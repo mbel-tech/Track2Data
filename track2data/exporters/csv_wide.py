@@ -57,7 +57,7 @@ def _build_wide(individual_metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
             merged = df.copy()
         else:
             # Join on shared key columns
-            shared_keys = [c for c in df.columns if c in KEY_COLS and c in merged.columns]
+            shared_keys = [c for c in df.columns if c in key_cols and c in merged.columns]
             if shared_keys:
                 merged = merged.merge(df, on=shared_keys, how="outer")
             else:
