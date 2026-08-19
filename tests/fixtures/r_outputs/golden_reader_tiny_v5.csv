@@ -1,0 +1,27 @@
+field,expected_value,dtype,notes
+session_id,tiny_v5,str,folder basename — set by conftest fixture name prefix
+n_animals,4,int,from trajectory array shape
+n_frames,100,int,from trajectory array shape
+fps,25.0,float,from video_object dict
+width_px,1920,int,from video_object dict
+height_px,1080,int,from video_object dict
+trajectory_variant,wo_gaps,str,wo_gaps file present so must be preferred
+has_stable_identities,True,bool,all animals have >50% coverage
+raw_xy_shape,"(100, 4, 2)",str,canonical shape after any transpose
+raw_xy_dtype,float64,str,must be float64
+frame0_animal0_x,100.0,float,100 + 0*5
+frame0_animal0_y,200.0,float,fixed y for animal 0
+frame0_animal1_x,300.0,float,fixed x for animal 1
+frame0_animal1_y,100.0,float,100 + 0*4
+frame0_animal2_x,1060.0,float,960 + 100*cos(0)
+frame0_animal2_y,540.0,float,540 + 100*sin(0)
+frame0_animal3_x,800.0,float,static
+frame0_animal3_y,600.0,float,static
+frame19_animal0_x,195.0,float,last valid frame before gap: 100+19*5
+gap_frame20_animal0_x,200.0,float,linear interp: 195 + 5*(1/6)*6
+gap_frame22_animal0_x,210.0,float,linear interp: 195 + 5*(3/6)*6
+gap_frame24_animal0_x,220.0,float,linear interp: 195 + 5*(5/6)*6
+frame25_animal0_x,225.0,float,next valid after gap: 100+25*5
+animal0_coverage,0.95,float,95/100 non-NaN for with_gaps variant
+animal1_coverage,1.0,float,no NaN
+body_length_px,None,none,not present in tiny_v5

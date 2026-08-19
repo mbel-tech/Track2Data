@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "track2data"
+version = "0.1.0"
+description = "Open-source desktop app that turns idtracker.ai output folders into analysis-ready behavioural datasets."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "pydantic>=2.0",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+video = ["av>=12.0"]            # pyav for frame extraction
+zones = ["shapely>=2.0"]        # polygon geometry
+export = ["openpyxl>=3.1", "pyarrow>=15.0"]
+ui = ["PySide6>=6.6"]           # desktop GUI (LGPL — safe for MIT distribution)
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-qt>=4.0",
+    "hypothesis>=6.0",
+    "ruff>=0.4",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "pydantic>=2.0",
+    "PySide6>=6.6",
+]
+
+[project.scripts]
+track2data     = "track2data.cli:main"
+track2data-gui = "app.main:main"
+
+[project.entry-points."track2data.readers"]
+idtrackerai    = "track2data.readers.idtrackerai.reader:IDTrackerAiReader"
+idtrackerai_v5 = "track2data.readers.idtrackerai_v5:IDTrackerAiV5Reader"
+idtrackerai_v4 = "track2data.readers.idtrackerai_v4:IDTrackerAiV4Reader"
+
+[project.entry-points."track2data.metrics"]
+# Populated as metrics are implemented
+
+[project.entry-points."track2data.exporters"]
+# Populated as exporters are implemented
+
+[tool.hatch.build.targets.wheel]
+packages = ["track2data", "app", "ui"]
+
+# ── Ruff ───────────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "ANN", "B", "SIM", "RUF"]
+ignore = [
+    "ANN401",  # Any allowed in internal helpers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S", "RUF012"]  # RUF012: ClassVar annotation not required in test ABC subclasses
+"track2data/core/errors.py" = ["N801", "N818"]  # ImportError_ uses trailing _ to avoid shadowing built-in
+"extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
+"app/**" = ["ANN", "N815"]   # N815: Qt signal names are camelCase by convention
+"ui/**" = ["ANN"]    # GUI screens; public-API annotation policy does not apply here
+
+# ── Pytest ─────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+markers = [
+    "r_parity: marks tests that compare output against R pipeline reference",
+    "r_parity_local: marks tests requiring embargoed local R-pipeline fixtures (skip in CI)",
+    "slow: marks tests that are expected to be slow",
+]
+
+[tool.coverage.run]
+source = ["track2data"]
+omit = ["track2data/cli.py"]
+
+[tool.coverage.report]
+fail_under = 80
