@@ -24,8 +24,12 @@ import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    from track2data.core.models import ProjectManifest
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _load_manifest(project: str):
+def _load_manifest(project: str) -> ProjectManifest:
     """Load and return a ProjectManifest; exit on failure."""
     from track2data.core.manifest import read as manifest_read
 
@@ -150,7 +154,7 @@ def list_metrics(level: str | None) -> None:
 
     Triggers lazy loading of all built-in metric modules before listing.
     """
-    from track2data.metrics import _registry, _load_builtins
+    from track2data.metrics import _load_builtins, _registry
 
     _load_builtins()  # ensure builtins are registered
 

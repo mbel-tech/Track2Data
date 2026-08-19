@@ -14,8 +14,7 @@ from track2data.core.models import (
     Session,
     VideoInfo,
 )
-from track2data.metrics.individual import CentreDistance, Acceleration
-
+from track2data.metrics.individual import Acceleration, CentreDistance
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -228,7 +227,6 @@ class TestAcceleration:
 
     def test_rms_formula(self) -> None:
         """RMS of [3, 4] = sqrt((9+16)/2) = sqrt(12.5)."""
-        n_animals = 1
         accel = np.array([[3.0], [4.0]])
         psess = make_psess(accel=accel, n_frames=2)
         df = Acceleration().compute(psess)

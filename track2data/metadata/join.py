@@ -72,7 +72,6 @@ def match(
     """
     result = JoinResult()
     matched_row_indices: set[int] = set()
-    session_set = set(session_ids)
 
     for sid in session_ids:
         rows = _find_rows(sid, df, rule)

@@ -15,13 +15,12 @@ from track2data.core.models import (
     VideoInfo,
 )
 from track2data.metrics.group import (
-    InterIndividualDistance,
     ConvexHullArea,
-    GroupCohesion,
     GroupCentroidPosition,
+    GroupCohesion,
     GroupSpread,
+    InterIndividualDistance,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -108,7 +107,7 @@ class TestInterIndividualDistance:
         psess = make_psess(xy=xy)
         df = InterIndividualDistance().compute(psess)
         # 4 sides of 100, 2 diagonals of 100*sqrt(2)
-        # pdist gives 6 pairwise: 4×100 + 2×141.4... = 682.8, mean = 113.8
+        # pdist gives 6 pairwise: 4x100 + 2x141.4... = 682.8, mean = 113.8
         expected_mean = (4 * 100 + 2 * 100 * np.sqrt(2)) / 6
         assert df["mean_iid_px"].values[0] == pytest.approx(expected_mean, rel=1e-4)
 

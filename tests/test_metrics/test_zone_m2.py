@@ -16,7 +16,6 @@ from track2data.core.models import (
 )
 from track2data.metrics.zone import AreaCorrectedOccupancy, ZoneTransitions
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -131,7 +130,9 @@ class TestAreaCorrectedOccupancy:
         n_frames, n_animals = 20, 1
         main_zone = np.full((n_frames, n_animals), "", dtype=object)
         main_zone[:10, 0] = "zone_A"
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         roi_areas = {"zone_A": 2500.0}
         cfg = {"roi_areas": roi_areas, "total_arena_area": 10000.0}
         df = AreaCorrectedOccupancy().compute(psess, cfg=cfg)
@@ -144,7 +145,9 @@ class TestAreaCorrectedOccupancy:
         n_frames, n_animals = 20, 1
         main_zone = np.full((n_frames, n_animals), "", dtype=object)
         main_zone[:5, 0] = "zone_A"  # 5/20 = 25%
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         roi_areas = {"zone_A": 2500.0}
         cfg = {"roi_areas": roi_areas, "total_arena_area": 10000.0}
         df = AreaCorrectedOccupancy().compute(psess, cfg=cfg)
@@ -198,7 +201,9 @@ class TestZoneTransitions:
         main_zone = np.full((n_frames, n_animals), "", dtype=object)
         main_zone[:10, 0] = "zone_A"
         main_zone[10:, 0] = "zone_B"
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         df = ZoneTransitions().compute(psess)
         row = df[
             (df["from_zone"] == "zone_A")
@@ -218,7 +223,9 @@ class TestZoneTransitions:
         main_zone[4:6, 0] = "zone_A"
         main_zone[6:8, 0] = "zone_B"
         main_zone[8:10, 0] = "zone_A"
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         df = ZoneTransitions().compute(psess)
         ab = df[(df["from_zone"] == "zone_A") & (df["to_zone"] == "zone_B")]
         ba = df[(df["from_zone"] == "zone_B") & (df["to_zone"] == "zone_A")]
@@ -229,7 +236,9 @@ class TestZoneTransitions:
         """Animal always in zone_A → no transitions."""
         n_frames, n_animals = 10, 1
         main_zone = np.full((n_frames, n_animals), "zone_A", dtype=object)
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         df = ZoneTransitions().compute(psess)
         assert len(df) == 0
 
@@ -239,7 +248,9 @@ class TestZoneTransitions:
         main_zone = np.full((n_frames, n_animals), "", dtype=object)
         main_zone[:10, 0] = "zone_A"
         # Frames 10-20: empty → no zone
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         df = ZoneTransitions().compute(psess)
         if len(df) > 0:
             assert "" not in df["from_zone"].values
@@ -260,7 +271,9 @@ class TestZoneTransitions:
         main_zone[:5, 1] = "zone_A"
         main_zone[5:15, 1] = "zone_B"
         main_zone[15:, 1] = "zone_A"
-        psess = make_psess_with_zones(zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
         df = ZoneTransitions().compute(psess)
         # Animal 0: 1 A→B
         a0 = df[(df["individual_id"] == 0)]

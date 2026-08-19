@@ -12,7 +12,6 @@ from track2data.core.models import PreprocessReport
 from track2data.exporters.base import ExportPayload
 from track2data.exporters.csv_wide import CsvWideExporter
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 
@@ -148,8 +147,7 @@ class TestCsvWideExporter:
         """The metric_id column should not appear (or be dropped) in wide output."""
         exporter = CsvWideExporter()
         exporter.write(_make_payload(), tmp_path)
-        df = pd.read_csv(tmp_path / "trial_summary_wide.csv")
+        pd.read_csv(tmp_path / "trial_summary_wide.csv")
         # metric_id should not be a meaningful data column in the wide format
         # (may be absent or have only one unique value per row)
         # Just ensure no crash; it's acceptable if not present
-        pass
