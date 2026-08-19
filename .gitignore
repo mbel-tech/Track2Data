@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Track2Data project cache
+*.t2d_cache/
+exports/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# graph tool (development artefact)
+.code-review-graph/
+
+# R-parity fixtures from external/embargoed data — do not commit until redistribution is approved
+tests/fixtures/r_outputs/from_choice_pipeline/**
+!tests/fixtures/r_outputs/from_choice_pipeline/README.md
+
+# Real-data corpus — 12 GB, never committed (see docs/IDTRACKERAI_FORMAT_ANALYSIS.md)
+Checked sessions GOT/
+
+# Tooling caches
+.ruff_cache/
+
+# Local Claude Code config
+.claude/settings.local.json
+
+# Vendored third-party skill (re-fetchable via skills-lock.json)
+.agents/
