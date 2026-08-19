@@ -325,3 +325,14 @@ def compute_all_diagnostics(session: Session) -> dict[str, pd.DataFrame]:
         IdentityStability(),
     ]
     return {m.id: m.compute(session) for m in metrics}
+
+
+# ── Registration ──────────────────────────────────────────────────────────────
+
+from track2data.metrics import register as _register  # noqa: E402
+
+_register(TrackingCoverage)
+_register(TrackingAccuracy)
+_register(IdProbabilityStats)
+_register(InconsistentFrameCount)
+_register(IdentityStability)
