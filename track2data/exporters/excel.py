@@ -84,3 +84,10 @@ class ExcelExporter(Exporter):
             quality_df.to_excel(writer, sheet_name="Quality", index=False)
 
         return [xlsx_path]
+
+
+# ── Registration ──────────────────────────────────────────────────────────────
+
+from track2data.exporters import register as _register  # noqa: E402
+
+_register(ExcelExporter)
