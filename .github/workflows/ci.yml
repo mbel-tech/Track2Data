@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check .
+
+  test:
+    name: Tests (${{ matrix.os }} / Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-13]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    env:
+      # PySide6 has no display to attach to on CI runners; the offscreen
+      # platform plugin lets QApplication() succeed headlessly.
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Qt runtime libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libgl1
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run unit tests (excluding r_parity)
+        # Coverage gate is temporarily 70% during the M1 build phase.
+        # Restored to 80% at M2 end per docs/TECHNICAL_SPEC.md §11.
+        run: >
+          pytest tests/ -v -m "not r_parity"
+          --cov=track2data --cov-report=term --cov-fail-under=70
+
+  r_parity:
+    name: R-parity (synthetic fixtures)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run r_parity tests against synthetic tiny_v5 fixture
+        # r_parity_local tests use embargoed choice-pipeline data and are
+        # excluded here. Run them locally with: pytest -m r_parity_local
+        run: pytest tests/test_r_parity/ -v -m "r_parity and not r_parity_local"
