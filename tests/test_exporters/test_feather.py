@@ -6,12 +6,10 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from track2data.core.models import PreprocessReport
 from track2data.exporters.base import ExportPayload
 from track2data.exporters.feather import FeatherExporter
-
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -148,5 +146,5 @@ class TestFeatherExporter:
             manifest_json="{}",
         )
         exporter = FeatherExporter()
-        paths = exporter.write(payload, tmp_path)
+        exporter.write(payload, tmp_path)
         assert (tmp_path / "master_fish_by_frame.feather").exists()

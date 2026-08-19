@@ -18,7 +18,6 @@ def _merge_individual_metrics(individual_metrics: dict[str, pd.DataFrame]) -> pd
     if not dfs:
         return pd.DataFrame()
 
-    KEY_COLS = {"session_id", "individual_id"}
     result = dfs[0].copy()
     for other in dfs[1:]:
         shared = [c for c in result.columns if c in other.columns]

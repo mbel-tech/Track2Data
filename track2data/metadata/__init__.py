@@ -6,12 +6,12 @@ from track2data.metadata.mapping import apply_mapping, auto_map
 from track2data.metadata.schema import ALIASES, CANONICAL, resolve_column
 
 __all__ = [
-    "load",
+    "ALIASES",
+    "CANONICAL",
+    "JoinResult",
     "apply_mapping",
     "auto_map",
+    "load",
     "match",
-    "JoinResult",
     "resolve_column",
-    "CANONICAL",
-    "ALIASES",
 ]
