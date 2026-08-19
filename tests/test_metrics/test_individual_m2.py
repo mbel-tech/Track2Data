@@ -27,6 +27,11 @@ def make_psess(
 ) -> PreprocessedSession:
     rng = np.random.default_rng(42)
     if xy is None:
+        if accel is not None:
+            # Keep the generated trajectory's shape consistent with an
+            # explicitly-passed accel array so session.n_animals (derived
+            # from xy) never diverges from accel_px_s2.shape[1].
+            n_frames, n_animals = accel.shape[0], accel.shape[1]
         xy = rng.random((n_frames, n_animals, 2)) * 500
     actual_frames, actual_animals = xy.shape[0], xy.shape[1]
     if accel is None:
