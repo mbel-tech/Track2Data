@@ -57,8 +57,6 @@ def _load_builtins() -> None:
         import track2data.metrics.group as _g  # noqa: F401
     with contextlib.suppress(ImportError):
         import track2data.metrics.zone as _z  # noqa: F401
-    with contextlib.suppress(ImportError):
-        import track2data.metrics.identity_free as _f  # noqa: F401
     # Load external entry-point metrics.
     try:
         import importlib.metadata as _meta
