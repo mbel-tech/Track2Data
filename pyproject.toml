@@ -46,7 +46,9 @@ track2data-gui = "app.main:main"
 [project.entry-points."track2data.readers"]
 idtrackerai    = "track2data.readers.idtrackerai.reader:IDTrackerAiReader"
 idtrackerai_v5 = "track2data.readers.idtrackerai_v5:IDTrackerAiV5Reader"
-idtrackerai_v4 = "track2data.readers.idtrackerai_v4:IDTrackerAiV4Reader"
+# idtrackerai_v4 deliberately NOT registered as an entry point -- see DECISIONS.md D-012.
+# The class is still hardcoded-registered as a built-in in readers/__init__.py (like the
+# two above), it's just not advertised to entry-point introspection as a working reader.
 
 [project.entry-points."track2data.metrics"]
 # Populated as metrics are implemented
