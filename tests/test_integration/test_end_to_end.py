@@ -320,7 +320,13 @@ def test_run_all_processes_all_sessions(
 def test_cli_run_produces_csv(
     tmp_path: Path, tiny_real_session: Path
 ) -> None:
-    """CLI `track2data run` writes master_fish_by_frame.csv."""
+    """
+    CLI `track2data run` writes master_fish_by_frame.csv under a
+    per-session subdirectory (out_dir/<session_id>/) -- Engine.run()'s
+    fix for the multi-session out_dir collision (issue #19); a
+    single-session run lands here too since run_all() is a thin wrapper
+    over the same run().
+    """
     from click.testing import CliRunner
 
     from track2data.cli import cli
@@ -342,7 +348,8 @@ def test_cli_run_produces_csv(
     assert result.exit_code == 0, (
         f"CLI exited {result.exit_code}:\n{result.output}"
     )
-    assert (out_dir / "master_fish_by_frame.csv").exists()
+    session_id = tiny_real_session.name
+    assert (out_dir / session_id / "master_fish_by_frame.csv").exists()
 
 
 # ── 7. CLI: validate ──────────────────────────────────────────────────────────

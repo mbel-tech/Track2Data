@@ -274,3 +274,38 @@ Parquet-representable (or extending `CacheStore` to cache pickled
 dataclasses directly, sidestepping Parquet) — an API design question,
 not a missing function call. Deferred until that's designed
 deliberately, with its own tests, rather than improvised here.
+
+---
+
+## Phase 3 — GUI wiring (M3)
+
+### D-014 · `Engine.run()` accepts `n_workers` but only implements `n_workers=1`
+
+**Decision:** `Engine.run(out_dir, exporters=None, *, progress=None,
+n_workers=1)` accepts an `n_workers` parameter (per issue #19's
+design) but only the sequential path is implemented. Passing
+`n_workers > 1` logs a warning and runs sequentially anyway rather
+than raising or silently ignoring the request.
+
+**Rationale:** D-013 named the per-session `out_dir` collision as the
+prerequisite blocker for reconsidering `core/parallel.map_sessions`.
+`Engine.run()` (this decision's own change) fixes exactly that
+prerequisite — each session now writes to `out_dir/<session_id>/`. But
+actually wiring `ProcessPoolExecutor` correctly still needs: a
+`ProgressCallback` that's picklable across the process boundary (a
+bound method or closure capturing Qt objects is not), `map_sessions`
+mapping over session *folder paths* rather than already-imported
+`Session` objects per D-013's own note, and real testing of Windows
+`spawn` semantics against this specific pipeline. That's substantially
+more risk than the rest of this change combined. Accepting the
+parameter now (rather than adding it later, which would be a breaking
+signature change for `TaskRunner` and anything else that calls
+`Engine.run()`) costs nothing; implementing parallel execution behind
+it is deferred to its own properly-tested change.
+
+**Alternative considered:** Omit `n_workers` entirely until parallel
+execution is actually implemented. Rejected — issue #19 specifies it
+as part of `Engine.run()`'s signature, and `ui/store/task_runner.py`
+(issue #20) is being built immediately after this and will call
+`Engine.run()`; adding the parameter now avoids a second signature
+change once parallel execution does land.
