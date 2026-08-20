@@ -37,6 +37,7 @@ from track2data.core.models import (
     ProjectManifest,
     Session,
 )
+from track2data.core.progress import ProgressCallback, ProgressEvent, emit
 from track2data.readers import read_session
 
 logger = logging.getLogger(__name__)
@@ -101,10 +102,27 @@ class Engine:
         """Auto-detect reader and return a Session for *folder*."""
         return read_session(Path(folder))
 
-    def import_sessions(self) -> list[Session]:
+    def import_sessions(
+        self, *, progress: ProgressCallback | None = None
+    ) -> list[Session]:
         """Import all sessions listed in ``manifest.sessions``."""
         sessions: list[Session] = []
-        for ref in self._manifest.sessions:
+        refs = self._manifest.sessions
+        for i, ref in enumerate(refs):
+            # Emit BEFORE the try opens: if the callback raises
+            # OperationCancelled, it must propagate out of this method,
+            # not be caught by the except below and treated as just
+            # another session that failed to import.
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="import",
+                    current=i + 1,
+                    total=len(refs),
+                    session_id=ref.session_id,
+                    message=f"Importing {ref.session_id}",
+                ),
+            )
             try:
                 sess = self.import_session(ref.folder)
                 sessions.append(sess)
@@ -254,6 +272,8 @@ class Engine:
         session: Session,
         out_dir: Path,
         exporters: list[str] | None = None,
+        *,
+        progress: ProgressCallback | None = None,
     ) -> list[Path]:
         """
         End-to-end pipeline for a single session.
@@ -265,12 +285,32 @@ class Engine:
 
         # Preprocessing + calibration + zones.
         psess = self.preprocess(session)
+        emit(
+            progress,
+            ProgressEvent(
+                stage="preprocess",
+                current=1,
+                total=3,
+                session_id=session.session_id,
+                message="Preprocessing complete",
+            ),
+        )
 
         # Metrics.
         metric_results = self.compute_metrics(psess)
 
         # Build master frame table.
         fish_by_frame = self.build_fish_by_frame(psess)
+        emit(
+            progress,
+            ProgressEvent(
+                stage="metrics",
+                current=2,
+                total=3,
+                session_id=session.session_id,
+                message="Metrics computed",
+            ),
+        )
 
         # Separate metric results by level.
         individual_metrics = {k: v for k, v in metric_results.items()
@@ -314,14 +354,56 @@ class Engine:
             except Exception:
                 logger.exception("Exporter %r failed.", name)
 
+        emit(
+            progress,
+            ProgressEvent(
+                stage="export",
+                current=3,
+                total=3,
+                session_id=session.session_id,
+                message="Export complete",
+            ),
+        )
+
         return written
 
-    def run_all(self, out_dir: Path, exporters: list[str] | None = None) -> list[Path]:
+    def run_all(
+        self,
+        out_dir: Path,
+        exporters: list[str] | None = None,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> list[Path]:
         """Run the full pipeline for every session in the manifest."""
-        sessions = self.import_sessions()
+        n_configured = len(self._manifest.sessions)
+        emit(
+            progress,
+            ProgressEvent(stage="run", current=0, total=n_configured, message="Run started"),
+        )
+
+        sessions = self.import_sessions(progress=progress)
         written: list[Path] = []
-        for sess in sessions:
-            written.extend(self.run_session(sess, out_dir, exporters=exporters))
+        for i, sess in enumerate(sessions):
+            written.extend(
+                self.run_session(sess, out_dir, exporters=exporters, progress=progress)
+            )
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="session",
+                    current=i + 1,
+                    total=len(sessions),
+                    session_id=sess.session_id,
+                    message="Session complete",
+                ),
+            )
+
+        emit(
+            progress,
+            ProgressEvent(
+                stage="run", current=n_configured, total=n_configured, message="Run complete"
+            ),
+        )
         return written
 
     # ── preview ────────────────────────────────────────────────────────────

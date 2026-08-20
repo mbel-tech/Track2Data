@@ -76,6 +76,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "S", "RUF012"]  # RUF012: ClassVar annotation not required in test ABC subclasses
 "track2data/core/errors.py" = ["N801", "N818"]  # ImportError_ uses trailing _ to avoid shadowing built-in
+"track2data/core/progress.py" = ["N818"]  # OperationCancelled is a control-flow signal, not an "error"
 "extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
 "app/**" = ["ANN", "N815"]   # N815: Qt signal names are camelCase by convention
 "ui/**" = ["ANN"]    # GUI screens; public-API annotation policy does not apply here
