@@ -18,7 +18,19 @@ def test_unified_reader_registered() -> None:
 def test_legacy_readers_registered() -> None:
     names = _reader_names()
     assert "idtrackerai_v5" in names, f"idtrackerai_v5 missing; registered: {names}"
-    assert "idtrackerai_v4" in names, f"idtrackerai_v4 missing; registered: {names}"
+
+
+def test_v4_reader_not_advertised_as_entry_point() -> None:
+    """
+    idtrackerai_v4's detect() unconditionally returns False (see its module
+    docstring: "not yet implemented" -- no v4 sample data exists to validate
+    against), so it can never actually be selected as a reader. Advertising
+    it as a live entry point would mislead anyone enumerating
+    track2data.readers expecting a working reader. See DECISIONS.md D-012.
+    It's still registered as a built-in directly in readers/__init__.py, just
+    not as a discoverable entry point.
+    """
+    assert "idtrackerai_v4" not in _reader_names()
 
 
 def test_unified_reader_loadable() -> None:
@@ -30,8 +42,7 @@ def test_unified_reader_loadable() -> None:
     assert cls.priority >= 20, f"Unified reader priority must be ≥ 20; got {cls.priority}"
 
 
-def test_legacy_readers_loadable() -> None:
+def test_legacy_reader_loadable() -> None:
     eps = {ep.name: ep for ep in importlib.metadata.entry_points(group="track2data.readers")}
-    for name in ("idtrackerai_v5", "idtrackerai_v4"):
-        cls = eps[name].load()
-        assert hasattr(cls, "priority"), f"{name} missing 'priority' attribute"
+    cls = eps["idtrackerai_v5"].load()
+    assert hasattr(cls, "priority"), "idtrackerai_v5 missing 'priority' attribute"
