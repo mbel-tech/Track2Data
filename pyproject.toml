@@ -37,6 +37,9 @@ dev = [
     "shapely>=2.0",              # tests/test_zones/* import track2data.zones.geometry directly
     "pyarrow>=15.0",             # cache/store.py (parquet) and exporters/feather.py call into
                                   # pandas methods that import pyarrow internally, at call time
+    "openpyxl>=3.1",             # tests/test_exporters/test_excel.py imports it directly to
+                                  # verify workbook content; exporters/excel.py also needs it
+                                  # unconditionally to write .xlsx at all
 ]
 
 [project.scripts]
