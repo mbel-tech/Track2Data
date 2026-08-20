@@ -14,8 +14,7 @@ from track2data.core.models import (
     Session,
     VideoInfo,
 )
-from track2data.metrics.individual import CentreDistance, Acceleration
-
+from track2data.metrics.individual import Acceleration, CentreDistance
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +27,11 @@ def make_psess(
 ) -> PreprocessedSession:
     rng = np.random.default_rng(42)
     if xy is None:
+        if accel is not None:
+            # Keep the generated trajectory's shape consistent with an
+            # explicitly-passed accel array so session.n_animals (derived
+            # from xy) never diverges from accel_px_s2.shape[1].
+            n_frames, n_animals = accel.shape[0], accel.shape[1]
         xy = rng.random((n_frames, n_animals, 2)) * 500
     actual_frames, actual_animals = xy.shape[0], xy.shape[1]
     if accel is None:
@@ -228,7 +232,6 @@ class TestAcceleration:
 
     def test_rms_formula(self) -> None:
         """RMS of [3, 4] = sqrt((9+16)/2) = sqrt(12.5)."""
-        n_animals = 1
         accel = np.array([[3.0], [4.0]])
         psess = make_psess(accel=accel, n_frames=2)
         df = Acceleration().compute(psess)

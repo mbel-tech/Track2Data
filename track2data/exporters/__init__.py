@@ -10,7 +10,7 @@ Usage::
 
 from __future__ import annotations
 
-from pathlib import Path
+import contextlib
 
 from track2data.exporters.base import Exporter
 
@@ -41,20 +41,16 @@ def _load_builtins() -> None:
         "track2data.exporters.feather",
         "track2data.exporters.readme",
     ):
-        try:
+        with contextlib.suppress(ImportError):
             __import__(mod)
-        except ImportError:
-            pass
     # External entry-point exporters.
     try:
         import importlib.metadata as _meta
         for ep in _meta.entry_points(group="track2data.exporters"):
-            try:
+            with contextlib.suppress(Exception):
                 cls = ep.load()
                 register(cls)
-            except Exception:  # noqa: BLE001
-                pass
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

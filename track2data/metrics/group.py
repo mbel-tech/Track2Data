@@ -861,10 +861,7 @@ class GroupSpread(Metric):
             rms_dist = float(np.sqrt(dist_sq.mean()))
             frame_spreads.append(rms_dist)
 
-        if len(frame_spreads) == 0:
-            mean_spread = np.nan
-        else:
-            mean_spread = float(np.mean(frame_spreads))
+        mean_spread = np.nan if len(frame_spreads) == 0 else float(np.mean(frame_spreads))
 
         return pd.DataFrame(
             [

@@ -34,6 +34,13 @@ layout observed in the 70-session corpus and the official 6.0.14 docs.
 
 from __future__ import annotations
 
+import os
+
+# Must be set before any PySide6 import (including inside test modules
+# collected after this conftest loads) — otherwise QApplication() aborts
+# the whole pytest process on headless CI runners with no display server.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import json
 import struct
 import zlib

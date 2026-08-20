@@ -359,7 +359,10 @@ class ZoneTransitions(Metric):
         ),
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings"],
-        warnings=["Only named zone-to-zone transitions are counted; entering/leaving no-zone is ignored"],
+        warnings=[
+            "Only named zone-to-zone transitions are counted; "
+            "entering/leaving no-zone is ignored"
+        ],
     )
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:

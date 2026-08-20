@@ -12,7 +12,6 @@ from track2data.core.models import PreprocessReport
 from track2data.exporters.base import ExportPayload
 from track2data.exporters.csv_long import CsvLongExporter
 
-
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -79,17 +78,23 @@ class TestCsvLongExporter:
     def test_exporter_extension(self) -> None:
         assert CsvLongExporter.file_extension == ".csv"
 
-    def test_writes_master_fish_by_frame(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_writes_master_fish_by_frame(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         paths = exporter.write(minimal_payload, tmp_path)
         assert any(p.name == "master_fish_by_frame.csv" for p in paths)
 
-    def test_master_csv_exists_on_disk(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_master_csv_exists_on_disk(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         exporter.write(minimal_payload, tmp_path)
         assert (tmp_path / "master_fish_by_frame.csv").exists()
 
-    def test_master_csv_has_session_id_column(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_master_csv_has_session_id_column(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         exporter.write(minimal_payload, tmp_path)
         df = pd.read_csv(tmp_path / "master_fish_by_frame.csv")
@@ -106,23 +111,31 @@ class TestCsvLongExporter:
         expected_frames = [0, 1, 2]
         assert list(df["frame"]) == expected_frames
 
-    def test_writes_activity_summary(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_writes_activity_summary(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         paths = exporter.write(minimal_payload, tmp_path)
         assert any(p.name == "trial_activity_summary.csv" for p in paths)
 
-    def test_writes_group_dynamics_summary(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_writes_group_dynamics_summary(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         paths = exporter.write(minimal_payload, tmp_path)
         assert any(p.name == "group_dynamics_summary.csv" for p in paths)
 
-    def test_returns_list_of_paths(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_returns_list_of_paths(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         paths = exporter.write(minimal_payload, tmp_path)
         assert isinstance(paths, list)
         assert all(isinstance(p, Path) for p in paths)
 
-    def test_utf8_encoding(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_utf8_encoding(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         exporter.write(minimal_payload, tmp_path)
         raw = (tmp_path / "master_fish_by_frame.csv").read_bytes()
@@ -147,11 +160,13 @@ class TestCsvLongExporter:
             manifest_json="{}",
         )
         exporter = CsvLongExporter()
-        paths = exporter.write(payload, tmp_path)
+        exporter.write(payload, tmp_path)
         summary_path = tmp_path / "trial_activity_summary.csv"
         assert summary_path.exists()
 
-    def test_all_returned_paths_exist(self, tmp_path: Path, minimal_payload: ExportPayload) -> None:
+    def test_all_returned_paths_exist(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
         exporter = CsvLongExporter()
         paths = exporter.write(minimal_payload, tmp_path)
         for p in paths:
