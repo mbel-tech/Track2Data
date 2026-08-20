@@ -1,4 +1,5 @@
-"""Tests for zone metrics Z-2 (AreaCorrectedOccupancy) and Z-4 (ZoneTransitions) — TDD RED."""
+"""Tests for zone metrics Z-2 (AreaCorrectedOccupancy), Z-4 (ZoneTransitions),
+Z-5 (Z5EntryExitEvents) and Z-6 (Z6LatencyToFirstEntry) — TDD RED."""
 
 from __future__ import annotations
 
@@ -14,7 +15,12 @@ from track2data.core.models import (
     Session,
     VideoInfo,
 )
-from track2data.metrics.zone import AreaCorrectedOccupancy, ZoneTransitions
+from track2data.metrics.zone import (
+    AreaCorrectedOccupancy,
+    Z5EntryExitEvents,
+    Z6LatencyToFirstEntry,
+    ZoneTransitions,
+)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -281,3 +287,189 @@ class TestZoneTransitions:
         # Animal 1: A→B and B→A
         a1 = df[(df["individual_id"] == 1)]
         assert a1["transition_count"].sum() >= 2
+
+
+# ── Z-5: Z5EntryExitEvents ────────────────────────────────────────────────────
+
+
+class TestZ5EntryExitEvents:
+    def test_metric_id(self) -> None:
+        assert Z5EntryExitEvents.id == "Z-5"
+
+    def test_output_columns_present(self) -> None:
+        psess = make_psess_with_zones()
+        df = Z5EntryExitEvents().compute(psess)
+        for col in ["session_id", "zone_name", "individual_id", "event", "t_s", "frame"]:
+            assert col in df.columns
+
+    def test_no_zones_returns_empty_with_correct_columns(self) -> None:
+        psess = make_psess_no_zones()
+        df = Z5EntryExitEvents().compute(psess)
+        assert len(df) == 0
+        for col in ["session_id", "zone_name", "individual_id", "event", "t_s", "frame"]:
+            assert col in df.columns
+
+    def test_single_enter_and_exit(self) -> None:
+        """Animal enters zone_A at frame 5, exits at frame 15: one enter + one exit."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[5:15, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z5EntryExitEvents().compute(psess)
+        enters = df[
+            (df["event"] == "enter") & (df["zone_name"] == "zone_A") & (df["individual_id"] == 0)
+        ]
+        exits = df[
+            (df["event"] == "exit") & (df["zone_name"] == "zone_A") & (df["individual_id"] == 0)
+        ]
+        assert len(enters) == 1
+        assert len(exits) == 1
+        assert enters["frame"].values[0] == 5
+        assert enters["t_s"].values[0] == pytest.approx(0.5)  # fps=10.0
+        assert exits["frame"].values[0] == 15
+        assert exits["t_s"].values[0] == pytest.approx(1.5)
+
+    def test_enter_at_frame_zero_when_starting_inside_zone(self) -> None:
+        """Animal already inside zone_A at frame 0 gets an enter event at frame 0."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:8, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z5EntryExitEvents().compute(psess)
+        enters = df[
+            (df["event"] == "enter") & (df["zone_name"] == "zone_A") & (df["individual_id"] == 0)
+        ]
+        assert len(enters) == 1
+        assert enters["frame"].values[0] == 0
+        assert enters["t_s"].values[0] == pytest.approx(0.0)
+
+    def test_enter_with_no_exit_when_never_leaves(self) -> None:
+        """Animal enters zone_A at frame 10 and is still inside at the last frame."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[10:20, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z5EntryExitEvents().compute(psess)
+        enters = df[
+            (df["event"] == "enter") & (df["zone_name"] == "zone_A") & (df["individual_id"] == 0)
+        ]
+        exits = df[
+            (df["event"] == "exit") & (df["zone_name"] == "zone_A") & (df["individual_id"] == 0)
+        ]
+        assert len(enters) == 1
+        assert enters["frame"].values[0] == 10
+        assert len(exits) == 0
+
+    def test_session_id_propagated(self) -> None:
+        psess = make_psess_with_zones()
+        df = Z5EntryExitEvents().compute(psess)
+        if len(df) > 0:
+            assert (df["session_id"] == "t").all()
+
+    def test_t_s_equals_frame_over_fps(self) -> None:
+        psess = make_psess_with_zones()
+        df = Z5EntryExitEvents().compute(psess)
+        if len(df) > 0:
+            expected = df["frame"].to_numpy() / 10.0  # fps=10.0
+            assert np.allclose(df["t_s"].to_numpy(), expected)
+
+    def test_empty_zone_name_excluded_from_output(self) -> None:
+        psess = make_psess_with_zones()
+        df = Z5EntryExitEvents().compute(psess)
+        if len(df) > 0:
+            assert "" not in df["zone_name"].values
+
+    def test_multiple_animals_independent(self) -> None:
+        """Each animal's enter/exit events are tracked independently."""
+        n_frames, n_animals = 20, 2
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[:10, 0] = "zone_A"
+        main_zone[5:15, 1] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z5EntryExitEvents().compute(psess)
+        a0 = df[df["individual_id"] == 0]
+        a1 = df[df["individual_id"] == 1]
+        assert set(a0["event"]) == {"enter", "exit"}
+        assert set(a1["event"]) == {"enter", "exit"}
+        assert a0[a0["event"] == "enter"]["frame"].values[0] == 0
+        assert a1[a1["event"] == "enter"]["frame"].values[0] == 5
+
+
+# ── Z-6: Z6LatencyToFirstEntry ────────────────────────────────────────────────
+
+
+class TestZ6LatencyToFirstEntry:
+    def test_metric_id(self) -> None:
+        assert Z6LatencyToFirstEntry.id == "Z-6"
+
+    def test_output_columns_present(self) -> None:
+        psess = make_psess_with_zones()
+        df = Z6LatencyToFirstEntry().compute(psess)
+        for col in ["session_id", "zone_name", "individual_id", "first_entry_t_s"]:
+            assert col in df.columns
+
+    def test_no_zones_returns_empty_with_correct_columns(self) -> None:
+        psess = make_psess_no_zones()
+        df = Z6LatencyToFirstEntry().compute(psess)
+        assert len(df) == 0
+        for col in ["session_id", "zone_name", "individual_id", "first_entry_t_s"]:
+            assert col in df.columns
+
+    def test_correct_first_entry_latency(self) -> None:
+        """First entry at frame 5; a later re-entry at frame 12 must not win."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[5:8, 0] = "zone_A"
+        main_zone[12:15, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z6LatencyToFirstEntry().compute(psess)
+        row = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)]
+        assert len(row) == 1
+        assert row["first_entry_t_s"].values[0] == pytest.approx(0.5)  # 5 / fps=10.0
+
+    def test_never_entered_gives_inf(self) -> None:
+        """Animal 0 enters zone_A; animal 1 never enters any zone -> inf for animal 1."""
+        n_frames, n_animals = 20, 2
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[5:10, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z6LatencyToFirstEntry().compute(psess)
+        row0 = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)]
+        row1 = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 1)]
+        assert len(row0) == 1
+        assert len(row1) == 1
+        assert row0["first_entry_t_s"].values[0] == pytest.approx(0.5)
+        assert row1["first_entry_t_s"].values[0] == float("inf")
+
+    def test_session_id_propagated(self) -> None:
+        psess = make_psess_with_zones()
+        df = Z6LatencyToFirstEntry().compute(psess)
+        if len(df) > 0:
+            assert (df["session_id"] == "t").all()
+
+    def test_full_grid_all_zones_times_all_animals(self) -> None:
+        """2 zones x 2 animals -> 4 rows, even though each animal only visits one zone."""
+        n_frames, n_animals = 20, 2
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[:5, 0] = "zone_A"
+        main_zone[5:10, 1] = "zone_B"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+        df = Z6LatencyToFirstEntry().compute(psess)
+        assert len(df) == 4
+        # animal 0 never entered zone_B -> inf
+        row = df[(df["zone_name"] == "zone_B") & (df["individual_id"] == 0)]
+        assert row["first_entry_t_s"].values[0] == float("inf")

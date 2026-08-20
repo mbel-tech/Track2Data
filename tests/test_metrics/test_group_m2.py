@@ -1,4 +1,4 @@
-"""Tests for group-level metrics GL-2, GL-4, GL-6, GL-9, GL-10 (TDD RED phase)."""
+"""Tests for group-level metrics GL-2, GL-4, GL-6, GL-8, GL-9, GL-10 (TDD RED phase)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from track2data.metrics.group import (
     GroupCohesion,
     GroupSpread,
     InterIndividualDistance,
+    RotationalOrder,
 )
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -30,6 +31,8 @@ def make_psess(
     n_animals: int = 4,
     xy: np.ndarray | None = None,
     fps: float = 25.0,
+    heading: np.ndarray | None = None,
+    speed: np.ndarray | None = None,
 ) -> PreprocessedSession:
     rng = np.random.default_rng(42)
     if xy is None:
@@ -45,9 +48,11 @@ def make_psess(
         has_stable_identities=True,
         raw_xy=xy,
     )
-    speed = np.zeros((actual_frames, actual_animals))
+    if speed is None:
+        speed = np.zeros((actual_frames, actual_animals))
     accel = np.zeros((actual_frames, actual_animals))
-    heading = np.zeros((actual_frames, actual_animals))
+    if heading is None:
+        heading = np.zeros((actual_frames, actual_animals))
     kine = KinematicsArrays(speed_px_s=speed, accel_px_s2=accel, heading_rad=heading)
     return PreprocessedSession(
         session=sess,
@@ -387,3 +392,157 @@ class TestGroupSpread:
         psess = make_psess(xy=xy)
         df = GroupSpread().compute(psess)
         assert np.isfinite(df["mean_group_spread_px"].values[0])
+
+
+# ── GL-8: RotationalOrder ─────────────────────────────────────────────────────
+
+
+class TestRotationalOrder:
+    def test_metric_id(self) -> None:
+        assert RotationalOrder.id == "GL-8"
+
+    def test_output_columns_present(self) -> None:
+        psess = make_psess()
+        df = RotationalOrder().compute(psess)
+        for col in [
+            "session_id",
+            "metric_id",
+            "mean_rotational_order",
+            "median_rotational_order",
+        ]:
+            assert col in df.columns
+
+    def test_session_id_propagated(self) -> None:
+        psess = make_psess()
+        df = RotationalOrder().compute(psess)
+        assert (df["session_id"] == "test").all()
+
+    def test_single_row_output(self) -> None:
+        psess = make_psess()
+        df = RotationalOrder().compute(psess)
+        assert len(df) == 1
+
+    def test_metric_id_column(self) -> None:
+        psess = make_psess()
+        df = RotationalOrder().compute(psess)
+        assert (df["metric_id"] == "GL-8").all()
+
+    def test_milling_configuration_gives_m_near_one(self) -> None:
+        """4 animals equally spaced on a circle around the centroid, each moving
+        tangentially in the same (CCW) sense -> perfect milling, M = 1 exactly.
+
+        Hand-derivation: positions at angles 0, 90, 180, 270 degrees on a
+        radius-100 circle centred on the origin sum to (0, 0), so C[t] = (0, 0)
+        and r_hat_k equals the unit position vector for every animal. Setting
+        each heading to (position_angle + 90 deg) makes e_hat_k perpendicular
+        to r_hat_k in the same rotational sense, so r_hat_k x e_hat_k = 1 for
+        every animal in every frame.
+        """
+        n_frames, n_animals = 10, 4
+        positions = np.array([[100.0, 0.0], [0.0, 100.0], [-100.0, 0.0], [0.0, -100.0]])
+        xy = np.tile(positions, (n_frames, 1, 1))
+        headings_vals = np.array([np.pi / 2, np.pi, 3 * np.pi / 2, 0.0])
+        heading = np.tile(headings_vals, (n_frames, 1))
+        speed = np.full((n_frames, n_animals), 50.0)
+        psess = make_psess(xy=xy, heading=heading, speed=speed)
+        df = RotationalOrder().compute(psess)
+        assert df["mean_rotational_order"].values[0] == pytest.approx(1.0, abs=1e-9)
+        assert df["median_rotational_order"].values[0] == pytest.approx(1.0, abs=1e-9)
+
+    def test_polarised_configuration_gives_m_near_zero(self) -> None:
+        """Same 4 positions as the milling test, but every animal shares the same
+        heading (pure translation, non-rotational) -> M = 0 exactly.
+
+        Hand-derivation: with all e_hat_k = (1, 0), the cross products
+        r_hat_k x e_hat_k = -r_hat_k.y for the four symmetric r_hat_k vectors
+        (0, 1), (1, 0)... -> (0, 1, 0, -1 as the y components) sum to zero, so
+        the mean is exactly 0.
+        """
+        n_frames, n_animals = 10, 4
+        positions = np.array([[100.0, 0.0], [0.0, 100.0], [-100.0, 0.0], [0.0, -100.0]])
+        xy = np.tile(positions, (n_frames, 1, 1))
+        heading = np.zeros((n_frames, n_animals))  # every animal heads +x
+        speed = np.full((n_frames, n_animals), 50.0)
+        psess = make_psess(xy=xy, heading=heading, speed=speed)
+        df = RotationalOrder().compute(psess)
+        assert df["mean_rotational_order"].values[0] == pytest.approx(0.0, abs=1e-9)
+        assert df["median_rotational_order"].values[0] == pytest.approx(0.0, abs=1e-9)
+
+    def test_stationary_animals_excluded(self) -> None:
+        """2 extra stationary animals, placed symmetrically opposite each other so
+        they do not perturb the centroid, must be excluded from M; the remaining
+        4 milling animals should still give M = 1 exactly.
+
+        (50, 50) and (-50, -50) sum to (0, 0), so C[t] stays at the origin with
+        all 6 positions included. If the stationary pair were wrongly kept in the
+        average, M would drop to 4/6 = 0.6667 instead of 1.0 (their own cross
+        terms of -1/sqrt(2) and +1/sqrt(2) cancel, leaving the divisor changed
+        from 4 to 6).
+        """
+        n_frames, n_animals = 10, 6
+        positions = np.array(
+            [
+                [100.0, 0.0],
+                [0.0, 100.0],
+                [-100.0, 0.0],
+                [0.0, -100.0],
+                [50.0, 50.0],
+                [-50.0, -50.0],
+            ]
+        )
+        xy = np.tile(positions, (n_frames, 1, 1))
+        headings_vals = np.array([np.pi / 2, np.pi, 3 * np.pi / 2, 0.0, 0.0, 0.0])
+        heading = np.tile(headings_vals, (n_frames, 1))
+        speed = np.full((n_frames, n_animals), 50.0)
+        speed[:, 4:] = 0.0  # the extra pair is stationary
+        psess = make_psess(xy=xy, heading=heading, speed=speed)
+        df = RotationalOrder().compute(psess)
+        assert df["mean_rotational_order"].values[0] == pytest.approx(1.0, abs=1e-9)
+        assert df["median_rotational_order"].values[0] == pytest.approx(1.0, abs=1e-9)
+
+    def test_animal_exactly_at_centroid_is_excluded(self) -> None:
+        """An animal sitting exactly on the group centroid has an undefined radial
+        direction and must be excluded (not divide by zero / corrupt the mean).
+
+        A = (-100, 0), B = (100, 0), C = (0, 0). Centroid of the 3 = (0, 0), so
+        animal C sits exactly on it and must be dropped. With tangential (CCW)
+        headings for A and B only, both remaining cross terms equal 1, so
+        M = 1 exactly if C is correctly excluded (a crash or NaN/inf leak would
+        fail this assertion).
+        """
+        n_frames, n_animals = 8, 3
+        positions = np.array([[-100.0, 0.0], [100.0, 0.0], [0.0, 0.0]])
+        xy = np.tile(positions, (n_frames, 1, 1))
+        headings_vals = np.array([3 * np.pi / 2, np.pi / 2, 0.0])
+        heading = np.tile(headings_vals, (n_frames, 1))
+        speed = np.full((n_frames, n_animals), 50.0)
+        psess = make_psess(xy=xy, heading=heading, speed=speed)
+        df = RotationalOrder().compute(psess)
+        assert df["mean_rotational_order"].values[0] == pytest.approx(1.0, abs=1e-9)
+        assert df["median_rotational_order"].values[0] == pytest.approx(1.0, abs=1e-9)
+
+    def test_all_stationary_returns_nan(self) -> None:
+        """When every animal is stationary in every frame, no frame reaches the
+        2-qualifying-animal minimum -> mean/median are NaN."""
+        n_frames, n_animals = 10, 3
+        positions = np.array([[0.0, 0.0], [100.0, 0.0], [0.0, 100.0]])
+        xy = np.tile(positions, (n_frames, 1, 1))
+        heading = np.zeros((n_frames, n_animals))
+        speed = np.zeros((n_frames, n_animals))  # nobody moves
+        psess = make_psess(xy=xy, heading=heading, speed=speed)
+        df = RotationalOrder().compute(psess)
+        assert np.isnan(df["mean_rotational_order"].values[0])
+        assert np.isnan(df["median_rotational_order"].values[0])
+
+    def test_custom_stationary_threshold_cfg(self) -> None:
+        """cfg['stationary_threshold_px_s'] overrides the default 1e-6 px/s
+        threshold, mirroring Polarisation's cfg support."""
+        n_frames, n_animals = 5, 4
+        positions = np.array([[100.0, 0.0], [0.0, 100.0], [-100.0, 0.0], [0.0, -100.0]])
+        xy = np.tile(positions, (n_frames, 1, 1))
+        headings_vals = np.array([np.pi / 2, np.pi, 3 * np.pi / 2, 0.0])
+        heading = np.tile(headings_vals, (n_frames, 1))
+        speed = np.full((n_frames, n_animals), 5.0)  # slower than the custom threshold
+        psess = make_psess(xy=xy, heading=heading, speed=speed)
+        df = RotationalOrder().compute(psess, cfg={"stationary_threshold_px_s": 10.0})
+        assert np.isnan(df["mean_rotational_order"].values[0])
