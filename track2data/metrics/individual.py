@@ -1,5 +1,5 @@
 """
-Individual-level metrics: IL-1, IL-2, IL-3, IL-4, IL-5, IL-6.
+Individual-level metrics: IL-1, IL-2, IL-3, IL-4, IL-5, IL-6, IL-7, IL-8.
 
 Each class implements :class:`track2data.metrics.base.Metric` and returns
 a :class:`pandas.DataFrame` with at least the columns ``session_id``,
@@ -549,6 +549,223 @@ class Acceleration(Metric):
         return pd.DataFrame(records)
 
 
+# ── IL-7: FreezingBouts ───────────────────────────────────────────────────────
+
+
+def _true_run_lengths(mask: np.ndarray) -> list[int]:
+    """Return the lengths of every contiguous run of ``True`` in a 1-D boolean array.
+
+    A ``False`` entry — including one produced by excluding a NaN frame —
+    always ends the current run; runs on either side of it are never
+    silently merged together.
+    """
+    lengths: list[int] = []
+    current = 0
+    for val in mask:
+        if val:
+            current += 1
+        else:
+            if current > 0:
+                lengths.append(current)
+            current = 0
+    if current > 0:
+        lengths.append(current)
+    return lengths
+
+
+class FreezingBouts(Metric):
+    """IL-7 — Freezing-bout count and duration statistics per individual."""
+
+    id = "IL-7"
+    name = "freezing_bouts"
+    label = "Freezing-Bout Count & Duration"
+    level = "individual"
+    priority = "optional"
+    requires_identity = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        "freezing_bout_count",
+        "mean_freezing_duration_s",
+        "total_freezing_duration_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Number and duration of discrete freezing (immobility) bouts per "
+            "individual.  A bout is a run of consecutive inactive frames "
+            "(speed ≤ threshold, same threshold rule as IL-4) that is at "
+            "least `min_bout_frames` frames long."
+        ),
+        formula_plain=(
+            "inactive[t,k] = speed[t,k] <= threshold (NaN frames excluded); "
+            "run-length encode inactive; keep runs >= min_bout_frames; "
+            "freezing_bout_count = number of qualifying runs; "
+            "total_freezing_duration_s = sum(qualifying run lengths) / fps; "
+            "mean_freezing_duration_s = total_freezing_duration_s / freezing_bout_count"
+        ),
+        inputs=[
+            "PreprocessedSession.kinematics.speed_px_s",
+            "cfg['min_bout_frames'] (default 5)",
+        ],
+        assumptions=["Same as IL-4"],
+        warnings=["Discards short pauses; min duration is study-specific"],
+        citation="Speed-threshold bout detection; e.g. Cachat et al. 2010",
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute freezing-bout statistics for every individual in *session*.
+
+        Parameters
+        ----------
+        session:
+            A fully preprocessed session.
+        cfg:
+            Optional dict.  ``cfg['threshold_px_s']`` overrides the IL-4-style
+            activity threshold (default: data-driven ``mean(speed) * 0.1``).
+            ``cfg['min_bout_frames']`` overrides the minimum run length, in
+            frames, required for a run of inactivity to count as a freezing
+            bout (default 5).
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per individual.
+        """
+        speed = session.kinematics.speed_px_s  # (n_frames, n_animals)
+
+        # Threshold: identical rule to IL-4 Activity so the two stay consistent.
+        if cfg is not None and "threshold_px_s" in cfg:
+            threshold = float(cfg["threshold_px_s"])
+        else:
+            all_valid = speed[~np.isnan(speed)]
+            threshold = float(np.mean(all_valid) * 0.1) if len(all_valid) > 0 else 0.0
+
+        min_bout_frames = 5
+        if cfg is not None and "min_bout_frames" in cfg:
+            min_bout_frames = int(cfg["min_bout_frames"])
+
+        fps = session.fps
+        n_animals = session.n_animals
+
+        records: list[dict] = []
+        for k in range(n_animals):
+            s = speed[:, k]
+            # NaN frames count as neither active nor inactive: excluding them
+            # here also means they break, rather than merge, adjacent runs.
+            inactive = (s <= threshold) & ~np.isnan(s)
+
+            run_lengths = _true_run_lengths(inactive)
+            qualifying = [n for n in run_lengths if n >= min_bout_frames]
+
+            bout_count = len(qualifying)
+            if bout_count > 0:
+                total_duration = float(sum(qualifying) / fps)
+                mean_duration = float(total_duration / bout_count)
+            else:
+                total_duration = 0.0
+                mean_duration = 0.0
+
+            records.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "individual_id": k,
+                    "freezing_bout_count": bout_count,
+                    "mean_freezing_duration_s": mean_duration,
+                    "total_freezing_duration_s": total_duration,
+                }
+            )
+
+        return pd.DataFrame(records)
+
+
+# ── IL-8: TurnRate ────────────────────────────────────────────────────────────
+
+
+class TurnRate(Metric):
+    """IL-8 — Mean and median turn rate (heading change) per individual."""
+
+    id = "IL-8"
+    name = "turn_rate"
+    label = "Turn Rate (Heading Change)"
+    level = "individual"
+    priority = "advanced"
+    requires_identity = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        "mean_turn_rate_rad_per_s",
+        "median_turn_rate_rad_per_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Mean and median rate of heading change per individual, computed "
+            "from frame-to-frame heading vectors."
+        ),
+        formula_plain=(
+            "theta[t,k] = heading_rad[t,k] = atan2(dy, dx) of the displacement "
+            "vector; dtheta = wrap(theta[t+1,k] - theta[t,k]) with "
+            "wrap(x) = atan2(sin(x), cos(x)); "
+            "turn_rate = mean(|dtheta|) * fps (median computed analogously)"
+        ),
+        inputs=["PreprocessedSession.kinematics.heading_rad"],
+        assumptions=["Heading is well-defined (i.e. speed > small ε)"],
+        warnings=["Stationary frames produce undefined heading; these are skipped"],
+        citation="Couzin et al. 2002",
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute turn-rate statistics for every individual in *session*.
+
+        Parameters
+        ----------
+        session:
+            A fully preprocessed session.
+        cfg:
+            Optional configuration dict (unused for this metric).
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per individual.
+        """
+        heading = session.kinematics.heading_rad  # (n_frames, n_animals)
+        fps = session.fps
+        n_animals = session.n_animals
+
+        records: list[dict] = []
+        for k in range(n_animals):
+            theta = heading[:, k]
+            theta_t = theta[:-1]
+            theta_t1 = theta[1:]
+            valid = ~(np.isnan(theta_t) | np.isnan(theta_t1))
+
+            if valid.sum() == 0:
+                mean_rate = np.nan
+                median_rate = np.nan
+            else:
+                dtheta = theta_t1[valid] - theta_t[valid]
+                # Robust wrap into (-pi, pi]; deliberately not a naive modulo.
+                wrapped = np.arctan2(np.sin(dtheta), np.cos(dtheta))
+                turn_rates = np.abs(wrapped) * fps
+                mean_rate = float(turn_rates.mean())
+                median_rate = float(np.median(turn_rates))
+
+            records.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "individual_id": k,
+                    "mean_turn_rate_rad_per_s": mean_rate,
+                    "median_turn_rate_rad_per_s": median_rate,
+                }
+            )
+
+        return pd.DataFrame(records)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -559,3 +776,5 @@ _register(CentreDistance)
 _register(Activity)
 _register(Tortuosity)
 _register(Acceleration)
+_register(FreezingBouts)
+_register(TurnRate)

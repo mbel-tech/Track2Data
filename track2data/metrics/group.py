@@ -721,6 +721,150 @@ class GroupCohesion(Metric):
         )
 
 
+# ── GL-8: RotationalOrder ─────────────────────────────────────────────────────
+
+
+class RotationalOrder(Metric):
+    """GL-8 — Rotational order parameter (milling vs. polarised motion)."""
+
+    id = "GL-8"
+    name = "rotational_order"
+    label = "Rotational Order"
+    level = "group"
+    priority = "optional"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "mean_rotational_order",
+        "median_rotational_order",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Rotational order (milling) measures how strongly the group circles "
+            "its own centroid rather than translating in a common direction.  A "
+            "value of 1 means every individual moves exactly tangentially around "
+            "the group centroid in the same rotational sense (milling); 0 means "
+            "no net rotation.  It complements polarisation (GL-3): milling shows "
+            "high M and low polarisation, coordinated translation shows the "
+            "opposite."
+        ),
+        formula_plain=(
+            "M[t] = ||(1/N) Σ_k r̂_k(t) x ê_k(t)||, where r̂_k = (xy[t,k] - C[t]) "
+            "/ ||xy[t,k] - C[t]|| is the unit vector from the group centroid to "
+            "animal k, ê_k is animal k's unit heading vector, and x is the "
+            "scalar 2-D cross product r̂_k.x·ê_k.y - r̂_k.y·ê_k.x; stationary "
+            "animals (speed ≈ 0) and animals exactly at the centroid are "
+            "excluded per frame"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.kinematics.heading_rad",
+            "PreprocessedSession.kinematics.speed_px_s",
+        ],
+        assumptions=[
+            "The group centroid C[t] is the mean position of all animals with a "
+            "valid (non-NaN) position in frame t, regardless of speed",
+            "Animals with speed ≈ 0 (below 1e-6 px/s) are excluded from each "
+            "frame",
+            "Animals exactly at the centroid (undefined radial direction) are "
+            "excluded from each frame",
+            "Frames with fewer than 2 included animals are skipped",
+        ],
+        warnings=[
+            "Same heading-stability caveat as GL-3: results may be biased when "
+            "many animals are stationary or headings are noisy"
+        ],
+        citation="Couzin et al. 2002, J. Theor. Biol.; Tunstrøm et al. 2013, PLoS Comp Bio",
+        citation_doi="10.1006/jtbi.2002.3065",
+    )
+
+    _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
+    _ZERO_RADIUS_EPS = 1e-9  # px — animals this close to the centroid are excluded
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute group rotational order (milling) for *session*.
+
+        Parameters
+        ----------
+        session:
+            A fully preprocessed session.
+        cfg:
+            Optional dict.  ``cfg['stationary_threshold_px_s']`` overrides the
+            default threshold of 1e-6 px/s for classifying animals as stationary.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row with mean and median rotational order.
+        """
+        xy = session.xy  # (n_frames, n_animals, 2)
+        heading = session.kinematics.heading_rad  # (n_frames, n_animals)
+        speed = session.kinematics.speed_px_s  # (n_frames, n_animals)
+
+        stationary_thr: float = self._STATIONARY_THRESHOLD
+        if cfg is not None:
+            stationary_thr = float(cfg.get("stationary_threshold_px_s", stationary_thr))
+
+        n_frames = xy.shape[0]
+        frame_rotational: list[float] = []
+
+        for t in range(n_frames):
+            positions = xy[t]  # (n_animals, 2)
+            h_t = heading[t]  # (n_animals,)
+            s_t = speed[t]  # (n_animals,)
+
+            valid_pos = ~np.isnan(positions[:, 0]) & ~np.isnan(positions[:, 1])
+            if valid_pos.sum() == 0:
+                continue  # no centroid possible this frame
+
+            centroid = positions[valid_pos].mean(axis=0)
+
+            # Exclude stationary animals and animals with NaN heading/speed/position
+            moving = (
+                valid_pos
+                & (~np.isnan(h_t))
+                & (~np.isnan(s_t))
+                & (s_t > stationary_thr)
+            )
+            idx = np.where(moving)[0]
+            if idx.size < 2:
+                continue  # skip frame
+
+            r = positions[idx] - centroid  # (k, 2)
+            r_norm = np.sqrt((r**2).sum(axis=1))
+            nonzero = r_norm > self._ZERO_RADIUS_EPS
+            if nonzero.sum() < 2:
+                continue  # skip frame
+
+            idx = idx[nonzero]
+            r_hat = r[nonzero] / r_norm[nonzero, None]
+            e_hat = np.column_stack((np.cos(h_t[idx]), np.sin(h_t[idx])))
+
+            cross = r_hat[:, 0] * e_hat[:, 1] - r_hat[:, 1] * e_hat[:, 0]
+            m_t = abs(float(cross.mean()))
+            frame_rotational.append(m_t)
+
+        if len(frame_rotational) == 0:
+            mean_rot = np.nan
+            median_rot = np.nan
+        else:
+            arr = np.array(frame_rotational)
+            mean_rot = float(arr.mean())
+            median_rot = float(np.median(arr))
+
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "mean_rotational_order": mean_rot,
+                    "median_rotational_order": median_rot,
+                }
+            ]
+        )
+
+
 # ── GL-9: GroupCentroidPosition ───────────────────────────────────────────────
 
 
@@ -885,5 +1029,6 @@ _register(ConvexHullArea)
 _register(CentroidSpeed)
 _register(GroupCohesion)
 _register(NNMatchedSpeed)
+_register(RotationalOrder)
 _register(GroupCentroidPosition)
 _register(GroupSpread)

@@ -1,4 +1,8 @@
-"""Tests for individual-level metrics IL-3 and IL-6 (TDD RED phase)."""
+"""Tests for individual-level metrics IL-3, IL-6, IL-7, and IL-8.
+
+IL-7 (FreezingBouts) and IL-8 (TurnRate) are added under strict TDD; see
+CONTRIBUTING.md §3.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +18,12 @@ from track2data.core.models import (
     Session,
     VideoInfo,
 )
-from track2data.metrics.individual import Acceleration, CentreDistance
+from track2data.metrics.individual import (
+    Acceleration,
+    CentreDistance,
+    FreezingBouts,
+    TurnRate,
+)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -24,18 +33,27 @@ def make_psess(
     n_animals: int = 4,
     xy: np.ndarray | None = None,
     accel: np.ndarray | None = None,
+    speed: np.ndarray | None = None,
+    heading: np.ndarray | None = None,
 ) -> PreprocessedSession:
     rng = np.random.default_rng(42)
     if xy is None:
-        if accel is not None:
-            # Keep the generated trajectory's shape consistent with an
-            # explicitly-passed accel array so session.n_animals (derived
-            # from xy) never diverges from accel_px_s2.shape[1].
-            n_frames, n_animals = accel.shape[0], accel.shape[1]
+        # Keep the generated trajectory's shape consistent with any
+        # explicitly-passed kinematics array (accel / speed / heading) so
+        # session.n_animals (derived from xy) never diverges from that
+        # array's shape.
+        for custom_arr in (accel, speed, heading):
+            if custom_arr is not None:
+                n_frames, n_animals = custom_arr.shape[0], custom_arr.shape[1]
+                break
         xy = rng.random((n_frames, n_animals, 2)) * 500
     actual_frames, actual_animals = xy.shape[0], xy.shape[1]
     if accel is None:
         accel = np.zeros((actual_frames, actual_animals))
+    if speed is None:
+        speed = np.zeros((actual_frames, actual_animals))
+    if heading is None:
+        heading = np.zeros((actual_frames, actual_animals))
     sess = Session(
         session_id="test",
         folder=Path("/tmp"),
@@ -46,8 +64,6 @@ def make_psess(
         has_stable_identities=True,
         raw_xy=xy,
     )
-    speed = np.zeros((actual_frames, actual_animals))
-    heading = np.zeros((actual_frames, actual_animals))
     kine = KinematicsArrays(speed_px_s=speed, accel_px_s2=accel, heading_rad=heading)
     return PreprocessedSession(
         session=sess,
@@ -261,3 +277,210 @@ class TestAcceleration:
         assert np.isnan(row0["mean_abs_accel_px_s2"])
         assert np.isnan(row0["rms_accel_px_s2"])
         assert np.isnan(row0["max_accel_px_s2"])
+
+
+# ── IL-7: FreezingBouts ───────────────────────────────────────────────────────
+
+
+class TestFreezingBouts:
+    def test_metric_id(self) -> None:
+        assert FreezingBouts.id == "IL-7"
+
+    def test_output_columns_present(self) -> None:
+        psess = make_psess()
+        df = FreezingBouts().compute(psess)
+        for col in [
+            "session_id",
+            "metric_id",
+            "individual_id",
+            "freezing_bout_count",
+            "mean_freezing_duration_s",
+            "total_freezing_duration_s",
+        ]:
+            assert col in df.columns
+
+    def test_session_id_propagated(self) -> None:
+        psess = make_psess()
+        df = FreezingBouts().compute(psess)
+        assert (df["session_id"] == "test").all()
+
+    def test_metric_id_column(self) -> None:
+        psess = make_psess()
+        df = FreezingBouts().compute(psess)
+        assert (df["metric_id"] == "IL-7").all()
+
+    def test_row_count_equals_n_animals(self) -> None:
+        psess = make_psess(n_animals=5)
+        df = FreezingBouts().compute(psess)
+        assert len(df) == 5
+
+    def test_clear_freezing_bout_counts_and_durations(self) -> None:
+        """5 inactive frames (>= default min_bout_frames=5) then active → 1 bout."""
+        n_frames, n_animals = 20, 1
+        speed = np.zeros((n_frames, n_animals))
+        speed[5:, 0] = 100.0  # frames 0-4 stay 0.0 (inactive); 5.. active
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        row = df.iloc[0]
+        assert row["freezing_bout_count"] == 1
+        assert row["total_freezing_duration_s"] == pytest.approx(5 / 25.0)
+        assert row["mean_freezing_duration_s"] == pytest.approx(5 / 25.0)
+
+    def test_bout_shorter_than_min_not_counted(self) -> None:
+        """3 inactive frames (< default min_bout_frames=5) never qualify."""
+        n_frames, n_animals = 20, 1
+        speed = np.full((n_frames, n_animals), 100.0)
+        speed[:3, 0] = 0.0
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        row = df.iloc[0]
+        assert row["freezing_bout_count"] == 0
+        assert row["mean_freezing_duration_s"] == pytest.approx(0.0)
+        assert row["total_freezing_duration_s"] == pytest.approx(0.0)
+
+    def test_zero_bouts_when_all_active(self) -> None:
+        n_frames, n_animals = 20, 2
+        speed = np.full((n_frames, n_animals), 100.0)
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        for k in range(n_animals):
+            row = df[df["individual_id"] == k].iloc[0]
+            assert row["freezing_bout_count"] == 0
+            assert row["mean_freezing_duration_s"] == pytest.approx(0.0)
+            assert row["total_freezing_duration_s"] == pytest.approx(0.0)
+
+    def test_nan_frames_excluded_and_do_not_merge_runs(self) -> None:
+        """Two 3-frame inactive runs split by 1 NaN frame must NOT merge into
+        a 6-frame run (which would wrongly qualify as a >=5-frame bout)."""
+        n_frames, n_animals = 10, 1
+        speed = np.zeros((n_frames, n_animals))
+        speed[3, 0] = np.nan
+        speed[7:10, 0] = 100.0
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        row = df.iloc[0]
+        assert row["freezing_bout_count"] == 0
+        assert row["total_freezing_duration_s"] == pytest.approx(0.0)
+        assert row["mean_freezing_duration_s"] == pytest.approx(0.0)
+
+    def test_nan_frame_inside_run_splits_bout_and_excluded_from_duration(self) -> None:
+        """Two qualifying 5-frame runs separated by 1 NaN frame → 2 bouts;
+        the NaN frame itself contributes zero duration."""
+        n_frames, n_animals = 12, 1
+        speed = np.zeros((n_frames, n_animals))
+        speed[5, 0] = np.nan
+        speed[11, 0] = 100.0
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        row = df.iloc[0]
+        assert row["freezing_bout_count"] == 2
+        assert row["total_freezing_duration_s"] == pytest.approx(10 / 25.0)
+        assert row["mean_freezing_duration_s"] == pytest.approx(5 / 25.0)
+
+    def test_min_bout_frames_override_via_cfg(self) -> None:
+        n_frames, n_animals = 10, 1
+        speed = np.full((n_frames, n_animals), 100.0)
+        speed[:3, 0] = 0.0
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0, "min_bout_frames": 3})
+        row = df.iloc[0]
+        assert row["freezing_bout_count"] == 1
+        assert row["total_freezing_duration_s"] == pytest.approx(3 / 25.0)
+        assert row["mean_freezing_duration_s"] == pytest.approx(3 / 25.0)
+
+    def test_default_threshold_replicates_activity_logic(self) -> None:
+        """No cfg threshold → mean(speed) * 0.1, the same rule IL-4 Activity uses."""
+        n_frames, n_animals = 20, 1
+        speed = np.zeros((n_frames, n_animals))
+        speed[5:, 0] = 100.0
+        # mean(speed) = (5*0 + 15*100) / 20 = 75.0 -> threshold = 7.5
+        # frames 0-4 (0.0) are inactive; frames 5.. (100.0) are active
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess)  # no cfg at all
+        row = df.iloc[0]
+        assert row["freezing_bout_count"] == 1
+        assert row["total_freezing_duration_s"] == pytest.approx(5 / 25.0)
+
+
+# ── IL-8: TurnRate ────────────────────────────────────────────────────────────
+
+
+class TestTurnRate:
+    def test_metric_id(self) -> None:
+        assert TurnRate.id == "IL-8"
+
+    def test_output_columns_present(self) -> None:
+        psess = make_psess()
+        df = TurnRate().compute(psess)
+        for col in [
+            "session_id",
+            "metric_id",
+            "individual_id",
+            "mean_turn_rate_rad_per_s",
+            "median_turn_rate_rad_per_s",
+        ]:
+            assert col in df.columns
+
+    def test_session_id_propagated(self) -> None:
+        psess = make_psess()
+        df = TurnRate().compute(psess)
+        assert (df["session_id"] == "test").all()
+
+    def test_metric_id_column(self) -> None:
+        psess = make_psess()
+        df = TurnRate().compute(psess)
+        assert (df["metric_id"] == "IL-8").all()
+
+    def test_row_count_equals_n_animals(self) -> None:
+        psess = make_psess(n_animals=5)
+        df = TurnRate().compute(psess)
+        assert len(df) == 5
+
+    def test_known_90_degree_turn_rate(self) -> None:
+        """theta = [0, pi/2, pi, NaN] -> two consecutive 90-degree turns."""
+        heading = np.array([[0.0], [np.pi / 2], [np.pi], [np.nan]])
+        psess = make_psess(heading=heading)
+        df = TurnRate().compute(psess)
+        row = df.iloc[0]
+        expected = (np.pi / 2) * 25.0  # fps=25.0, from make_psess
+        assert row["mean_turn_rate_rad_per_s"] == pytest.approx(expected, rel=1e-6)
+        assert row["median_turn_rate_rad_per_s"] == pytest.approx(expected, rel=1e-6)
+
+    def test_wrapped_angle_difference_near_pi_boundary(self) -> None:
+        """theta going from 3pi/4 to -3pi/4 is a 90-degree turn the short way,
+        NOT the naive (unwrapped) 270-degree difference."""
+        heading = np.array([[3 * np.pi / 4], [-3 * np.pi / 4], [np.nan]])
+        psess = make_psess(heading=heading)
+        df = TurnRate().compute(psess)
+        row = df.iloc[0]
+        expected = (np.pi / 2) * 25.0
+        assert row["mean_turn_rate_rad_per_s"] == pytest.approx(expected, rel=1e-6)
+
+    def test_nan_and_stationary_frames_excluded(self) -> None:
+        """NaN (stationary / undefined-heading) frames are dropped from the
+        mean/median and do not corrupt the surrounding valid pairs."""
+        heading = np.array([[0.0], [0.1], [np.nan], [0.1], [0.4], [np.nan], [0.4], [1.0]])
+        psess = make_psess(heading=heading)
+        df = TurnRate().compute(psess)
+        row = df.iloc[0]
+        # valid dtheta pairs: (0.0->0.1)=0.1, (0.1->0.4)=0.3, (0.4->1.0)=0.6
+        turn_rates = np.array([0.1, 0.3, 0.6]) * 25.0
+        assert row["mean_turn_rate_rad_per_s"] == pytest.approx(float(turn_rates.mean()), rel=1e-6)
+        assert row["median_turn_rate_rad_per_s"] == pytest.approx(
+            float(np.median(turn_rates)), rel=1e-6
+        )
+
+    def test_all_nan_heading_returns_nan(self) -> None:
+        """An individual with fully undefined heading -> NaN stats, independent
+        of a second individual whose heading is well-defined throughout."""
+        n_frames, n_animals = 10, 2
+        heading = np.zeros((n_frames, n_animals))
+        heading[:, 0] = np.nan
+        psess = make_psess(heading=heading)
+        df = TurnRate().compute(psess)
+        row0 = df[df["individual_id"] == 0].iloc[0]
+        row1 = df[df["individual_id"] == 1].iloc[0]
+        assert np.isnan(row0["mean_turn_rate_rad_per_s"])
+        assert np.isnan(row0["median_turn_rate_rad_per_s"])
+        assert row1["mean_turn_rate_rad_per_s"] == pytest.approx(0.0)
+        assert row1["median_turn_rate_rad_per_s"] == pytest.approx(0.0)
