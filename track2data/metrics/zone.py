@@ -423,6 +423,205 @@ class ZoneTransitions(Metric):
         return pd.DataFrame(rows, columns=empty_cols)
 
 
+# ── Z-5: Entry / exit event log ───────────────────────────────────────────────
+
+
+class Z5EntryExitEvents(Metric):
+    """Z-5 — Event log of zone entry/exit timestamps for each animal.
+
+    ``Metric.level`` only allows "individual" / "group" / "zone" / "diagnostic"
+    (see ``track2data/metrics/base.py``) — "event" is not a supported value —
+    so this metric declares ``level = "zone"`` even though its output is an
+    event log rather than a per-(zone, individual) summary row.
+    """
+
+    id = "Z-5"
+    name = "zone_entry_exit_events"
+    label = "Zone Entry/Exit Events"
+    level = "zone"
+    priority = "optional"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "zone_name",
+        "individual_id",
+        "event",
+        "t_s",
+        "frame",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Event log of every zone entry and exit for each animal: one row "
+            "per rising or falling edge in the zone-membership series."
+        ),
+        formula_plain=(
+            "enter at frame t when in_zone[t] and (t == 0 or not in_zone[t-1]); "
+            "exit at frame t when not in_zone[t] and in_zone[t-1]; t_s = frame / fps"
+        ),
+        inputs=["Z-1 zone-membership series"],
+        assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
+        warnings=[
+            "An animal already inside a zone at frame 0 gets an 'enter' event at "
+            "frame 0 with no preceding 'exit'.",
+            "An animal still inside a zone at the final frame gets an 'enter' "
+            "event with no matching 'exit' event.",
+        ],
+    )
+
+    def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+        """Emit one row per zone entry/exit edge for every (zone, animal) pair.
+
+        Parameters
+        ----------
+        session:
+            A ``PreprocessedSession`` instance.
+        cfg:
+            Unused; reserved for future configuration.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per event with columns: session_id, zone_name,
+            individual_id, event ("enter"/"exit"), t_s, frame.
+            Empty DataFrame when no zone arrays are present.
+        """
+        zone_arrays = _collect_zone_arrays(session)
+        empty_cols = self.output_columns
+        if not zone_arrays:
+            return pd.DataFrame(columns=empty_cols)
+
+        session_id: str = session.session_id  # type: ignore[attr-defined]
+        n_animals: int = session.n_animals  # type: ignore[attr-defined]
+        fps: float = session.fps  # type: ignore[attr-defined]
+
+        rows: list[dict[str, object]] = []
+        for arr in zone_arrays:
+            for k in range(n_animals):
+                col = arr[:, k]
+                zone_names = [z for z in np.unique(col) if z != _EMPTY_ZONE_VALUE]
+                for zone_name in zone_names:
+                    in_zone: np.ndarray = col == zone_name
+                    enter_frames = [0] if in_zone[0] else []
+                    enter_frames += (np.flatnonzero(~in_zone[:-1] & in_zone[1:]) + 1).tolist()
+                    exit_frames = (np.flatnonzero(in_zone[:-1] & ~in_zone[1:]) + 1).tolist()
+                    for frame in enter_frames:
+                        rows.append(
+                            {
+                                "session_id": session_id,
+                                "zone_name": zone_name,
+                                "individual_id": k,
+                                "event": "enter",
+                                "t_s": frame / fps,
+                                "frame": frame,
+                            }
+                        )
+                    for frame in exit_frames:
+                        rows.append(
+                            {
+                                "session_id": session_id,
+                                "zone_name": zone_name,
+                                "individual_id": k,
+                                "event": "exit",
+                                "t_s": frame / fps,
+                                "frame": frame,
+                            }
+                        )
+
+        if not rows:
+            return pd.DataFrame(columns=empty_cols)
+
+        df = pd.DataFrame(rows, columns=empty_cols)
+        return df.sort_values(["individual_id", "zone_name", "frame"]).reset_index(drop=True)
+
+
+# ── Z-6: Latency to first entry ───────────────────────────────────────────────
+
+
+class Z6LatencyToFirstEntry(Metric):
+    """Z-6 — Time of each animal's first entry into each named zone."""
+
+    id = "Z-6"
+    name = "latency_to_first_entry"
+    label = "Latency to First Entry"
+    level = "zone"
+    priority = "optional"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "zone_name",
+        "individual_id",
+        "first_entry_t_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=("Time (in seconds) of each animal's first entry into each named zone."),
+        formula_plain=(
+            "first_entry_t_s[k, z] = min(t_s) over Z-5 'enter' events for "
+            "(zone_name == z, individual_id == k); inf if the animal never enters"
+        ),
+        inputs=["Z-5 event log"],
+        assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
+        warnings=[
+            "NaN when the individual never enters the zone is encoded as inf "
+            "(rather than NaN) so results sort as 'latest possible'."
+        ],
+    )
+
+    def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute the first-entry latency for every (zone, animal) pair.
+
+        Internally reuses ``Z5EntryExitEvents.compute()`` as the event-log
+        subroutine (per METRICS_SPEC.md Z-6 "Inputs: Z-5 event log") rather
+        than re-deriving rising edges.
+
+        Parameters
+        ----------
+        session:
+            A ``PreprocessedSession`` instance.
+        cfg:
+            Unused; reserved for future configuration.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (zone_name, individual_id) — the full grid of every
+            zone seen by any animal times every animal — with
+            first_entry_t_s == inf for pairs that never had an enter event.
+            Empty DataFrame when no zone arrays are present.
+        """
+        empty_cols = self.output_columns
+        zone_arrays = _collect_zone_arrays(session)
+        if not zone_arrays:
+            return pd.DataFrame(columns=empty_cols)
+
+        session_id: str = session.session_id  # type: ignore[attr-defined]
+        n_animals: int = session.n_animals  # type: ignore[attr-defined]
+
+        events = Z5EntryExitEvents().compute(session, cfg)
+        enters = events[events["event"] == "enter"]
+
+        zone_names = sorted(enters["zone_name"].unique().tolist())
+        if not zone_names:
+            return pd.DataFrame(columns=empty_cols)
+
+        rows = []
+        for zone_name in zone_names:
+            for k in range(n_animals):
+                match = enters[
+                    (enters["zone_name"] == zone_name) & (enters["individual_id"] == k)
+                ]
+                first_entry_t_s = float(match["t_s"].min()) if len(match) > 0 else float("inf")
+                rows.append(
+                    {
+                        "session_id": session_id,
+                        "zone_name": zone_name,
+                        "individual_id": k,
+                        "first_entry_t_s": first_entry_t_s,
+                    }
+                )
+
+        return pd.DataFrame(rows, columns=empty_cols)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -431,3 +630,5 @@ _register(TimeInZone)
 _register(AreaCorrectedOccupancy)
 _register(ZoneVisitCount)
 _register(ZoneTransitions)
+_register(Z5EntryExitEvents)
+_register(Z6LatencyToFirstEntry)
