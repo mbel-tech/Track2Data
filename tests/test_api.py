@@ -356,3 +356,152 @@ def test_validate_flags_scalar_mode_without_px_per_cm() -> None:
     engine = Engine(manifest)
     issues = engine.validate()
     assert any("px_per_cm" in issue for issue in issues)
+
+
+# ── progress reporting (issue #18) ──────────────────────────────────────────────
+
+
+def test_import_sessions_without_progress_still_works() -> None:
+    """Backward compatibility: progress is optional and defaults to None."""
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=Path("/does/not/exist"), sha256="x")]
+    )
+    engine = Engine(manifest)
+    assert engine.import_sessions() == []  # fails to import, logged+skipped, no crash
+
+
+def test_import_sessions_emits_one_event_per_session(tiny_real_session: Path) -> None:
+    from track2data.api import Engine
+    from track2data.core.progress import ProgressEvent
+
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="s1", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s2", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s3", folder=tiny_real_session, sha256="x"),
+        ]
+    )
+    engine = Engine(manifest)
+    events: list[ProgressEvent] = []
+    engine.import_sessions(progress=events.append)
+
+    assert [e.stage for e in events] == ["import", "import", "import"]
+    assert [e.session_id for e in events] == ["s1", "s2", "s3"]
+    assert [e.current for e in events] == [1, 2, 3]
+    assert all(e.total == 3 for e in events)
+
+
+def test_import_sessions_cancellation_propagates_not_swallowed(
+    tiny_real_session: Path,
+) -> None:
+    """
+    The progress emit for a session must happen BEFORE that session's
+    import try/except opens -- otherwise a raised OperationCancelled from
+    the callback would be caught by the broad `except Exception` around
+    the import attempt and silently treated as "this session failed to
+    import", continuing the loop instead of actually stopping the run.
+    """
+    from track2data.api import Engine
+    from track2data.core.progress import OperationCancelled
+
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="s1", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s2", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s3", folder=tiny_real_session, sha256="x"),
+        ]
+    )
+    engine = Engine(manifest)
+    seen: list[str] = []
+
+    def cancel_on_second(event) -> None:
+        seen.append(event.session_id)
+        if event.session_id == "s2":
+            raise OperationCancelled()
+
+    with pytest.raises(OperationCancelled):
+        engine.import_sessions(progress=cancel_on_second)
+
+    # Stopped at s2 -- s3 was never reached, proving the exception
+    # propagated out of the loop rather than being logged and skipped.
+    assert seen == ["s1", "s2"]
+
+
+def test_run_session_emits_preprocess_metrics_export_in_order(tmp_path: Path) -> None:
+    from track2data.api import Engine
+    from track2data.core.progress import ProgressEvent
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    events: list[ProgressEvent] = []
+
+    engine.run_session(session, tmp_path, exporters=["csv_long"], progress=events.append)
+
+    assert [e.stage for e in events] == ["preprocess", "metrics", "export"]
+    assert all(e.session_id == session.session_id for e in events)
+    assert all(e.total == 3 for e in events)
+    assert [e.current for e in events] == [1, 2, 3]
+
+
+def test_run_all_emits_run_bookends_and_session_complete(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    from track2data.api import Engine
+    from track2data.core.progress import ProgressEvent
+
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="s1", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s2", folder=tiny_real_session, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    events: list[ProgressEvent] = []
+
+    engine.run_all(tmp_path, exporters=["csv_long"], progress=events.append)
+
+    stages = [e.stage for e in events]
+    assert stages[0] == "run"
+    assert stages[-1] == "run"
+    assert stages.count("import") == 2
+    assert stages.count("session") == 2
+    # preprocess/metrics/export per session, twice.
+    assert stages.count("preprocess") == 2
+    assert stages.count("metrics") == 2
+    assert stages.count("export") == 2
+
+    run_events = [e for e in events if e.stage == "run"]
+    assert run_events[0].current == 0
+    assert run_events[-1].current == run_events[-1].total
+
+
+def test_run_all_per_session_call_count_is_bounded(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """A per-frame hook would queue thousands of events; this bounds the
+    actual call count to a small, fixed number of stage-boundary emits."""
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=tiny_real_session, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    call_count = 0
+
+    def counter(_event) -> None:
+        nonlocal call_count
+        call_count += 1
+
+    engine.run_all(tmp_path, exporters=["csv_long"], progress=counter)
+
+    # 1 run-start + 1 import + 3 run_session stages + 1 session-complete
+    # + 1 run-end = 7 for a single-session run.
+    assert call_count <= 8
