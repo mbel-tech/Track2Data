@@ -16,7 +16,7 @@ They verify:
 2. Engine.preprocess() returns a PreprocessedSession with xy cleaned.
 3. Engine.compute_metrics() returns D-* diagnostics + selected metrics.
 4. Engine.run_session() writes master_fish_by_frame.csv to disk.
-5. The CSV has the expected columns and one row per (frame × animal).
+5. The CSV has the expected columns and one row per (frame x animal).
 6. CLI `track2data run` produces the same output via Click's test runner.
 7. CLI `track2data validate` exits 0 on a valid manifest, 1 on issues.
 8. CLI `track2data list-metrics` lists registered metric IDs.
@@ -25,10 +25,9 @@ They verify:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
-
-import hashlib
 
 import numpy as np
 import pandas as pd
@@ -248,7 +247,7 @@ def test_run_session_csv_columns(
 def test_run_session_csv_row_count(
     tmp_path: Path, tiny_real_session: Path
 ) -> None:
-    """master_fish_by_frame.csv has n_frames × n_animals rows."""
+    """master_fish_by_frame.csv has n_frames x n_animals rows."""
     from track2data.api import Engine
 
     manifest = _minimal_manifest(tiny_real_session)
@@ -258,7 +257,7 @@ def test_run_session_csv_row_count(
     engine.run_session(session, tmp_path, exporters=["csv_long"])
 
     df = pd.read_csv(tmp_path / "master_fish_by_frame.csv")
-    expected = _N_FRAMES * _N_ANIMALS  # 10 × 2 = 20
+    expected = _N_FRAMES * _N_ANIMALS  # 10 x 2 = 20
     assert len(df) == expected, f"Expected {expected} rows, got {len(df)}"
 
 

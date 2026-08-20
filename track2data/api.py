@@ -117,7 +117,6 @@ class Engine:
         Returns a dict mapping metric_id to a ``pd.DataFrame``.
         Diagnostic metrics (D-1..D-5) are always computed.
         """
-        import pandas as pd
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
 
@@ -230,8 +229,6 @@ class Engine:
         diagnostic_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("D-")}
 
-        import json
-        from datetime import UTC, datetime
         payload = ExportPayload(
             session_id=psess.session_id,
             project_name=self._manifest.project_name,

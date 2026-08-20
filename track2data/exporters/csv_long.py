@@ -107,3 +107,10 @@ class CsvLongExporter(Exporter):
         written.append(_write_csv(group_summary, out_dir / "group_dynamics_summary.csv"))
 
         return written
+
+
+# ── Registration ──────────────────────────────────────────────────────────────
+
+from track2data.exporters import register as _register  # noqa: E402
+
+_register(CsvLongExporter)

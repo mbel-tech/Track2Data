@@ -9,6 +9,7 @@ CSV / XLSX metadata loader with type coercion.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pandas as pd
@@ -55,12 +56,10 @@ def load(path: Path) -> pd.DataFrame:
         df[col] = df[col].str.strip()
 
     # Coerce obvious date columns to datetime.
-    _DATE_HINTS = {"trial_date", "date", "exp_date"}
+    date_hints = {"trial_date", "date", "exp_date"}
     for col in df.columns:
-        if col in _DATE_HINTS:
-            try:
+        if col in date_hints:
+            with contextlib.suppress(Exception):
                 df[col] = pd.to_datetime(df[col], errors="coerce")
-            except Exception:  # noqa: BLE001
-                pass
 
     return df

@@ -117,3 +117,10 @@ class ReadmeExporter(Exporter):
         )
 
         return [readme_path, manifest_path]
+
+
+# ── Registration ──────────────────────────────────────────────────────────────
+
+from track2data.exporters import register as _register  # noqa: E402
+
+_register(ReadmeExporter)

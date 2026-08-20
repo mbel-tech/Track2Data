@@ -13,6 +13,8 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
+
 from track2data.metrics.base import Metric
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -47,36 +49,24 @@ def all_ids() -> list[str]:
 # missing optional deps (scipy, shapely) don't break basic model imports.
 
 def _load_builtins() -> None:
-    try:
+    with contextlib.suppress(ImportError):
         import track2data.metrics.diagnostic as _d  # noqa: F401
-    except ImportError:
-        pass
-    try:
+    with contextlib.suppress(ImportError):
         import track2data.metrics.individual as _i  # noqa: F401
-    except ImportError:
-        pass
-    try:
+    with contextlib.suppress(ImportError):
         import track2data.metrics.group as _g  # noqa: F401
-    except ImportError:
-        pass
-    try:
+    with contextlib.suppress(ImportError):
         import track2data.metrics.zone as _z  # noqa: F401
-    except ImportError:
-        pass
-    try:
+    with contextlib.suppress(ImportError):
         import track2data.metrics.identity_free as _f  # noqa: F401
-    except ImportError:
-        pass
     # Load external entry-point metrics.
     try:
         import importlib.metadata as _meta
         for ep in _meta.entry_points(group="track2data.metrics"):
-            try:
+            with contextlib.suppress(Exception):
                 cls = ep.load()
                 register(cls)
-            except Exception:  # noqa: BLE001
-                pass
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
