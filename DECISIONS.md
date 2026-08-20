@@ -229,3 +229,48 @@ data anywhere in this repo to validate against (the 70-session
 support with no real fixture to test against would be speculation, not
 engineering. Revisit if v4 sample data becomes available; re-add the
 entry-point line at that point, not before.
+
+### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now
+
+**Decision:** `Engine.run_all()` continues to loop over sessions
+sequentially rather than calling `core/parallel.map_sessions()`.
+`cache/store.CacheStore` continues to be reachable only via
+`track2data cache clear`, not from anywhere in the actual
+import → preprocess → metrics → export pipeline. Both modules are
+fully implemented and tested; neither is being deleted or considered
+dead code — they're deferred because what they'd plug into isn't
+ready for them yet, not because parallel execution or caching are bad
+ideas.
+
+**Rationale (parallel):** `run_all()` currently calls
+`run_session(sess, out_dir, ...)` for *every* session with the *same*
+`out_dir` — each session's output files silently overwrite the
+previous session's (tracked as #2, "run_all silently overwrites output
+when a manifest has 2+ sessions"; #19 covers the proper fix, giving
+each session its own output subdirectory). Wiring in
+`ProcessPoolExecutor`-based parallelism on top of a loop that already
+destroys all but the last session's output the moment it goes multi-
+session would be worse than useless — N workers would race to
+overwrite the same files instead of one process doing it sequentially
+and predictably. The output-collision bug is a correctness prerequisite
+for parallelism to mean anything, not a detail to patch as a side
+effect of this decision; #19 needs its own fix and its own tests.
+Once that lands, `map_sessions()` should map over session *folder
+paths* (cheap to pickle, re-imported fresh inside each worker) rather
+than already-imported `Session` objects (which carry large in-memory
+NumPy trajectory arrays) — worth re-litigating at that point, along
+with the Windows `spawn`-vs-`fork` re-import cost this codebase hasn't
+measured yet.
+
+**Rationale (cache):** `CacheStore.put()`/`.get()` operate on a single
+flat `pd.DataFrame`, keyed by `(reader_name, folder_hash,
+config_hash)`. `PreprocessedSession` — the thing worth caching, per the
+PRD's "iterative re-analysis using cached intermediates" use case — is
+not a DataFrame: it's a dataclass carrying `xy`, a `KinematicsArrays`
+(three more arrays), optional `main_zone`/`sec_zone` arrays, and a
+`PreprocessReport`. Wiring `CacheStore` into `Engine.preprocess()`
+needs a real serialization contract between that shape and something
+Parquet-representable (or extending `CacheStore` to cache pickled
+dataclasses directly, sidestepping Parquet) — an API design question,
+not a missing function call. Deferred until that's designed
+deliberately, with its own tests, rather than improvised here.
