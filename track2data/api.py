@@ -28,6 +28,7 @@ Typical usage::
 from __future__ import annotations
 
 import logging
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,49 @@ class Engine:
     @property
     def manifest(self) -> ProjectManifest:
         return self._manifest
+
+    # ── metadata ──────────────────────────────────────────────────────────
+
+    @cached_property
+    def _metadata_join(self) -> Any:
+        """
+        Load, canonically map, and join the manifest's metadata source
+        against its session IDs.
+
+        Returns None when no metadata source (or no mapping rule) is
+        configured. Computed once and cached: the same join result applies
+        to every session processed by this Engine instance.
+        """
+        src = self._manifest.metadata_source
+        rule = self._manifest.mapping
+        if src is None or rule is None:
+            return None
+
+        from track2data.metadata.join import match
+        from track2data.metadata.loader import load
+        from track2data.metadata.mapping import apply_mapping
+
+        raw = load(src.path)
+        mapped = apply_mapping(raw, rule)
+        session_ids = [ref.session_id for ref in self._manifest.sessions]
+        return match(session_ids, mapped, rule)
+
+    def _metadata_fields_for(self, session_id: str) -> dict[str, Any]:
+        """
+        Return the matched canonical metadata fields for *session_id*.
+
+        Empty when metadata isn't configured or this session has no match.
+        ``session_id`` and ``individual_id`` are always excluded: the join
+        is session-level only, so a metadata-sourced individual_id (e.g.
+        from a `fish_id` column alias) would silently overwrite the real
+        per-row fish index used throughout the pipeline rather than adding
+        useful data.
+        """
+        join = self._metadata_join
+        if join is None:
+            return {}
+        fields = join.matched.get(session_id, {})
+        return {k: v for k, v in fields.items() if k not in ("session_id", "individual_id")}
 
     # ── session import ─────────────────────────────────────────────────────
 
@@ -144,6 +188,12 @@ class Engine:
         _run(sel.zone)
         _run(sel.diagnostic)
 
+        meta_fields = self._metadata_fields_for(psess.session_id)
+        if meta_fields:
+            for df in results.values():
+                for col, val in meta_fields.items():
+                    df[col] = val
+
         return results
 
     def build_fish_by_frame(self, psess: PreprocessedSession) -> Any:
@@ -189,6 +239,9 @@ class Engine:
             df["main_zone"] = psess.main_zone.reshape(-1)
         if psess.sec_zone is not None:
             df["sec_zone"] = psess.sec_zone.reshape(-1)
+
+        for col, val in self._metadata_fields_for(psess.session_id).items():
+            df[col] = val
 
         return df.sort_values(["session_id", "individual_id", "frame"]).reset_index(
             drop=True
