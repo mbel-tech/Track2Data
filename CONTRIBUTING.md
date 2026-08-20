@@ -30,10 +30,10 @@ pytest tests/test_r_parity/ -m "r_parity and not r_parity_local"
 pytest tests/test_r_parity/ -m r_parity_local
 
 # Coverage
-pytest --cov=track2data --cov-report=term --cov-fail-under=70
+pytest --cov=track2data --cov-report=term --cov-fail-under=80
 ```
 
-The coverage gate is temporarily 70% during the M1 build phase and will be restored to 80% (per `docs/TECHNICAL_SPEC.md` §11) once the metric and exporter modules land.
+The coverage gate is 80% (per `docs/TECHNICAL_SPEC.md` §11 and `pyproject.toml`'s `[tool.coverage.report]`). Actual coverage sits well above this floor in practice; treat 80% as a hard minimum, not a target.
 
 ## 3. Test-Driven Development
 

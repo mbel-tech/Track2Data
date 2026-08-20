@@ -42,11 +42,12 @@ jobs:
       - name: Install package + dev deps
         run: pip install -e ".[dev]"
       - name: Run unit tests (excluding r_parity)
-        # Coverage gate is temporarily 70% during the M1 build phase.
-        # Restored to 80% at M2 end per docs/TECHNICAL_SPEC.md §11.
+        # 80% per docs/TECHNICAL_SPEC.md §11 and pyproject.toml's
+        # [tool.coverage.report] fail_under (M2 restored this from the
+        # temporary 70% floor used during M1; actual coverage is ~94%).
         run: >
           pytest tests/ -v -m "not r_parity"
-          --cov=track2data --cov-report=term --cov-fail-under=70
+          --cov=track2data --cov-report=term --cov-fail-under=80
 
   r_parity:
     name: R-parity (synthetic fixtures)
