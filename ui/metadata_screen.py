@@ -154,11 +154,8 @@ class MetadataScreen(QWidget):
                 combo.setCurrentIndex(idx)
 
     def _skip_metadata(self) -> None:
-        if self._store is not None and self._store.manifest is not None:
-            self._store._manifest = self._store.manifest.model_copy(
-                update={"metadata_source": None}
-            )
-            self._store.metadataChanged.emit()
+        if self._store is not None:
+            self._store.update_metadata_source(None)
         self._file_label.setText("(skipped)")
         self._file_label.setStyleSheet("color: #666; font-style: italic;")
         self._preview.setRowCount(0)
@@ -175,10 +172,7 @@ class MetadataScreen(QWidget):
                 rules[field] = val
         rule = MappingRule(rules=rules)
         try:
-            self._store._manifest = self._store.manifest.model_copy(
-                update={"mapping": rule}
-            )
-            self._store.metadataChanged.emit()
+            self._store.update_mapping(rule)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to apply mapping:\n{exc}")
 

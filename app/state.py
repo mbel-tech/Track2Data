@@ -19,6 +19,9 @@ from PySide6.QtCore import QObject, Signal
 
 from track2data.core.models import (
     CalibrationConfig,
+    ExportTarget,
+    MappingRule,
+    MetadataSource,
     MetricSelection,
     PreprocessConfig,
     ProjectManifest,
@@ -148,6 +151,25 @@ class ProjectStore(QObject):
             return
         self._manifest = self._manifest.model_copy(update={"metrics": sel})
         self.metricsChanged.emit()
+
+    def update_metadata_source(self, source: MetadataSource | None) -> None:
+        """Set (or clear, via None) the metadata file reference."""
+        if self._manifest is None:
+            return
+        self._manifest = self._manifest.model_copy(update={"metadata_source": source})
+        self.metadataChanged.emit()
+
+    def update_mapping(self, rule: MappingRule | None) -> None:
+        if self._manifest is None:
+            return
+        self._manifest = self._manifest.model_copy(update={"mapping": rule})
+        self.metadataChanged.emit()
+
+    def update_export_targets(self, targets: list[ExportTarget]) -> None:
+        if self._manifest is None:
+            return
+        self._manifest = self._manifest.model_copy(update={"export_targets": list(targets)})
+        self.exportChanged.emit()
 
     def append_log(self, markdown_line: str) -> None:
         """Append a line to the in-memory run log and emit the signal."""

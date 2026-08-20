@@ -197,6 +197,85 @@ class TestUILayer:
         assert store2.manifest is not None
         assert store2.manifest.project_name == "save-test"
 
+    def test_project_store_update_metadata_source(self, qt_app, tmp_path: Path) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import MetadataSource
+
+        store = ProjectStore()
+        store.new_project("meta-test", tmp_path)
+        fired: list[bool] = []
+        store.metadataChanged.connect(lambda: fired.append(True))
+
+        source = MetadataSource(path=tmp_path / "meta.csv", sha256="abc123")
+        store.update_metadata_source(source)
+
+        assert store.manifest.metadata_source == source
+        assert fired == [True]
+
+    def test_project_store_update_metadata_source_to_none(
+        self, qt_app, tmp_path: Path
+    ) -> None:
+        """Skipping metadata must be representable -- source goes back to None."""
+        from app.state import ProjectStore
+        from track2data.core.models import MetadataSource
+
+        store = ProjectStore()
+        store.new_project("meta-skip-test", tmp_path)
+        store.update_metadata_source(MetadataSource(path=tmp_path / "m.csv", sha256="x"))
+
+        store.update_metadata_source(None)
+
+        assert store.manifest.metadata_source is None
+
+    def test_project_store_update_mapping(self, qt_app, tmp_path: Path) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import MappingRule
+
+        store = ProjectStore()
+        store.new_project("mapping-test", tmp_path)
+        fired: list[bool] = []
+        store.metadataChanged.connect(lambda: fired.append(True))
+
+        rule = MappingRule(rules={"treatment": "condition"})
+        store.update_mapping(rule)
+
+        assert store.manifest.mapping == rule
+        assert fired == [True]
+
+    def test_project_store_update_export_targets(self, qt_app, tmp_path: Path) -> None:
+        """exportChanged has never had an emitter anywhere in the codebase
+        before this setter -- this is what makes the export wizard stage
+        able to persist anything at all."""
+        from app.state import ProjectStore
+        from track2data.core.models import ExportTarget
+
+        store = ProjectStore()
+        store.new_project("export-test", tmp_path)
+        fired: list[bool] = []
+        store.exportChanged.connect(lambda: fired.append(True))
+
+        targets = [ExportTarget(exporter_name="csv_long"), ExportTarget(exporter_name="readme")]
+        store.update_export_targets(targets)
+
+        assert store.manifest.export_targets == targets
+        assert fired == [True]
+
+    def test_project_store_setters_are_noop_without_a_project(self, qt_app) -> None:
+        """Matches the existing guard on every other setter (update_calibration,
+        update_zones, etc.): silently do nothing when no project is open,
+        rather than crash on self._manifest.model_copy(...)."""
+        from app.state import ProjectStore
+        from track2data.core.models import ExportTarget, MappingRule, MetadataSource
+
+        store = ProjectStore()
+        assert store.manifest is None
+
+        store.update_metadata_source(MetadataSource(path=Path("x.csv"), sha256="x"))
+        store.update_mapping(MappingRule())
+        store.update_export_targets([ExportTarget(exporter_name="csv_long")])
+
+        assert store.manifest is None
+
     def test_wizard_sidebar_creation(self, qt_app) -> None:
         from app.navigation import WizardSidebar
 
