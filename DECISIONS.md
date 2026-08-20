@@ -140,3 +140,52 @@ group so UI tests can create `QApplication` instances safely.
 **Rationale:** pytest-qt handles `QApplication` lifecycle and headless
 display configuration, preventing test suite crashes on CI without a
 display server.
+
+---
+
+## Phase 2 — Metadata + remaining metrics (M2)
+
+### D-010 · Metadata join excludes `individual_id` and `session_id`
+
+**Decision:** `Engine._metadata_fields_for()` never merges a
+metadata-sourced `individual_id` or `session_id` value into
+`build_fish_by_frame()` or metric result frames, even when the user's
+`MappingRule` maps a column (e.g. `fish_id`) to canonical
+`individual_id`.
+
+**Rationale:** `metadata.join.match()` matches at the **session**
+level only (`match(session_ids: list[str], df, rule)` — no per-individual
+key). So `JoinResult.matched[session_id]` is a single dict of field
+values broadcast to *every* row of that session. If `individual_id`
+were included, every row would get the *same* constant value,
+silently overwriting the real per-row fish index
+(`0..n_animals-1`, assigned in `build_fish_by_frame()` from
+trajectory shape) that every downstream metric and export depends on.
+That's not a missing feature — it's active data corruption disguised
+as a metadata attribute. Excluding `session_id` too is defensive: it
+should already equal the session being merged into given how `match()`
+works, but there's no reason to let a mapped column silently override
+an identifier this central.
+
+**Alternative considered:** Support genuine per-individual metadata
+(e.g. real per-fish IDs from ear-tag records) by extending `match()`
+to accept `(session_id, individual_id)` composite keys. Rejected for
+now — no current call site needs it, and `CANONICAL` already reserves
+`individual_id` for this future use per `ENGINE_DESIGN.md §8.1`
+("individual_id where applicable"). Revisit if per-individual metadata
+becomes a real requirement; until then, the exclusion is the safe
+default.
+
+### D-011 · Metadata join is loaded once per `Engine` instance and cached
+
+**Decision:** `Engine._metadata_join` is a `functools.cached_property`,
+not recomputed per session.
+
+**Rationale:** `run_all()` constructs one `Engine` and calls
+`run_session()` once per manifest session; the same metadata file,
+mapping, and join result apply to all of them. Recomputing per call
+would re-read and re-parse the metadata file for every session for no
+benefit. The cache is invalidated only by constructing a new `Engine`
+(manifests are otherwise treated as immutable within an Engine's
+lifetime, matching how `self._manifest` itself is never mutated
+in-place elsewhere in this class).
