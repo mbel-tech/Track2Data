@@ -193,3 +193,56 @@ def test_join_regex() -> None:
     )
     result = match(["tank3_t1"], df, rule)
     assert "tank3_t1" in result.matched
+
+
+def test_join_regex_no_match_is_unmatched() -> None:
+    """A session_id the regex pattern doesn't match at all -> unmatched, not an error."""
+    from track2data.core.models import MappingRule
+    from track2data.metadata.join import match
+
+    df = pd.DataFrame({"tank": ["3"], "treatment": ["ctrl"]})
+    rule = MappingRule(join_regex=r"tank(?P<tank>\d+)")
+    result = match(["not_a_tank_folder"], df, rule)
+    assert "not_a_tank_folder" in result.unmatched_sessions
+    assert "not_a_tank_folder" not in result.matched
+
+
+def test_join_composite_key_without_session_id() -> None:
+    """Composite key join on columns that don't include session_id at all."""
+    from track2data.core.models import MappingRule
+    from track2data.metadata.join import match
+
+    df = pd.DataFrame(
+        {
+            "tank": ["3", "4"],
+            "trial_date": ["2024-01-01", "2024-01-02"],
+            "treatment": ["ctrl", "exp"],
+        }
+    )
+    rule = MappingRule(join_keys=["tank", "trial_date"])
+    result = match(["3_2024-01-01"], df, rule)
+    assert "3_2024-01-01" in result.matched
+    assert result.matched["3_2024-01-01"]["treatment"] == "ctrl"
+
+
+def test_join_single_non_session_id_key() -> None:
+    """A single join key that isn't 'session_id' (e.g. an external video ID)."""
+    from track2data.core.models import MappingRule
+    from track2data.metadata.join import match
+
+    df = pd.DataFrame({"video_id": ["vid_42"], "treatment": ["ctrl"]})
+    rule = MappingRule(join_keys=["video_id"])
+    result = match(["vid_42"], df, rule)
+    assert "vid_42" in result.matched
+    assert result.matched["vid_42"]["treatment"] == "ctrl"
+
+
+def test_join_key_column_absent_from_dataframe() -> None:
+    """The configured join key doesn't exist in the metadata DataFrame at all."""
+    from track2data.core.models import MappingRule
+    from track2data.metadata.join import match
+
+    df = pd.DataFrame({"treatment": ["ctrl"]})
+    rule = MappingRule(join_keys=["video_id"])
+    result = match(["vid_42"], df, rule)
+    assert "vid_42" in result.unmatched_sessions
