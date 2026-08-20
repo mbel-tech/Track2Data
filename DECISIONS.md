@@ -189,3 +189,43 @@ benefit. The cache is invalidated only by constructing a new `Engine`
 (manifests are otherwise treated as immutable within an Engine's
 lifetime, matching how `self._manifest` itself is never mutated
 in-place elsewhere in this class).
+
+### D-012 · `identity_free.py` deleted; `idtrackerai_v4` entry point removed
+
+**Decision:** `track2data/metrics/identity_free.py` (a 4-line stub —
+docstring plus `from __future__ import annotations`, no code) is
+deleted, along with its lazy-import line in
+`metrics/__init__.py::_load_builtins()`. Separately, the
+`idtrackerai_v4` entry in `[project.entry-points."track2data.readers"]`
+is removed from `pyproject.toml`; the `IDTrackerAiV4Reader` class
+itself is untouched and still registered as a built-in directly in
+`readers/__init__.py`.
+
+**Rationale (metrics):** GL-7 ("NN-Matched Speed" — identity-free speed
+via greedy nearest-neighbour assignment) was already fully implemented,
+tested, and registered as `NNMatchedSpeed` in `metrics/group.py`. The
+stub file was never filled in; nothing pointed to it. Moving the
+already-working GL-7 implementation into `identity_free.py` for the
+sake of the filename matching the metric's category would be pure
+churn — re-wiring imports and registration order for zero functional
+change — for a class that works correctly where it already lives.
+Deleting dead placeholder code is safer than shuffling working code to
+satisfy a naming expectation nothing else depends on.
+
+**Rationale (idtrackerai_v4):** `IDTrackerAiV4Reader.detect()` is
+hardcoded to return `False` unconditionally ("disabled until
+implemented" per its own comment), so `detect_reader()` can never
+select it — the `NotImplementedError` in `read()` is unreachable in
+normal operation. Advertising it as a *live* entry point (as opposed
+to the built-in registration every reader already gets in
+`readers/__init__.py`, entry points or not) misleads anything that
+enumerates `track2data.readers` externally into thinking it's a
+working reader.
+
+**Alternative considered:** Implement real v4 support instead of just
+hiding the gap. Rejected for now: there is no idtracker.ai v4 sample
+data anywhere in this repo to validate against (the 70-session
+`Checked sessions GOT/` corpus is v6.0.13) — implementing format
+support with no real fixture to test against would be speculation, not
+engineering. Revisit if v4 sample data becomes available; re-add the
+entry-point line at that point, not before.
