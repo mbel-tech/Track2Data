@@ -1,0 +1,146 @@
+name: Release
+
+# Builds standalone Track2Data binaries for Windows/macOS/Linux (issues
+# #42-47) and, on a real version-tag push, publishes them to a GitHub
+# Release with SHA-256 sums. workflow_dispatch lets the whole build +
+# determinism matrix be validated on demand without cutting a release --
+# the publish job is gated to actual `v*` tag pushes (see its `if:`).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-26, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Qt runtime libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libgl1
+
+      - name: Install package + build deps
+        run: pip install -e ".[ui,build,export,zones,video]"
+
+      - name: Build with PyInstaller
+        run: pyinstaller packaging/track2data.spec --noconfirm
+
+      - name: Smoke-test the built executable
+        run: python packaging/smoke_test.py
+
+      # ── Windows: wrap the .exe in an Inno Setup installer (issue #44) ──
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          iscc packaging\inno_setup.iss
+
+      # ── macOS: pack the .app bundle into a .dmg (issue #45) ────────────
+      - name: Build macOS .dmg
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil create -volname "Track2Data" -srcfolder dist/Track2Data.app \
+            -ov -format UDZO dist/Track2Data.dmg
+
+      # ── Linux: pack the onefile build into an .AppImage (issue #46) ────
+      - name: Build Linux .AppImage
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x packaging/build_appimage.sh
+          packaging/build_appimage.sh
+
+      - name: Remove non-artifact build output
+        shell: bash
+        run: |
+          # Keep only the final, user-facing artifacts -- not the raw
+          # PyInstaller onefile exe once an installer/bundle wraps it, and
+          # not the intermediate .app/.AppDir directories.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            find dist -maxdepth 1 -type f ! -name 'Track2Data-setup.exe' -delete
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            find dist -maxdepth 1 ! -name 'dist' ! -name 'Track2Data.dmg' -exec rm -rf {} +
+          else
+            find dist -maxdepth 1 -type f ! -name 'Track2Data-x86_64.AppImage' -delete
+            rm -rf dist/Track2Data.AppDir
+          fi
+
+      - name: Compute SHA-256 sums
+        shell: bash
+        # macOS runners have no GNU sha256sum -- shasum -a 256 is the
+        # portable equivalent, available on macOS/Linux/Git-Bash-on-Windows.
+        run: |
+          cd dist
+          for f in *; do
+            [ -f "$f" ] && shasum -a 256 "$f" >> "../${{ runner.os }}-SHA256SUMS.txt"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: track2data-${{ runner.os }}
+          path: |
+            dist/*
+            ${{ runner.os }}-SHA256SUMS.txt
+          if-no-files-found: error
+
+  determinism:
+    name: Determinism gate
+    runs-on: ubuntu-22.04
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libgl1
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run the same project twice and byte-diff the output
+        run: python packaging/check_determinism.py
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build, determinism]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect SHA-256 sums into one file
+        run: |
+          cat artifacts/*/*-SHA256SUMS.txt > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # actions/upload-artifact preserves the source path, so each
+        # binary landed under <artifact-name>/dist/... on download, not
+        # at the artifact's top level -- only the *-SHA256SUMS.txt files
+        # were uploaded from the workspace root and sit untended.
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Track2Data ${{ github.ref_name }}" \
+            --notes "Unsigned binaries -- see README for the trust path on each OS (issue #48). SHA-256 sums attached below." \
+            SHA256SUMS.txt \
+            artifacts/track2data-Windows/dist/Track2Data-setup.exe \
+            artifacts/track2data-macOS/dist/Track2Data.dmg \
+            artifacts/track2data-Linux/dist/Track2Data-x86_64.AppImage

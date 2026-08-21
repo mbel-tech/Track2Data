@@ -29,6 +29,25 @@ track2data-gui
 # or: python -m app.main
 ```
 
+**Pre-built binaries** (no Python install needed): download the latest
+release for your OS from the [Releases page](https://github.com/mbel-tech/Track2Data/releases).
+v1.0 ships these unsigned (code signing is planned for v1.1 — see
+[`docs/TECHNICAL_SPEC.md` §10.3](docs/TECHNICAL_SPEC.md#103-code-signing)),
+so your OS will warn before the first run:
+
+- **Windows**: SmartScreen shows "Windows protected your PC". Click
+  **More info**, then **Run anyway**.
+- **macOS**: Gatekeeper blocks the app on first launch. Right-click (or
+  Control-click) `Track2Data.app` → **Open** → **Open** again in the
+  dialog. (A plain double-click will just say the app is damaged/can't
+  be opened — that's Gatekeeper, not a broken download.)
+- **Linux**: mark the `.AppImage` executable before running:
+  `chmod +x Track2Data-x86_64.AppImage`.
+
+Every release includes a `SHA256SUMS.txt` alongside the binaries —
+verify your download with `sha256sum -c SHA256SUMS.txt` (or `shasum -a
+256 -c` on macOS) before running past the warning above.
+
 ## Development setup
 
 ```bash
@@ -39,7 +58,7 @@ pytest tests/test_app_smoke.py -v      # Phase 1 smoke tests only
 ruff check .                            # lint
 ```
 
-## Running the app (Phase 1 shell)
+## Running the app
 
 ```bash
 # After pip install -e ".[ui]":
@@ -49,5 +68,6 @@ track2data-gui
 python -m app.main
 ```
 
-The Phase 1 shell opens a 7-stage wizard with placeholder screens.
-Full functionality is implemented in subsequent phases.
+Opens the full import → calibrate → zones → metadata → metrics →
+process → preview → export wizard, wired end to end to the
+`track2data` engine.
