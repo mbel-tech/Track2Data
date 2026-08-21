@@ -228,6 +228,14 @@ class Engine:
         Columns: session_id, individual_id, frame, time_s, x_px, y_px,
                  speed_px_s, heading_rad, main_zone, sec_zone.
         Calibrated columns added when psess.px_per_cm is set.
+
+        When ``MetricSelection.quality_threshold`` > 0, rows whose
+        ``id_probabilities[frame, animal] < threshold`` have their position/
+        kinematics columns masked to NaN (position and derived columns only
+        -- session_id/individual_id/frame/time_s survive so the row can
+        still be located). id_probability itself is always emitted as a
+        column, masked or not, so the applied threshold is auditable from
+        the export rather than only from the manifest.
         """
         import numpy as np
         import pandas as pd
@@ -264,6 +272,33 @@ class Engine:
             df["main_zone"] = psess.main_zone.reshape(-1)
         if psess.sec_zone is not None:
             df["sec_zone"] = psess.sec_zone.reshape(-1)
+
+        threshold = self._manifest.metrics.quality_threshold
+        id_prob = psess.session.id_probabilities
+        if id_prob is not None:
+            df["id_probability"] = id_prob.reshape(-1)
+        elif threshold > 0:
+            # A threshold was configured but there is nothing to evaluate it
+            # against -- record that honestly (an all-NaN column) rather
+            # than silently skipping the filter, which would make the
+            # manifest's quality_threshold value actively misleading (see
+            # MetricSelection.quality_threshold).
+            logger.warning(
+                "quality_threshold=%.3f configured but session %s has no "
+                "id_probabilities; no rows were masked.",
+                threshold,
+                psess.session_id,
+            )
+            df["id_probability"] = np.nan
+
+        if threshold > 0 and id_prob is not None:
+            below = df["id_probability"] < threshold
+            masked_cols = [
+                c for c in ("x_px", "y_px", "x_cm", "y_cm",
+                            "speed_px_s", "speed_cm_s", "heading_rad")
+                if c in df.columns
+            ]
+            df.loc[below, masked_cols] = np.nan
 
         for col, val in self._metadata_fields_for(psess.session_id).items():
             df[col] = val

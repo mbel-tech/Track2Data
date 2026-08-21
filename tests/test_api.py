@@ -273,6 +273,81 @@ def test_build_fish_by_frame_includes_zone_columns_when_present() -> None:
     assert (df["sec_zone"] == "zone_B").all()
 
 
+# ── build_fish_by_frame: quality_threshold gate ─────────────────────────────
+#
+# Regression coverage: MetricSelection.quality_threshold was collected by the
+# UI, saved in the manifest, and read by zero lines of the engine -- setting
+# "0.9" and exporting produced a manifest that asserted a filter that was
+# never applied. See core/models.py's quality_threshold docstring.
+
+
+def test_quality_threshold_zero_masks_nothing() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)
+    session = session.model_copy(
+        update={"id_probabilities": np.full((10, 2), 0.5)}
+    )
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.0)))
+    df = engine.build_fish_by_frame(psess)
+    assert df["x_px"].isna().sum() == 0
+    assert "id_probability" in df.columns
+
+
+def test_quality_threshold_masks_only_low_confidence_rows() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=4, n_animals=2)
+    probs = np.array([[0.95, 0.2], [0.95, 0.2], [0.95, 0.2], [0.95, 0.2]])
+    session = session.model_copy(update={"id_probabilities": probs})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.5)))
+    df = engine.build_fish_by_frame(psess)
+
+    animal0 = df[df["individual_id"] == 0]
+    animal1 = df[df["individual_id"] == 1]
+    assert animal0["x_px"].isna().sum() == 0
+    assert animal1["x_px"].isna().sum() == len(animal1)
+    assert animal1["y_px"].isna().sum() == len(animal1)
+    assert animal1["speed_px_s"].isna().sum() == len(animal1)
+    # session_id/individual_id/frame/time_s survive the mask -- the row is
+    # still locatable, only its measured values are withheld.
+    assert animal1["frame"].isna().sum() == 0
+
+
+def test_quality_threshold_masks_calibrated_columns_too() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=2, n_animals=1)
+    session = session.model_copy(update={"id_probabilities": np.array([[0.1], [0.1]])})
+    psess = _make_psess(session)
+    from dataclasses import replace
+
+    psess = replace(psess, px_per_cm=10.0)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.5)))
+    df = engine.build_fish_by_frame(psess)
+    assert df["x_cm"].isna().all()
+    assert df["speed_cm_s"].isna().all()
+
+
+def test_quality_threshold_without_id_probabilities_warns_and_masks_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A configured threshold with no id_probabilities to evaluate it
+    against must not silently pretend the filter was applied."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=2)  # id_probabilities=None
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.9)))
+    with caplog.at_level("WARNING"):
+        df = engine.build_fish_by_frame(psess)
+    assert df["x_px"].isna().sum() == 0
+    assert df["id_probability"].isna().all()
+    assert any("quality_threshold" in rec.message for rec in caplog.records)
+
+
 # ── run_session: default exporters / unregistered exporter / exporter exception ─
 
 
