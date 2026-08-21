@@ -52,6 +52,10 @@ class MetricsScreen(QWidget):
         if store is not None:
             store.metricsChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
+            store.sessionsChanged.connect(self._update_identity_graying)
+            store.zonesChanged.connect(self._update_zone_tab_enabled)
+            self._update_identity_graying()
+            self._update_zone_tab_enabled()
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -175,6 +179,41 @@ class MetricsScreen(QWidget):
         self._set_checked(self._grp_table, sel.group)
         self._set_checked(self._zone_table, sel.zone)
         self._quality_spin.setValue(sel.quality_threshold)
+        self._update_identity_graying()
+        self._update_zone_tab_enabled()
+
+    def _update_identity_graying(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        sessions = self._store.manifest.sessions
+        probed = [
+            s.has_stable_identities for s in sessions if s.has_stable_identities is not None
+        ]
+        all_identity_free = bool(probed) and all(not v for v in probed)
+
+        for table in (self._ind_table, self._grp_table, self._zone_table):
+            for row in range(table.rowCount()):
+                include_item = table.item(row, _COL_INCLUDE)
+                id_item = table.item(row, _COL_ID)
+                if include_item is None or id_item is None:
+                    continue
+                requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
+                flags = include_item.flags()
+                if requires_identity and all_identity_free:
+                    include_item.setFlags(flags & ~Qt.ItemFlag.ItemIsEnabled)
+                    id_item.setToolTip(
+                        "No session in this project has stable identities; "
+                        "this metric will be skipped for every session."
+                    )
+                else:
+                    include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
+                    id_item.setToolTip("")
+
+    def _update_zone_tab_enabled(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        zone_index = self._tabs.indexOf(self._zone_table)
+        self._tabs.setTabEnabled(zone_index, bool(self._store.manifest.zones.rois))
 
     @staticmethod
     def _set_checked(table: QTableWidget, ids: list[str]) -> None:
