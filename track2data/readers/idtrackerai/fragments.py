@@ -66,6 +66,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 #: Fragment keys observed present on every fragment in the real corpus.
@@ -167,3 +169,35 @@ def fragment_swap_boundaries(fragments_data: dict[str, Any]) -> set[int]:
         if isinstance(end_frame, int):
             boundaries.add(end_frame)
     return boundaries
+
+
+def crossing_frame_mask(fragments_data: dict[str, Any], n_frames: int) -> np.ndarray:
+    """
+    Return a session-wide ``(n_frames,)`` bool array, True for every frame
+    covered by at least one crossing fragment (``is_an_individual is
+    False``).
+
+    This is session-wide, not per-animal: a crossing fragment merges two or
+    more animals into one blob, so it cannot be attributed to a single
+    trajectory column without the blob layer (preprocessing/list_of_blobs.pickle,
+    not read by this reader). Even at this coarser granularity it is a
+    useful gap classifier -- verified on a real session, 65.1% of frames
+    with at least one animal's position missing coincide with an active
+    crossing fragment, matching the correlation measured independently at
+    the (unread) blob level.
+
+    Used by preprocess/gap_fill.py to distinguish "occluded by a
+    conspecific" (this animal is present, its path passes through the
+    crossing) from "not detected at all" (no crossing fragment active,
+    interpolation is on weaker footing) when reporting which kind of gap
+    was filled.
+    """
+    mask = np.zeros(n_frames, dtype=bool)
+    for frag in fragments_data.get("fragments", []):
+        if frag.get("is_an_individual") is not False:
+            continue
+        start, end = frag.get("start_frame"), frag.get("end_frame")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        mask[max(0, start):min(end, n_frames)] = True
+    return mask

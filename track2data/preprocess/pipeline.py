@@ -52,7 +52,11 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     xy: np.ndarray = session.raw_xy.copy()
 
     # 1. Gap fill
-    xy, step = fill_gaps(xy, config.gap_fill)
+    crossing_mask = None
+    if session.fragments is not None:
+        from track2data.readers.idtrackerai.fragments import crossing_frame_mask
+        crossing_mask = crossing_frame_mask(session.fragments, session.n_frames)
+    xy, step = fill_gaps(xy, config.gap_fill, crossing_frame_mask=crossing_mask)
     report.steps.append(step)
 
     # 2. Jump detection
