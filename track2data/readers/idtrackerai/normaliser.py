@@ -49,7 +49,8 @@ class Normaliser:
             Parsed contents of session.json, if available.
         """
         payload = self._apply_aliases(payload)
-        raw_xy = self._extract_trajectories(payload)
+        meta = session_meta or {}
+        raw_xy = self._extract_trajectories(payload, meta)
         n_frames, n_animals = raw_xy.shape[0], raw_xy.shape[1]
 
         id_prob = self._normalise_id_probabilities(
@@ -57,10 +58,8 @@ class Normaliser:
         )
         length_unit = self._normalise_length_unit(payload.get("length_unit"))
         quality = self._extract_quality(payload)
-        version = payload.get("version") or (session_meta or {}).get("version")
+        version = payload.get("version") or meta.get("version")
         raw_attrs = self._collect_unknown_keys(payload)
-
-        meta = session_meta or {}
         fps = self._require_positive_number(
             "frames_per_second", payload.get("frames_per_second"), meta.get("frames_per_second")
         )
@@ -81,7 +80,7 @@ class Normaliser:
             height_px=height,
         )
 
-        has_stable = self._check_stability(raw_xy)
+        has_stable = self._check_stability(raw_xy, quality, meta)
         body_length_px = self._normalise_body_length(payload.get("body_length"), n_animals)
 
         return Session(
@@ -124,11 +123,82 @@ class Normaliser:
         return out
 
     @staticmethod
-    def _extract_trajectories(payload: dict[str, Any]) -> np.ndarray:
+    def _extract_trajectories(
+        payload: dict[str, Any], session_meta: dict[str, Any]
+    ) -> np.ndarray:
+        """
+        Extract and validate the ``trajectories`` array.
+
+        Previously this accepted any array with no ndim/shape checks and no
+        cross-check against session.json -- a missing key silently produced
+        an empty (0, 0, 2) Session, and a transposed (n_animals, n_frames, 2)
+        array (e.g. from a user-side reshape, or the tidy-CSV pivot path)
+        would pass straight through and be silently misinterpreted, with
+        every per-animal statistic computed over the wrong axis.
+        idtrackerai_v5.py's legacy reader already solved this
+        (_canonicalise_shape); reused here rather than reimplemented.
+        """
         arr = payload.get("trajectories")
         if arr is None:
-            return np.empty((0, 0, 2), dtype=np.float64)
-        return np.asarray(arr, dtype=np.float64)
+            raise DataValidationError(
+                "Trajectory payload has no 'trajectories' key.",
+                code="IDT_DICT_MISSING_KEY",
+                severity="error",
+                subject="trajectories",
+                remediation=(
+                    "The trajectory file is missing its primary array; "
+                    "re-export the session or try a different trajectory format."
+                ),
+            )
+        arr = np.asarray(arr, dtype=np.float64)
+
+        if arr.ndim != 3 or arr.shape[-1] != 2:
+            raise DataValidationError(
+                f"Expected trajectories shape (n_frames, n_animals, 2), got {arr.shape}.",
+                code="IDT_SHAPE_MISMATCH",
+                severity="error",
+                subject=str(arr.shape),
+                remediation="Verify the trajectory file was written by idtracker.ai.",
+            )
+
+        n_frames_hint = session_meta.get("number_of_frames")
+        n_animals_hint = session_meta.get("number_of_animals")
+        d0, d1, _ = arr.shape
+        resolved_by_hint = False
+
+        if isinstance(n_frames_hint, (int, float)) and n_frames_hint > 0:
+            if d0 == n_frames_hint:
+                resolved_by_hint = True  # already canonical
+            elif d1 == n_frames_hint:
+                arr = arr.transpose(1, 0, 2)
+                resolved_by_hint = True
+            # else: neither axis matches the hint -- fall through to the
+            # d0 < d1 heuristic below rather than raising, since a partial
+            # session (tracking_intervals subsetting the video) can
+            # legitimately make n_frames != number_of_frames.
+
+        if not resolved_by_hint and arr.shape[0] < arr.shape[1]:
+            # n_animals << n_frames in every real session; a smaller leading
+            # axis means this is actually (n_animals, n_frames, 2). Only
+            # applied when the hint above didn't already settle it -- a
+            # short session can legitimately have n_frames < n_animals.
+            arr = arr.transpose(1, 0, 2)
+
+        if isinstance(n_animals_hint, (int, float)) and n_animals_hint > 0:
+            if arr.shape[1] != n_animals_hint:
+                raise DataValidationError(
+                    f"trajectories has {arr.shape[1]} animals but session.json "
+                    f"declares number_of_animals={int(n_animals_hint)}.",
+                    code="IDT_SHAPE_MISMATCH",
+                    severity="error",
+                    subject=str(arr.shape),
+                    remediation=(
+                        "The trajectory array and session.json disagree on "
+                        "animal count; the session data may be truncated or corrupt."
+                    ),
+                )
+
+        return arr
 
     @staticmethod
     def _normalise_id_probabilities(
@@ -244,7 +314,40 @@ class Normaliser:
         return p if p.exists() else None
 
     @staticmethod
-    def _check_stability(raw_xy: np.ndarray) -> bool:
+    def _check_stability(
+        raw_xy: np.ndarray, quality: dict[str, Any] | None, session_meta: dict[str, Any]
+    ) -> bool:
+        """
+        Decide whether per-individual identity is meaningful for this session.
+
+        Prefers idtracker.ai's own authoritative signals over the NaN-based
+        heuristic:
+
+        1. ``track_wo_identities`` (idtracker.ai_usage.md: "Track the video
+           without assigning identities") is decisive when present and True
+           -- identities are not persistent by construction, so per-individual
+           analysis is meaningless regardless of how complete the coverage
+           looks. The old heuristic-only version would label such a session
+           "stable" whenever coverage happened to be good.
+        2. ``fraction_identified`` (output_structure_idtrackerai.md:85,
+           already loaded into Session.quality) is the tracker's own
+           fraction of (frame, animal) entries with a valid position --
+           used at the same >= 0.5 threshold as D-5 IdentityStability
+           (metrics/diagnostic.py) for consistency.
+        3. Falls back to the raw per-animal NaN-coverage heuristic only when
+           neither authoritative signal is available (e.g. a CSV bundle
+           whose attributes.json doesn't carry these keys).
+        """
+        if session_meta.get("track_wo_identities") is True:
+            return False
+
+        if quality is not None and "fraction_identified" in quality:
+            raw = quality["fraction_identified"]
+            try:
+                return float(raw) >= 0.50
+            except (TypeError, ValueError):
+                pass
+
         if raw_xy.size == 0:
             return False
         valid_frac = (~np.isnan(raw_xy[:, :, 0])).mean(axis=0)

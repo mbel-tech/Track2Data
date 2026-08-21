@@ -201,6 +201,31 @@ class TestIdProbabilityStats:
         assert df.loc[df["individual_id"] == 0, col].values[0] == pytest.approx(0.5)
         assert df.loc[df["individual_id"] == 1, col].values[0] == pytest.approx(1.0)
 
+    def test_d3_nan_frames_excluded_not_propagated(self) -> None:
+        """Regression: NaN in id_probabilities means 'animal not detected in
+        this frame' (output_structure_idtrackerai.md:69), not zero
+        confidence. np.median/np.percentile propagate any NaN to the whole
+        result -- on the real corpus 44.5% of entries are NaN, so this used
+        to return NaN for every animal in every real session."""
+        probs = np.full((100, 2), 0.9)
+        probs[:44, 0] = np.nan  # 44% NaN for animal 0, none for animal 1
+        sess = make_session(id_probabilities=probs)
+        df = IdProbabilityStats().compute(sess)
+        row0 = df.loc[df["individual_id"] == 0].iloc[0]
+        assert not np.isnan(row0["id_prob_median"])
+        assert row0["id_prob_median"] == pytest.approx(0.9)
+        assert row0["id_prob_frac_above_0p9"] == pytest.approx(0.0)  # 0.9 is not > 0.9
+
+    def test_d3_all_nan_for_animal_returns_nan(self) -> None:
+        """An animal never detected at all (100% NaN) still returns NaN --
+        distinct from the None-array case, but the same output contract."""
+        probs = np.full((100, 2), 0.9)
+        probs[:, 0] = np.nan
+        sess = make_session(id_probabilities=probs)
+        df = IdProbabilityStats().compute(sess)
+        row0 = df.loc[df["individual_id"] == 0].iloc[0]
+        assert np.isnan(row0["id_prob_median"])
+
     def test_d3_metric_attributes(self) -> None:
         m = IdProbabilityStats()
         assert m.id == "D-3"
