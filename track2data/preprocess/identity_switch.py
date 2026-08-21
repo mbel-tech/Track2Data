@@ -1,4 +1,11 @@
-"""PP-3 identity-switch correction using Tier-1 ratio test and Tier-2 Hungarian assignment."""
+"""PP-3 identity-switch correction using Tier-1 ratio test and Tier-2 Hungarian assignment.
+
+Off by default (IdSwitchCfg.enabled=False) -- see the docstring on
+IdSwitchCfg in core/models.py for why. This module still exists so callers
+who understand the risk can opt in, and so a fragment-boundary-aware
+replacement (planned) has somewhere to land, but it must not run
+unconditionally in the default pipeline.
+"""
 
 from __future__ import annotations
 
@@ -69,6 +76,13 @@ def correct_switches(xy: np.ndarray, cfg: IdSwitchCfg) -> tuple[np.ndarray, PPSt
         )
 
     corrected_frames: set[int] = set()
+    # Per-identity slot indices that were actually permuted at some frame --
+    # NOT "every animal, every time a swap happened anywhere" (the previous
+    # behaviour), which overstated corrections in PreprocessReport by ~4x on
+    # real data (10,224 reported vs 2,556 actual events on a 4-animal
+    # session) and fed that inflated number straight into the exported
+    # README's provenance.
+    affected_per_individual = [0] * n_animals
 
     for t in range(1, n_frames - 1):
         # Skip frames with any NaN
@@ -119,6 +133,9 @@ def correct_switches(xy: np.ndarray, cfg: IdSwitchCfg) -> tuple[np.ndarray, PPSt
                 if not np.all(perm == np.arange(n_animals)):
                     out[tf + 1] = out[tf + 1][perm]
                     corrected_frames.add(tf + 1)
+                    for k in range(n_animals):
+                        if perm[k] != k:
+                            affected_per_individual[k] += 1
         else:
             # Tier-1 swap: find best swap pair
             cost_matrix = _pairwise_distances(out[t])
@@ -126,13 +143,11 @@ def correct_switches(xy: np.ndarray, cfg: IdSwitchCfg) -> tuple[np.ndarray, PPSt
             if not np.all(col_ind == np.arange(n_animals)):
                 out[t + 1] = out[t + 1][col_ind]
                 corrected_frames.add(t + 1)
+                for k in range(n_animals):
+                    if col_ind[k] != k:
+                        affected_per_individual[k] += 1
 
     total_affected = len(corrected_frames)
-    affected_per_individual = [0] * n_animals
-    # Attribute corrections evenly (each swap affects all animals)
-    if total_affected > 0:
-        for k in range(n_animals):
-            affected_per_individual[k] = total_affected
 
     return out, PPStepResult(
         step_name="identity_switch",

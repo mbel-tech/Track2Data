@@ -114,3 +114,43 @@ def test_gap_exactly_at_max_is_filled() -> None:
     out, result = fill_gaps(xy, cfg)
     assert not np.any(np.isnan(out[:, 0, :]))
     assert result.affected_frames == 10
+
+
+# ── crossing_frame_mask notes ────────────────────────────────────────────────
+#
+# Regression coverage: gap_fill had no way to distinguish "occluded by a
+# conspecific" from "not detected at all" -- the two are physically
+# different situations with different confidence in the interpolated value.
+
+
+def test_notes_report_crossing_overlap_fraction(xy_with_gaps: np.ndarray) -> None:
+    mask = np.zeros(100, dtype=bool)
+    mask[20:23] = True  # 3 of the 5 gap frames overlap a crossing
+    cfg = GapFillCfg(enabled=True, max_gap_frames=30)
+    _out, result = fill_gaps(xy_with_gaps, cfg, crossing_frame_mask=mask)
+    assert "3/5" in result.notes
+    assert "60.0%" in result.notes
+
+
+def test_notes_empty_when_no_mask_given(xy_with_gaps: np.ndarray) -> None:
+    cfg = GapFillCfg(enabled=True, max_gap_frames=30)
+    _out, result = fill_gaps(xy_with_gaps, cfg, crossing_frame_mask=None)
+    assert result.notes == ""
+
+
+def test_notes_empty_when_nothing_filled() -> None:
+    xy = np.zeros((10, 1, 2), dtype=np.float64)  # no gaps at all
+    mask = np.zeros(10, dtype=bool)
+    cfg = GapFillCfg(enabled=True, max_gap_frames=30)
+    _out, result = fill_gaps(xy, cfg, crossing_frame_mask=mask)
+    assert result.notes == ""
+
+
+def test_does_not_change_which_gaps_are_filled(xy_with_gaps: np.ndarray) -> None:
+    """crossing_frame_mask is purely informational -- output values must be
+    identical with or without it."""
+    cfg = GapFillCfg(enabled=True, max_gap_frames=30)
+    out_without, _ = fill_gaps(xy_with_gaps, cfg, crossing_frame_mask=None)
+    mask = np.ones(100, dtype=bool)
+    out_with, _ = fill_gaps(xy_with_gaps, cfg, crossing_frame_mask=mask)
+    np.testing.assert_array_equal(out_without, out_with)

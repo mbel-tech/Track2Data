@@ -132,6 +132,19 @@ class TestCalibrationConfig:
         c = CalibrationConfig(mode="scalar", px_per_cm=12.5)
         assert c.px_per_cm == 12.5
 
+    def test_length_unit_label_defaults_cm_unconfirmed(self) -> None:
+        """idtracker.ai's length_unit is a ratio to a user-defined unit,
+        not necessarily centimetres -- default to "cm" (today's
+        unconfirmed assumption, made explicit) with confirmed=False."""
+        c = CalibrationConfig()
+        assert c.length_unit_label == "cm"
+        assert c.length_unit_confirmed_by_user is False
+
+    def test_length_unit_label_settable(self) -> None:
+        c = CalibrationConfig(length_unit_label="mm", length_unit_confirmed_by_user=True)
+        assert c.length_unit_label == "mm"
+        assert c.length_unit_confirmed_by_user is True
+
 
 class TestZoneSet:
     def test_empty_default(self) -> None:
