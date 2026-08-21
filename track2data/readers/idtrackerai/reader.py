@@ -32,7 +32,7 @@ from track2data.readers.idtrackerai.formats.h5 import load_h5
 from track2data.readers.idtrackerai.formats.npy import load_npy
 from track2data.readers.idtrackerai.log import load_log_digest
 from track2data.readers.idtrackerai.normaliser import Normaliser
-from track2data.readers.idtrackerai.session_json import load_session_json
+from track2data.readers.idtrackerai.session_json import load_session_json, parse_roi_string
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +179,15 @@ class IDTrackerAiReader(SessionReader):
                     (int(s), int(e)) for s, e in raw_ti
                 ]
 
-        # roi_list: list of strings like "+ Polygon [...]"
+        # roi_list: list of "± Polygon [[x,y], …]" strings -> parsed
+        # {sign, vertices, raw} dicts. Unparseable entries are dropped
+        # (parse_roi_string logs why) rather than failing the whole import.
         raw_roi = meta.get("roi_list")
         if raw_roi:
-            updates["roi_list"] = [{"raw": r} for r in raw_roi]
+            parsed_roi = [
+                p for r in raw_roi if (p := parse_roi_string(r)) is not None
+            ]
+            if parsed_roi:
+                updates["roi_list"] = parsed_roi
 
         return session.model_copy(update=updates) if updates else session

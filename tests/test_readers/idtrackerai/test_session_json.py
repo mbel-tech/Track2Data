@@ -89,3 +89,54 @@ class TestSessionJsonLogDigest:
         from track2data.readers.idtrackerai.log import load_log_digest
         digest = load_log_digest(tmp_path)
         assert digest is None
+
+
+class TestParseRoiString:
+    """Session.roi_list docstring claims "Parsed signed polygons" -- before
+    this, reader.py just stored the raw string verbatim ({"raw": r}).
+    parse_roi_string is what makes that claim true."""
+
+    def test_additive_polygon(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        result = parse_roi_string("+ Polygon [[10.0, 20.0], [30.0, 20.0], [30.0, 40.0]]")
+        assert result is not None
+        assert result["sign"] == "+"
+        assert result["vertices"] == [(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)]
+
+    def test_subtractive_polygon(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        result = parse_roi_string("- Polygon [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]")
+        assert result is not None
+        assert result["sign"] == "-"
+
+    def test_raw_preserved(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        raw = "+ Polygon [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]"
+        result = parse_roi_string(raw)
+        assert result is not None
+        assert result["raw"] == raw
+
+    def test_negative_coordinates(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        result = parse_roi_string("+ Polygon [[-5.0, -10.0], [5.0, -10.0], [5.0, 10.0]]")
+        assert result is not None
+        assert result["vertices"][0] == (-5.0, -10.0)
+
+    def test_unrecognised_format_returns_none(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        assert parse_roi_string("not a polygon at all") is None
+
+    def test_malformed_vertex_list_returns_none(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        assert parse_roi_string("+ Polygon [not valid python]") is None
+
+    def test_fewer_than_three_vertices_returns_none(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_roi_string
+
+        assert parse_roi_string("+ Polygon [[0.0, 0.0], [1.0, 1.0]]") is None
