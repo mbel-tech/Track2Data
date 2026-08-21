@@ -231,7 +231,9 @@ class Engine:
         Compute all selected metrics for *psess*.
 
         Returns a dict mapping metric_id to a ``pd.DataFrame``.
-        Diagnostic metrics (D-1..D-5) are always computed.
+        Diagnostic metrics (D-1..D-6) are always computed.
+        Group metrics are skipped (with a warning) when
+        ``Session.exclusive_rois`` is True -- see the guard below.
         """
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
@@ -256,7 +258,29 @@ class Engine:
                     logger.exception("Metric %s failed; skipping.", mid)
 
         _run(sel.individual)
-        _run(sel.group)
+
+        if psess.session.exclusive_rois is True and sel.group:
+            # With exclusive_rois=True, identities are physically
+            # partitioned by ROI (idtracker.ai_usage.md: "Treat each
+            # separate ROI as a closed group of identities") -- animals in
+            # different partitions can never interact, so every group
+            # metric (nearest-neighbour distance, polarisation, cohesion,
+            # ...) computed across the whole session is meaningless.
+            # Skipping rather than silently producing publishable-looking
+            # numbers; per-compartment group metrics (using
+            # Session.identities_groups to know which identity is in which
+            # partition) would be the correct fix but is a larger,
+            # separate change than this guard.
+            logger.warning(
+                "Skipping group metrics (%s) for session %s: "
+                "Session.exclusive_rois=True -- identities are physically "
+                "partitioned, so cross-session group metrics are meaningless.",
+                ", ".join(sel.group),
+                psess.session_id,
+            )
+        else:
+            _run(sel.group)
+
         _run(sel.zone)
         _run(sel.diagnostic)
 

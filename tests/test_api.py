@@ -202,6 +202,42 @@ def test_preprocess_assigns_zones_when_rois_configured() -> None:
     assert psess.main_zone.shape == (session.n_frames, session.n_animals)
 
 
+# ── compute_metrics: exclusive_rois guard on group metrics ─────────────────
+#
+# Regression coverage: exclusive_rois=True means identities are physically
+# partitioned by ROI -- animals in different partitions can never interact,
+# so a group metric computed across the whole session (nearest-neighbour
+# distance, polarisation, cohesion, ...) is meaningless. Before this guard,
+# such metrics were computed silently and would look like valid data.
+
+
+def test_group_metrics_skipped_when_exclusive_rois_true(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)
+    session = session.model_copy(update={"exclusive_rois": True})
+    psess = _make_psess(session)
+    manifest = _make_manifest(metrics=MetricSelection(group=["GL-1"]))
+    engine = Engine(manifest)
+    with caplog.at_level("WARNING"):
+        results = engine.compute_metrics(psess)
+    assert "GL-1" not in results
+    assert any("exclusive_rois" in rec.message for rec in caplog.records)
+
+
+def test_group_metrics_computed_when_exclusive_rois_false_or_none() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)  # exclusive_rois defaults to None
+    psess = _make_psess(session)
+    manifest = _make_manifest(metrics=MetricSelection(group=["GL-1"]))
+    engine = Engine(manifest)
+    results = engine.compute_metrics(psess)
+    assert "GL-1" in results
+
+
 # ── compute_metrics: unregistered metric / metric exception ────────────────────
 
 
