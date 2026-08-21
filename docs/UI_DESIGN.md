@@ -695,12 +695,14 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 - "Select at least one metric." (Next button disabled + tooltip)
 
 **Next Button Logic:**
-- Enabled if ≥1 metric selected
-- On Next: emit `metricsChanged`, save `MetricSelection`, advance to Screen 6.3
+- Next is the shared toolbar ◀ Back / Next ▶ action, not a per-screen button — its enabled state depends only on stack position (`page_index < last_page`), not on how many metrics are selected, and it just advances the `QStackedWidget` to the next built stage (the Processing screen). It does not itself save the selection. `MetricSelection` is saved separately by the screen's own **Apply selection** button, which calls `ProjectStore.update_metrics()` (this is what emits `metricsChanged`).
+- Screen 6.3 (below) is not implemented — there is no config schema or navigation target for it yet, so Next never routes there.
 
 ---
 
-### 6.11 Screen 6.3 — Per-Metric Advanced Configuration
+### 6.11 Screen 6.3 — Per-Metric Advanced Configuration (Aspirational — Not Yet Implemented)
+
+> **Status:** This screen does not exist in the shipped app — no config schema, no navigation target, nothing below is built. Kept as a design reference only; everything in this section is proposed, not current behavior.
 
 **Stage:** Stage 6 (Preprocessing & Metrics)  
 **Purpose:** Configure metric-specific parameters (e.g., activity threshold).
@@ -717,7 +719,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 - QLabel: "Global parameters" (section header)
 - QSpinBox: `timepoint_minutes_spinbox` (range 0–N, 0=whole session, default None)
-- QDoubleSpinBox: `quality_threshold_slider` (range 0–1, default 0.0; display as slider or spinner; masks per-frame metrics when `id_probabilities[frame, animal] < threshold`)
+- QDoubleSpinBox: `quality_threshold_slider` (range 0–1, default 0.0; display as slider or spinner; masks per-frame metrics when `id_probabilities[frame, animal] < threshold`) — **already implemented today**, on the real Screen 6.2 (§6.10) as `_quality_spin`, not gated behind this unbuilt screen
 
 **Data Bindings:**
 - `timepoint_minutes_spinbox` ↔ `ProjectStore.metrics.timepoint_minutes`
