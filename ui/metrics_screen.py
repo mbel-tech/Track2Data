@@ -1,33 +1,55 @@
 """
-Stage 6b — Metric selection screen (M3 real widgets).
+Stage 6b — Metric selection screen (registry-driven QTableWidget).
 
-QTabWidget with three tabs: Individual / Group / Zone.
-Each tab: QListWidget with checkable items.
-Quality threshold QDoubleSpinBox + Apply button.
+QTabWidget with three tabs: Individual / Group / Zone. Each tab is a
+QTableWidget populated from track2data.metrics.list_for_level(level),
+columns: include (checkbox) / metric_id / metric_name / info (ⓘ) /
+config (⚙, stub). Quality threshold QDoubleSpinBox + Apply button.
 """
 
 from __future__ import annotations
+
+from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
+    QHeaderView,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from track2data import metrics
 from track2data.core.models import MetricSelection
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
-_INDIVIDUAL_METRICS = ["IL-1", "IL-2", "IL-4", "IL-5"]
-_GROUP_METRICS = ["GL-1", "GL-3", "GL-5", "GL-7"]
-_ZONE_METRICS = ["Z-1", "Z-3"]
+_COLUMN_HEADERS = ["Include", "ID", "Name", "Info", "Config"]
+_COL_INCLUDE, _COL_ID, _COL_NAME, _COL_INFO, _COL_CONFIG = range(5)
+_ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
+_ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
+
+
+def _natural_sort_key(metric_cls):
+    """Sort metrics naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2).
+
+    Third-party metrics (loaded via the ``track2data.metrics`` entry
+    point, see ENGINE_DESIGN.md §8.5/§11) aren't required to use the
+    built-in PREFIX-NUMBER id shape -- fall back to a plain string sort
+    for any id that doesn't parse, rather than crashing the whole
+    screen on one non-conforming plugin metric.
+    """
+    prefix, _, number = metric_cls.id.rpartition("-")
+    try:
+        return (prefix, int(number))
+    except ValueError:
+        return (metric_cls.id, 0)
 
 
 class MetricsScreen(QWidget):
@@ -40,6 +62,10 @@ class MetricsScreen(QWidget):
         if store is not None:
             store.metricsChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
+            store.sessionsChanged.connect(self._update_identity_graying)
+            store.zonesChanged.connect(self._update_zone_tab_enabled)
+            self._update_identity_graying()
+            self._update_zone_tab_enabled()
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -52,32 +78,22 @@ class MetricsScreen(QWidget):
         title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
         root.addWidget(title)
 
-        subtitle = QLabel(
-            "Choose which behavioural metrics to extract."
-        )
+        subtitle = QLabel("Choose which behavioural metrics to extract.")
         subtitle.setStyleSheet("font-size: 14px; color: #555;")
         root.addWidget(subtitle)
 
-        # ── tabs ──────────────────────────────────────────────────────────
         self._tabs = QTabWidget()
 
-        self._ind_list = self._make_list(_INDIVIDUAL_METRICS)
-        self._grp_list = self._make_list(_GROUP_METRICS)
-        self._zone_list = self._make_list(_ZONE_METRICS)
+        self._ind_table = self._make_table("individual")
+        self._grp_table = self._make_table("group")
+        self._zone_table = self._make_table("zone")
 
-        self._tabs.addTab(self._ind_list, "Individual")
-        self._tabs.addTab(self._grp_list, "Group")
-        self._tabs.addTab(self._zone_list, "Zone")
+        self._tabs.addTab(self._ind_table, "Individual")
+        self._tabs.addTab(self._grp_table, "Group")
+        self._tabs.addTab(self._zone_table, "Zone")
 
         root.addWidget(self._tabs, 1)
 
-        # ── metric info ───────────────────────────────────────────────────
-        self._info_btn = QPushButton("Metric info…")
-        self._info_btn.setFixedWidth(140)
-        self._info_btn.clicked.connect(self._show_metric_info)
-        root.addWidget(self._info_btn)
-
-        # ── quality threshold ─────────────────────────────────────────────
         qform = QFormLayout()
         self._quality_spin = QDoubleSpinBox()
         self._quality_spin.setRange(0.0, 1.0)
@@ -87,56 +103,77 @@ class MetricsScreen(QWidget):
         qform.addRow("Quality threshold:", self._quality_spin)
         root.addLayout(qform)
 
-        # ── apply ─────────────────────────────────────────────────────────
         apply_btn = QPushButton("Apply selection")
         apply_btn.setFixedWidth(130)
         apply_btn.clicked.connect(self._apply)
         root.addWidget(apply_btn)
 
-    @staticmethod
-    def _make_list(metric_ids: list[str]) -> QListWidget:
-        lw = QListWidget()
-        for mid in metric_ids:
-            item = QListWidgetItem(mid)
-            item.setFlags(
-                item.flags()
+    def _make_table(self, level: str) -> QTableWidget:
+        metric_classes = sorted(metrics.list_for_level(level), key=_natural_sort_key)
+        table = QTableWidget(len(metric_classes), len(_COLUMN_HEADERS))
+        table.setHorizontalHeaderLabels(_COLUMN_HEADERS)
+        table.horizontalHeader().setSectionResizeMode(
+            _COL_NAME, QHeaderView.ResizeMode.Stretch
+        )
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        for row, metric_cls in enumerate(metric_classes):
+            include_item = QTableWidgetItem()
+            include_item.setFlags(
+                include_item.flags()
                 | Qt.ItemFlag.ItemIsUserCheckable
                 | Qt.ItemFlag.ItemIsEnabled
             )
-            item.setCheckState(Qt.CheckState.Unchecked)
-            lw.addItem(item)
-        return lw
+            include_item.setCheckState(Qt.CheckState.Unchecked)
+            include_item.setData(_ROLE_METRIC_ID, metric_cls.id)
+            include_item.setData(_ROLE_REQUIRES_IDENTITY, metric_cls.requires_identity)
+            table.setItem(row, _COL_INCLUDE, include_item)
 
-    @staticmethod
-    def _checked_ids(lw: QListWidget) -> list[str]:
-        result = []
-        for i in range(lw.count()):
-            item = lw.item(i)
-            if item is not None and item.checkState() == Qt.CheckState.Checked:
-                result.append(item.text())
-        return result
+            table.setItem(row, _COL_ID, QTableWidgetItem(metric_cls.id))
+            table.setItem(row, _COL_NAME, QTableWidgetItem(metric_cls.name))
+
+            doc = metric_cls.documentation
+            if doc.formula_plain is not None or doc.citation is not None:
+                info_btn = QPushButton("ⓘ")
+                info_btn.setFixedWidth(28)
+                info_btn.clicked.connect(partial(self._show_metric_info, metric_cls))
+                table.setCellWidget(row, _COL_INFO, info_btn)
+
+            config_btn = QPushButton("⚙")
+            config_btn.setFixedWidth(28)
+            config_btn.clicked.connect(self._show_config_stub)
+            table.setCellWidget(row, _COL_CONFIG, config_btn)
+
+        return table
+
+    def _show_metric_info(self, metric_cls) -> None:
+        dlg = MetricInfoDialog(metric_cls, self)
+        dlg.exec()
+
+    def _show_config_stub(self) -> None:
+        QMessageBox.information(
+            self, "Not yet implemented", "Per-metric configuration isn't available yet."
+        )
 
     # ── slots ──────────────────────────────────────────────────────────────
 
-    def _show_metric_info(self) -> None:
-        lw = self._tabs.currentWidget()
-        item = lw.currentItem() if isinstance(lw, QListWidget) else None
-        if item is None:
-            QMessageBox.information(
-                self, "No metric selected", "Select a metric to view its info."
-            )
-            return
-        dlg = MetricInfoDialog(item.text(), self)
-        dlg.exec()
+    def _checked_ids(self, table: QTableWidget) -> list[str]:
+        result = []
+        for row in range(table.rowCount()):
+            item = table.item(row, _COL_INCLUDE)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                result.append(item.data(_ROLE_METRIC_ID))
+        return result
 
     def _apply(self) -> None:
         if self._store is None:
             QMessageBox.information(self, "Info", "No project open.")
             return
         sel = MetricSelection(
-            individual=self._checked_ids(self._ind_list),
-            group=self._checked_ids(self._grp_list),
-            zone=self._checked_ids(self._zone_list),
+            individual=self._checked_ids(self._ind_table),
+            group=self._checked_ids(self._grp_table),
+            zone=self._checked_ids(self._zone_table),
             quality_threshold=self._quality_spin.value(),
         )
         try:
@@ -148,15 +185,57 @@ class MetricsScreen(QWidget):
         if self._store is None or self._store.manifest is None:
             return
         sel = self._store.manifest.metrics
-        self._set_checked(self._ind_list, sel.individual)
-        self._set_checked(self._grp_list, sel.group)
-        self._set_checked(self._zone_list, sel.zone)
+        self._set_checked(self._ind_table, sel.individual)
+        self._set_checked(self._grp_table, sel.group)
+        self._set_checked(self._zone_table, sel.zone)
         self._quality_spin.setValue(sel.quality_threshold)
+        self._update_identity_graying()
+        self._update_zone_tab_enabled()
+
+    def _update_identity_graying(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        sessions = self._store.manifest.sessions
+        probed = [
+            s.has_stable_identities for s in sessions if s.has_stable_identities is not None
+        ]
+        all_identity_free = bool(probed) and all(not v for v in probed)
+
+        for table in (self._ind_table, self._grp_table, self._zone_table):
+            for row in range(table.rowCount()):
+                include_item = table.item(row, _COL_INCLUDE)
+                id_item = table.item(row, _COL_ID)
+                if include_item is None or id_item is None:
+                    continue
+                requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
+                flags = include_item.flags()
+                if requires_identity and all_identity_free:
+                    include_item.setFlags(flags & ~Qt.ItemFlag.ItemIsEnabled)
+                    tooltip = (
+                        "No session in this project has stable identities; "
+                        "this metric will be skipped for every session."
+                    )
+                    include_item.setToolTip(tooltip)
+                    id_item.setToolTip(tooltip)
+                else:
+                    include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
+                    include_item.setToolTip("")
+                    id_item.setToolTip("")
+
+    def _update_zone_tab_enabled(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        zone_index = self._tabs.indexOf(self._zone_table)
+        self._tabs.setTabEnabled(zone_index, bool(self._store.manifest.zones.rois))
 
     @staticmethod
-    def _set_checked(lw: QListWidget, ids: list[str]) -> None:
-        for i in range(lw.count()):
-            item = lw.item(i)
+    def _set_checked(table: QTableWidget, ids: list[str]) -> None:
+        for row in range(table.rowCount()):
+            item = table.item(row, _COL_INCLUDE)
             if item is not None:
-                state = Qt.CheckState.Checked if item.text() in ids else Qt.CheckState.Unchecked
+                state = (
+                    Qt.CheckState.Checked
+                    if item.data(_ROLE_METRIC_ID) in ids
+                    else Qt.CheckState.Unchecked
+                )
                 item.setCheckState(state)

@@ -12,6 +12,7 @@ signals from. app/state.py keeps a deprecated re-export for compatibility.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -71,12 +72,14 @@ class ProjectStore(QObject):
         self._manifest: ProjectManifest | None = None
         self._project_dir: Path | None = None
         self._run_results: RunResult | None = None
+        self._identity_probes: dict[str, str] = {}  # task_id -> session_id
 
         self._tasks = TaskRunner(self)
         self._tasks.taskProgress.connect(self.taskProgress)
         self._tasks.taskFinished.connect(self.taskFinished)
         self._tasks.taskFailed.connect(self._on_task_failed)
         self._tasks.taskLog.connect(lambda _task_id, line: self.append_log(line))
+        self.taskFinished.connect(self._on_identity_probe_finished)
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -118,6 +121,7 @@ class ProjectStore(QObject):
 
     def new_project(self, name: str, directory: Path) -> None:
         """Create a blank manifest for a new project."""
+        self._identity_probes.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
             project_name=name,
@@ -132,6 +136,7 @@ class ProjectStore(QObject):
 
     def open_project(self, t2d_path: Path) -> None:
         """Load an existing project from a .t2d.json file."""
+        self._identity_probes.clear()
         from track2data.core.manifest import read as manifest_read
 
         self._manifest = manifest_read(t2d_path)
@@ -180,12 +185,39 @@ class ProjectStore(QObject):
         self.sessionsChanged.emit()
 
     def add_session(self, folder: Path) -> None:
-        """Append a new SessionRef for *folder* and emit sessionsChanged."""
+        """Append a new SessionRef for *folder*, emit sessionsChanged, and
+        submit a background probe (see _on_identity_probe_finished) that
+        fills in has_stable_identities once the reader has read it."""
         if self._manifest is None:
             return
+        from track2data.readers import read_session
+
         session_id = folder.name
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
         sessions = [*list(self._manifest.sessions), ref]
+        self._manifest = self._manifest.model_copy(update={"sessions": sessions})
+        self.sessionsChanged.emit()
+
+        task_id = self._tasks.submit(partial(read_session, folder))
+        self._identity_probes[task_id] = session_id
+
+    def _on_identity_probe_finished(self, task_id: str, result: object) -> None:
+        session_id = self._identity_probes.pop(task_id, None)
+        if session_id is None:
+            return  # not an identity-probe task (e.g. a pipeline run/preview)
+        if isinstance(result, Exception):
+            self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
+            return
+        self._set_session_identity(session_id, result.has_stable_identities)
+
+    def _set_session_identity(self, session_id: str, has_stable_identities: bool) -> None:
+        if self._manifest is None:
+            return
+        sessions = [
+            s.model_copy(update={"has_stable_identities": has_stable_identities})
+            if s.session_id == session_id else s
+            for s in self._manifest.sessions
+        ]
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
 
