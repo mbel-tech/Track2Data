@@ -7,6 +7,7 @@ docs/superpowers/specs/2026-08-21-metrics-screen-info-dialog-redesign-design.md
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -194,3 +195,101 @@ def test_info_button_is_absent_when_metric_has_no_formula_or_citation(qtbot, mon
     qtbot.addWidget(screen)
 
     assert screen._ind_table.cellWidget(0, 3) is None
+
+
+# ── identity-aware graying ────────────────────────────────────────────────────
+
+
+def test_identity_required_rows_greyed_when_every_session_lacks_stable_identities(qtbot) -> None:
+    from track2data.core.models import SessionRef
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "sessions": [
+                SessionRef(
+                    session_id="s1", folder=Path("s1"), sha256="x",
+                    has_stable_identities=False,
+                ),
+            ]
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")  # IL-1.requires_identity is True
+    include_item = screen._ind_table.item(row, 0)
+    assert not (include_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_rows_not_greyed_when_sessions_are_unprobed(qtbot) -> None:
+    from track2data.core.models import SessionRef
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": [SessionRef(session_id="s1", folder=Path("s1"), sha256="x")]}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    include_item = screen._ind_table.item(row, 0)
+    assert bool(include_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_rows_not_greyed_when_at_least_one_session_has_stable_identities(qtbot) -> None:
+    from track2data.core.models import SessionRef
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "sessions": [
+                SessionRef(
+                    session_id="s1", folder=Path("s1"), sha256="x",
+                    has_stable_identities=False,
+                ),
+                SessionRef(
+                    session_id="s2", folder=Path("s2"), sha256="y",
+                    has_stable_identities=True,
+                ),
+            ]
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    include_item = screen._ind_table.item(row, 0)
+    assert bool(include_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+# ── zone tab disabling ────────────────────────────────────────────────────────
+
+
+def test_zone_tab_disabled_when_no_zones_defined(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    zone_index = screen._tabs.indexOf(screen._zone_table)
+    assert screen._tabs.isTabEnabled(zone_index) is False
+
+
+def test_zone_tab_enabled_when_zones_are_defined(qtbot) -> None:
+    from track2data.core.models import ROI, ZoneSet
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"zones": ZoneSet(rois=[ROI(name="arena", vertices=[(0, 0), (1, 0), (1, 1)])])}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    zone_index = screen._tabs.indexOf(screen._zone_table)
+    assert screen._tabs.isTabEnabled(zone_index) is True
