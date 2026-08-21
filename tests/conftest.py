@@ -365,11 +365,11 @@ def _build_tiny_real_session(base: Path) -> None:
     # lines carry the level as a literal token; the terminal status on a
     # successful run is the bare word "Success" on its own line.
     log_text = (
-        "10:17:32 Welcome to idtracker.ai 6.0.13                          logging_utils.py:184\n"
-        "         Loading parameters from                                        py_utils.py:84\n"
-        "10:17:33 WARNING There are 2 frames with more blobs than animals animals_detection.py:110\n"
-        "10:17:45 Tracking complete. It took 0:00:12                              session.py:1035\n"
-        "         Success                                                                 run.py:81\n"
+        "10:17:32 Welcome to idtracker.ai 6.0.13                    logging_utils.py:184\n"
+        "         Loading parameters from                                  py_utils.py:84\n"
+        "10:17:33 WARNING Frames with more blobs than animals  animals_detection.py:110\n"
+        "10:17:45 Tracking complete. It took 0:00:12                        session.py:1035\n"
+        "         Success                                                           run.py:81\n"
     )
     (base / "idtrackerai.log").write_text(log_text, encoding="utf-8")
 
