@@ -45,6 +45,53 @@ from track2data.readers import read_session
 logger = logging.getLogger(__name__)
 
 
+def _map_array_index_to_true_frame(
+    tracking_intervals: list[tuple[int, int]] | None, n_frames: int
+) -> tuple[Any, bool]:
+    """
+    Map trajectory-array row position (0..n_frames-1) to the true video
+    frame number, using ``Session.tracking_intervals``.
+
+    idtracker.ai only tracks (and stores trajectory rows for) frames inside
+    the configured ``--tracking_intervals``; array position 0 is the first
+    frame of the first interval, not frame 0 of the video
+    (idtracker.ai_usage.md:552: "Tracking intervals in frames ... If not
+    set, the whole video is tracked"; session_idtrackerai.md:240: interval
+    end is exclusive). With a single interval starting elsewhere than 0,
+    using the raw array position as "frame" understates every frame number
+    by the interval's start; with multiple intervals, it also makes the
+    derived time axis non-monotonic in real time across the gap between
+    intervals.
+
+    Returns
+    -------
+    true_frames:
+        Array of length n_frames with the true video frame number per row.
+    valid:
+        Whether the mapping could be trusted, i.e. the intervals'
+        combined length matches n_frames exactly. When False, true_frames
+        is simply ``arange(n_frames)`` (today's behaviour) because the
+        intervals don't reconcile with the data -- e.g. a partial/embargoed
+        session.json, or gaps closed by preprocessing on idtracker.ai's
+        side that this reader has no way to reconstruct.
+    """
+    import numpy as np
+
+    if not tracking_intervals:
+        return np.arange(n_frames), False
+
+    lengths = [max(0, end - start) for start, end in tracking_intervals]
+    if sum(lengths) != n_frames:
+        return np.arange(n_frames), False
+
+    true_frames = np.empty(n_frames, dtype=np.int64)
+    pos = 0
+    for (start, _end), length in zip(tracking_intervals, lengths, strict=True):
+        true_frames[pos : pos + length] = np.arange(start, start + length)
+        pos += length
+    return true_frames, True
+
+
 class Engine:
     """Stateless facade over all engine subsystems."""
 
@@ -236,6 +283,13 @@ class Engine:
         still be located). id_probability itself is always emitted as a
         column, masked or not, so the applied threshold is auditable from
         the export rather than only from the manifest.
+
+        ``frame``/``time_s`` are the true video frame/time when
+        ``Session.tracking_intervals`` reconciles with the array length
+        (see ``_map_array_index_to_true_frame``); ``in_tracking_interval``
+        records whether that mapping was trusted (True) or the raw array
+        position was used as a fallback (NaN -- not False, since "outside
+        the interval" is not what an unreconciled mapping means).
         """
         import numpy as np
         import pandas as pd
@@ -244,9 +298,14 @@ class Engine:
         n_animals = psess.n_animals
         fps = psess.fps
 
-        frames = np.repeat(np.arange(n_frames), n_animals)
+        true_frame_per_row, mapping_valid = _map_array_index_to_true_frame(
+            psess.session.tracking_intervals, n_frames
+        )
+        frames = np.repeat(true_frame_per_row, n_animals)
         individuals = np.tile(np.arange(n_animals), n_frames)
         time_s = frames / fps
+        in_interval_fill = True if mapping_valid else np.nan
+        in_interval = np.full(n_frames * n_animals, in_interval_fill)
 
         xy_flat = psess.xy.reshape(-1, 2)
         speed_flat = psess.kinematics.speed_px_s.reshape(-1)
@@ -257,6 +316,7 @@ class Engine:
             "individual_id": individuals,
             "frame": frames,
             "time_s": time_s,
+            "in_tracking_interval": in_interval,
             "x_px": xy_flat[:, 0],
             "y_px": xy_flat[:, 1],
             "speed_px_s": speed_flat,
