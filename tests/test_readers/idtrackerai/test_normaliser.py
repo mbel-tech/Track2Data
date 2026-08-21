@@ -135,6 +135,111 @@ class TestNormaliserBodyLengthAndAreas:
         assert set(s.quality["areas"].keys()) == {"mean", "median", "std"}
 
 
+class TestNormaliserHasStableIdentities:
+    """has_stable_identities used to be a pure NaN-coverage heuristic that
+    ignored track_wo_identities and the already-loaded fraction_identified.
+    A track_wo_identities=True session with good coverage used to be
+    labelled 'stable' and get per-individual analysis applied to identities
+    that are not persistent by construction."""
+
+    def test_track_wo_identities_forces_unstable_even_with_full_coverage(
+        self, tmp_path: Path
+    ) -> None:
+        payload = _minimal_payload(tmp_path)  # full coverage, no NaN
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"track_wo_identities": True}
+        )
+        assert s.has_stable_identities is False
+
+    def test_fraction_identified_above_threshold_is_stable(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["fraction_identified"] = 0.822
+        # Corrupt raw coverage so the heuristic alone would say unstable --
+        # fraction_identified must take priority.
+        payload["trajectories"] = np.full((N, M, 2), np.nan)
+        s = Normaliser(tmp_path).normalise(payload, session_meta={})
+        assert s.has_stable_identities is True
+
+    def test_fraction_identified_below_threshold_is_unstable(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["fraction_identified"] = 0.3
+        s = Normaliser(tmp_path).normalise(payload, session_meta={})
+        assert s.has_stable_identities is False
+
+    def test_falls_back_to_heuristic_when_no_authoritative_signal(
+        self, tmp_path: Path
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        del payload["fraction_identified"]
+        s = Normaliser(tmp_path).normalise(payload, session_meta={})
+        # _minimal_payload has full (non-NaN) coverage -> heuristic says stable.
+        assert s.has_stable_identities is True
+
+
+class TestNormaliserTrajectoryShapeValidation:
+    """Regression coverage: _extract_trajectories used to accept any array
+    shape with no validation -- a missing key silently produced an empty
+    (0, 0, 2) Session, and a transposed array passed straight through and
+    was misinterpreted with n_frames and n_animals swapped."""
+
+    def test_missing_trajectories_key_raises(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)
+        del payload["trajectories"]
+        with pytest.raises(DataValidationError) as exc_info:
+            Normaliser(tmp_path).normalise(payload)
+        assert exc_info.value.code == "IDT_DICT_MISSING_KEY"
+
+    def test_wrong_last_dimension_raises(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)
+        payload["trajectories"] = np.zeros((N, M, 3))  # not (x, y)
+        with pytest.raises(DataValidationError) as exc_info:
+            Normaliser(tmp_path).normalise(payload)
+        assert exc_info.value.code == "IDT_SHAPE_MISMATCH"
+
+    def test_2d_array_raises_instead_of_index_error(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)
+        payload["trajectories"] = np.zeros((N, 2))  # missing the animals axis
+        with pytest.raises(DataValidationError):
+            Normaliser(tmp_path).normalise(payload)
+
+    def test_transposed_array_recovered_via_frame_count_hint(self, tmp_path: Path) -> None:
+        """(n_animals, n_frames, 2) must be transposed back to canonical
+        when session.json's number_of_frames identifies the true frame axis."""
+        payload = _minimal_payload(tmp_path)
+        # Deliberately transposed: (n_animals=2, n_frames=10, 2)
+        canonical = payload["trajectories"]
+        payload["trajectories"] = canonical.transpose(1, 0, 2)
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"number_of_frames": N, "number_of_animals": M}
+        )
+        assert s.raw_xy.shape == (N, M, 2)
+
+    def test_animal_count_mismatch_with_session_json_raises(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)  # M=2 animals
+        with pytest.raises(DataValidationError) as exc_info:
+            Normaliser(tmp_path).normalise(
+                payload, session_meta={"number_of_animals": 4}
+            )
+        assert exc_info.value.code == "IDT_SHAPE_MISMATCH"
+
+    def test_no_hint_falls_back_to_dimension_heuristic(self, tmp_path: Path) -> None:
+        """Without a session.json hint, a smaller leading axis is assumed to
+        be n_animals (n_animals << n_frames in every real session)."""
+        payload = _minimal_payload(tmp_path)
+        canonical = payload["trajectories"]  # (10 frames, 2 animals, 2)
+        payload["trajectories"] = canonical.transpose(1, 0, 2)  # (2, 10, 2)
+        s = Normaliser(tmp_path).normalise(payload, session_meta={})
+        assert s.raw_xy.shape == (N, M, 2)
+
+
 class TestNormaliserIdProbabilities:
     def test_2d_id_probabilities_unchanged(self, tmp_path: Path) -> None:
         payload = _minimal_payload(tmp_path)

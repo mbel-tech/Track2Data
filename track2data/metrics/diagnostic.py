@@ -165,15 +165,21 @@ class IdProbabilityStats(Metric):
         definition=(
             "Per-animal summary of the per-frame identity-probability values "
             "reported by idtracker.ai. High median and high fraction-above-0.9 "
-            "indicate confident identities."
+            "indicate confident identities. NaN entries (frames where the "
+            "animal was not detected -- output_structure_idtrackerai.md:69) "
+            "are excluded from the percentile/median/fraction calculations, "
+            "not treated as zero-confidence or propagated to NaN."
         ),
         formula_plain=(
-            "median/p10/p90 = percentile(id_probabilities[:,k], 50/10/90); "
-            "frac_above_0p9 = mean(id_probabilities[:,k] > 0.9)"
+            "median/p10/p90 = nanpercentile(id_probabilities[:,k], 50/10/90); "
+            "frac_above_0p9 = mean(id_probabilities[:,k] > 0.9) over non-NaN entries"
         ),
         inputs=["Session.id_probabilities"],
         assumptions=["id_probabilities has shape (n_frames, n_animals)."],
-        warnings=["Returns NaN values when Session.id_probabilities is None."],
+        warnings=[
+            "Returns NaN values when Session.id_probabilities is None, or "
+            "when an animal has zero non-NaN entries (never detected)."
+        ],
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -192,14 +198,31 @@ class IdProbabilityStats(Metric):
                 )
             else:
                 col = session.id_probabilities[:, k]
+                valid = col[~np.isnan(col)]
+                # NaN in id_probabilities means "animal not detected in this
+                # frame" (output_structure_idtrackerai.md:69), not a
+                # confidence value of zero. np.median/np.percentile propagate
+                # any NaN to the whole result -- on the real corpus 44.5% of
+                # id_probabilities entries are NaN, so the plain-numpy
+                # version returned NaN for every animal in every session,
+                # violating this metric's own "NaN only when Session.id_
+                # probabilities is None" contract. nanmedian/nanpercentile
+                # compute over the valid (detected) frames only.
+                if valid.size == 0:
+                    median = p10 = p90 = frac_above = float("nan")
+                else:
+                    median = float(np.nanmedian(col))
+                    p10 = float(np.nanpercentile(col, 10))
+                    p90 = float(np.nanpercentile(col, 90))
+                    frac_above = float(np.mean(valid > 0.9))
                 rows.append(
                     {
                         "session_id": session.session_id,
                         "individual_id": k,
-                        "id_prob_median": float(np.median(col)),
-                        "id_prob_p10": float(np.percentile(col, 10)),
-                        "id_prob_p90": float(np.percentile(col, 90)),
-                        "id_prob_frac_above_0p9": float(np.mean(col > 0.9)),
+                        "id_prob_median": median,
+                        "id_prob_p10": p10,
+                        "id_prob_p90": p90,
+                        "id_prob_frac_above_0p9": frac_above,
                     }
                 )
         return pd.DataFrame(rows, columns=self.output_columns)
