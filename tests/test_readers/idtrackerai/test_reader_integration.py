@@ -177,3 +177,56 @@ class TestReaderRead:
                                        tiny_real_session: Path) -> None:
         s = reader.read(tiny_real_session)
         assert s.trajectory_format == "npy"
+
+
+# ── format fallback ─────────────────────────────────────────────────────────
+#
+# Real idtracker.ai sessions ship trajectories_formats=['h5','npy','csv'] by
+# default (session_idtrackerai.md:73) -- confirmed in 70/70 of the real GOT
+# corpus. detect() ranks h5 first. Before the fallback fix, any format ranked
+# above the first one with a working loader made read() raise
+# IDT_FORMAT_AMBIGUOUS even though a readable format sat right next to it --
+# this class pins that regression.
+
+class TestReaderFormatFallback:
+    def test_reads_via_npy_when_unreadable_format_ranks_higher(
+        self, reader: IDTrackerAiReader, tmp_path: Path
+    ) -> None:
+        import numpy as np
+
+        from track2data.readers.idtrackerai.detect import detect
+
+        session_dir = tmp_path / "session_fallback_test"
+        traj_dir = session_dir / "trajectories"
+        traj_dir.mkdir(parents=True)
+        # A format detect() ranks above npy/csv but has no loader (parquet).
+        (traj_dir / "trajectories.parquet").write_bytes(b"not a real parquet file")
+        traj_dict = {
+            "trajectories": np.zeros((3, 2, 2)),
+            "version": "6.0.13",
+            "frames_per_second": 25.0,
+        }
+        np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
+
+        hit = detect(session_dir)
+        assert hit is not None
+        assert hit.format == "parquet"  # confirms the test actually exercises the fallback
+
+        s = reader.read(session_dir)
+        assert s.raw_xy.shape == (3, 2, 2)
+        assert s.trajectory_format == "npy"
+
+    def test_raises_only_when_nothing_is_readable(
+        self, reader: IDTrackerAiReader, tmp_path: Path
+    ) -> None:
+        from track2data.core.errors import ImportError_
+
+        session_dir = tmp_path / "session_all_unreadable"
+        traj_dir = session_dir / "trajectories"
+        traj_dir.mkdir(parents=True)
+        (traj_dir / "trajectories.parquet").write_bytes(b"not real")
+        (traj_dir / "trajectories.pickle").write_bytes(b"not real")
+
+        with pytest.raises(ImportError_) as exc_info:
+            reader.read(session_dir)
+        assert exc_info.value.code == "IDT_FORMAT_AMBIGUOUS"
