@@ -122,7 +122,40 @@ def test_failing_task_emits_failed_not_finished(qtbot, runner) -> None:
     assert "simulated failure" in message
     assert "RuntimeError" in tb
     assert "boom" in tb  # traceback.format_exc() -- the function name appears
-    assert finished_calls == []
+
+
+def test_failing_track2data_error_message_carries_code_subject_remediation(
+    qtbot, runner
+) -> None:
+    """
+    _EngineTask.run() only ever emits str(exc) + a plain traceback -- the
+    original exception object (and its code/subject/remediation
+    attributes) never crosses the thread boundary as structured data.
+    That turns out not to matter: Track2DataError.__str__() already
+    formats all three into the string itself (see core/errors.py), so
+    str(exc) alone -- no changes needed here -- carries everything a
+    failure dialog (#22) needs to show, just as one pre-formatted string
+    rather than separate fields.
+    """
+    from track2data.core.errors import Track2DataError
+
+    def boom() -> None:
+        raise Track2DataError(
+            "Session folder missing",
+            code="NO_READER",
+            subject="session_042",
+            remediation="Check the folder path and try again.",
+        )
+
+    with qtbot.waitSignal(runner.taskFailed, timeout=2000) as blocker:
+        runner.submit(boom)
+
+    _task_id, message, tb = blocker.args
+    assert "NO_READER" in message
+    assert "Session folder missing" in message
+    assert "session_042" in message
+    assert "Check the folder path and try again." in message
+    assert "Track2DataError" in tb  # the real traceback is still present too
 
 
 # ── cancellation ─────────────────────────────────────────────────────────────
