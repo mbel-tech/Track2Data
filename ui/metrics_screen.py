@@ -37,9 +37,19 @@ _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
 
 
 def _natural_sort_key(metric_cls):
-    """Sort metrics naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2)."""
+    """Sort metrics naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2).
+
+    Third-party metrics (loaded via the ``track2data.metrics`` entry
+    point, see ENGINE_DESIGN.md §8.5/§11) aren't required to use the
+    built-in PREFIX-NUMBER id shape -- fall back to a plain string sort
+    for any id that doesn't parse, rather than crashing the whole
+    screen on one non-conforming plugin metric.
+    """
     prefix, _, number = metric_cls.id.rpartition("-")
-    return (prefix, int(number))
+    try:
+        return (prefix, int(number))
+    except ValueError:
+        return (metric_cls.id, 0)
 
 
 class MetricsScreen(QWidget):
