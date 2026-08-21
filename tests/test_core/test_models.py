@@ -16,6 +16,7 @@ from track2data.core.models import (
     PreprocessConfig,
     ProjectManifest,
     Session,
+    SessionRef,
     VideoInfo,
     ZoneSet,
 )
@@ -361,3 +362,17 @@ class TestSessionExtendedFields:
             matching_results=["session_trial1_Segment1"],
         )
         assert "session_trial1_Segment1" in s.matching_results  # type: ignore[operator]
+
+
+# ── SessionRef ─────────────────────────────────────────────────────────────────
+
+class TestSessionRef:
+    def test_has_stable_identities_defaults_to_none(self, tmp_path: Path) -> None:
+        ref = SessionRef(session_id="s1", folder=tmp_path, sha256="abc")
+        assert ref.has_stable_identities is None
+
+    def test_has_stable_identities_can_be_set_explicitly(self, tmp_path: Path) -> None:
+        ref = SessionRef(
+            session_id="s1", folder=tmp_path, sha256="abc", has_stable_identities=True
+        )
+        assert ref.has_stable_identities is True
