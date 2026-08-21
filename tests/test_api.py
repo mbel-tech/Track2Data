@@ -251,6 +251,71 @@ def test_compute_metrics_catches_a_raising_metric(monkeypatch: pytest.MonkeyPatc
     assert "D-1" in results
 
 
+# ── build_fish_by_frame: tracking_intervals frame/time offset ──────────────
+#
+# Regression coverage: frame/time_s used to be the raw array position,
+# ignoring Session.tracking_intervals. A session tracked with
+# --tracking_intervals "[9000,18000]" would export frame=0..8999 for data
+# that is really frames 9000..17999. All 70 real corpus sessions happen to
+# have a single trivial interval [0, n_frames], so this can only be
+# verified synthetically -- see also the direct unit tests on
+# api._map_array_index_to_true_frame.
+
+
+def test_frame_column_offset_by_tracking_interval_start() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=1)
+    session = session.model_copy(update={"tracking_intervals": [(9000, 9005)]})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == [9000, 9001, 9002, 9003, 9004]
+    assert df["in_tracking_interval"].all()
+
+
+def test_time_s_reflects_gap_between_multiple_intervals() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=4, n_animals=1)
+    session = session.model_copy(
+        update={"tracking_intervals": [(0, 2), (150, 152)], "video": session.video.model_copy(
+            update={"fps": 1.0}
+        )}
+    )
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == [0, 1, 150, 151]
+    assert list(df["time_s"]) == [0.0, 1.0, 150.0, 151.0]
+
+
+def test_mismatched_tracking_intervals_falls_back_to_array_position() -> None:
+    """Intervals that don't reconcile with n_frames (e.g. a partial
+    session.json) must not corrupt the frame axis -- fall back to today's
+    behaviour and mark in_tracking_interval as unknown (NaN), not False."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    session = session.model_copy(update={"tracking_intervals": [(0, 3)]})  # sums to 3, not 10
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == list(range(10))
+    assert df["in_tracking_interval"].isna().all()
+
+
+def test_no_tracking_intervals_falls_back_to_array_position() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=1)  # tracking_intervals defaults to None
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == [0, 1, 2, 3, 4]
+    assert df["in_tracking_interval"].isna().all()
+
+
 # ── build_fish_by_frame: zone columns ───────────────────────────────────────
 
 
