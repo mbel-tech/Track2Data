@@ -179,6 +179,14 @@ class IDTrackerAiReader(SessionReader):
                     (int(s), int(e)) for s, e in raw_ti
                 ]
 
+        # identities_colors: only in session.json, never the trajectory
+        # dict (verified: absent from all 70 real trajectories.h5/.npy
+        # payloads). Index-aligned with identities_labels/individual_id.
+        raw_colors = meta.get("identities_colors")
+        if raw_colors:
+            with contextlib.suppress(TypeError, ValueError):
+                updates["identities_colors"] = [str(c) for c in raw_colors]
+
         # roi_list: list of "± Polygon [[x,y], …]" strings -> parsed
         # {sign, vertices, raw} dicts. Unparseable entries are dropped
         # (parse_roi_string logs why) rather than failing the whole import.
