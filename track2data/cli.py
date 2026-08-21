@@ -30,6 +30,7 @@ import click
 
 if TYPE_CHECKING:
     from track2data.core.models import ProjectManifest
+    from track2data.metrics.base import Metric
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +158,12 @@ def validate(project: str) -> None:
 # ── list-metrics ──────────────────────────────────────────────────────────────
 
 
+def _natural_sort_key(metric_cls: type[Metric]) -> tuple[str, int]:
+    """Sort metrics naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2)."""
+    prefix, _, number = metric_cls.id.rpartition("-")
+    return (prefix, int(number))
+
+
 @cli.command("list-metrics")
 @click.option("--level", default=None,
               type=click.Choice(["individual", "group", "zone", "diagnostic"]),
@@ -170,7 +177,7 @@ def list_metrics(level: str | None) -> None:
 
     _load_builtins()  # ensure builtins are registered
 
-    metrics = sorted(_registry.values(), key=lambda m: m.id)
+    metrics = sorted(_registry.values(), key=_natural_sort_key)
     if level is not None:
         metrics = [m for m in metrics if m.level == level]
 
