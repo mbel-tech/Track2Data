@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import MetricSelection
+from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
 _INDIVIDUAL_METRICS = ["IL-1", "IL-2", "IL-4", "IL-5"]
 _GROUP_METRICS = ["GL-1", "GL-3", "GL-5", "GL-7"]
@@ -70,6 +71,12 @@ class MetricsScreen(QWidget):
 
         root.addWidget(self._tabs, 1)
 
+        # ── metric info ───────────────────────────────────────────────────
+        self._info_btn = QPushButton("Metric info…")
+        self._info_btn.setFixedWidth(140)
+        self._info_btn.clicked.connect(self._show_metric_info)
+        root.addWidget(self._info_btn)
+
         # ── quality threshold ─────────────────────────────────────────────
         qform = QFormLayout()
         self._quality_spin = QDoubleSpinBox()
@@ -110,6 +117,17 @@ class MetricsScreen(QWidget):
         return result
 
     # ── slots ──────────────────────────────────────────────────────────────
+
+    def _show_metric_info(self) -> None:
+        lw = self._tabs.currentWidget()
+        item = lw.currentItem() if isinstance(lw, QListWidget) else None
+        if item is None:
+            QMessageBox.information(
+                self, "No metric selected", "Select a metric to view its info."
+            )
+            return
+        dlg = MetricInfoDialog(item.text(), self)
+        dlg.exec()
 
     def _apply(self) -> None:
         if self._store is None:

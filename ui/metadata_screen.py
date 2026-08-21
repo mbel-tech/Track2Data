@@ -28,7 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data.core.models import MappingRule
+from track2data.core.hashing import file_sha256
+from track2data.core.models import MappingRule, MetadataSource
 
 _CANONICAL_FIELDS = ["session_id", "treatment", "trial_id", "trial_date"]
 
@@ -129,6 +130,11 @@ class MetadataScreen(QWidget):
             self._populate_combos(headers)
             self._file_label.setText(Path(path).name)
             self._file_label.setStyleSheet("color: #2c3e50;")
+            if self._store is not None:
+                csv_path = Path(path)
+                self._store.update_metadata_source(
+                    MetadataSource(path=csv_path, sha256=file_sha256(csv_path))
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to load CSV:\n{exc}")
 
@@ -154,11 +160,8 @@ class MetadataScreen(QWidget):
                 combo.setCurrentIndex(idx)
 
     def _skip_metadata(self) -> None:
-        if self._store is not None and self._store.manifest is not None:
-            self._store._manifest = self._store.manifest.model_copy(
-                update={"metadata_source": None}
-            )
-            self._store.metadataChanged.emit()
+        if self._store is not None:
+            self._store.update_metadata_source(None)
         self._file_label.setText("(skipped)")
         self._file_label.setStyleSheet("color: #666; font-style: italic;")
         self._preview.setRowCount(0)
@@ -175,10 +178,7 @@ class MetadataScreen(QWidget):
                 rules[field] = val
         rule = MappingRule(rules=rules)
         try:
-            self._store._manifest = self._store.manifest.model_copy(
-                update={"mapping": rule}
-            )
-            self._store.metadataChanged.emit()
+            self._store.update_mapping(rule)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to apply mapping:\n{exc}")
 

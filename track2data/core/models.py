@@ -249,6 +249,41 @@ class PreprocessReport:
 
 
 @dataclass
+class SessionRunResult:
+    """
+    Outcome of running one session through ``Engine.run()``.
+
+    Deliberately small and picklable (a prerequisite for any future
+    parallel execution across processes): metric previews are capped at
+    ``head(200)`` and the full ``fish_by_frame`` table is never retained
+    at all -- a 70-session real run would need tens of GB if every
+    session's per-frame table were kept in memory afterwards.
+    """
+
+    session_id: str
+    written: list[Path] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    metric_previews: dict[str, Any] = field(default_factory=dict)
+    duration_s: float = 0.0
+    error: str | None = None
+
+
+@dataclass
+class RunResult:
+    """Outcome of running every session in a manifest through ``Engine.run()``."""
+
+    sessions: list[SessionRunResult] = field(default_factory=list)
+
+    @property
+    def written(self) -> list[Path]:
+        """All written paths across every session, flattened."""
+        paths: list[Path] = []
+        for s in self.sessions:
+            paths.extend(s.written)
+        return paths
+
+
+@dataclass
 class KinematicsArrays:
     """Per-frame kinematics derived from a preprocessed xy array."""
 
