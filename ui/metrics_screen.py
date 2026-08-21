@@ -201,12 +201,15 @@ class MetricsScreen(QWidget):
                 flags = include_item.flags()
                 if requires_identity and all_identity_free:
                     include_item.setFlags(flags & ~Qt.ItemFlag.ItemIsEnabled)
-                    id_item.setToolTip(
+                    tooltip = (
                         "No session in this project has stable identities; "
                         "this metric will be skipped for every session."
                     )
+                    include_item.setToolTip(tooltip)
+                    id_item.setToolTip(tooltip)
                 else:
                     include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
+                    include_item.setToolTip("")
                     id_item.setToolTip("")
 
     def _update_zone_tab_enabled(self) -> None:
