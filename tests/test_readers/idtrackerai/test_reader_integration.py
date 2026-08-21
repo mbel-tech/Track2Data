@@ -130,6 +130,96 @@ class TestReaderRead:
         assert s.roi_list is not None
         assert len(s.roi_list) >= 1
 
+    def test_roi_list_entries_are_parsed_signed_polygons(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.roi_list is not None
+        entry = s.roi_list[0]
+        assert entry["sign"] == "+"
+        assert isinstance(entry["vertices"], list)
+        assert entry["vertices"][0] == (10.0, 10.0)
+
+    def test_identities_colors_from_session_json(self, reader: IDTrackerAiReader,
+                                                   tiny_real_session: Path) -> None:
+        """identities_colors only exists in session.json, never the
+        trajectory dict -- verified absent from all 70 real trajectory
+        payloads."""
+        s = reader.read(tiny_real_session)
+        assert s.identities_colors == ["#e41a1c", "#377eb8"]
+
+    # ── session.json Fase-4 fields ──────────────────────────────────────────
+
+    def test_number_of_error_frames_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.number_of_error_frames == 3
+
+    def test_exclusive_rois_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.exclusive_rois is False
+
+    def test_last_validated_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.last_validated == "2024-01-15T10:30:00"
+
+    def test_data_policy_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.data_policy == "idmatcher.ai"
+
+    def test_length_calibrations_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.length_calibrations is not None
+        assert s.length_calibrations[0]["distance"] == 1.0
+
+    def test_velocity_threshold_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.velocity_threshold_px_frame == pytest.approx(42.5)
+
+    def test_resolution_reduction_and_id_image_size_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.resolution_reduction == pytest.approx(0.75)
+        assert s.id_image_size == [80, 80, 1]
+
+    def test_segmentation_params_grouped_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.segmentation_params is not None
+        assert s.segmentation_params["intensity_ths"] == [10, 128]
+        assert s.segmentation_params["use_bkg"] is True
+        assert s.segmentation_params["background_subtraction_stat"] == "median"
+        assert s.segmentation_params["erosion_kernel_size"] == 10
+
+    def test_timers_merged_into_tracking_log_durations(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.tracking_log is not None
+        assert s.tracking_log["durations"]["Tracking session"] == pytest.approx(13.0)
+
+    def test_preprocessing_image_paths_recorded(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.roi_mask_path is not None
+        assert s.roi_mask_path.exists()
+        assert s.background_image_path is not None
+        assert s.background_image_path.exists()
+
     # ── custom artefacts ──────────────────────────────────────────────────────
 
     def test_inconsistent_frames_loaded(self, reader: IDTrackerAiReader,
@@ -177,3 +267,58 @@ class TestReaderRead:
                                        tiny_real_session: Path) -> None:
         s = reader.read(tiny_real_session)
         assert s.trajectory_format == "npy"
+
+
+# ── format fallback ─────────────────────────────────────────────────────────
+#
+# Real idtracker.ai sessions ship trajectories_formats=['h5','npy','csv'] by
+# default (session_idtrackerai.md:73) -- confirmed in 70/70 of the real GOT
+# corpus. detect() ranks h5 first. Before the fallback fix, any format ranked
+# above the first one with a working loader made read() raise
+# IDT_FORMAT_AMBIGUOUS even though a readable format sat right next to it --
+# this class pins that regression.
+
+class TestReaderFormatFallback:
+    def test_reads_via_npy_when_unreadable_format_ranks_higher(
+        self, reader: IDTrackerAiReader, tmp_path: Path
+    ) -> None:
+        import numpy as np
+
+        from track2data.readers.idtrackerai.detect import detect
+
+        session_dir = tmp_path / "session_fallback_test"
+        traj_dir = session_dir / "trajectories"
+        traj_dir.mkdir(parents=True)
+        # A format detect() ranks above npy/csv but has no loader (parquet).
+        (traj_dir / "trajectories.parquet").write_bytes(b"not a real parquet file")
+        traj_dict = {
+            "trajectories": np.zeros((3, 2, 2)),
+            "version": "6.0.13",
+            "frames_per_second": 25.0,
+            "width": 1920,
+            "height": 1080,
+        }
+        np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
+
+        hit = detect(session_dir)
+        assert hit is not None
+        assert hit.format == "parquet"  # confirms the test actually exercises the fallback
+
+        s = reader.read(session_dir)
+        assert s.raw_xy.shape == (3, 2, 2)
+        assert s.trajectory_format == "npy"
+
+    def test_raises_only_when_nothing_is_readable(
+        self, reader: IDTrackerAiReader, tmp_path: Path
+    ) -> None:
+        from track2data.core.errors import ImportError_
+
+        session_dir = tmp_path / "session_all_unreadable"
+        traj_dir = session_dir / "trajectories"
+        traj_dir.mkdir(parents=True)
+        (traj_dir / "trajectories.parquet").write_bytes(b"not real")
+        (traj_dir / "trajectories.pickle").write_bytes(b"not real")
+
+        with pytest.raises(ImportError_) as exc_info:
+            reader.read(session_dir)
+        assert exc_info.value.code == "IDT_FORMAT_AMBIGUOUS"

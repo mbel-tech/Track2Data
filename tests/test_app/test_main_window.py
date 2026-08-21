@@ -246,24 +246,29 @@ def test_cancel_action_disabled_after_cancellation(
 def test_task_failure_shows_a_dialog_with_message_and_traceback(
     qtbot, tmp_path: Path, tiny_real_session: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Engine.import_sessions is patched (not Engine.preprocess): a session-
-    level exception from preprocess/metrics/export is swallowed by
-    Engine._run_one_session into SessionRunResult.error and still yields a
-    *successful* RunResult, never a taskFinished(..., Exception). Only a
-    failure outside that per-session try/except (e.g. import_sessions itself)
-    actually reaches TaskRunner's `failed` signal."""
+    """Engine.run is patched directly, not a sub-step: a session-level
+    exception from import/preprocess/metrics/export is caught by
+    Engine._run_one_session into SessionRunResult.error and still yields
+    a *successful* RunResult, never a taskFinished(..., Exception) --
+    that's the whole point of #7's fix, extending the same per-session
+    resilience that already covered preprocess/metrics/export to import
+    too. Only a failure outside that per-session try/except -- something
+    breaking Engine.run() itself, not any one session's pipeline --
+    actually reaches TaskRunner's `failed` signal, so this patches run()
+    at the top level rather than trying to find an internal call that's
+    still "outside the net"."""
     from track2data.api import Engine
     from track2data.core.errors import ProcessingError
 
-    def boom(self, *, progress=None):
+    def boom(self, *args, **kwargs):
         raise ProcessingError(
-            "synthetic import failure",
+            "synthetic run failure",
             code="E-999",
             subject="engine",
             remediation="retry the run",
         )
 
-    monkeypatch.setattr(Engine, "import_sessions", boom)
+    monkeypatch.setattr(Engine, "run", boom)
 
     boxes: list = []
     monkeypatch.setattr("app.main_window.QMessageBox.exec", lambda self: boxes.append(self))
@@ -275,7 +280,7 @@ def test_task_failure_shows_a_dialog_with_message_and_traceback(
 
     assert len(boxes) == 1
     text = boxes[0].text()
-    assert "synthetic import failure" in text
+    assert "synthetic run failure" in text
     assert "[E-999]" in text
     assert "subject: engine" in text
     assert "fix: retry the run" in text

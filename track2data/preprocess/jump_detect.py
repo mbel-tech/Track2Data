@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from track2data.core.models import JumpCfg, PPStepResult
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_displacement(xy: np.ndarray) -> np.ndarray:
@@ -48,7 +52,18 @@ def _flag_jumps_percentile(disp: np.ndarray, percentile: float, pct_mult: float)
     return flags
 
 
-def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult]:
+def _flag_jumps_absolute(disp: np.ndarray, threshold_px_frame: float) -> np.ndarray:
+    """Flag frames where displacement exceeds a fixed absolute threshold,
+    shared across all animals (unlike the per-animal SD/percentile methods).
+    """
+    return disp > threshold_px_frame
+
+
+def detect_jumps(
+    xy: np.ndarray,
+    cfg: JumpCfg,
+    velocity_threshold_px_frame: float | None = None,
+) -> tuple[np.ndarray, PPStepResult]:
     """Detect and replace anomalously large inter-frame displacements.
 
     Parameters
@@ -57,6 +72,13 @@ def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult
         Position array of shape ``(n_frames, n_animals, 2)``, dtype float64.
     cfg:
         Jump-detection configuration.
+    velocity_threshold_px_frame:
+        idtracker.ai's own outlier-displacement threshold
+        (``Session.velocity_threshold_px_frame``), used when
+        ``cfg.method == "idtracker_velocity_threshold"``. If that method is
+        requested but this is ``None`` (session has no such value), falls
+        back to ``sd_multiple`` with a warning rather than silently
+        flagging nothing.
 
     Returns
     -------
@@ -80,8 +102,18 @@ def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult
 
     if cfg.method == "sd_multiple":
         flags = _flag_jumps_sd(disp, cfg.sd_mult)
-    else:
+    elif cfg.method == "percentile":
         flags = _flag_jumps_percentile(disp, cfg.percentile, cfg.pct_mult)
+    elif velocity_threshold_px_frame is not None:
+        flags = _flag_jumps_absolute(disp, velocity_threshold_px_frame)
+    else:
+        logger.warning(
+            "JumpCfg.method='idtracker_velocity_threshold' but no "
+            "Session.velocity_threshold_px_frame is available; falling "
+            "back to sd_multiple (sd_mult=%.1f).",
+            cfg.sd_mult,
+        )
+        flags = _flag_jumps_sd(disp, cfg.sd_mult)
 
     affected_per_individual: list[int] = []
 
@@ -91,16 +123,30 @@ def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult
             affected_per_individual.append(0)
             continue
 
+        # Frames that were already NaN before jump detection ran (e.g. gaps
+        # gap_fill deliberately left unfilled because they exceeded
+        # max_gap_frames). These are not this step's responsibility and must
+        # survive it untouched -- see the regression test in
+        # test_jump_detect.py for the corruption this used to cause on real
+        # data: interpolating unconditionally with limit_direction="both"
+        # below filled every pre-existing gap in the series, not just the
+        # frames flagged here, silently erasing gap_fill's NaN policy.
+        pre_existing_nan = np.isnan(out[:, k, 0])
+
         # Set flagged positions to NaN first
         for f in flagged_frames:
             out[f, k, :] = np.nan
 
-        # Optionally interpolate
+        # Optionally interpolate — only the newly-flagged frames get filled;
+        # pre-existing gaps are restored to NaN afterward regardless of how
+        # far pandas' interpolation reached across them.
         if cfg.replacement == "linear_interp":
             for axis in range(2):
                 series = pd.Series(out[:, k, axis])
                 filled = series.interpolate(method="linear", limit_direction="both")
-                out[:, k, axis] = filled.to_numpy(dtype=np.float64, na_value=np.nan)
+                filled_arr = filled.to_numpy(dtype=np.float64, na_value=np.nan).copy()
+                filled_arr[pre_existing_nan] = np.nan
+                out[:, k, axis] = filled_arr
 
         affected_per_individual.append(int(flagged_frames.size))
 

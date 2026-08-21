@@ -177,3 +177,84 @@ def test_detect_overlaps_touching_edges_no_overlap() -> None:
     zone_set = ZoneSet(rois=[roi_a, roi_b])
     overlaps = detect_overlaps(zone_set)
     assert len(overlaps) == 0
+
+
+# ── assign_zones: sign-aware ROI groups (idtracker.ai roi_list) ────────────
+#
+# idtracker.ai's roi_list defines an arena as an additive outer boundary
+# minus subtractive exclusion holes (85% of ~660 real roi_list entries
+# across a 70-session corpus are subtractive). ROIs sharing a name combine
+# by sign rather than being independent zones.
+
+
+def test_point_inside_additive_outside_subtractive_hole() -> None:
+    outer = ROI(name="arena", level="main", sign="+",
+                vertices=[(0, 0), (100, 0), (100, 100), (0, 100)])
+    hole = ROI(name="arena", level="main", sign="-",
+               vertices=[(40, 40), (60, 40), (60, 60), (40, 60)])
+    zone_set = ZoneSet(rois=[outer, hole])
+    xy = np.array([[[50.0, 50.0]]])  # inside the hole
+    main, _sec = assign_zones(xy, zone_set)
+    assert main[0, 0] == ""  # excluded by the hole
+
+
+def test_point_inside_additive_outside_hole_matches() -> None:
+    outer = ROI(name="arena", level="main", sign="+",
+                vertices=[(0, 0), (100, 0), (100, 100), (0, 100)])
+    hole = ROI(name="arena", level="main", sign="-",
+               vertices=[(40, 40), (60, 40), (60, 60), (40, 60)])
+    zone_set = ZoneSet(rois=[outer, hole])
+    xy = np.array([[[10.0, 10.0]]])  # inside the arena, outside the hole
+    main, _sec = assign_zones(xy, zone_set)
+    assert main[0, 0] == "arena"
+
+
+def test_subtractive_only_roi_matches_nothing() -> None:
+    """A "-" polygon with no corresponding "+" polygon of the same name
+    excludes without ever including -- there is nothing to subtract from."""
+    hole = ROI(name="arena", level="main", sign="-",
+               vertices=[(0, 0), (10, 0), (10, 10), (0, 10)])
+    zone_set = ZoneSet(rois=[hole])
+    xy = np.array([[[5.0, 5.0]]])
+    main, _sec = assign_zones(xy, zone_set)
+    assert main[0, 0] == ""
+
+
+def test_same_name_additive_and_subtractive_do_not_count_as_overlap() -> None:
+    """detect_overlaps must not flag an arena's own outer boundary against
+    its own exclusion holes -- that overlap is by design (ROI.sign)."""
+    outer = ROI(name="arena", level="main", sign="+",
+                vertices=[(0, 0), (100, 0), (100, 100), (0, 100)])
+    hole = ROI(name="arena", level="main", sign="-",
+               vertices=[(40, 40), (60, 40), (60, 60), (40, 60)])
+    zone_set = ZoneSet(rois=[outer, hole])
+    assert detect_overlaps(zone_set) == []
+
+
+def test_default_sign_is_additive_backward_compatible() -> None:
+    """Hand-drawn zones (no sign specified) behave exactly as before."""
+    roi = make_square_roi("zone_A", 0, 0, 100, 100)
+    assert roi.sign == "+"
+
+
+def test_point_on_boundary_is_covered_not_excluded() -> None:
+    """Boundary-inclusive containment (Polygon.covers, not within) --
+    a point exactly on an arena's wall must count as inside it, since
+    wall-following/thigmotaxis is exactly the behaviour a strict interior
+    test would systematically undercount."""
+    roi = make_square_roi("zone_A", 0, 0, 100, 100)
+    zone_set = ZoneSet(rois=[roi])
+    xy = np.array([[[0.0, 50.0]]])  # exactly on the left edge
+    main, _sec = assign_zones(xy, zone_set)
+    assert main[0, 0] == "zone_A"
+
+
+def test_invalid_self_intersecting_polygon_does_not_crash() -> None:
+    """Real idtracker.ai roi_list polygons can be self-intersecting (2/10
+    in a real sample) -- must be repaired (buffer(0)), not crash assign_zones."""
+    bowtie = ROI(name="arena", level="main", sign="+",
+                 vertices=[(0, 0), (10, 10), (10, 0), (0, 10)])  # self-intersecting
+    zone_set = ZoneSet(rois=[bowtie])
+    xy = np.array([[[5.0, 1.0]]])
+    main, _sec = assign_zones(xy, zone_set)  # must not raise
+    assert main[0, 0] in ("", "arena")

@@ -36,12 +36,60 @@ from track2data.core.models import (
     ProjectManifest,
     RunResult,
     Session,
+    SessionRef,
     SessionRunResult,
 )
 from track2data.core.progress import ProgressCallback, ProgressEvent, emit
 from track2data.readers import read_session
 
 logger = logging.getLogger(__name__)
+
+
+def _map_array_index_to_true_frame(
+    tracking_intervals: list[tuple[int, int]] | None, n_frames: int
+) -> tuple[Any, bool]:
+    """
+    Map trajectory-array row position (0..n_frames-1) to the true video
+    frame number, using ``Session.tracking_intervals``.
+
+    idtracker.ai only tracks (and stores trajectory rows for) frames inside
+    the configured ``--tracking_intervals``; array position 0 is the first
+    frame of the first interval, not frame 0 of the video
+    (idtracker.ai_usage.md:552: "Tracking intervals in frames ... If not
+    set, the whole video is tracked"; session_idtrackerai.md:240: interval
+    end is exclusive). With a single interval starting elsewhere than 0,
+    using the raw array position as "frame" understates every frame number
+    by the interval's start; with multiple intervals, it also makes the
+    derived time axis non-monotonic in real time across the gap between
+    intervals.
+
+    Returns
+    -------
+    true_frames:
+        Array of length n_frames with the true video frame number per row.
+    valid:
+        Whether the mapping could be trusted, i.e. the intervals'
+        combined length matches n_frames exactly. When False, true_frames
+        is simply ``arange(n_frames)`` (today's behaviour) because the
+        intervals don't reconcile with the data -- e.g. a partial/embargoed
+        session.json, or gaps closed by preprocessing on idtracker.ai's
+        side that this reader has no way to reconstruct.
+    """
+    import numpy as np
+
+    if not tracking_intervals:
+        return np.arange(n_frames), False
+
+    lengths = [max(0, end - start) for start, end in tracking_intervals]
+    if sum(lengths) != n_frames:
+        return np.arange(n_frames), False
+
+    true_frames = np.empty(n_frames, dtype=np.int64)
+    pos = 0
+    for (start, _end), length in zip(tracking_intervals, lengths, strict=True):
+        true_frames[pos : pos + length] = np.arange(start, start + length)
+        pos += length
+    return true_frames, True
 
 
 class Engine:
@@ -106,14 +154,23 @@ class Engine:
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
     ) -> list[Session]:
-        """Import all sessions listed in ``manifest.sessions``."""
+        """Import all sessions listed in ``manifest.sessions``.
+
+        Raises on the first session that fails to import -- FR-IMP-3
+        requires failures be flagged with an actionable message, never
+        silently dropped (see issue #7: this used to catch, log, and
+        continue, so a bad session in a project was invisible unless
+        someone happened to check the log). This is the "import
+        everything, or tell me exactly what's wrong" entry point for
+        direct/CLI use. ``Engine.run()`` does NOT call this method for
+        its own batch resilience -- it imports each session individually
+        inside ``_run_one_session`` so one bad session is captured as
+        that session's ``SessionRunResult.error`` instead of aborting an
+        entire multi-session run.
+        """
         sessions: list[Session] = []
         refs = self._manifest.sessions
         for i, ref in enumerate(refs):
-            # Emit BEFORE the try opens: if the callback raises
-            # OperationCancelled, it must propagate out of this method,
-            # not be caught by the except below and treated as just
-            # another session that failed to import.
             emit(
                 progress,
                 ProgressEvent(
@@ -124,11 +181,7 @@ class Engine:
                     message=f"Importing {ref.session_id}",
                 ),
             )
-            try:
-                sess = self.import_session(ref.folder)
-                sessions.append(sess)
-            except Exception:
-                logger.exception("Failed to import session %s", ref.session_id)
+            sessions.append(self.import_session(ref.folder))
         return sessions
 
     # ── preprocessing ──────────────────────────────────────────────────────
@@ -178,7 +231,9 @@ class Engine:
         Compute all selected metrics for *psess*.
 
         Returns a dict mapping metric_id to a ``pd.DataFrame``.
-        Diagnostic metrics (D-1..D-5) are always computed.
+        Diagnostic metrics (D-1..D-6) are always computed.
+        Group metrics are skipped (with a warning) when
+        ``Session.exclusive_rois`` is True -- see the guard below.
         """
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
@@ -203,7 +258,29 @@ class Engine:
                     logger.exception("Metric %s failed; skipping.", mid)
 
         _run(sel.individual)
-        _run(sel.group)
+
+        if psess.session.exclusive_rois is True and sel.group:
+            # With exclusive_rois=True, identities are physically
+            # partitioned by ROI (idtracker.ai_usage.md: "Treat each
+            # separate ROI as a closed group of identities") -- animals in
+            # different partitions can never interact, so every group
+            # metric (nearest-neighbour distance, polarisation, cohesion,
+            # ...) computed across the whole session is meaningless.
+            # Skipping rather than silently producing publishable-looking
+            # numbers; per-compartment group metrics (using
+            # Session.identities_groups to know which identity is in which
+            # partition) would be the correct fix but is a larger,
+            # separate change than this guard.
+            logger.warning(
+                "Skipping group metrics (%s) for session %s: "
+                "Session.exclusive_rois=True -- identities are physically "
+                "partitioned, so cross-session group metrics are meaningless.",
+                ", ".join(sel.group),
+                psess.session_id,
+            )
+        else:
+            _run(sel.group)
+
         _run(sel.zone)
         _run(sel.diagnostic)
 
@@ -220,8 +297,28 @@ class Engine:
         Build the master per-frame DataFrame for *psess*.
 
         Columns: session_id, individual_id, frame, time_s, x_px, y_px,
-                 speed_px_s, heading_rad, main_zone, sec_zone.
+                 was_interpolated, speed_px_s, heading_rad, main_zone, sec_zone.
         Calibrated columns added when psess.px_per_cm is set.
+        individual_label/individual_color added when
+        Session.identities_labels/identities_colors are present.
+        was_interpolated is True where a position was originally missing
+        and is now present after preprocessing -- see
+        PreprocessedSession.was_interpolated.
+
+        When ``MetricSelection.quality_threshold`` > 0, rows whose
+        ``id_probabilities[frame, animal] < threshold`` have their position/
+        kinematics columns masked to NaN (position and derived columns only
+        -- session_id/individual_id/frame/time_s survive so the row can
+        still be located). id_probability itself is always emitted as a
+        column, masked or not, so the applied threshold is auditable from
+        the export rather than only from the manifest.
+
+        ``frame``/``time_s`` are the true video frame/time when
+        ``Session.tracking_intervals`` reconciles with the array length
+        (see ``_map_array_index_to_true_frame``); ``in_tracking_interval``
+        records whether that mapping was trusted (True) or the raw array
+        position was used as a fallback (NaN -- not False, since "outside
+        the interval" is not what an unreconciled mapping means).
         """
         import numpy as np
         import pandas as pd
@@ -230,9 +327,14 @@ class Engine:
         n_animals = psess.n_animals
         fps = psess.fps
 
-        frames = np.repeat(np.arange(n_frames), n_animals)
+        true_frame_per_row, mapping_valid = _map_array_index_to_true_frame(
+            psess.session.tracking_intervals, n_frames
+        )
+        frames = np.repeat(true_frame_per_row, n_animals)
         individuals = np.tile(np.arange(n_animals), n_frames)
         time_s = frames / fps
+        in_interval_fill = True if mapping_valid else np.nan
+        in_interval = np.full(n_frames * n_animals, in_interval_fill)
 
         xy_flat = psess.xy.reshape(-1, 2)
         speed_flat = psess.kinematics.speed_px_s.reshape(-1)
@@ -243,8 +345,10 @@ class Engine:
             "individual_id": individuals,
             "frame": frames,
             "time_s": time_s,
+            "in_tracking_interval": in_interval,
             "x_px": xy_flat[:, 0],
             "y_px": xy_flat[:, 1],
+            "was_interpolated": psess.was_interpolated.reshape(-1),
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
@@ -258,6 +362,48 @@ class Engine:
             df["main_zone"] = psess.main_zone.reshape(-1)
         if psess.sec_zone is not None:
             df["sec_zone"] = psess.sec_zone.reshape(-1)
+
+        # identities_labels/identities_colors are index-aligned with
+        # individual_id (0-based) -- surface them so a user who spent time
+        # naming/colouring identities in the idtracker.ai Validator gets
+        # them back in the export instead of bare 0..N-1 integers.
+        labels = psess.session.identities_labels
+        if labels:
+            df["individual_label"] = [
+                labels[i] if i < len(labels) else None for i in individuals
+            ]
+        colors = psess.session.identities_colors
+        if colors:
+            df["individual_color"] = [
+                colors[i] if i < len(colors) else None for i in individuals
+            ]
+
+        threshold = self._manifest.metrics.quality_threshold
+        id_prob = psess.session.id_probabilities
+        if id_prob is not None:
+            df["id_probability"] = id_prob.reshape(-1)
+        elif threshold > 0:
+            # A threshold was configured but there is nothing to evaluate it
+            # against -- record that honestly (an all-NaN column) rather
+            # than silently skipping the filter, which would make the
+            # manifest's quality_threshold value actively misleading (see
+            # MetricSelection.quality_threshold).
+            logger.warning(
+                "quality_threshold=%.3f configured but session %s has no "
+                "id_probabilities; no rows were masked.",
+                threshold,
+                psess.session_id,
+            )
+            df["id_probability"] = np.nan
+
+        if threshold > 0 and id_prob is not None:
+            below = df["id_probability"] < threshold
+            masked_cols = [
+                c for c in ("x_px", "y_px", "x_cm", "y_cm",
+                            "speed_px_s", "speed_cm_s", "heading_rad")
+                if c in df.columns
+            ]
+            df.loc[below, masked_cols] = np.nan
 
         for col, val in self._metadata_fields_for(psess.session_id).items():
             df[col] = val
@@ -276,7 +422,7 @@ class Engine:
         computed metric results, bucketing results by level (IL-*/GL-*/
         Z-*/D-*) and building the master per-frame table.
         """
-        from track2data.exporters.base import ExportPayload
+        from track2data.exporters.base import ExportPayload, SessionProvenance
 
         fish_by_frame = self.build_fish_by_frame(psess)
 
@@ -288,6 +434,31 @@ class Engine:
                         if k.startswith("Z-")}
         diagnostic_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("D-")}
+
+        session = psess.session
+        quality = session.quality or {}
+        tracking_log = session.tracking_log or {}
+        provenance = SessionProvenance(
+            reader=session.reader,
+            idtrackerai_version=session.idtrackerai_version,
+            trajectory_format=session.trajectory_format,
+            trajectory_variant=session.trajectory_variant,
+            n_frames=session.n_frames,
+            n_animals=session.n_animals,
+            has_stable_identities=session.has_stable_identities,
+            tracking_status=tracking_log.get("status"),
+            tracking_failure_summary=tracking_log.get("failure_summary", ""),
+            tracking_warnings_count=len(tracking_log.get("warnings", [])),
+            estimated_accuracy=quality.get("estimated_accuracy"),
+            fraction_identified=quality.get("fraction_identified"),
+            silhouette_score=quality.get("silhouette_score"),
+            fragment_connectivity=quality.get("fragment_connectivity"),
+            length_unit=session.length_unit,
+            length_unit_label=self._manifest.calibration.length_unit_label,
+            length_unit_confirmed_by_user=self._manifest.calibration.length_unit_confirmed_by_user,
+            body_length_reliable=session.body_length_reliable,
+            blob_body_length_source_file=session.blob_body_length_source_file,
+        )
 
         return ExportPayload(
             session_id=psess.session_id,
@@ -301,6 +472,7 @@ class Engine:
             diagnostic_metrics=diagnostic_metrics,
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
+            provenance=provenance,
         )
 
     def export(
@@ -400,10 +572,15 @@ class Engine:
 
         Each session's output is written to ``out_dir/<session_id>/`` so
         multi-session runs never collide. A session that raises during
-        preprocessing, metrics, or export is captured as that session's
-        ``SessionRunResult.error`` without aborting the rest of the batch
-        -- ``OperationCancelled`` is the one exception never caught here,
-        since it must propagate to actually stop the run.
+        import, preprocessing, metrics, or export is captured as that
+        session's ``SessionRunResult.error`` without aborting the rest of
+        the batch -- ``OperationCancelled`` is the one exception never
+        caught here, since it must propagate to actually stop the run.
+        (This is deliberately more forgiving than ``import_sessions()``,
+        which fails loud on the first bad session -- see issue #7: a
+        single unreadable session in a 70-session batch shouldn't lose
+        the other 69, but it must never vanish silently either, hence
+        surfacing it as this session's own ``.error`` instead.)
 
         ``n_workers`` is accepted for forward compatibility with a future
         parallel implementation but only the sequential (n_workers=1)
@@ -416,25 +593,25 @@ class Engine:
                 n_workers,
             )
 
-        n_configured = len(self._manifest.sessions)
+        refs = self._manifest.sessions
+        n_configured = len(refs)
         emit(
             progress,
             ProgressEvent(stage="run", current=0, total=n_configured, message="Run started"),
         )
 
-        sessions = self.import_sessions(progress=progress)
         results: list[SessionRunResult] = []
-        for i, sess in enumerate(sessions):
+        for i, ref in enumerate(refs):
             results.append(
-                self._run_one_session(sess, Path(out_dir) / sess.session_id, exporters, progress)
+                self._run_one_session(ref, Path(out_dir) / ref.session_id, exporters, progress)
             )
             emit(
                 progress,
                 ProgressEvent(
                     stage="session",
                     current=i + 1,
-                    total=len(sessions),
-                    session_id=sess.session_id,
+                    total=n_configured,
+                    session_id=ref.session_id,
                     message="Session complete",
                 ),
             )
@@ -449,14 +626,18 @@ class Engine:
 
     def _run_one_session(
         self,
-        session: Session,
+        ref: SessionRef,
         session_out_dir: Path,
         exporters: list[str] | None,
         progress: ProgressCallback | None,
     ) -> SessionRunResult:
         """Run one session for ``run()``, capturing its outcome (including
-        any failure) as a SessionRunResult rather than raising -- except
-        OperationCancelled, which must propagate to stop the whole run."""
+        any failure -- import, preprocess, metrics, or export) as a
+        SessionRunResult rather than raising -- except OperationCancelled,
+        which must propagate to stop the whole run. Keyed throughout by
+        ``ref.session_id`` (the manifest's own identity), not a
+        reader-derived one, since it must be available even when import
+        itself fails."""
         import time
 
         from track2data.core.progress import OperationCancelled
@@ -464,12 +645,20 @@ class Engine:
         start = time.monotonic()
         psess = None
         try:
+            session = self.import_session(ref.folder)
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="import", current=1, total=4,
+                    session_id=ref.session_id, message="Import complete",
+                ),
+            )
             psess = self.preprocess(session)
             emit(
                 progress,
                 ProgressEvent(
-                    stage="preprocess", current=1, total=3,
-                    session_id=session.session_id, message="Preprocessing complete",
+                    stage="preprocess", current=2, total=4,
+                    session_id=ref.session_id, message="Preprocessing complete",
                 ),
             )
             metric_results = self.compute_metrics(psess)
@@ -477,16 +666,16 @@ class Engine:
             emit(
                 progress,
                 ProgressEvent(
-                    stage="metrics", current=2, total=3,
-                    session_id=session.session_id, message="Metrics computed",
+                    stage="metrics", current=3, total=4,
+                    session_id=ref.session_id, message="Metrics computed",
                 ),
             )
             written = self.export(payload, session_out_dir, exporters)
             emit(
                 progress,
                 ProgressEvent(
-                    stage="export", current=3, total=3,
-                    session_id=session.session_id, message="Export complete",
+                    stage="export", current=4, total=4,
+                    session_id=ref.session_id, message="Export complete",
                 ),
             )
             diagnostics = {k: v for k, v in metric_results.items() if k.startswith("D-")}
@@ -494,7 +683,7 @@ class Engine:
                 k: v.head(200) for k, v in metric_results.items() if not k.startswith("D-")
             }
             return SessionRunResult(
-                session_id=session.session_id,
+                session_id=ref.session_id,
                 written=written,
                 diagnostics=diagnostics,
                 metric_previews=metric_previews,
@@ -504,9 +693,9 @@ class Engine:
         except OperationCancelled:
             raise
         except Exception as exc:
-            logger.exception("Session %s failed.", session.session_id)
+            logger.exception("Session %s failed.", ref.session_id)
             return SessionRunResult(
-                session_id=session.session_id,
+                session_id=ref.session_id,
                 # Preserved when the failure came *after* preprocessing: the
                 # step log is often what explains why the later stage blew up.
                 preprocess_report=psess.report if psess is not None else None,
