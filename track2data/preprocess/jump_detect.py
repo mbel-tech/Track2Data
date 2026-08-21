@@ -91,16 +91,30 @@ def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult
             affected_per_individual.append(0)
             continue
 
+        # Frames that were already NaN before jump detection ran (e.g. gaps
+        # gap_fill deliberately left unfilled because they exceeded
+        # max_gap_frames). These are not this step's responsibility and must
+        # survive it untouched -- see the regression test in
+        # test_jump_detect.py for the corruption this used to cause on real
+        # data: interpolating unconditionally with limit_direction="both"
+        # below filled every pre-existing gap in the series, not just the
+        # frames flagged here, silently erasing gap_fill's NaN policy.
+        pre_existing_nan = np.isnan(out[:, k, 0])
+
         # Set flagged positions to NaN first
         for f in flagged_frames:
             out[f, k, :] = np.nan
 
-        # Optionally interpolate
+        # Optionally interpolate — only the newly-flagged frames get filled;
+        # pre-existing gaps are restored to NaN afterward regardless of how
+        # far pandas' interpolation reached across them.
         if cfg.replacement == "linear_interp":
             for axis in range(2):
                 series = pd.Series(out[:, k, axis])
                 filled = series.interpolate(method="linear", limit_direction="both")
-                out[:, k, axis] = filled.to_numpy(dtype=np.float64, na_value=np.nan)
+                filled_arr = filled.to_numpy(dtype=np.float64, na_value=np.nan).copy()
+                filled_arr[pre_existing_nan] = np.nan
+                out[:, k, axis] = filled_arr
 
         affected_per_individual.append(int(flagged_frames.size))
 
