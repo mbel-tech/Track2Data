@@ -17,6 +17,11 @@ dependencies = [
     "scipy>=1.11",                  # preprocess.pipeline hard-imports identity_switch
                                      # (linear_sum_assignment) and smoothing (savgol_filter)
                                      # unconditionally -- not actually optional at runtime
+    "h5py>=3.8",                    # trajectories.h5 is idtracker.ai's own default output
+                                     # format (trajectories_formats defaults to
+                                     # ['h5','npy','csv']) -- readers/idtrackerai/formats/h5.py.
+                                     # The reader degrades gracefully to npy/csv if h5py is
+                                     # ever made optional again; see reader.py::_load_payload.
 ]
 
 [project.optional-dependencies]
@@ -91,6 +96,7 @@ markers = [
     "r_parity: marks tests that compare output against R pipeline reference",
     "r_parity_local: marks tests requiring embargoed local R-pipeline fixtures (skip in CI)",
     "slow: marks tests that are expected to be slow",
+    "corpus_local: marks tests requiring the embargoed 70-session real idtracker.ai corpus (skip in CI; skips automatically when the corpus directory is absent)",
 ]
 
 [tool.coverage.run]

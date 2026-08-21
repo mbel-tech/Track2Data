@@ -63,7 +63,11 @@ def _fill_series(series: np.ndarray, max_gap: int) -> tuple[np.ndarray, int]:
     return out, filled_count
 
 
-def fill_gaps(xy: np.ndarray, cfg: GapFillCfg) -> tuple[np.ndarray, PPStepResult]:
+def fill_gaps(
+    xy: np.ndarray,
+    cfg: GapFillCfg,
+    crossing_frame_mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, PPStepResult]:
     """Fill short NaN gaps in trajectories via linear interpolation.
 
     Only gaps of at most *cfg.max_gap_frames* consecutive NaN frames are
@@ -75,6 +79,15 @@ def fill_gaps(xy: np.ndarray, cfg: GapFillCfg) -> tuple[np.ndarray, PPStepResult
         Position array of shape ``(n_frames, n_animals, 2)``, dtype float64.
     cfg:
         Gap-fill configuration.
+    crossing_frame_mask:
+        Optional ``(n_frames,)`` bool array from
+        ``readers.idtrackerai.fragments.crossing_frame_mask`` -- True where
+        at least one idtracker.ai crossing fragment is active. When given,
+        the step's ``notes`` report what fraction of filled frames overlap
+        a crossing (occlusion by a conspecific -- the animal is present,
+        interpolation is on firmer footing) versus not (no detection at
+        all, interpolation is a weaker guess). Purely informational: does
+        not change which gaps get filled.
 
     Returns
     -------
@@ -84,7 +97,7 @@ def fill_gaps(xy: np.ndarray, cfg: GapFillCfg) -> tuple[np.ndarray, PPStepResult
     result:
         ``PPStepResult`` recording how many frames were affected.
     """
-    _, n_animals, _ = xy.shape
+    n_frames, n_animals, _ = xy.shape
     out = xy.copy()
 
     if not cfg.enabled:
@@ -107,8 +120,23 @@ def fill_gaps(xy: np.ndarray, cfg: GapFillCfg) -> tuple[np.ndarray, PPStepResult
 
     total_affected = sum(affected_per_individual)
 
+    notes = ""
+    if crossing_frame_mask is not None and total_affected > 0:
+        filled_this_frame = np.isnan(xy[:, :, 0]) & ~np.isnan(out[:, :, 0])
+        filled_frames = filled_this_frame.any(axis=1)  # (n_frames,)
+        n_filled_frames = int(filled_frames.sum())
+        n_with_crossing = int((filled_frames & crossing_frame_mask[:n_frames]).sum())
+        pct = 100 * n_with_crossing / n_filled_frames if n_filled_frames else 0.0
+        notes = (
+            f"{n_with_crossing}/{n_filled_frames} filled frames ({pct:.1f}%) "
+            "overlap an active idtracker.ai crossing fragment (occlusion by "
+            "a conspecific, not necessarily a missed detection); the rest "
+            "have no crossing fragment active at that frame."
+        )
+
     return out, PPStepResult(
         step_name="gap_fill",
         affected_frames=total_affected,
         affected_per_individual=affected_per_individual,
+        notes=notes,
     )

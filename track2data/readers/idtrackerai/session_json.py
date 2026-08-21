@@ -9,12 +9,54 @@ handle them leniently and emits IDT_JSON_NONSTRICT at info level.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# "+ Polygon [[274.1, 13.2], [144.9, 401.2], ...]" or "- Polygon [...]"
+# (idtracker.ai_usage.md:30-31). "+" is the arena outer boundary, "-" is an
+# exclusion hole -- 85% of the ~660 roi_list entries across a 70-session
+# real corpus are subtractive, so ignoring the sign and treating every
+# entry as additive would include every excluded region as trackable area.
+_ROI_STRING_RE = re.compile(r"^\s*([+-])\s*Polygon\s*(\[.*\])\s*$")
+
+
+def parse_roi_string(raw: str) -> dict[str, Any] | None:
+    """
+    Parse one ``session.json['roi_list']`` entry into ``{sign, vertices, raw}``.
+
+    Returns None (logging a warning, never raising) when *raw* doesn't
+    match the documented format -- this is enrichment, and a malformed
+    entry must not break session import.
+    """
+    match = _ROI_STRING_RE.match(raw)
+    if not match:
+        logger.warning("Could not parse roi_list entry (unrecognised format): %r", raw[:80])
+        return None
+
+    sign, literal = match.groups()
+    try:
+        raw_vertices = ast.literal_eval(literal)
+    except (ValueError, SyntaxError):
+        logger.warning("Could not parse roi_list polygon vertices: %r", raw[:80])
+        return None
+
+    try:
+        vertices = [(float(x), float(y)) for x, y in raw_vertices]
+    except (TypeError, ValueError):
+        logger.warning("roi_list polygon vertices are not (x, y) pairs: %r", raw[:80])
+        return None
+
+    if len(vertices) < 3:
+        logger.warning("roi_list polygon has fewer than 3 vertices: %r", raw[:80])
+        return None
+
+    return {"sign": sign, "vertices": vertices, "raw": raw}
 
 _CONSTANT_MAP = {
     "Infinity": float("inf"),
@@ -55,3 +97,39 @@ def load_session_json(folder: Path) -> dict[str, Any] | None:
             exc,
         )
         return None
+
+
+def parse_timers_to_durations(timers: Any) -> dict[str, float]:
+    """
+    Convert ``session.json['timers']`` into ``{stage_name: seconds}``.
+
+    ``timers`` is a dict keyed by stage name, each value carrying
+    ``start_time``/``finish_time`` ISO-8601 timestamps (verified against
+    the real 70-session corpus -- undocumented in the official reference).
+    A stage whose ``finish_time`` is null (observed once in the corpus, on
+    a session whose tracking run crashed mid-stage) is skipped rather than
+    guessed at; a partial timers dict is exactly the signal that a run
+    didn't complete cleanly.
+
+    This is the structured, parse-free replacement for the log parser's
+    old (and never-matching) duration regex -- see readers/idtrackerai/log.py.
+    """
+    from datetime import datetime
+
+    if not isinstance(timers, dict):
+        return {}
+
+    durations: dict[str, float] = {}
+    for stage_name, entry in timers.items():
+        if not isinstance(entry, dict):
+            continue
+        start, finish = entry.get("start_time"), entry.get("finish_time")
+        if not start or not finish:
+            continue
+        try:
+            t0 = datetime.fromisoformat(start)
+            t1 = datetime.fromisoformat(finish)
+        except (TypeError, ValueError):
+            continue
+        durations[stage_name] = (t1 - t0).total_seconds()
+    return durations

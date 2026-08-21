@@ -58,7 +58,17 @@ class Session(BaseModel):
     # Px-to-real-unit ratio from the validator's length-calibration tool; None = not calibrated.
     length_unit: float | None = None
     identities_labels: list[str] | None = None
-    identities_groups: list[str] | None = None
+    # Hex colours ("#ff0000", ...) assigned per identity in the Validator
+    # GUI, index-aligned with identities_labels / individual_id. Only in
+    # session.json, not the trajectory dict -- see reader.py's session.json
+    # enrichment. Lets an export match the colours a user already spent
+    # time associating with each identity while validating.
+    identities_colors: list[str] | None = None
+    # idtracker.ai docs disagree on this type: session_idtrackerai.md:21 says dict
+    # ("Named groups of identities... if exclusive ROI, saved here"); output_structure
+    # says list. Real 6.x sessions ship a dict (verified: 70/70 in the GOT corpus).
+    # Kept permissive on purpose -- do not narrow this back to list[str].
+    identities_groups: dict[str, Any] | list[str] | None = None
     setup_points: dict[str, Any] | None = None
     # [[start, end], …] frame ranges that are valid; frames outside are not tracked.
     tracking_intervals: list[tuple[int, int]] | None = None
@@ -77,6 +87,66 @@ class Session(BaseModel):
     trajectory_format: str | None = None
     # Verbatim unknown keys from the source trajectory dict.
     raw_attrs: dict[str, Any] | None = None
+
+    # ── session.json fields (Fase 4) ────────────────────────────────────────
+    # idtracker.ai's own authoritative count of frames with more blobs than
+    # animals -- independent of any user-side inconsistent_frames.csv, and
+    # the only place a `Check_segmentation is False` (silenced) session can
+    # still surface segmentation contamination.
+    number_of_error_frames: int | None = None
+    # When True, identities are physically partitioned by ROI: every group
+    # metric (nearest-neighbour distance, polarisation, cohesion, ...) is
+    # meaningless across partitions, since those animals can never interact.
+    exclusive_rois: bool | None = None
+    # ISO timestamp of the last Validator manual-review pass, or None if the
+    # session was never opened in the Validator.
+    last_validated: str | None = None
+    # Predicts which output folders survive (idtracker.ai_usage.md's
+    # data_policy table) -- e.g. "trajectories" deletes preprocessing/,
+    # identification_images/, and accumulation/.
+    data_policy: str | None = None
+    # [{"point_A": [x,y], "point_B": [x,y], "distance": float}, ...] -- the
+    # raw pixel-endpoint pairs behind length_unit. Multiple entries give a
+    # real uncertainty estimate on every calibrated metric (see
+    # calibration/bodylength.py); length_unit alone is just their average.
+    length_calibrations: list[dict[str, Any]] | None = None
+    # Segmentation parameters that body_length/areas are *defined by*
+    # (output_structure_idtrackerai.md:104): intensity_ths, area_ths,
+    # use_bkg, background_subtraction_stat, erosion_kernel_size. Comparing
+    # body length/area across sessions is only valid when these match --
+    # kept as a single dict since they're always used together for that
+    # one batch-consistency question, not individually.
+    segmentation_params: dict[str, Any] | None = None
+    # idtracker.ai's own outlier-displacement threshold (px/frame),
+    # computed from the actual tracked data -- a better-grounded default
+    # for jump detection than a hardcoded SD-multiple; see
+    # preprocess/jump_detect.py's "idtracker_velocity_threshold" method.
+    velocity_threshold_px_frame: float | None = None
+    # resolution_reduction/id_image_size apply ONLY to the identification
+    # CNN's input images (idtracker.ai_usage.md:370), never to trajectory
+    # coordinates -- do NOT scale raw_xy by resolution_reduction. Recorded
+    # for idmatcher.ai cross-session-matching provenance (both must match
+    # across sessions for identity matching to be valid), not for use here.
+    resolution_reduction: float | None = None
+    id_image_size: list[int] | None = None
+    # Paths only, not decoded pixel data -- see
+    # readers/idtrackerai/preprocessing.py's module docstring for why.
+    roi_mask_path: Path | None = None
+    background_image_path: Path | None = None
+    # Parsed preprocessing/list_of_fragments.json -- see
+    # readers/idtrackerai/fragments.py's module docstring for the schema
+    # (undocumented on the official side; derived empirically) and the
+    # defensive-parsing rules any consumer of session.fragments must follow.
+    fragments: dict[str, Any] | None = None
+    # Which preprocessing/list_of_blobs*.pickle produced body_length_px,
+    # when it came from the opt-in blob-layer enrichment
+    # (readers/idtrackerai/blobs.py) rather than the session-wide scalar
+    # broadcast the normal reader sets. None when body_length_px is still
+    # that broadcast (or absent). Recorded because 5/70 real sessions carry
+    # a separate list_of_blobs_validated.pickle, and mixing curated and
+    # uncurated sessions in one analysis without knowing which is which is
+    # a reproducibility hazard.
+    blob_body_length_source_file: str | None = None
 
     @property
     def n_frames(self) -> int:
@@ -98,7 +168,14 @@ class GapFillCfg(BaseModel):
 
 class JumpCfg(BaseModel):
     enabled: bool = True
-    method: Literal["sd_multiple", "percentile"] = "sd_multiple"
+    # "idtracker_velocity_threshold" uses Session.velocity_threshold_px_frame
+    # -- idtracker.ai's own outlier-displacement bound, computed from the
+    # actual tracked data -- as an absolute px/frame threshold, instead of
+    # the hardcoded SD-multiple/percentile heuristics below. Falls back to
+    # sd_multiple (with a warning) when the session has no such value.
+    method: Literal["sd_multiple", "percentile", "idtracker_velocity_threshold"] = (
+        "sd_multiple"
+    )
     sd_mult: float = 10.0
     percentile: float = 99.0
     pct_mult: float = 2.0
@@ -106,7 +183,18 @@ class JumpCfg(BaseModel):
 
 
 class IdSwitchCfg(BaseModel):
-    enabled: bool = True
+    # Defaults to OFF. This corrector reasons about identity from raw
+    # geometry alone (nearest-neighbour + Hungarian assignment), with no
+    # knowledge of idtracker.ai's own fragment boundaries -- the only
+    # frames where an identity swap is even possible. Measured on the real
+    # idtracker.ai corpus (session_trial10_Segment1), it re-permutes 17.1%
+    # of the recording and injects ~640px single-frame teleports (a
+    # stationary animal's path length inflated from 218px to 11,639px,
+    # +5234%). See docs_from_idtracker.ai/fragment_idtrackerai.md and the
+    # format-alignment plan Fase 1.5b/6d: a fragment-boundary-aware
+    # replacement is planned; this pass is not safe to run unconditionally
+    # until then. Enable only if you understand and accept that risk.
+    enabled: bool = False
     tier1_ratio: float = 1.5
     tier2_hungarian: bool = True
     consolidate_window: int = 5
@@ -139,6 +227,17 @@ class CalibrationConfig(BaseModel):
     mode: Literal["scalar", "bodylength"] = "bodylength"
     px_per_cm: float | None = None
     bl_min_samples: int = 30
+    # idtracker.ai's length_unit (session_idtrackerai.md:242) is a ratio
+    # to "user defined units" -- it does NOT record which physical unit
+    # the Validator's Length Calibration tool was actually run in. The
+    # arithmetic in calibration/bodylength.py and every *_cm-suffixed
+    # export column is correct regardless; only the label is an
+    # assumption. Defaults to "cm" (today's unconfirmed assumption, made
+    # explicit rather than silent) -- set it to whatever unit was really
+    # used (e.g. "mm") when Session.length_unit came from a calibration;
+    # confirmed_by_user records whether anyone actually verified it.
+    length_unit_label: str = "cm"
+    length_unit_confirmed_by_user: bool = False
 
 
 class ROI(BaseModel):
@@ -146,12 +245,28 @@ class ROI(BaseModel):
     level: str = "main"
     vertices: list[tuple[float, float]]
     area_units: float | None = None
+    # "+" (additive) or "-" (subtractive/exclusion). idtracker.ai's roi_list
+    # defines an arena as one or more "+ Polygon" outer boundaries minus any
+    # number of "- Polygon" exclusion holes (idtracker.ai_usage.md:30-31).
+    # Multiple ROIs sharing the same (name, level) with different signs
+    # combine: a point belongs to the zone iff it is covered by at least
+    # one "+" polygon and not covered by any "-" polygon of that name.
+    # Defaults to "+" so hand-drawn zones (which have no notion of holes)
+    # are unaffected.
+    sign: Literal["+", "-"] = "+"
 
 
 class ZoneSet(BaseModel):
     rois: list[ROI] = []
     orientation_tag: str | None = None
     zone_levels: dict[str, str] = {}
+    # Pixel dimensions of the video these ROIs were defined against. Set
+    # when seeding a ZoneSet from Session.roi_list; None for hand-drawn
+    # zones (no source video to compare against). Used to detect (not
+    # silently ignore) reusing a ZoneSet on a session tracked at a
+    # different resolution -- see zones/io.py::zone_set_from_roi_list.
+    source_width_px: int | None = None
+    source_height_px: int | None = None
 
 
 # ── Metric selection ──────────────────────────────────────────────────────────
@@ -328,3 +443,23 @@ class PreprocessedSession:
     @property
     def fps(self) -> float:
         return self.session.video.fps
+
+    @property
+    def was_interpolated(self) -> np.ndarray:
+        """
+        (n_frames, n_animals) bool -- True where a position was originally
+        missing (NaN in ``Session.raw_xy``) and is now present after
+        preprocessing.
+
+        Before this, ``trajectory_variant`` was a Session-level constant
+        (always ``"with_gaps"``), so nothing in the exported per-frame
+        table could distinguish a measured position from a reconstructed
+        one. This is the honest, minimal version of that distinction: it
+        does NOT flag ``jump_detect``'s anomaly-corrected replacements
+        that did not originate from a NaN gap (those are already visible
+        in ``PreprocessReport``'s ``jump_detect`` step, which records
+        exactly how many frames it touched).
+        """
+        raw_nan = np.isnan(self.session.raw_xy[:, :, 0])
+        final_present = ~np.isnan(self.xy[:, :, 0])
+        return raw_nan & final_present

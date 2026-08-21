@@ -47,13 +47,32 @@ built-in catalogue.
 
 ### 2.1 Body-length source for BL-calibrated outputs
 
-When `Session.length_unit` is present (i.e. the validator's
-length-calibration tool was used), per-individual body length is
-computed as the **median diagonal of each individual's blob bounding
-boxes** from `Session.bbox_table` (column `body_length_px` grouped by
-`identity`). When `bbox_table` is unavailable, fall back to the
-session-mean `Session.body_length_px` and surface the
-`IDT_BODY_LENGTH_UNRELIABLE` warning until the user acknowledges.
+Per-individual body length comes from `Session.body_length_px`, populated
+by the reader from idtracker.ai's own `body_length` /
+`session.json:median_body_length` value (a single session-wide scalar,
+broadcast across all animals -- see `readers/idtrackerai/normaliser.py`).
+When `Session.length_unit` is present, this is converted to real units by
+`calibration/bodylength.py`; otherwise it stays in pixels.
+
+**`Session.bbox_table` (the `<session>_bboxes.csv` produced by
+`extract_bboxes.py`) is deliberately NOT used for calibration**, and no
+future revision of this spec should reintroduce it without re-reading
+`docs/EXTRACT_BBOXES_FIX.md` first. Measured on a real session, that
+script's per-identity median overestimates the tracker's own
+`median_body_length` by **+27.8%**, with a **1.75×** spread between
+individual medians of the same species in the same arena -- because it
+medians over every `is_an_individual` blob rather than the narrower
+`seems_like_individual` + unicity-frame population idtracker.ai itself
+uses. A correctly-filtered per-identity value (superior to the
+session-wide broadcast above) requires reading
+`preprocessing/list_of_blobs.pickle` directly with that filter; this is
+planned but not yet implemented (format-alignment plan, Fase 6c).
+
+`IDT_BODY_LENGTH_UNRELIABLE` and `Session.body_length_reliable` (always
+`False` regardless of source -- `output_structure_idtrackerai.md`
+explicitly warns this value depends on segmentation parameters and video
+conditions) still gate user acknowledgement before BL-calibrated metrics
+are treated as trustworthy.
 
 ### 2.2 Output schema
 

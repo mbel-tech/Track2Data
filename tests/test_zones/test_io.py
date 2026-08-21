@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from track2data.core.models import ROI, ZoneSet
-from track2data.zones.io import load_zones_csv, save_zones_csv, zone_set_from_dict
+from track2data.zones.io import (
+    load_zones_csv,
+    save_zones_csv,
+    zone_set_from_dict,
+    zone_set_from_roi_list,
+)
 
 # ── CSV round-trip ────────────────────────────────────────────────────────────
 
@@ -137,3 +142,53 @@ def test_zone_set_from_dict_tuple_vertices() -> None:
     }
     zs = zone_set_from_dict(data)
     assert zs.rois[0].vertices[0] == (5.0, 6.0)
+
+
+# ── zone_set_from_roi_list ───────────────────────────────────────────────────
+#
+# Regression coverage: Session.roi_list was stored unparsed ({"raw": r}) and
+# had zero consumers -- nothing built a ZoneSet from it, so a user redrew by
+# hand an arena idtracker.ai already had. 85% of real roi_list entries (a
+# 70-session corpus) are subtractive exclusion holes.
+
+
+def test_zone_set_from_roi_list_empty() -> None:
+    zs = zone_set_from_roi_list(None)
+    assert zs.rois == []
+    zs2 = zone_set_from_roi_list([])
+    assert zs2.rois == []
+
+
+def test_zone_set_from_roi_list_builds_signed_rois() -> None:
+    roi_list = [
+        {"sign": "+", "vertices": [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], "raw": "+ ..."},
+        {"sign": "-", "vertices": [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0)], "raw": "- ..."},
+    ]
+    zs = zone_set_from_roi_list(roi_list)
+    assert len(zs.rois) == 2
+    assert {r.sign for r in zs.rois} == {"+", "-"}
+    assert all(r.name == "arena" for r in zs.rois)
+    assert all(r.level == "main" for r in zs.rois)
+
+
+def test_zone_set_from_roi_list_records_source_dimensions() -> None:
+    roi_list = [{"sign": "+", "vertices": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]}]
+    zs = zone_set_from_roi_list(roi_list, width_px=1920, height_px=1080)
+    assert zs.source_width_px == 1920
+    assert zs.source_height_px == 1080
+
+
+def test_zone_set_from_roi_list_skips_malformed_entries() -> None:
+    roi_list = [
+        {"sign": "+", "vertices": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]},
+        {"raw": "unparseable, no sign/vertices key"},
+    ]
+    zs = zone_set_from_roi_list(roi_list)
+    assert len(zs.rois) == 1
+
+
+def test_zone_set_from_roi_list_custom_name_and_level() -> None:
+    roi_list = [{"sign": "+", "vertices": [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]}]
+    zs = zone_set_from_roi_list(roi_list, name="tank", level="secondary")
+    assert zs.rois[0].name == "tank"
+    assert zs.rois[0].level == "secondary"
