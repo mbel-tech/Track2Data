@@ -637,8 +637,10 @@ In `UI_DESIGN.md` Page 6, each row in the metric-selection list becomes:
 ```
 
 - ✓ — selection checkbox (existing)
-- ⓘ — info icon (NEW)
-- ⚙ — per-metric config (existing; some metrics only)
+- ⓘ — info icon
+- ⚙ — per-metric config — **stub in v1**: present on every row, but
+  clicking it shows a "Not yet implemented" message. No metric has a
+  config schema and Screen 6.3 does not exist yet.
 
 ### 6.2 Click behaviour
 
@@ -681,22 +683,26 @@ Click on ⓘ opens a modal `MetricInfoDialog(metric: Metric)`:
 
 The modal closes on:
 
-- ✕ button click
-- `Escape` key
-- click outside the modal area (modal is `Qt.Popup` style, or a
-  `QDialog` with `setModal(True)` + outside-click hook)
+- title-bar ✕
+- `Escape` key (QDialog's own default behaviour)
+- click outside the modal's rect — implemented as a QApplication-wide
+  event filter installed for the dialog's lifetime, checking whether a
+  `MouseButtonPress` falls outside `self.rect()`
 
 ### 6.4 Implementation
 
 `MetricInfoDialog` is a small `QDialog` subclass that:
 
-1. Receives a `Metric` instance.
+1. Receives a `Metric` class.
 2. Reads `metric.documentation` (the `MetricDocumentation` model from §5.2).
-3. Renders the panels above with `QLabel` (Markdown-styled text).
-4. Provides a "Copy citation" button that copies the citation string to
-   the clipboard.
-5. Has `keyPressEvent` for Escape and `mousePressEvent` on the
-   semi-transparent overlay for outside-click closure.
+3. Renders the panels above as plain text in a read-only `QTextEdit`
+   (no Markdown/LaTeX rendering — `formula_latex`, when present, is
+   shown as its raw source string).
+4. Provides a "Copy citation" button that copies the citation string
+   (plus DOI, when present) to the clipboard.
+5. Relies on `QDialog`'s own default Escape handling, plus a
+   QApplication-wide event filter installed while shown/removed when
+   hidden, for outside-click closure.
 
 ### 6.5 Visibility rule
 
@@ -704,6 +710,12 @@ Show the ⓘ icon **only when** `metric.documentation.citation is not
 None` *or* `metric.documentation.formula_plain is not None`. Metrics
 without a published formula or canonical reference (e.g. ad-hoc
 diagnostic outputs) get a tooltip instead, not the modal.
+
+Note: `MetricDocumentation.formula_plain` (§5.2) is currently a
+required, non-`None` `str` field on every built-in metric, so this
+rule never actually hides the ⓘ icon today. It's implemented as
+specified for forward compatibility, in case a future metric type
+legitimately has no formula.
 
 ### 6.6 Source of truth
 
