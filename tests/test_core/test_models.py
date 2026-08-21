@@ -14,8 +14,10 @@ from track2data.core.models import (
     CalibrationConfig,
     MetricSelection,
     PreprocessConfig,
+    PreprocessReport,
     ProjectManifest,
     Session,
+    SessionRunResult,
     VideoInfo,
     ZoneSet,
 )
@@ -361,3 +363,17 @@ class TestSessionExtendedFields:
             matching_results=["session_trial1_Segment1"],
         )
         assert "session_trial1_Segment1" in s.matching_results  # type: ignore[operator]
+
+
+# ── SessionRunResult ─────────────────────────────────────────────────────────
+
+
+class TestSessionRunResult:
+    def test_preprocess_report_defaults_to_none(self) -> None:
+        result = SessionRunResult(session_id="s1")
+        assert result.preprocess_report is None
+
+    def test_preprocess_report_stored(self) -> None:
+        report = PreprocessReport()
+        result = SessionRunResult(session_id="s1", preprocess_report=report)
+        assert result.preprocess_report is report

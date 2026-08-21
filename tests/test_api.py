@@ -699,6 +699,69 @@ def test_run_captures_per_session_error_without_aborting_batch(tmp_path: Path) -
     assert by_id["bad"].written == []
 
 
+def test_run_attaches_preprocess_report_to_session_run_result(tmp_path: Path) -> None:
+    """SessionRunResult.preprocess_report must carry the same PreprocessReport
+    that Engine.preprocess() produces for that session -- currently it's
+    computed but discarded before _run_one_session() builds the result."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    expected_report = engine.preprocess(session).report
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    got = result.sessions[0].preprocess_report
+    assert isinstance(got, PreprocessReport)
+    assert [s.step_name for s in got.steps] == [s.step_name for s in expected_report.steps]
+
+
+def test_run_leaves_preprocess_report_none_when_preprocessing_fails(tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+    engine.preprocess = lambda _session: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    assert result.sessions[0].error is not None
+    assert result.sessions[0].preprocess_report is None
+
+
+def test_session_run_result_preprocess_report_survives_pickle(tmp_path: Path) -> None:
+    import pickle
+
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+    restored = pickle.loads(pickle.dumps(result.sessions[0]))
+
+    assert restored.preprocess_report is not None
+    assert [s.step_name for s in restored.preprocess_report.steps] == [
+        s.step_name for s in result.sessions[0].preprocess_report.steps
+    ]
+
+
 def test_run_all_is_a_thin_wrapper_returning_run_written(tmp_path: Path) -> None:
     from track2data.api import Engine
 
