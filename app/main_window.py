@@ -13,13 +13,14 @@ Implements the QMainWindow shell described in UI_DESIGN.md §3:
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QInputDialog,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -102,6 +103,10 @@ class MainWindow(QMainWindow):
             PreviewScreen(self._store),      # 8 — stage 6 (first)
             ExportScreen(self._store),       # 9 — stage 6 (last)
         ]
+        # Direct reference (not a self._stack index lookup) so _action_run()
+        # has exactly one call path into the real run, shared with this
+        # screen's own Run button (issue #22).
+        self._processing_screen = pages[7]
         for page in pages:
             self._stack.addWidget(page)
         self.setCentralWidget(self._stack)
@@ -130,6 +135,12 @@ class MainWindow(QMainWindow):
         self._sidebar.stage_page_selected.connect(self._go_to_page)
         self._store.projectChanged.connect(self._update_statusbar)
         self._store.runLogAppended.connect(self._run_log.append)
+        # taskStarted/taskCancelled are deliberately NOT forwarded onto
+        # ProjectStore's own signals (see ProjectStore's docstring) --
+        # connect to store.tasks directly for the toolbar Cancel action.
+        self._store.tasks.taskStarted.connect(self._on_task_started)
+        self._store.tasks.taskCancelled.connect(self._on_task_cancelled)
+        self._store.taskFinished.connect(self._on_task_finished)
 
         # Start on page 0.
         self._go_to_page(0)
@@ -224,11 +235,14 @@ class MainWindow(QMainWindow):
         self._next_action = QAction("Next  ▶", self, triggered=self._go_next)
         self._run_action  = QAction("▶  Run pipeline", self, triggered=self._action_run)
         self._run_action.setEnabled(False)
+        self._cancel_action = QAction("■  Cancel", self, triggered=self._action_cancel)
+        self._cancel_action.setEnabled(False)
 
         tb.addAction(self._back_action)
         tb.addAction(self._next_action)
         tb.addSeparator()
         tb.addAction(self._run_action)
+        tb.addAction(self._cancel_action)
 
     # ── status bar ──────────────────────────────────────────────────────────
 
@@ -302,19 +316,45 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Nothing to save — open or create a project first.", 3000)
 
     def _action_validate(self) -> None:
-        # Phase 2+: calls Engine.validate_pipeline()
-        self.statusBar().showMessage("Validate pipeline — not yet implemented.", 3000)
+        if not self._store.has_project:
+            QMessageBox.warning(self, "Validate pipeline", "No project is open.")
+            return
+
+        from track2data.api import Engine
+
+        issues = Engine(self._store.manifest).validate()
+        if issues:
+            self._store.append_log(
+                "### Validation failed\n" + "\n".join(f"- {i}" for i in issues) + "\n"
+            )
+            QMessageBox.warning(
+                self,
+                "Pipeline validation",
+                "Fix these issues first:\n\n" + "\n".join(issues),
+            )
+        else:
+            self._store.append_log("### Validation passed\nReady to run.\n")
+            QMessageBox.information(self, "Pipeline validation", "Ready to run.")
+        self._run_action.setEnabled(not issues)
 
     def _action_run(self) -> None:
-        # Phase 2+: calls Engine + TaskRunner
-        self.statusBar().showMessage("Run pipeline — not yet implemented.", 3000)
+        if not self._store.has_project:
+            QMessageBox.warning(self, "Run pipeline", "No project is open.")
+            return
+        # Navigate to Processing and delegate to its own start_run() --
+        # the one real run code path, shared with its Run button, per
+        # issue #22's explicit design goal.
+        self._go_to_page(7)
+        self._processing_screen.start_run()
+
+    def _action_cancel(self) -> None:
+        self._store.tasks.cancel_all()
 
     def _action_export(self) -> None:
         # Phase 2+: calls exporters
         self._go_to_page(9)  # jump to Export screen
 
     def _action_about(self) -> None:
-        from PySide6.QtWidgets import QMessageBox
         QMessageBox.about(
             self,
             f"About {APP_NAME}",
@@ -325,3 +365,45 @@ class MainWindow(QMainWindow):
             "License: MIT · "
             "<a href='https://github.com'>GitHub</a>",
         )
+
+    # ── background task signals ────────────────────────────────────────────────
+
+    def _on_task_started(self, task_id: str) -> None:
+        self._cancel_action.setEnabled(True)
+
+    def _on_task_finished(self, task_id: str, result: object) -> None:
+        self._cancel_action.setEnabled(False)
+        if isinstance(result, Exception):
+            self._show_run_failure(result)
+
+    def _on_task_cancelled(self, task_id: str) -> None:
+        self._cancel_action.setEnabled(False)
+
+    def _show_run_failure(self, exc: Exception) -> None:
+        """Modal failure dialog for a taskFinished(..., Exception). The
+        message (str(exc)) already carries a Track2DataError's code/subject/
+        remediation baked in by its own __str__ when the failure originated
+        from one; the full traceback sits behind "Show Details..." rather
+        than inline, since it can be long."""
+        box = QMessageBox(
+            QMessageBox.Icon.Critical,
+            "Pipeline run failed",
+            str(exc),
+            QMessageBox.StandardButton.Ok,
+            self,
+        )
+        traceback_text = getattr(exc, "traceback", "")
+        if traceback_text:
+            box.setDetailedText(traceback_text)
+        box.exec()
+
+    # ── close ───────────────────────────────────────────────────────────────────
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 -- Qt override, must match QWidget's exact name
+        """Drain the background TaskRunner before the window -- and every
+        widget a still-running task's signals might emit into -- is torn
+        down. See ui/store/task_runner.py's docstring and DECISIONS.md for
+        the pool-thread-into-mid-GC-object access-violation crash this
+        prevents (issue #20)."""
+        self._store.tasks.shutdown(5000)
+        super().closeEvent(event)
