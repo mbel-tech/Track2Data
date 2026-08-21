@@ -191,9 +191,10 @@ to defaults" link per group.
 populated from `metrics.list_for_level(level)`. Each row = checkbox +
 id + name + ⓘ icon + ⚙ config icon (stub in v1 — see below).
 Identity-aware metrics (`Metric.requires_identity`) greyed-out when
-every session in the project has `has_stable_identities is False`,
-with an explanatory tooltip. Zone tab disabled when no zones are
-defined.
+every *probed* session in the project has `has_stable_identities is
+False` — sessions not yet probed (or whose probe failed) don't count
+toward that "every", so an all-unprobed project greys nothing — with
+an explanatory tooltip. Zone tab disabled when no zones are defined.
 
 **Footer:** "Timepoint binning" spinbox (minutes; 0 = whole session).
 
