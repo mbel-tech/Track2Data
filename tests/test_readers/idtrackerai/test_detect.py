@@ -77,7 +77,13 @@ class TestDetectCsvBundle:
 
 class TestDetectResourceForks:
     def test_resource_fork_npy_not_detected(self, tmp_path: Path) -> None:
-        """macOS resource-fork files (._*) must never be treated as trajectory files."""
+        """A macOS resource-fork file (._trajectories.npy) does not match any
+        of detect()'s fixed candidate filenames ("trajectories.npy", etc.),
+        so it is never picked up -- there is no dedicated resource-fork
+        filter in detect.py itself (candidate paths are literals, so one
+        would be unreachable dead code; see detect.py's module docstring).
+        This test documents that the fixed-filename matching alone already
+        gives the right behaviour here, not that a filter exists."""
         traj_dir = tmp_path / "trajectories"
         traj_dir.mkdir()
         (traj_dir / "._trajectories.npy").write_bytes(b"\x00\x05\x16\x07")

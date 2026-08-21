@@ -306,19 +306,30 @@ class SessionReader(ABC):
   ├── reader.py            IDTrackerAiReader — wires the full pipeline
   ├── detect.py            file-tree probe; priority: h5>parquet>npy>pickle>csv
   ├── normaliser.py        TrajectoryPayload dict → Session (version-agnostic rules)
-  ├── session_json.py      session.json parser with Infinity/NaN hook
+  ├── session_json.py      session.json parser, roi_list/timers parsing
   ├── log.py               idtrackerai.log digest extractor
   ├── custom_artefacts.py  inconsistent_frames.csv, *_bboxes.csv, matching_results/
+  ├── preprocessing.py     preprocessing/ROI_mask.png + background.png (paths only)
+  ├── fragments.py         preprocessing/list_of_fragments.json parser
+  ├── blobs.py             opt-in preprocessing/list_of_blobs.pickle reader
   ├── key_aliases.py       cross-version key rename map
   └── formats/
       ├── npy.py           pickled-dict NPY loader
       ├── csv_bundle.py    trajectories_csv/ loader
-      ├── h5.py            h5py loader (optional extra)
-      ├── parquet.py       pyarrow loader (optional extra)
-      ├── pickle.py        pickle loader (consent-gated)
-      ├── csv_tidy.py      tidy CSV loader
-      └── legacy.py        pre-6.x video_object.npy path
+      └── h5.py            h5py loader (core dependency, idtracker.ai's own default format)
   ```
+
+  **Status note (2026-08):** `h5.py` is implemented (this list previously
+  described it as planned). `parquet.py`, a dedicated `pickle.py` format
+  loader, `csv_tidy.py`, and a `legacy.py` module do **not** exist --
+  `detect.py` still ranks those formats and `reader.py._load_payload`
+  falls back past them (see its docstring) to whichever format *does*
+  have a loader, rather than failing outright the way it used to when h5
+  had no loader at all. `fragments.py`/`blobs.py` read the
+  `preprocessing/` folder, not a trajectory format, and sit outside the
+  `formats/` package for that reason. `blobs.py` is intentionally never
+  called by `reader.py` automatically -- see its module docstring for
+  why (a 50MB pickle of custom classes, opt-in only).
 
   Key normalisation rules applied by `Normaliser`:
   - `id_probabilities` shape `(N, M, 1)` squeezed to `(N, M)`.

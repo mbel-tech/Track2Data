@@ -1,8 +1,23 @@
 # idtracker.ai Format Analysis, Drift & Normalisation Strategy
 
-**Status:** Draft v0.2 — analysis with real-data evidence; no code changes yet
+**Status:** Historical. Written as Draft v0.2 ("analysis with real-data
+evidence; no code changes yet") before the reader rewrite this document
+motivated. Most of §2/§3's gap table has since been implemented across a
+multi-commit branch (h5/parquet-priority format fallback; fps/width/
+height/version fallback to session.json; body_length/areas capture;
+signed roi_list → ZoneSet; session.json fields including
+number_of_error_frames/exclusive_rois/length_calibrations/segmentation
+params/velocity_threshold; the idtrackerai.log parser rewrite;
+preprocessing/ROI_mask.png+background.png+list_of_fragments.json+
+list_of_blobs.pickle readers; new D-6..D-9 diagnostics). This document is
+kept for its real-corpus evidence (§1, §9) rather than as a current
+gap-status reference -- treat any "❌ missing" row in §3 as unverified
+against the current codebase, not as still-true. Three factual errors
+from the original draft are corrected in place below (§1.4 x2, §3)
+rather than left standing.
+
 **Authoritative references:**
-- [`../idtrackerai_output_structure.md`](../idtrackerai_output_structure.md) — official idtracker.ai 6.0.14 docs
+- [`../idtrackerai_output_structure.md`](../idtrackerai_output_structure.md) — official idtracker.ai 6.0.14 docs (superseded by `docs_from_idtracker.ai/output_structure_idtrackerai.md`, 6.0.15a0, for anything not cited by line number below)
 - `Checked sessions GOT/` — 70 real session folders (idtracker.ai 6.0.13)
 
 **Audience:** Engineers and reviewers before any reader rewrite
@@ -100,8 +115,8 @@ returns a dict with **all 17 keys** listed in the reference
 | Reference says | Reality (sample) |
 |---|---|
 | `id_probabilities` shape `(N_frames, N_animals)` (`reference:65`) | **`(N_frames, N_animals, 1)`** — extra trailing axis |
-| `areas`: "dict containing mean/median/sd per individual" (`reference:83`) | Actually `{'mean': ndarray(n_animals,), 'median': ndarray(n_animals,), 'std': ndarray(n_animals,)}` — dict-of-stat-arrays, not dict-of-individuals |
-| `length_unit`: px↔real-distance ratio | **`None`** in this sample — the validator's Length-Calibration tool was not used; will be common in user data |
+| `areas`: "dict containing mean/median/sd per individual" (`reference:83`) | **Corrected 2026-08** (was originally flagged here as a reference deviation; it is not one): `{'mean': ndarray(n_animals,), 'median': ndarray(n_animals,), 'std': ndarray(n_animals,)}` is exactly a dict of three per-individual stat arrays, matching `output_structure_idtrackerai.md:87` ("mean, median and standard deviation of the blobs area for each individual") precisely. |
+| `length_unit`: px↔real-distance ratio | **Corrected 2026-08** (was originally reported as `None` in *all* real data from a single sample; that was an overgeneralisation): `None` in `trial10_Segment1` specifically -- the validator's Length-Calibration tool was not used for that session -- but a corpus-wide check found **26 of 70 sessions have a valid `length_unit`** from `length_calibrations` entries. See R11 below, also corrected. |
 | `body_length`: mean diagonal of blob bounding boxes | **150.15** px in this sample, but `length_unit=None`, so it cannot be converted to cm |
 | `video_paths` | macOS absolute paths under `/Volumes/Expansion/...` — unreachable from Windows |
 | `version` | `"6.0.13"` — string |
@@ -167,7 +182,7 @@ Legend: ✅ supported · 🟡 partial / wrong · ❌ missing · ⚠ risky
 | Tidy CSV trajectories_tidy.csv | ❌ missing | format option; not in sample but officially supported |
 | Legacy v4/v5 layout | 🟡 implemented but unused | none of the 70 real sessions are legacy; future / external users may have these |
 | `session.json` parsing | 🟡 partial | only used for fallback FPS/size; ignores 40+ other keys |
-| JSON literal `Infinity` | ❌ missing handling | real `session.json` contains `Infinity`; stdlib `json.loads` rejects |
+| JSON literal `Infinity` | 🟡 handling built, premise wrong | real `session.json` contains `Infinity` (e.g. `area_ths: [668.0, Infinity]`). **Corrected 2026-08**: the original claim that "stdlib `json.loads` rejects" this is false -- verified directly, `json.loads('{"a": Infinity}')` returns `{'a': inf}` without any hook. `session_json.py`'s `parse_constant` handling is harmless but was built on an incorrect premise; it logs `IDT_JSON_NONSTRICT` on every real session for what is, by default, not an error at all. |
 | `idtrackerai.log` | ❌ missing | universal; encodes processing timing + warnings |
 | `preprocessing/ROI_mask.png` | ❌ missing | universal; perfect zone-editor seed |
 | `preprocessing/background.png` | ❌ missing | universal; useful preview fallback |
@@ -409,21 +424,25 @@ fully covers the reader's contract.
 
 ### 7.1 New error codes (add to `core/errors.py` + USER_WORKFLOW §6 catalogue)
 
-| Code | Severity | Message |
-|---|---|---|
-| `IDT_NO_TRAJ` | error | "No trajectory file found in `<folder>/trajectories/`." |
-| `IDT_FORMAT_AMBIGUOUS` | info | "Multiple trajectory formats present (`<list>`); chose `<best>`." |
-| `IDT_PICKLE_REFUSED` | error | "Loading `<path>` requires explicit consent (`--allow-pickle` / GUI prompt)." |
-| `IDT_VERSION_UNKNOWN` | warning | "idtracker.ai version `<v>` not recognised; using v6.x assumptions." |
-| `IDT_PARTIAL_SESSION` | warning | "Session looks incomplete (no `trajectories/`; log ended in error)." |
-| `IDT_BODY_LENGTH_UNRELIABLE` | warning | (§5 / F12) |
-| `IDT_DICT_MISSING_KEY` | warning | "Trajectory dict missing optional key `<k>`; field set to None." |
-| `IDT_SHAPE_MISMATCH` | error | "`id_probabilities` shape `<a>` incompatible with trajectories `<b>`." |
-| `IDT_LENGTH_UNIT_INVALID` | warning | "`length_unit=<v>` invalid; manual calibration required." |
-| `IDT_ROI_MASK_UNREADABLE` | warning | "Could not decode `<path>`." |
-| `IDT_JSON_NONSTRICT` | info | "`session.json` contains non-strict JSON literal (`Infinity`/`NaN`); parsed leniently." |
-| `IDT_VIDEO_PATH_UNREACHABLE` | warning | "`video_paths` `<p>` unreachable on this machine. Use 'Locate video…' to rebase." |
-| `IDT_RESOURCE_FORK_IGNORED` | info | "Ignored `<count>` macOS resource-fork files (`._*`)." |
+**Status column added 2026-08.** This table was aspirational when
+written; roughly half the codes now exist, with different severities in
+one case.
+
+| Code | Severity | Message | Status |
+|---|---|---|---|
+| `IDT_NO_TRAJ` | error | "No trajectory file found in `<folder>/trajectories/`." | ✅ implemented (`reader.py`, `formats/*.py`) |
+| `IDT_FORMAT_AMBIGUOUS` | info | "Multiple trajectory formats present (`<list>`); chose `<best>`." | ✅ implemented at **info**, matching this spec (`reader.py::_load_payload`) -- was previously misused as a fatal `error` for an unrelated "not a dict" condition; that use is gone |
+| `IDT_PICKLE_REFUSED` | error | "Loading `<path>` requires explicit consent (`--allow-pickle` / GUI prompt)." | ❌ not implemented as a code; the *behaviour* exists differently -- `readers/idtrackerai/blobs.py`'s blob-pickle loader requires an explicit `allow_pickle=True` **function parameter**, not a CLI flag or manifest field (see §7.2) |
+| `IDT_VERSION_UNKNOWN` | warning | "idtracker.ai version `<v>` not recognised; using v6.x assumptions." | ❌ not implemented; no 5.x/6.x version gating exists (`readers/idtrackerai_detect.py::sniff_version` has no production caller) |
+| `IDT_PARTIAL_SESSION` | warning | "Session looks incomplete (no `trajectories/`; log ended in error)." | ❌ not implemented as this code, but the underlying signal exists: `log.py`'s rewritten parser now returns `status: "Failed"` with a `failure_summary` when a crash is detected, surfaced in the export's provenance section |
+| `IDT_BODY_LENGTH_UNRELIABLE` | warning | (§5 / F12) | ❌ not a logged code, but `Session.body_length_reliable` (always False regardless of source) carries the same caveat through to the README's provenance section |
+| `IDT_DICT_MISSING_KEY` | warning | "Trajectory dict missing optional key `<k>`; field set to None." | ✅ implemented, but as **error** not warning, and only for the `trajectories` key specifically (`normaliser.py::_extract_trajectories`) and fps/width/height (`_require_positive_number`) -- not generically for every optional key |
+| `IDT_SHAPE_MISMATCH` | error | "`id_probabilities` shape `<a>` incompatible with trajectories `<b>`." | ✅ implemented, but for `trajectories` vs `session.json.number_of_animals`, not specifically the `id_probabilities`-vs-`trajectories` case this row describes (`normaliser.py::_extract_trajectories`) |
+| `IDT_LENGTH_UNIT_INVALID` | warning | "`length_unit=<v>` invalid; manual calibration required." | ❌ not implemented as a logged code; invalid values (`<=0`, non-finite) are silently normalised to `None` (`normaliser.py::_normalise_length_unit`) |
+| `IDT_ROI_MASK_UNREADABLE` | warning | "Could not decode `<path>`." | N/A -- `preprocessing.py` records the path only, never decodes the PNG (see `docs/ENGINE_DESIGN.md`'s status note), so there is nothing to fail to decode |
+| `IDT_JSON_NONSTRICT` | info | "`session.json` contains non-strict JSON literal (`Infinity`/`NaN`); parsed leniently." | ✅ implemented (`session_json.py`), but see §1.4's correction above -- the premise that stdlib `json.loads` rejects these literals is false, so this fires on every real session for something that was never actually an error |
+| `IDT_VIDEO_PATH_UNREACHABLE` | warning | "`video_paths` `<p>` unreachable on this machine. Use 'Locate video…' to rebase." | ❌ not implemented; `Session.video.path` is silently `None` when unreachable (`normaliser.py::_resolve_video_path`), with no logged code and no rebase tool |
+| `IDT_RESOURCE_FORK_IGNORED` | info | "Ignored `<count>` macOS resource-fork files (`._*`)." | ❌ not implemented as a logged code; the filtering itself works (`custom_artefacts.py`, `preprocessing.py`, `blobs.py` all filter `._*`), it just doesn't log a count. The original `detect.py` resource-fork filter this row was likely inspired by was and remains dead code (unreachable, since its candidate paths are all literals) -- see the dead-code cleanup note below. |
 
 ### 7.2 Security policy
 
@@ -435,6 +454,21 @@ secure*. Policy:
 | Programmatic / notebook | Loads `.npy` / `.pickle` without prompting (user owns the files) |
 | CLI | Refuse without `--allow-pickle`; emit `IDT_PICKLE_REFUSED` |
 | GUI | One-time-per-project consent modal; choice persisted in manifest as `security.allow_pickle_trajectories` |
+
+**Status (2026-08):** not built as specified. `formats/npy.py`'s
+docstring claimed this gate existed (`security.allow_pickle_trajectories`
+in the project manifest) when it never did -- that phantom claim has not
+been corrected, and `np.load(path, allow_pickle=True)` still runs
+unconditionally for `.npy` trajectories, same as when this table was
+written. The new `readers/idtrackerai/blobs.py` (list_of_blobs.pickle
+reader) takes a different, narrower approach instead of implementing
+this table as written: a restricted `pickle.Unpickler` allowlist (stubs
+every `idtrackerai.*` class, refuses everything outside a small numpy
+allowlist -- no idtracker.ai code ever executes) plus a mandatory
+`allow_pickle: bool` **function parameter** that the caller must pass
+`True` explicitly. No CLI flag, no GUI modal, no `ProjectManifest.security`
+field exist. A caller wiring this into the CLI/GUI still needs to build
+the consent surface this table describes; the loader itself is ready for it.
 
 ### 7.3 JSON-strictness hook
 
@@ -448,6 +482,15 @@ json.loads(text, parse_constant=_safe_constant)
 ```
 
 Triggers `IDT_JSON_NONSTRICT` (info) when any constant is replaced.
+
+**Status (2026-08):** implemented exactly as specified
+(`session_json.py`), but see §1.4's correction: the premise is wrong.
+`json.loads('{"a": Infinity}')` already returns `{'a': inf}` with the
+stdlib parser alone -- no `parse_constant` hook is required for this to
+work. The hook is harmless (it does the same thing stdlib already does,
+plus logs), but the log line fires on every real session
+(`area_ths: [668.0, Infinity]` is universal in the corpus) narrating a
+non-event as if it were a compatibility fix.
 
 ### 7.4 Path-rebase
 
@@ -534,7 +577,7 @@ unchanged from TECHNICAL_SPEC §11.2.
 | R8 | Custom post-processing outputs (`*_bboxes.csv`, `inconsistent_frames.csv`) are user-pipeline-specific | Treat as opportunistic — never required, never crash if absent or different schema |
 | R9 | macOS `._*` resource forks may carry trailing-NULs that fool simple "exists" checks | filter at discovery layer via `iter_session_files()` |
 | R10 | Real `video_paths` are unreachable from the user's analysis machine | path-rebase tool (F14); preview falls back to `background.png` |
-| R11 | `length_unit` is `None` in the available real data — auto-calibration path never tested against real data | F6 must work with `length_unit=None` as a no-op |
+| R11 | **Corrected 2026-08**: 26/70 real sessions have a valid `length_unit`, not none — the original assumption was drawn from one uncalibrated sample. The auto-calibration path must be tested against a calibrated real session, not assumed to be a permanent no-op | F6 must work correctly with `length_unit` both present and `None` |
 | R12 | `body_length` in idtracker.ai is segmentation-dependent (`reference:100`); users may still use it for calibration | F12 banner + manifest record |
 | R13 | `id_probabilities` shape disagrees with reference doc | normalise at the source; document deviation in the analysis doc itself |
 | R14 | macOS / Windows / Linux path separators differ | always `Path()`; preserve original strings in `Session.metadata["raw"]` |
