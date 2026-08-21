@@ -148,6 +148,69 @@ class TestReaderRead:
         s = reader.read(tiny_real_session)
         assert s.identities_colors == ["#e41a1c", "#377eb8"]
 
+    # ── session.json Fase-4 fields ──────────────────────────────────────────
+
+    def test_number_of_error_frames_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.number_of_error_frames == 3
+
+    def test_exclusive_rois_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.exclusive_rois is False
+
+    def test_last_validated_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.last_validated == "2024-01-15T10:30:00"
+
+    def test_data_policy_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.data_policy == "idmatcher.ai"
+
+    def test_length_calibrations_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.length_calibrations is not None
+        assert s.length_calibrations[0]["distance"] == 1.0
+
+    def test_velocity_threshold_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.velocity_threshold_px_frame == pytest.approx(42.5)
+
+    def test_resolution_reduction_and_id_image_size_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.resolution_reduction == pytest.approx(0.75)
+        assert s.id_image_size == [80, 80, 1]
+
+    def test_segmentation_params_grouped_from_session_json(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.segmentation_params is not None
+        assert s.segmentation_params["intensity_ths"] == [10, 128]
+        assert s.segmentation_params["use_bkg"] is True
+        assert s.segmentation_params["background_subtraction_stat"] == "median"
+        assert s.segmentation_params["erosion_kernel_size"] == 10
+
+    def test_timers_merged_into_tracking_log_durations(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.tracking_log is not None
+        assert s.tracking_log["durations"]["Tracking session"] == pytest.approx(13.0)
+
     # ── custom artefacts ──────────────────────────────────────────────────────
 
     def test_inconsistent_frames_loaded(self, reader: IDTrackerAiReader,
