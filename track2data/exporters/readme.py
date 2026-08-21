@@ -169,11 +169,16 @@ class ReadmeExporter(Exporter):
         ]
 
         if p.length_unit is not None:
+            confirmation = (
+                "confirmed by user" if p.length_unit_confirmed_by_user
+                else "**default, not confirmed** -- idtracker.ai does not "
+                     "record which physical unit the Validator's Length "
+                     "Calibration tool actually used; verify before "
+                     f"trusting any *_{p.length_unit_label} column"
+            )
             lines.append(
                 f"| Length calibration factor | {p.length_unit:.6g} px per "
-                "user-defined unit (idtracker.ai does not record which "
-                "physical unit was used -- confirm with whoever ran the "
-                "Validator's Length Calibration tool) |"
+                f"{p.length_unit_label} ({confirmation}) |"
             )
         else:
             lines.append("| Length calibration factor | *(not calibrated)* |")

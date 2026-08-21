@@ -160,6 +160,17 @@ class CalibrationConfig(BaseModel):
     mode: Literal["scalar", "bodylength"] = "bodylength"
     px_per_cm: float | None = None
     bl_min_samples: int = 30
+    # idtracker.ai's length_unit (session_idtrackerai.md:242) is a ratio
+    # to "user defined units" -- it does NOT record which physical unit
+    # the Validator's Length Calibration tool was actually run in. The
+    # arithmetic in calibration/bodylength.py and every *_cm-suffixed
+    # export column is correct regardless; only the label is an
+    # assumption. Defaults to "cm" (today's unconfirmed assumption, made
+    # explicit rather than silent) -- set it to whatever unit was really
+    # used (e.g. "mm") when Session.length_unit came from a calibration;
+    # confirmed_by_user records whether anyone actually verified it.
+    length_unit_label: str = "cm"
+    length_unit_confirmed_by_user: bool = False
 
 
 class ROI(BaseModel):

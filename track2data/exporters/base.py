@@ -50,6 +50,8 @@ class SessionProvenance:
     # output_structure_idtrackerai.md:104 warns body_length depends on
     # segmentation parameters and video conditions regardless of source.
     length_unit: float | None = None
+    length_unit_label: str = "cm"
+    length_unit_confirmed_by_user: bool = False
     body_length_reliable: bool = False
 
 

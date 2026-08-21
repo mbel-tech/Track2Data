@@ -213,7 +213,26 @@ class TestReadmeProvenanceSection:
         ReadmeExporter().write(provenance_payload, tmp_path)
         content = (tmp_path / "README.md").read_text(encoding="utf-8")
         assert "8.95425" in content
-        assert "user-defined unit" in content
+        assert "not confirmed" in content
+
+    def test_calibration_unit_confirmed_shows_no_caveat_warning(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        from dataclasses import replace
+
+        from track2data.exporters.base import SessionProvenance
+
+        prov = SessionProvenance(
+            length_unit=10.0,
+            length_unit_label="mm",
+            length_unit_confirmed_by_user=True,
+        )
+        payload = replace(minimal_payload, provenance=prov)
+        ReadmeExporter().write(payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "px per mm" in content
+        assert "confirmed by user" in content
+        assert "not confirmed" not in content
 
     def test_not_calibrated_shown_when_length_unit_none(
         self, tmp_path: Path, minimal_payload: ExportPayload
