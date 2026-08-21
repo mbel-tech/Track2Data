@@ -86,7 +86,7 @@ ignore = [
 "track2data/core/progress.py" = ["N818"]  # OperationCancelled is a control-flow signal, not an "error"
 "extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
 "app/**" = ["ANN", "N815"]   # N815: Qt signal names are camelCase by convention
-"ui/**" = ["ANN", "N815"]    # GUI screens; ui/store/ also declares camelCase Qt signals
+"ui/**" = ["ANN", "N815", "N802"]    # N802: Qt event-handler overrides (showEvent, etc.) are camelCase by convention
 
 # ── Pytest ─────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]

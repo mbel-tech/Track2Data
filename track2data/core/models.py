@@ -291,6 +291,7 @@ class SessionRef(BaseModel):
     session_id: str
     folder: Path
     sha256: str
+    has_stable_identities: bool | None = None
 
 
 class MetadataSource(BaseModel):
