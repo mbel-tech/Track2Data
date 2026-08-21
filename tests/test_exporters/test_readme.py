@@ -147,3 +147,117 @@ class TestReadmeExporter:
         paths = exporter.write(minimal_payload, tmp_path)
         for p in paths:
             assert p.exists(), f"{p} does not exist"
+
+
+# ── SessionProvenance rendering ─────────────────────────────────────────────
+#
+# Regression coverage: ExportPayload carried no reference to Session at all,
+# so no idtracker.ai value could reach the README even in principle -- it
+# listed only metric *IDs* (e.g. "D-2"), never the estimated_accuracy value
+# that metric actually reports.
+
+
+@pytest.fixture()
+def provenance_payload(minimal_payload: ExportPayload) -> ExportPayload:
+    from dataclasses import replace
+
+    from track2data.exporters.base import SessionProvenance
+
+    prov = SessionProvenance(
+        reader="idtrackerai",
+        idtrackerai_version="6.0.13",
+        trajectory_format="h5",
+        trajectory_variant="with_gaps",
+        n_frames=14911,
+        n_animals=4,
+        has_stable_identities=True,
+        tracking_status="Success",
+        tracking_warnings_count=13,
+        estimated_accuracy=0.751957740605162,
+        fraction_identified=0.822446515994903,
+        silhouette_score=0.7805799245834351,
+        fragment_connectivity=1.3401015228426396,
+        length_unit=8.95425,
+        body_length_reliable=False,
+    )
+    return replace(minimal_payload, provenance=prov)
+
+
+class TestReadmeProvenanceSection:
+    def test_idtrackerai_version_in_readme(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(provenance_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "6.0.13" in content
+
+    def test_trajectory_format_in_readme(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(provenance_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "| Trajectory format read | h5 |" in content
+
+    def test_quality_values_in_readme_not_just_metric_ids(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        """The whole point: actual values, not just the D-2/D-3 IDs."""
+        ReadmeExporter().write(provenance_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "0.7520" in content  # estimated_accuracy
+        assert "0.8224" in content  # fraction_identified
+
+    def test_calibration_unit_caveat_present_when_calibrated(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(provenance_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "8.95425" in content
+        assert "user-defined unit" in content
+
+    def test_not_calibrated_shown_when_length_unit_none(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(minimal_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "*(not calibrated)*" in content
+
+    def test_body_length_reliability_caveat_present(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(minimal_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "not** acknowledged reliable" in content
+
+    def test_failed_tracking_status_shows_failure_summary(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        from dataclasses import replace
+
+        from track2data.exporters.base import SessionProvenance
+
+        prov = SessionProvenance(
+            tracking_status="Failed",
+            tracking_failure_summary="OSError: [Errno 24] Too many open files",
+        )
+        payload = replace(minimal_payload, provenance=prov)
+        ReadmeExporter().write(payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "Tracking failure" in content
+        assert "Too many open files" in content
+
+    def test_missing_quality_values_render_as_not_reported(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(minimal_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "*(not reported)*" in content
+
+    def test_session_provenance_in_manifest_json(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(provenance_payload, tmp_path)
+        manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+        prov = manifest["run_metadata"]["session_provenance"]
+        assert prov["idtrackerai_version"] == "6.0.13"
+        assert prov["estimated_accuracy"] == pytest.approx(0.751957740605162)

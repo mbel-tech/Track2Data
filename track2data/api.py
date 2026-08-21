@@ -394,7 +394,7 @@ class Engine:
         computed metric results, bucketing results by level (IL-*/GL-*/
         Z-*/D-*) and building the master per-frame table.
         """
-        from track2data.exporters.base import ExportPayload
+        from track2data.exporters.base import ExportPayload, SessionProvenance
 
         fish_by_frame = self.build_fish_by_frame(psess)
 
@@ -406,6 +406,28 @@ class Engine:
                         if k.startswith("Z-")}
         diagnostic_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("D-")}
+
+        session = psess.session
+        quality = session.quality or {}
+        tracking_log = session.tracking_log or {}
+        provenance = SessionProvenance(
+            reader=session.reader,
+            idtrackerai_version=session.idtrackerai_version,
+            trajectory_format=session.trajectory_format,
+            trajectory_variant=session.trajectory_variant,
+            n_frames=session.n_frames,
+            n_animals=session.n_animals,
+            has_stable_identities=session.has_stable_identities,
+            tracking_status=tracking_log.get("status"),
+            tracking_failure_summary=tracking_log.get("failure_summary", ""),
+            tracking_warnings_count=len(tracking_log.get("warnings", [])),
+            estimated_accuracy=quality.get("estimated_accuracy"),
+            fraction_identified=quality.get("fraction_identified"),
+            silhouette_score=quality.get("silhouette_score"),
+            fragment_connectivity=quality.get("fragment_connectivity"),
+            length_unit=session.length_unit,
+            body_length_reliable=session.body_length_reliable,
+        )
 
         return ExportPayload(
             session_id=psess.session_id,
@@ -419,6 +441,7 @@ class Engine:
             diagnostic_metrics=diagnostic_metrics,
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
+            provenance=provenance,
         )
 
     def export(
