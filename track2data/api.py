@@ -457,6 +457,7 @@ class Engine:
             length_unit_label=self._manifest.calibration.length_unit_label,
             length_unit_confirmed_by_user=self._manifest.calibration.length_unit_confirmed_by_user,
             body_length_reliable=session.body_length_reliable,
+            blob_body_length_source_file=session.blob_body_length_source_file,
         )
 
         return ExportPayload(

@@ -138,6 +138,15 @@ class Session(BaseModel):
     # (undocumented on the official side; derived empirically) and the
     # defensive-parsing rules any consumer of session.fragments must follow.
     fragments: dict[str, Any] | None = None
+    # Which preprocessing/list_of_blobs*.pickle produced body_length_px,
+    # when it came from the opt-in blob-layer enrichment
+    # (readers/idtrackerai/blobs.py) rather than the session-wide scalar
+    # broadcast the normal reader sets. None when body_length_px is still
+    # that broadcast (or absent). Recorded because 5/70 real sessions carry
+    # a separate list_of_blobs_validated.pickle, and mixing curated and
+    # uncurated sessions in one analysis without knowing which is which is
+    # a reproducibility hazard.
+    blob_body_length_source_file: str | None = None
 
     @property
     def n_frames(self) -> int:
