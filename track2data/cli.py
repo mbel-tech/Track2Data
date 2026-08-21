@@ -104,18 +104,30 @@ def run(project: str, out_dir: str | None, exporters: tuple[str, ...]) -> None:
     )
 
     try:
-        written = engine.run_all(out_path, exporters=exporter_list)
+        result = engine.run(out_path, exporters=exporter_list)
     except Exception as exc:
         click.echo(f"[error] Pipeline failed: {exc}", err=True)
         logger.exception("Pipeline failed")
         sys.exit(2)
 
+    # A session that fails (import, preprocess, metrics, or export) is
+    # captured as its own SessionRunResult.error rather than aborting the
+    # batch -- but per FR-IMP-3 that failure must still be flagged loudly
+    # here, not left for the user to notice only from a lower file count.
+    failed = [s for s in result.sessions if s.error]
+    for s in failed:
+        click.echo(f"[error] Session '{s.session_id}' failed: {s.error}", err=True)
+
+    written = result.written
     if written:
         click.echo(f"Wrote {len(written)} file(s) to {out_path}:")
         for p in written:
             click.echo(f"  {p}")
     else:
         click.echo("[warn] No output files written.", err=True)
+
+    if failed:
+        sys.exit(1)
 
 
 # ── validate ──────────────────────────────────────────────────────────────────

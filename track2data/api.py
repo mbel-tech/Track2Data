@@ -36,6 +36,7 @@ from track2data.core.models import (
     ProjectManifest,
     RunResult,
     Session,
+    SessionRef,
     SessionRunResult,
 )
 from track2data.core.progress import ProgressCallback, ProgressEvent, emit
@@ -106,14 +107,23 @@ class Engine:
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
     ) -> list[Session]:
-        """Import all sessions listed in ``manifest.sessions``."""
+        """Import all sessions listed in ``manifest.sessions``.
+
+        Raises on the first session that fails to import -- FR-IMP-3
+        requires failures be flagged with an actionable message, never
+        silently dropped (see issue #7: this used to catch, log, and
+        continue, so a bad session in a project was invisible unless
+        someone happened to check the log). This is the "import
+        everything, or tell me exactly what's wrong" entry point for
+        direct/CLI use. ``Engine.run()`` does NOT call this method for
+        its own batch resilience -- it imports each session individually
+        inside ``_run_one_session`` so one bad session is captured as
+        that session's ``SessionRunResult.error`` instead of aborting an
+        entire multi-session run.
+        """
         sessions: list[Session] = []
         refs = self._manifest.sessions
         for i, ref in enumerate(refs):
-            # Emit BEFORE the try opens: if the callback raises
-            # OperationCancelled, it must propagate out of this method,
-            # not be caught by the except below and treated as just
-            # another session that failed to import.
             emit(
                 progress,
                 ProgressEvent(
@@ -124,11 +134,7 @@ class Engine:
                     message=f"Importing {ref.session_id}",
                 ),
             )
-            try:
-                sess = self.import_session(ref.folder)
-                sessions.append(sess)
-            except Exception:
-                logger.exception("Failed to import session %s", ref.session_id)
+            sessions.append(self.import_session(ref.folder))
         return sessions
 
     # ── preprocessing ──────────────────────────────────────────────────────
@@ -400,10 +406,15 @@ class Engine:
 
         Each session's output is written to ``out_dir/<session_id>/`` so
         multi-session runs never collide. A session that raises during
-        preprocessing, metrics, or export is captured as that session's
-        ``SessionRunResult.error`` without aborting the rest of the batch
-        -- ``OperationCancelled`` is the one exception never caught here,
-        since it must propagate to actually stop the run.
+        import, preprocessing, metrics, or export is captured as that
+        session's ``SessionRunResult.error`` without aborting the rest of
+        the batch -- ``OperationCancelled`` is the one exception never
+        caught here, since it must propagate to actually stop the run.
+        (This is deliberately more forgiving than ``import_sessions()``,
+        which fails loud on the first bad session -- see issue #7: a
+        single unreadable session in a 70-session batch shouldn't lose
+        the other 69, but it must never vanish silently either, hence
+        surfacing it as this session's own ``.error`` instead.)
 
         ``n_workers`` is accepted for forward compatibility with a future
         parallel implementation but only the sequential (n_workers=1)
@@ -416,25 +427,25 @@ class Engine:
                 n_workers,
             )
 
-        n_configured = len(self._manifest.sessions)
+        refs = self._manifest.sessions
+        n_configured = len(refs)
         emit(
             progress,
             ProgressEvent(stage="run", current=0, total=n_configured, message="Run started"),
         )
 
-        sessions = self.import_sessions(progress=progress)
         results: list[SessionRunResult] = []
-        for i, sess in enumerate(sessions):
+        for i, ref in enumerate(refs):
             results.append(
-                self._run_one_session(sess, Path(out_dir) / sess.session_id, exporters, progress)
+                self._run_one_session(ref, Path(out_dir) / ref.session_id, exporters, progress)
             )
             emit(
                 progress,
                 ProgressEvent(
                     stage="session",
                     current=i + 1,
-                    total=len(sessions),
-                    session_id=sess.session_id,
+                    total=n_configured,
+                    session_id=ref.session_id,
                     message="Session complete",
                 ),
             )
@@ -449,26 +460,38 @@ class Engine:
 
     def _run_one_session(
         self,
-        session: Session,
+        ref: SessionRef,
         session_out_dir: Path,
         exporters: list[str] | None,
         progress: ProgressCallback | None,
     ) -> SessionRunResult:
         """Run one session for ``run()``, capturing its outcome (including
-        any failure) as a SessionRunResult rather than raising -- except
-        OperationCancelled, which must propagate to stop the whole run."""
+        any failure -- import, preprocess, metrics, or export) as a
+        SessionRunResult rather than raising -- except OperationCancelled,
+        which must propagate to stop the whole run. Keyed throughout by
+        ``ref.session_id`` (the manifest's own identity), not a
+        reader-derived one, since it must be available even when import
+        itself fails."""
         import time
 
         from track2data.core.progress import OperationCancelled
 
         start = time.monotonic()
         try:
+            session = self.import_session(ref.folder)
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="import", current=1, total=4,
+                    session_id=ref.session_id, message="Import complete",
+                ),
+            )
             psess = self.preprocess(session)
             emit(
                 progress,
                 ProgressEvent(
-                    stage="preprocess", current=1, total=3,
-                    session_id=session.session_id, message="Preprocessing complete",
+                    stage="preprocess", current=2, total=4,
+                    session_id=ref.session_id, message="Preprocessing complete",
                 ),
             )
             metric_results = self.compute_metrics(psess)
@@ -476,16 +499,16 @@ class Engine:
             emit(
                 progress,
                 ProgressEvent(
-                    stage="metrics", current=2, total=3,
-                    session_id=session.session_id, message="Metrics computed",
+                    stage="metrics", current=3, total=4,
+                    session_id=ref.session_id, message="Metrics computed",
                 ),
             )
             written = self.export(payload, session_out_dir, exporters)
             emit(
                 progress,
                 ProgressEvent(
-                    stage="export", current=3, total=3,
-                    session_id=session.session_id, message="Export complete",
+                    stage="export", current=4, total=4,
+                    session_id=ref.session_id, message="Export complete",
                 ),
             )
             diagnostics = {k: v for k, v in metric_results.items() if k.startswith("D-")}
@@ -493,7 +516,7 @@ class Engine:
                 k: v.head(200) for k, v in metric_results.items() if not k.startswith("D-")
             }
             return SessionRunResult(
-                session_id=session.session_id,
+                session_id=ref.session_id,
                 written=written,
                 diagnostics=diagnostics,
                 metric_previews=metric_previews,
@@ -502,9 +525,9 @@ class Engine:
         except OperationCancelled:
             raise
         except Exception as exc:
-            logger.exception("Session %s failed.", session.session_id)
+            logger.exception("Session %s failed.", ref.session_id)
             return SessionRunResult(
-                session_id=session.session_id,
+                session_id=ref.session_id,
                 duration_s=time.monotonic() - start,
                 error=str(exc),
             )
