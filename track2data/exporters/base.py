@@ -53,6 +53,13 @@ class SessionProvenance:
     length_unit_label: str = "cm"
     length_unit_confirmed_by_user: bool = False
     body_length_reliable: bool = False
+    # Set when body_length_px came from the opt-in blob-layer enrichment
+    # (readers/idtrackerai/blobs.py) rather than the session-wide scalar
+    # broadcast -- records which of a session's blob pickles (base vs
+    # _validated) produced the value, since mixing curated and uncurated
+    # sessions in one analysis without recording which is which is a
+    # reproducibility hazard.
+    blob_body_length_source_file: str | None = None
 
 
 @dataclass

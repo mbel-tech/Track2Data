@@ -284,3 +284,49 @@ class TestFragmentsOnRealCorpus:
             assert s.fragments is not None, f"no fragments parsed for {folder.name}"
             individual_fragments(s.fragments)  # must not raise
             fragment_swap_boundaries(s.fragments)  # must not raise
+
+
+class TestBlobBodyLengthOnRealCorpus:
+    """The opt-in blob-layer enrichment (readers/idtrackerai/blobs.py) is
+    the highest-value item unlocked by reading list_of_blobs.pickle:
+    real per-identity body length instead of the session-wide scalar
+    broadcast. Pinned to session_trial10_Segment1's exact measured
+    values so a future change doesn't silently regress the filter."""
+
+    SESSION = "session_trial10_Segment1"
+
+    def test_matches_measured_per_identity_values(self) -> None:
+        import numpy as np
+
+        from track2data.readers import read_session
+        from track2data.readers.idtrackerai.blobs import (
+            enrich_session_with_blob_body_length,
+        )
+
+        folder = CORPUS_DIR / self.SESSION
+        if not folder.is_dir():
+            pytest.skip(f"{self.SESSION} not present in corpus")
+
+        s = read_session(folder)
+        broadcast = s.body_length_px.copy()
+        s2 = enrich_session_with_blob_body_length(s, allow_pickle=True)
+
+        assert s2.blob_body_length_source_file == "list_of_blobs.pickle"
+        # Pooled median (all identities) reproduces the tracker's own
+        # median_body_length to within ~0.5%; the session-wide broadcast
+        # (a single repeated value) must not survive the upgrade.
+        assert not (s2.body_length_px == broadcast).all()
+        tracker_median = 150.1532550429727
+        assert abs(float(np.median(s2.body_length_px)) - tracker_median) / tracker_median < 0.1
+
+    def test_gated_off_by_default_matches_import(self) -> None:
+        """The opt-in gate must not fire on a plain read_session() call --
+        confirms the 70/70 import baseline is unaffected by this feature."""
+        from track2data.readers import read_session
+
+        folder = CORPUS_DIR / self.SESSION
+        if not folder.is_dir():
+            pytest.skip(f"{self.SESSION} not present in corpus")
+
+        s = read_session(folder)
+        assert s.blob_body_length_source_file is None

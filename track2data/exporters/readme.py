@@ -189,6 +189,17 @@ class ReadmeExporter(Exporter):
                  "parameters and video conditions (idtracker.ai's own caveat)"
         )
         lines.append(f"| Body-length reliability | {reliability} |")
+
+        if p.blob_body_length_source_file:
+            lines.append(
+                f"| Body-length source | per-identity, from `{p.blob_body_length_source_file}` |"
+            )
+        else:
+            lines.append(
+                "| Body-length source | session-wide value broadcast to every "
+                "identity (no per-identity blob-layer data) |"
+            )
+
         lines.append("")
         return lines
 
