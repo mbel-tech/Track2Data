@@ -264,6 +264,7 @@ class SessionRunResult:
     written: list[Path] = field(default_factory=list)
     diagnostics: dict[str, Any] = field(default_factory=dict)
     metric_previews: dict[str, Any] = field(default_factory=dict)
+    preprocess_report: PreprocessReport | None = None
     duration_s: float = 0.0
     error: str | None = None
 

@@ -497,6 +497,7 @@ class Engine:
                 written=written,
                 diagnostics=diagnostics,
                 metric_previews=metric_previews,
+                preprocess_report=psess.report,
                 duration_s=time.monotonic() - start,
             )
         except OperationCancelled:
