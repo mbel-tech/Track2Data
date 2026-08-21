@@ -240,3 +240,47 @@ class TestRoiListZonesOnRealCorpus:
             )
             assert len(zs.rois) > 0
             assert all(r.sign in ("+", "-") for r in zs.rois)
+
+
+class TestFragmentsOnRealCorpus:
+    """preprocessing/list_of_fragments.json had zero consumers -- the
+    entire fragment layer (identity-swap boundaries, per-fragment
+    certainty, crossing detection) was unused. Pinned to
+    session_trial10_Segment1's exact measured numbers."""
+
+    SESSION = "session_trial10_Segment1"
+
+    def test_fragment_counts_match_measured_values(self) -> None:
+        from track2data.readers import read_session
+        from track2data.readers.idtrackerai.fragments import (
+            fragment_swap_boundaries,
+            individual_fragments,
+        )
+
+        folder = CORPUS_DIR / self.SESSION
+        if not folder.is_dir():
+            pytest.skip(f"{self.SESSION} not present in corpus")
+
+        s = read_session(folder)
+        assert s.fragments is not None
+        assert len(s.fragments["fragments"]) == 1152
+        assert len(individual_fragments(s.fragments)) == 761
+
+        boundaries = fragment_swap_boundaries(s.fragments)
+        # 4.1% of 14911 frames are where a swap is even possible; a huge
+        # reduction from the 94.9% of frames the old geometric-only
+        # identity_switch pass used to reason about.
+        assert len(boundaries) < 0.05 * s.n_frames
+
+    def test_all_sessions_fragments_parse_without_error(self) -> None:
+        from track2data.readers import read_session
+        from track2data.readers.idtrackerai.fragments import (
+            fragment_swap_boundaries,
+            individual_fragments,
+        )
+
+        for folder in _corpus_sessions():
+            s = read_session(folder)
+            assert s.fragments is not None, f"no fragments parsed for {folder.name}"
+            individual_fragments(s.fragments)  # must not raise
+            fragment_swap_boundaries(s.fragments)  # must not raise

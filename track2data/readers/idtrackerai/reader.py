@@ -30,6 +30,7 @@ from track2data.readers.idtrackerai.detect import ReaderHit, detect
 from track2data.readers.idtrackerai.formats.csv_bundle import load_csv_bundle
 from track2data.readers.idtrackerai.formats.h5 import load_h5
 from track2data.readers.idtrackerai.formats.npy import load_npy
+from track2data.readers.idtrackerai.fragments import load_fragments
 from track2data.readers.idtrackerai.log import load_log_digest
 from track2data.readers.idtrackerai.normaliser import Normaliser
 from track2data.readers.idtrackerai.preprocessing import find_preprocessing_images
@@ -118,6 +119,11 @@ class IDTrackerAiReader(SessionReader):
                 "roi_mask_path": images.get("roi_mask"),
                 "background_image_path": images.get("background"),
             })
+
+        # Attach parsed list_of_fragments.json (opportunistic, same caveat).
+        fragments_data = load_fragments(folder)
+        if fragments_data is not None:
+            session = session.model_copy(update={"fragments": fragments_data})
 
         return session
 
