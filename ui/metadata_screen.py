@@ -28,7 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data.core.models import MappingRule
+from track2data.core.hashing import file_sha256
+from track2data.core.models import MappingRule, MetadataSource
 
 _CANONICAL_FIELDS = ["session_id", "treatment", "trial_id", "trial_date"]
 
@@ -129,6 +130,11 @@ class MetadataScreen(QWidget):
             self._populate_combos(headers)
             self._file_label.setText(Path(path).name)
             self._file_label.setStyleSheet("color: #2c3e50;")
+            if self._store is not None:
+                csv_path = Path(path)
+                self._store.update_metadata_source(
+                    MetadataSource(path=csv_path, sha256=file_sha256(csv_path))
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to load CSV:\n{exc}")
 
