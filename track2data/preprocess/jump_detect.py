@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from track2data.core.models import JumpCfg, PPStepResult
+
+logger = logging.getLogger(__name__)
 
 
 def _compute_displacement(xy: np.ndarray) -> np.ndarray:
@@ -48,7 +52,18 @@ def _flag_jumps_percentile(disp: np.ndarray, percentile: float, pct_mult: float)
     return flags
 
 
-def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult]:
+def _flag_jumps_absolute(disp: np.ndarray, threshold_px_frame: float) -> np.ndarray:
+    """Flag frames where displacement exceeds a fixed absolute threshold,
+    shared across all animals (unlike the per-animal SD/percentile methods).
+    """
+    return disp > threshold_px_frame
+
+
+def detect_jumps(
+    xy: np.ndarray,
+    cfg: JumpCfg,
+    velocity_threshold_px_frame: float | None = None,
+) -> tuple[np.ndarray, PPStepResult]:
     """Detect and replace anomalously large inter-frame displacements.
 
     Parameters
@@ -57,6 +72,13 @@ def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult
         Position array of shape ``(n_frames, n_animals, 2)``, dtype float64.
     cfg:
         Jump-detection configuration.
+    velocity_threshold_px_frame:
+        idtracker.ai's own outlier-displacement threshold
+        (``Session.velocity_threshold_px_frame``), used when
+        ``cfg.method == "idtracker_velocity_threshold"``. If that method is
+        requested but this is ``None`` (session has no such value), falls
+        back to ``sd_multiple`` with a warning rather than silently
+        flagging nothing.
 
     Returns
     -------
@@ -80,8 +102,18 @@ def detect_jumps(xy: np.ndarray, cfg: JumpCfg) -> tuple[np.ndarray, PPStepResult
 
     if cfg.method == "sd_multiple":
         flags = _flag_jumps_sd(disp, cfg.sd_mult)
-    else:
+    elif cfg.method == "percentile":
         flags = _flag_jumps_percentile(disp, cfg.percentile, cfg.pct_mult)
+    elif velocity_threshold_px_frame is not None:
+        flags = _flag_jumps_absolute(disp, velocity_threshold_px_frame)
+    else:
+        logger.warning(
+            "JumpCfg.method='idtracker_velocity_threshold' but no "
+            "Session.velocity_threshold_px_frame is available; falling "
+            "back to sd_multiple (sd_mult=%.1f).",
+            cfg.sd_mult,
+        )
+        flags = _flag_jumps_sd(disp, cfg.sd_mult)
 
     affected_per_individual: list[int] = []
 
