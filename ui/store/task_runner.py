@@ -110,6 +110,16 @@ class TaskRunner(QObject):
         self._pool = QThreadPool()
         self._pool.setMaxThreadCount(1)
         self._tokens: dict[str, CancellationToken] = {}
+        # Explicit strong references to each in-flight task's _WorkerSignals
+        # and _EngineTask, keyed by task_id. Both are local variables inside
+        # _submit() otherwise -- once that method returns, nothing but Qt's
+        # C++-side bookkeeping would keep them alive, and under load that
+        # can race with Python's GC: a pool thread emitting a signal into
+        # (or QThreadPool auto-deleting) a Python wrapper object that's
+        # concurrently being collected is a real access-violation crash,
+        # reproduced during this module's own test development. Cleared
+        # only once a task reaches a terminal state (see _forget).
+        self._active: dict[str, tuple[_WorkerSignals, _EngineTask]] = {}
 
     def submit(self, fn: Callable[[], Any]) -> str:
         """Submit a plain callable that takes no arguments -- e.g.
@@ -146,12 +156,18 @@ class TaskRunner(QObject):
         signals.cancelled.connect(forget)
 
         task = _EngineTask(task_id, fn, signals, token, progress_enabled=progress_enabled)
+        # Qt's C++ side would otherwise auto-delete the QRunnable itself
+        # once run() returns; Python's own reference in self._active is
+        # now the sole owner of its lifetime, cleared only in _forget.
+        task.setAutoDelete(False)
+        self._active[task_id] = (signals, task)
         self._pool.start(task)
         return task_id
 
     def _forget(self, task_id: str) -> Callable[..., None]:
         def _cleanup(*_args: object) -> None:
             self._tokens.pop(task_id, None)
+            self._active.pop(task_id, None)
         return _cleanup
 
     def cancel(self, task_id: str) -> None:

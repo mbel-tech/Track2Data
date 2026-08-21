@@ -284,6 +284,84 @@ class TestUILayer:
 
         assert store.manifest is None
 
+    # ── tasks property + forwarding, run_results (issue #27) ───────────────
+
+    def test_store_owns_a_single_task_runner_instance(self, qt_app) -> None:
+        from app.state import ProjectStore
+        from ui.store.task_runner import TaskRunner
+
+        store = ProjectStore()
+        assert isinstance(store.tasks, TaskRunner)
+        assert store.tasks is store.tasks  # same instance, not re-created
+
+    def test_store_forwards_task_progress(self, qtbot, qt_app) -> None:
+        from app.state import ProjectStore
+        from track2data.core.progress import ProgressEvent
+
+        store = ProjectStore()
+        forwarded: list[tuple[str, int]] = []
+        store.taskProgress.connect(lambda tid, pct: forwarded.append((tid, pct)))
+
+        def do_work(progress) -> str:
+            progress(ProgressEvent(stage="run", current=1, total=2))
+            return "ok"
+
+        with qtbot.waitSignal(store.taskFinished, timeout=2000):
+            store.tasks.submit_with_progress(do_work)
+
+        assert forwarded == [(forwarded[0][0], 50)]
+
+    def test_store_forwards_successful_task_result(self, qtbot, qt_app) -> None:
+        from app.state import ProjectStore
+
+        store = ProjectStore()
+        with qtbot.waitSignal(store.taskFinished, timeout=2000) as blocker:
+            store.tasks.submit(lambda: "the result")
+
+        _task_id, result = blocker.args
+        assert result == "the result"
+
+    def test_store_forwards_task_failure_as_exception_on_task_finished(
+        self, qtbot, qt_app
+    ) -> None:
+        """
+        taskFailed -> taskFinished, per taskFinished's documented
+        "result-or-exception" contract -- so UI code only ever needs to
+        listen to one signal to learn a task is done, success or not.
+        """
+        from app.state import ProjectStore
+
+        store = ProjectStore()
+
+        def boom() -> None:
+            raise RuntimeError("simulated failure")
+
+        with qtbot.waitSignal(store.taskFinished, timeout=2000) as blocker:
+            store.tasks.submit(boom)
+
+        _task_id, result = blocker.args
+        assert isinstance(result, Exception)
+        assert "simulated failure" in str(result)
+        assert "RuntimeError" in result.traceback
+        assert "boom" in result.traceback
+
+    def test_store_run_results_starts_none_and_set_run_results_emits(
+        self, qt_app
+    ) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import RunResult, SessionRunResult
+
+        store = ProjectStore()
+        assert store.run_results is None
+        fired: list[bool] = []
+        store.runResultsChanged.connect(lambda: fired.append(True))
+
+        result = RunResult(sessions=[SessionRunResult(session_id="s1")])
+        store.set_run_results(result)
+
+        assert store.run_results is result
+        assert fired == [True]
+
     def test_wizard_sidebar_creation(self, qt_app) -> None:
         from app.navigation import WizardSidebar
 

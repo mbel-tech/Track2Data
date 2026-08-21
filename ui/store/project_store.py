@@ -25,9 +25,11 @@ from track2data.core.models import (
     MetricSelection,
     PreprocessConfig,
     ProjectManifest,
+    RunResult,
     SessionRef,
     ZoneSet,
 )
+from ui.store.task_runner import TaskRunner
 
 
 class ProjectStore(QObject):
@@ -37,6 +39,17 @@ class ProjectStore(QObject):
     Emits a fine-grained signal for every top-level field so wizard pages
     can subscribe only to what they need, avoiding unnecessary redraws.
     State is never mutated in place; setters replace fields then emit.
+
+    Owns a TaskRunner (self.tasks) and forwards its signals onto its own
+    taskProgress/taskFinished so wizard pages only ever need to listen to
+    ProjectStore, never reach into store.tasks directly for routine
+    progress/completion handling. taskFinished carries a result on
+    success or an Exception on failure (see its own signal comment) --
+    a failed task's message and traceback are both attached to that
+    exception (.args and a dynamically-added .traceback attribute), since
+    TaskRunner.taskFailed only carries the stringified message +
+    traceback, not the original exception object, which isn't reliably
+    picklable/marshalable across the Qt signal boundary.
     """
 
     # ── signals ────────────────────────────────────────────────────────────
@@ -48,6 +61,7 @@ class ProjectStore(QObject):
     preprocessChanged  = Signal()
     metricsChanged     = Signal()
     exportChanged      = Signal()
+    runResultsChanged  = Signal()
     runLogAppended     = Signal(str)           # one Markdown line
     taskProgress       = Signal(str, int)      # task_id, percent 0-100
     taskFinished       = Signal(str, object)   # task_id, result-or-exception
@@ -56,6 +70,13 @@ class ProjectStore(QObject):
         super().__init__(parent)
         self._manifest: ProjectManifest | None = None
         self._project_dir: Path | None = None
+        self._run_results: RunResult | None = None
+
+        self._tasks = TaskRunner(self)
+        self._tasks.taskProgress.connect(self.taskProgress)
+        self._tasks.taskFinished.connect(self.taskFinished)
+        self._tasks.taskFailed.connect(self._on_task_failed)
+        self._tasks.taskLog.connect(lambda _task_id, line: self.append_log(line))
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -70,6 +91,28 @@ class ProjectStore(QObject):
     @property
     def has_project(self) -> bool:
         return self._manifest is not None
+
+    @property
+    def tasks(self) -> TaskRunner:
+        """The owned background TaskRunner. Prefer ProjectStore's own
+        taskProgress/taskFinished signals for routine listening; use this
+        directly for submit()/submit_with_progress()/cancel()/cancel_all()."""
+        return self._tasks
+
+    @property
+    def run_results(self) -> RunResult | None:
+        return self._run_results
+
+    def set_run_results(self, results: RunResult) -> None:
+        """Record the outcome of the most recent Engine.run() and notify
+        listeners (e.g. the preview screen's Diagnostics/Metrics tabs)."""
+        self._run_results = results
+        self.runResultsChanged.emit()
+
+    def _on_task_failed(self, task_id: str, message: str, tb: str) -> None:
+        exc = RuntimeError(message)
+        exc.traceback = tb
+        self.taskFinished.emit(task_id, exc)
 
     # ── project lifecycle ──────────────────────────────────────────────────
 
