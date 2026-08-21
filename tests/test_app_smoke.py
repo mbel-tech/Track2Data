@@ -156,6 +156,14 @@ class TestUILayer:
         assert len(PAGE_TO_STAGE) == 10
         assert all(0 <= s < len(STAGES) for s in PAGE_TO_STAGE)
 
+    def test_app_state_is_a_genuine_reexport_not_a_duplicate(self) -> None:
+        """D-004 / issue #27: app/state.py is a deprecated shim over
+        ui/store/project_store.py, not a second copy of the class."""
+        from app.state import ProjectStore as ShimProjectStore
+        from ui.store.project_store import ProjectStore as RealProjectStore
+
+        assert ShimProjectStore is RealProjectStore
+
     @pytest.fixture(scope="class")
     def qt_app(self):
         """One QApplication per test class (cannot create more than one)."""
