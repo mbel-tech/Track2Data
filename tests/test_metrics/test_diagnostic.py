@@ -9,10 +9,13 @@ import pytest
 
 from track2data.core.models import Session, VideoInfo
 from track2data.metrics.diagnostic import (
+    CrossingRate,
+    FragmentLengthDistribution,
     IdentityStability,
     IdProbabilityStats,
     InconsistentFrameCount,
     SegmentationErrorFrames,
+    SwapOpportunityCount,
     TrackingAccuracy,
     TrackingCoverage,
     compute_all_diagnostics,
@@ -328,6 +331,92 @@ class TestSegmentationErrorFrames:
         assert m.level == "diagnostic"
 
 
+# ── D-7/D-8/D-9: fragment-derived diagnostics ───────────────────────────────
+#
+# Regression coverage: preprocessing/list_of_fragments.json had zero
+# consumers -- the entire fragment layer (identity-swap boundaries,
+# crossing detection, fragment-length distribution) was unused.
+
+
+def _frag(**overrides):  # type: ignore[no-untyped-def]
+    frag = {
+        "identifier": 0, "start_frame": 0, "end_frame": 5,
+        "is_an_individual": True,
+    }
+    frag.update(overrides)
+    return frag
+
+
+class TestFragmentLengthDistribution:
+    def test_d7_none_when_no_fragments(self) -> None:
+        sess = make_session(fragments=None)
+        df = FragmentLengthDistribution().compute(sess)
+        assert np.isnan(df["fragment_length_median"].values[0])
+
+    def test_d7_computes_distribution(self) -> None:
+        fragments = {"fragments": [
+            _frag(start_frame=0, end_frame=5),    # length 5
+            _frag(start_frame=10, end_frame=30),  # length 20
+            _frag(start_frame=0, end_frame=1, is_an_individual=False),  # crossing, excluded
+        ]}
+        sess = make_session(fragments=fragments)
+        df = FragmentLengthDistribution().compute(sess)
+        assert df["n_individual_fragments"].values[0] == 2
+        assert df["fragment_length_median"].values[0] == pytest.approx(12.5)
+        assert df["fragment_length_max"].values[0] == 20.0
+
+    def test_d7_metric_attributes(self) -> None:
+        m = FragmentLengthDistribution()
+        assert m.id == "D-7"
+        assert m.level == "diagnostic"
+
+
+class TestCrossingRate:
+    def test_d8_none_when_no_fragments(self) -> None:
+        sess = make_session(fragments=None)
+        df = CrossingRate().compute(sess)
+        assert np.isnan(df["crossing_fragment_fraction"].values[0])
+
+    def test_d8_computes_rates(self) -> None:
+        fragments = {"fragments": [
+            _frag(start_frame=0, end_frame=10, is_an_individual=True),   # 10 frames
+            _frag(start_frame=0, end_frame=10, is_an_individual=False),  # 10 frames, crossing
+        ]}
+        sess = make_session(fragments=fragments)
+        df = CrossingRate().compute(sess)
+        assert df["crossing_fragment_fraction"].values[0] == pytest.approx(0.5)
+        assert df["crossing_frame_fraction"].values[0] == pytest.approx(0.5)
+
+    def test_d8_metric_attributes(self) -> None:
+        m = CrossingRate()
+        assert m.id == "D-8"
+        assert m.level == "diagnostic"
+
+
+class TestSwapOpportunityCount:
+    def test_d9_none_when_no_fragments(self) -> None:
+        sess = make_session(fragments=None)
+        df = SwapOpportunityCount().compute(sess)
+        assert np.isnan(df["swap_opportunity_count"].values[0])
+
+    def test_d9_counts_boundaries_excluding_fixed(self) -> None:
+        fragments = {"fragments": [
+            _frag(identifier=0, end_frame=7, identity_is_fixed=False),
+            _frag(identifier=1, end_frame=20, identity_is_fixed=True),  # excluded
+        ]}
+        sess = make_session(fragments=fragments, video=VideoInfo(
+            fps=25.0, n_frames=100, width_px=100, height_px=100,
+        ))
+        df = SwapOpportunityCount().compute(sess)
+        assert df["swap_opportunity_count"].values[0] == 1.0
+        assert df["swap_opportunity_fraction"].values[0] == pytest.approx(0.01)
+
+    def test_d9_metric_attributes(self) -> None:
+        m = SwapOpportunityCount()
+        assert m.id == "D-9"
+        assert m.level == "diagnostic"
+
+
 # ── D-5: Identity Stability ────────────────────────────────────────────────────
 
 
@@ -399,10 +488,12 @@ class TestIdentityStability:
 
 
 class TestComputeAllDiagnostics:
-    def test_returns_six_keys(self) -> None:
+    def test_returns_nine_keys(self) -> None:
         sess = make_session()
         result = compute_all_diagnostics(sess)
-        assert set(result.keys()) == {"D-1", "D-2", "D-3", "D-4", "D-5", "D-6"}
+        assert set(result.keys()) == {
+            "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9",
+        }
 
     def test_values_are_dataframes(self) -> None:
         import pandas as pd
