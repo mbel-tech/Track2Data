@@ -97,7 +97,10 @@ class MetricInfoDialog(QDialog):
     def _format_documentation(metric_cls: type[Metric]) -> str:
         """Render a MetricDocumentation as readable multi-line plain text."""
         doc = metric_cls.documentation
-        lines: list[str] = ["Definition:", doc.definition, "", "Formula:", doc.formula_plain]
+        lines: list[str] = ["Definition:", doc.definition]
+
+        if doc.formula_plain:
+            lines += ["", "Formula:", doc.formula_plain]
 
         if doc.formula_latex:
             lines += ["", "Formula (LaTeX source):", doc.formula_latex]
