@@ -316,6 +316,65 @@ def test_no_tracking_intervals_falls_back_to_array_position() -> None:
     assert df["in_tracking_interval"].isna().all()
 
 
+# ── build_fish_by_frame: identities_labels / identities_colors ─────────────
+#
+# Regression coverage: identities_labels was on Session and unused;
+# identities_colors wasn't even read. A user who spent time naming/
+# colouring identities in the Validator got bare 0..N-1 individual_id
+# integers back in the export.
+
+
+def test_individual_label_column_present_when_labels_set() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=2)
+    session = session.model_copy(update={"identities_labels": ["Alpha", "Beta"]})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert set(df.loc[df["individual_id"] == 0, "individual_label"]) == {"Alpha"}
+    assert set(df.loc[df["individual_id"] == 1, "individual_label"]) == {"Beta"}
+
+
+def test_individual_color_column_present_when_colors_set() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=2)
+    session = session.model_copy(
+        update={"identities_colors": ["#ff0000", "#00ff00"]}
+    )
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert set(df.loc[df["individual_id"] == 0, "individual_color"]) == {"#ff0000"}
+    assert set(df.loc[df["individual_id"] == 1, "individual_color"]) == {"#00ff00"}
+
+
+def test_no_label_color_columns_when_absent() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=2)
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert "individual_label" not in df.columns
+    assert "individual_color" not in df.columns
+
+
+def test_labels_shorter_than_n_animals_does_not_crash() -> None:
+    """A malformed/partial identities_labels must degrade to None per
+    row, not IndexError the whole export."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=2, n_animals=2)
+    session = session.model_copy(update={"identities_labels": ["OnlyOne"]})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert set(df.loc[df["individual_id"] == 0, "individual_label"]) == {"OnlyOne"}
+    assert df.loc[df["individual_id"] == 1, "individual_label"].isna().all()
+
+
 # ── build_fish_by_frame: zone columns ───────────────────────────────────────
 
 

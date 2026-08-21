@@ -130,6 +130,24 @@ class TestReaderRead:
         assert s.roi_list is not None
         assert len(s.roi_list) >= 1
 
+    def test_roi_list_entries_are_parsed_signed_polygons(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.roi_list is not None
+        entry = s.roi_list[0]
+        assert entry["sign"] == "+"
+        assert isinstance(entry["vertices"], list)
+        assert entry["vertices"][0] == (10.0, 10.0)
+
+    def test_identities_colors_from_session_json(self, reader: IDTrackerAiReader,
+                                                   tiny_real_session: Path) -> None:
+        """identities_colors only exists in session.json, never the
+        trajectory dict -- verified absent from all 70 real trajectory
+        payloads."""
+        s = reader.read(tiny_real_session)
+        assert s.identities_colors == ["#e41a1c", "#377eb8"]
+
     # ── custom artefacts ──────────────────────────────────────────────────────
 
     def test_inconsistent_frames_loaded(self, reader: IDTrackerAiReader,

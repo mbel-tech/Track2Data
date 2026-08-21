@@ -58,6 +58,12 @@ class Session(BaseModel):
     # Px-to-real-unit ratio from the validator's length-calibration tool; None = not calibrated.
     length_unit: float | None = None
     identities_labels: list[str] | None = None
+    # Hex colours ("#ff0000", ...) assigned per identity in the Validator
+    # GUI, index-aligned with identities_labels / individual_id. Only in
+    # session.json, not the trajectory dict -- see reader.py's session.json
+    # enrichment. Lets an export match the colours a user already spent
+    # time associating with each identity while validating.
+    identities_colors: list[str] | None = None
     # idtracker.ai docs disagree on this type: session_idtrackerai.md:21 says dict
     # ("Named groups of identities... if exclusive ROI, saved here"); output_structure
     # says list. Real 6.x sessions ship a dict (verified: 70/70 in the GOT corpus).

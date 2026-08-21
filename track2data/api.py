@@ -275,6 +275,8 @@ class Engine:
         Columns: session_id, individual_id, frame, time_s, x_px, y_px,
                  speed_px_s, heading_rad, main_zone, sec_zone.
         Calibrated columns added when psess.px_per_cm is set.
+        individual_label/individual_color added when
+        Session.identities_labels/identities_colors are present.
 
         When ``MetricSelection.quality_threshold`` > 0, rows whose
         ``id_probabilities[frame, animal] < threshold`` have their position/
@@ -332,6 +334,21 @@ class Engine:
             df["main_zone"] = psess.main_zone.reshape(-1)
         if psess.sec_zone is not None:
             df["sec_zone"] = psess.sec_zone.reshape(-1)
+
+        # identities_labels/identities_colors are index-aligned with
+        # individual_id (0-based) -- surface them so a user who spent time
+        # naming/colouring identities in the idtracker.ai Validator gets
+        # them back in the export instead of bare 0..N-1 integers.
+        labels = psess.session.identities_labels
+        if labels:
+            df["individual_label"] = [
+                labels[i] if i < len(labels) else None for i in individuals
+            ]
+        colors = psess.session.identities_colors
+        if colors:
+            df["individual_color"] = [
+                colors[i] if i < len(colors) else None for i in individuals
+            ]
 
         threshold = self._manifest.metrics.quality_threshold
         id_prob = psess.session.id_probabilities
