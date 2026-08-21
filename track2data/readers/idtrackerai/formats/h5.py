@@ -50,7 +50,7 @@ def _group_to_dict(group: Any) -> dict[str, Any]:
     import h5py
 
     out: dict[str, Any] = {}
-    for key in group.keys():
+    for key in group:
         item = group[key]
         if isinstance(item, h5py.Group):
             out[key] = _group_to_dict(item)
@@ -106,14 +106,14 @@ def load_h5(path: Path) -> dict[str, Any]:
                 remediation="Re-export the session or use a different trajectory format.",
             )
 
-        for key in f.keys():
+        for key in f:
             item = f[key]
             if isinstance(item, h5py.Group):
                 payload[key] = _group_to_dict(item)
             else:
                 payload[key] = item[:]
 
-        for key in f.attrs.keys():
+        for key in f.attrs:
             payload[key] = _coerce_attr(f.attrs[key])
 
     return payload

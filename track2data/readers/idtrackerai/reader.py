@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, ClassVar
 
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
@@ -24,14 +26,13 @@ from track2data.readers.idtrackerai.custom_artefacts import (
     load_inconsistent_frames,
     load_matching_results,
 )
-from track2data.readers.idtrackerai.detect import detect
+from track2data.readers.idtrackerai.detect import ReaderHit, detect
 from track2data.readers.idtrackerai.formats.csv_bundle import load_csv_bundle
 from track2data.readers.idtrackerai.formats.h5 import load_h5
 from track2data.readers.idtrackerai.formats.npy import load_npy
 from track2data.readers.idtrackerai.log import load_log_digest
 from track2data.readers.idtrackerai.normaliser import Normaliser
 from track2data.readers.idtrackerai.session_json import load_session_json
-
 
 logger = logging.getLogger(__name__)
 
@@ -105,14 +106,14 @@ class IDTrackerAiReader(SessionReader):
 
     # Formats with a working loader. parquet/pickle/csv_tidy are detected by
     # detect.py but have no loader yet -- see _LOADERS below.
-    _LOADERS = {
+    _LOADERS: ClassVar[dict[str, Callable[[Path], dict]]] = {
         "h5": load_h5,
         "npy": load_npy,
         "csv": load_csv_bundle,
     }
 
     @classmethod
-    def _load_payload(cls, hit) -> tuple[str, dict]:
+    def _load_payload(cls, hit: ReaderHit) -> tuple[str, dict[str, Any]]:
         """
         Load the trajectory payload from the best *readable* format in *hit*.
 

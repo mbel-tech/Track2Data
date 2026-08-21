@@ -184,19 +184,22 @@ class Normaliser:
             # short session can legitimately have n_frames < n_animals.
             arr = arr.transpose(1, 0, 2)
 
-        if isinstance(n_animals_hint, (int, float)) and n_animals_hint > 0:
-            if arr.shape[1] != n_animals_hint:
-                raise DataValidationError(
-                    f"trajectories has {arr.shape[1]} animals but session.json "
-                    f"declares number_of_animals={int(n_animals_hint)}.",
-                    code="IDT_SHAPE_MISMATCH",
-                    severity="error",
-                    subject=str(arr.shape),
-                    remediation=(
-                        "The trajectory array and session.json disagree on "
-                        "animal count; the session data may be truncated or corrupt."
-                    ),
-                )
+        if (
+            isinstance(n_animals_hint, (int, float))
+            and n_animals_hint > 0
+            and arr.shape[1] != n_animals_hint
+        ):
+            raise DataValidationError(
+                f"trajectories has {arr.shape[1]} animals but session.json "
+                f"declares number_of_animals={int(n_animals_hint)}.",
+                code="IDT_SHAPE_MISMATCH",
+                severity="error",
+                subject=str(arr.shape),
+                remediation=(
+                    "The trajectory array and session.json disagree on "
+                    "animal count; the session data may be truncated or corrupt."
+                ),
+            )
 
         return arr
 

@@ -53,7 +53,7 @@ class TestAllSessionsImport:
         for folder in sessions:
             try:
                 read_session(folder)
-            except Exception as exc:  # noqa: BLE001 -- collecting all failures deliberately
+            except Exception as exc:
                 failures.append((folder.name, exc))
 
         if failures:
@@ -162,7 +162,7 @@ class TestPipelineDoesNotCorruptRealData:
         length inflation measured on this session when it ran unconditionally."""
         import numpy as np
 
-        from track2data.core.models import PreprocessConfig, VideoInfo, Session
+        from track2data.core.models import PreprocessConfig, Session, VideoInfo
         from track2data.preprocess.pipeline import run
 
         xy = self._raw_xy()
