@@ -1096,6 +1096,73 @@ def test_run_keeps_preprocess_report_when_a_later_stage_fails(tmp_path: Path) ->
     assert _report_fingerprint(got) == _report_fingerprint(expected_report)
 
 
+def test_preprocess_attaches_report_to_a_post_pipeline_stage_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Calibration and zone assignment run *inside* Engine.preprocess(),
+    after pp_run() has already produced the step report. When one of them
+    fails, preprocess() must still raise -- continuing would silently yield
+    pixel-unit or zone-less results, which issue #7's fail-loud rule exists
+    to prevent -- but the already-computed report rides along on the
+    exception so callers can still surface the step log."""
+    from track2data.api import Engine
+    from track2data.core.errors import PreprocessStageError
+
+    session = _make_session(n_frames=10, n_animals=1)
+    engine = Engine(_make_manifest())
+
+    expected_report = engine.preprocess(session).report
+
+    def failing_apply_scalar_calibration(*_args, **_kwargs):
+        raise RuntimeError("calibration exploded")
+
+    monkeypatch.setattr(
+        "track2data.calibration.scalar.apply_scalar_calibration",
+        failing_apply_scalar_calibration,
+    )
+
+    with pytest.raises(PreprocessStageError) as excinfo:
+        engine.preprocess(session)
+
+    assert _report_fingerprint(excinfo.value.report) == _report_fingerprint(expected_report)
+    # The original failure is chained, not swallowed.
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert "calibration exploded" in str(excinfo.value.__cause__)
+
+
+def test_run_keeps_preprocess_report_when_zone_assignment_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same rule as a later-stage failure, one layer down: zone assignment
+    blowing up inside preprocess() must not discard the step report that
+    pp_run() already produced."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        zones=ZoneSet(rois=[ROI(name="arena", vertices=[(0.0, 0.0), (99.0, 0.0), (99.0, 99.0)])]),
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    expected_report = engine.preprocess(session).report
+
+    def failing_assign_zones(*_args, **_kwargs):
+        raise RuntimeError("zones exploded")
+
+    monkeypatch.setattr("track2data.zones.geometry.assign_zones", failing_assign_zones)
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    assert result.sessions[0].error is not None
+    assert "zones exploded" in result.sessions[0].error
+    got = result.sessions[0].preprocess_report
+    assert got is not None
+    assert _report_fingerprint(got) == _report_fingerprint(expected_report)
+
+
 def test_session_run_result_preprocess_report_survives_pickle(tmp_path: Path) -> None:
     import pickle
 
