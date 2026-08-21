@@ -699,6 +699,16 @@ def test_run_captures_per_session_error_without_aborting_batch(tmp_path: Path) -
     assert by_id["bad"].written == []
 
 
+def _report_fingerprint(report: PreprocessReport) -> list[tuple]:
+    """Full per-step content, not just step_name: every session's report
+    carries the same five step names, so comparing names alone would pass
+    even against a report computed from entirely different data."""
+    return [
+        (s.step_name, s.affected_frames, s.affected_per_individual, s.notes)
+        for s in report.steps
+    ]
+
+
 def test_run_attaches_preprocess_report_to_session_run_result(tmp_path: Path) -> None:
     """SessionRunResult.preprocess_report must carry the same PreprocessReport
     that Engine.preprocess() produces for that session -- currently it's
@@ -719,7 +729,7 @@ def test_run_attaches_preprocess_report_to_session_run_result(tmp_path: Path) ->
 
     got = result.sessions[0].preprocess_report
     assert isinstance(got, PreprocessReport)
-    assert [s.step_name for s in got.steps] == [s.step_name for s in expected_report.steps]
+    assert _report_fingerprint(got) == _report_fingerprint(expected_report)
 
 
 def test_run_leaves_preprocess_report_none_when_preprocessing_fails(tmp_path: Path) -> None:
@@ -732,12 +742,47 @@ def test_run_leaves_preprocess_report_none_when_preprocessing_fails(tmp_path: Pa
     )
     engine = Engine(manifest)
     engine.import_session = lambda folder: session  # type: ignore[method-assign]
-    engine.preprocess = lambda _session: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+
+    def failing_preprocess(_session):
+        raise RuntimeError("boom")
+
+    engine.preprocess = failing_preprocess  # type: ignore[method-assign]
 
     result = engine.run(tmp_path, exporters=["csv_long"])
 
     assert result.sessions[0].error is not None
     assert result.sessions[0].preprocess_report is None
+
+
+def test_run_keeps_preprocess_report_when_a_later_stage_fails(tmp_path: Path) -> None:
+    """_run_one_session()'s except block covers preprocess, metrics, payload
+    build and export alike. When preprocessing succeeded and a *later* stage
+    blew up, the report exists and is exactly what the user needs to diagnose
+    the failure -- it must not be discarded along with the rest."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    expected_report = engine.preprocess(session).report
+
+    def failing_compute_metrics(_psess):
+        raise RuntimeError("metrics exploded")
+
+    engine.compute_metrics = failing_compute_metrics  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    assert result.sessions[0].error is not None
+    assert "metrics exploded" in result.sessions[0].error
+    got = result.sessions[0].preprocess_report
+    assert got is not None
+    assert _report_fingerprint(got) == _report_fingerprint(expected_report)
 
 
 def test_session_run_result_preprocess_report_survives_pickle(tmp_path: Path) -> None:
@@ -757,9 +802,11 @@ def test_session_run_result_preprocess_report_survives_pickle(tmp_path: Path) ->
     restored = pickle.loads(pickle.dumps(result.sessions[0]))
 
     assert restored.preprocess_report is not None
-    assert [s.step_name for s in restored.preprocess_report.steps] == [
-        s.step_name for s in result.sessions[0].preprocess_report.steps
-    ]
+    # Fingerprint, not step names: this is what proves the nested list[int]
+    # and notes survived the round-trip, which is the point of the test.
+    assert _report_fingerprint(restored.preprocess_report) == _report_fingerprint(
+        result.sessions[0].preprocess_report
+    )
 
 
 def test_run_all_is_a_thin_wrapper_returning_run_written(tmp_path: Path) -> None:

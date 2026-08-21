@@ -340,6 +340,49 @@ def test_diagnostics_tab_preprocess_table_empty_when_report_is_none(qtbot) -> No
     assert screen._diag_preprocess_table.rowCount() == 0
 
 
+def test_diagnostics_tab_preprocess_table_empty_when_report_has_no_steps(qtbot) -> None:
+    """A report that exists but logged no steps is distinct from None and
+    must also render as an empty table, not a header-only ghost row."""
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+
+    session = _session1()
+    session.preprocess_report = PreprocessReport(steps=[])
+    store.set_run_results(RunResult(sessions=[session]))
+
+    assert screen._diag_preprocess_table.rowCount() == 0
+    assert screen._diag_preprocess_table.columnCount() == 0
+
+
+def test_diagnostics_tab_preprocess_table_clears_when_switching_to_a_reportless_session(
+    qtbot,
+) -> None:
+    """The stale-table regression guard: switching from a session that has
+    a report to one that doesn't (and back) must repopulate each time
+    rather than leaving the previous session's steps on screen."""
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+    store.set_run_results(
+        RunResult(sessions=[_session3_with_preprocess_report(), _session1()])
+    )
+
+    assert screen._diag_session_combo.currentText() == "s3"
+    assert screen._diag_preprocess_table.rowCount() == 2
+
+    screen._diag_session_combo.setCurrentText("s1")
+    assert screen._diag_preprocess_table.rowCount() == 0
+
+    screen._diag_session_combo.setCurrentText("s3")
+    assert screen._diag_preprocess_table.rowCount() == 2
+    assert _row_dict(screen._diag_preprocess_table, 0)["step_name"] == "gap_fill"
+
+
 # ── Metrics tab: populated after a run ──────────────────────────────────────
 
 

@@ -462,6 +462,7 @@ class Engine:
         from track2data.core.progress import OperationCancelled
 
         start = time.monotonic()
+        psess = None
         try:
             psess = self.preprocess(session)
             emit(
@@ -506,6 +507,9 @@ class Engine:
             logger.exception("Session %s failed.", session.session_id)
             return SessionRunResult(
                 session_id=session.session_id,
+                # Preserved when the failure came *after* preprocessing: the
+                # step log is often what explains why the later stage blew up.
+                preprocess_report=psess.report if psess is not None else None,
                 duration_s=time.monotonic() - start,
                 error=str(exc),
             )
