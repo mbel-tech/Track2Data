@@ -340,8 +340,14 @@ def _build_tiny_real_session(base: Path) -> None:
         '  "name": "' + session_name + '",\n'
         '  "area_ths": [100.0, Infinity],\n'
         '  "intensity_ths": [10, 128],\n'
+        '  "use_bkg": true,\n'
+        '  "background_subtraction_stat": "median",\n'
+        '  "erosion_kernel_size": 10,\n'
         '  "tracking_intervals": [[0, 9]],\n'
-        '  "roi_list": ["+ Polygon [(10, 10), (100, 10), (100, 100), (10, 100)]"],\n'
+        # Real format uses [x, y] list pairs, not (x, y) tuples --
+        # verified against the 70-session GOT corpus.
+        '  "roi_list": ["+ Polygon [[10.0, 10.0], [100.0, 10.0], '
+        '[100.0, 100.0], [10.0, 100.0]]"],\n'
         '  "estimated_accuracy": 0.90,\n'
         '  "fraction_identified": 0.822,\n'
         '  "silhouette_score": 0.781,\n'
@@ -350,21 +356,38 @@ def _build_tiny_real_session(base: Path) -> None:
         '  "identities_groups": [],\n'
         '  "identities_colors": ["#e41a1c", "#377eb8"],\n'
         '  "last_validated": "2024-01-15T10:30:00",\n'
-        '  "data_policy": "trajectories_and_images",\n'
+        '  "data_policy": "idmatcher.ai",\n'
         '  "trajectories_formats": ["npy", "csv"],\n'
-        '  "timers": [{"name": "tracking", "start_time": 0.0, "finish_time": 12.5}],\n'
+        '  "number_of_error_frames": 3,\n'
+        '  "exclusive_rois": false,\n'
+        '  "velocity_threshold": 42.5,\n'
+        '  "resolution_reduction": 0.75,\n'
+        '  "id_image_size": [80, 80, 1],\n'
+        '  "length_calibrations": [{"point_A": [0, 0], "point_B": [10, 0], '
+        '"distance": 1.0}],\n'
+        # Real format: dict keyed by stage name, ISO-8601 start/finish
+        # timestamps -- verified against the 70-session GOT corpus.
+        '  "timers": {\n'
+        '    "Tracking session": {"name": "Tracking session", '
+        '"start_time": "2024-01-15T10:17:32", "finish_time": "2024-01-15T10:17:45"}\n'
+        '  },\n'
         '  "video_paths": ["/Volumes/Expansion/tiny_real.mp4"]\n'
         '}'
     )
     (base / "session.json").write_text(session_json_text, encoding="utf-8")
 
     # ── idtrackerai.log ───────────────────────────────────────────────────────
+    # Real format (verified against the 70-session GOT corpus): a timestamp
+    # is shown only when it changes from the previous line; every entry is
+    # right-padded with a "module.py:line" source reference; WARNING/ERROR
+    # lines carry the level as a literal token; the terminal status on a
+    # successful run is the bare word "Success" on its own line.
     log_text = (
-        "2024-01-15 10:17:32 INFO  [tracking] Starting session tracking\n"
-        "2024-01-15 10:17:33 INFO  [preprocessing] ROI mask applied\n"
-        "2024-01-15 10:17:45 INFO  [tracking] Tracking complete in 12.5s\n"
-        "2024-01-15 10:30:00 INFO  [validation] Session validated successfully\n"
-        "2024-01-15 10:30:00 INFO  [done] Status: Success\n"
+        "10:17:32 Welcome to idtracker.ai 6.0.13                    logging_utils.py:184\n"
+        "         Loading parameters from                                  py_utils.py:84\n"
+        "10:17:33 WARNING Frames with more blobs than animals  animals_detection.py:110\n"
+        "10:17:45 Tracking complete. It took 0:00:12                        session.py:1035\n"
+        "         Success                                                           run.py:81\n"
     )
     (base / "idtrackerai.log").write_text(log_text, encoding="utf-8")
 

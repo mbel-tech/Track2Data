@@ -1,4 +1,4 @@
-"""Tests for diagnostic metrics D-1 through D-5 (TDD)."""
+"""Tests for diagnostic metrics D-1 through D-6 (TDD)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,13 @@ import pytest
 
 from track2data.core.models import Session, VideoInfo
 from track2data.metrics.diagnostic import (
+    CrossingRate,
+    FragmentLengthDistribution,
     IdentityStability,
     IdProbabilityStats,
     InconsistentFrameCount,
+    SegmentationErrorFrames,
+    SwapOpportunityCount,
     TrackingAccuracy,
     TrackingCoverage,
     compute_all_diagnostics,
@@ -201,6 +205,31 @@ class TestIdProbabilityStats:
         assert df.loc[df["individual_id"] == 0, col].values[0] == pytest.approx(0.5)
         assert df.loc[df["individual_id"] == 1, col].values[0] == pytest.approx(1.0)
 
+    def test_d3_nan_frames_excluded_not_propagated(self) -> None:
+        """Regression: NaN in id_probabilities means 'animal not detected in
+        this frame' (output_structure_idtrackerai.md:69), not zero
+        confidence. np.median/np.percentile propagate any NaN to the whole
+        result -- on the real corpus 44.5% of entries are NaN, so this used
+        to return NaN for every animal in every real session."""
+        probs = np.full((100, 2), 0.9)
+        probs[:44, 0] = np.nan  # 44% NaN for animal 0, none for animal 1
+        sess = make_session(id_probabilities=probs)
+        df = IdProbabilityStats().compute(sess)
+        row0 = df.loc[df["individual_id"] == 0].iloc[0]
+        assert not np.isnan(row0["id_prob_median"])
+        assert row0["id_prob_median"] == pytest.approx(0.9)
+        assert row0["id_prob_frac_above_0p9"] == pytest.approx(0.0)  # 0.9 is not > 0.9
+
+    def test_d3_all_nan_for_animal_returns_nan(self) -> None:
+        """An animal never detected at all (100% NaN) still returns NaN --
+        distinct from the None-array case, but the same output contract."""
+        probs = np.full((100, 2), 0.9)
+        probs[:, 0] = np.nan
+        sess = make_session(id_probabilities=probs)
+        df = IdProbabilityStats().compute(sess)
+        row0 = df.loc[df["individual_id"] == 0].iloc[0]
+        assert np.isnan(row0["id_prob_median"])
+
     def test_d3_metric_attributes(self) -> None:
         m = IdProbabilityStats()
         assert m.id == "D-3"
@@ -255,6 +284,136 @@ class TestInconsistentFrameCount:
     def test_d4_metric_attributes(self) -> None:
         m = InconsistentFrameCount()
         assert m.id == "D-4"
+        assert m.level == "diagnostic"
+
+
+# ── D-6: Segmentation Error Frames ──────────────────────────────────────────
+#
+# Regression coverage: number_of_error_frames is idtracker.ai's own
+# authoritative count of frames with more blobs than animals -- it was read
+# from session.json and had zero consumers. Distinct from D-4's
+# inconsistent_frames.csv, which is a user-side post-processing artefact.
+
+
+class TestSegmentationErrorFrames:
+    def test_d6_columns_present(self) -> None:
+        sess = make_session()
+        df = SegmentationErrorFrames().compute(sess)
+        for col in ["session_id", "number_of_error_frames", "error_frame_fraction"]:
+            assert col in df.columns
+
+    def test_d6_one_row(self) -> None:
+        sess = make_session()
+        df = SegmentationErrorFrames().compute(sess)
+        assert len(df) == 1
+
+    def test_d6_none_returns_nan(self) -> None:
+        sess = make_session(number_of_error_frames=None)
+        df = SegmentationErrorFrames().compute(sess)
+        assert np.isnan(df["number_of_error_frames"].values[0])
+        assert np.isnan(df["error_frame_fraction"].values[0])
+
+    def test_d6_count_and_fraction(self) -> None:
+        sess = make_session(number_of_error_frames=75)  # n_frames=100 default
+        df = SegmentationErrorFrames().compute(sess)
+        assert df["number_of_error_frames"].values[0] == 75
+        assert df["error_frame_fraction"].values[0] == pytest.approx(0.75)
+
+    def test_d6_zero_error_frames(self) -> None:
+        sess = make_session(number_of_error_frames=0)
+        df = SegmentationErrorFrames().compute(sess)
+        assert df["number_of_error_frames"].values[0] == 0
+        assert df["error_frame_fraction"].values[0] == pytest.approx(0.0)
+
+    def test_d6_metric_attributes(self) -> None:
+        m = SegmentationErrorFrames()
+        assert m.id == "D-6"
+        assert m.level == "diagnostic"
+
+
+# ── D-7/D-8/D-9: fragment-derived diagnostics ───────────────────────────────
+#
+# Regression coverage: preprocessing/list_of_fragments.json had zero
+# consumers -- the entire fragment layer (identity-swap boundaries,
+# crossing detection, fragment-length distribution) was unused.
+
+
+def _frag(**overrides):  # type: ignore[no-untyped-def]
+    frag = {
+        "identifier": 0, "start_frame": 0, "end_frame": 5,
+        "is_an_individual": True,
+    }
+    frag.update(overrides)
+    return frag
+
+
+class TestFragmentLengthDistribution:
+    def test_d7_none_when_no_fragments(self) -> None:
+        sess = make_session(fragments=None)
+        df = FragmentLengthDistribution().compute(sess)
+        assert np.isnan(df["fragment_length_median"].values[0])
+
+    def test_d7_computes_distribution(self) -> None:
+        fragments = {"fragments": [
+            _frag(start_frame=0, end_frame=5),    # length 5
+            _frag(start_frame=10, end_frame=30),  # length 20
+            _frag(start_frame=0, end_frame=1, is_an_individual=False),  # crossing, excluded
+        ]}
+        sess = make_session(fragments=fragments)
+        df = FragmentLengthDistribution().compute(sess)
+        assert df["n_individual_fragments"].values[0] == 2
+        assert df["fragment_length_median"].values[0] == pytest.approx(12.5)
+        assert df["fragment_length_max"].values[0] == 20.0
+
+    def test_d7_metric_attributes(self) -> None:
+        m = FragmentLengthDistribution()
+        assert m.id == "D-7"
+        assert m.level == "diagnostic"
+
+
+class TestCrossingRate:
+    def test_d8_none_when_no_fragments(self) -> None:
+        sess = make_session(fragments=None)
+        df = CrossingRate().compute(sess)
+        assert np.isnan(df["crossing_fragment_fraction"].values[0])
+
+    def test_d8_computes_rates(self) -> None:
+        fragments = {"fragments": [
+            _frag(start_frame=0, end_frame=10, is_an_individual=True),   # 10 frames
+            _frag(start_frame=0, end_frame=10, is_an_individual=False),  # 10 frames, crossing
+        ]}
+        sess = make_session(fragments=fragments)
+        df = CrossingRate().compute(sess)
+        assert df["crossing_fragment_fraction"].values[0] == pytest.approx(0.5)
+        assert df["crossing_frame_fraction"].values[0] == pytest.approx(0.5)
+
+    def test_d8_metric_attributes(self) -> None:
+        m = CrossingRate()
+        assert m.id == "D-8"
+        assert m.level == "diagnostic"
+
+
+class TestSwapOpportunityCount:
+    def test_d9_none_when_no_fragments(self) -> None:
+        sess = make_session(fragments=None)
+        df = SwapOpportunityCount().compute(sess)
+        assert np.isnan(df["swap_opportunity_count"].values[0])
+
+    def test_d9_counts_boundaries_excluding_fixed(self) -> None:
+        fragments = {"fragments": [
+            _frag(identifier=0, end_frame=7, identity_is_fixed=False),
+            _frag(identifier=1, end_frame=20, identity_is_fixed=True),  # excluded
+        ]}
+        sess = make_session(fragments=fragments, video=VideoInfo(
+            fps=25.0, n_frames=100, width_px=100, height_px=100,
+        ))
+        df = SwapOpportunityCount().compute(sess)
+        assert df["swap_opportunity_count"].values[0] == 1.0
+        assert df["swap_opportunity_fraction"].values[0] == pytest.approx(0.01)
+
+    def test_d9_metric_attributes(self) -> None:
+        m = SwapOpportunityCount()
+        assert m.id == "D-9"
         assert m.level == "diagnostic"
 
 
@@ -329,10 +488,12 @@ class TestIdentityStability:
 
 
 class TestComputeAllDiagnostics:
-    def test_returns_five_keys(self) -> None:
+    def test_returns_nine_keys(self) -> None:
         sess = make_session()
         result = compute_all_diagnostics(sess)
-        assert set(result.keys()) == {"D-1", "D-2", "D-3", "D-4", "D-5"}
+        assert set(result.keys()) == {
+            "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9",
+        }
 
     def test_values_are_dataframes(self) -> None:
         import pandas as pd

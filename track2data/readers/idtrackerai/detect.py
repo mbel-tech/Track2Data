@@ -5,8 +5,12 @@ Priority order: h5 > parquet > npy > pickle > csv_tidy > csv_bundle > legacy.
 Rationale: h5 is binary, cross-platform, and secure; parquet next; npy/pickle
 last for safety.  csv_bundle is universal in the observed corpus.
 
-macOS resource-fork files (._*) are filtered at this layer and never returned
-as candidate trajectory files.
+Candidate paths are built from fixed literal filenames ("trajectories.h5",
+etc.), so macOS resource-fork files (._trajectories.h5, ...) never match
+them regardless -- there is nothing to filter at this layer. Real
+resource-fork filtering (needed where this reader globs a directory rather
+than checking one fixed name) lives in custom_artefacts.py,
+preprocessing.py, and blobs.py, each via `not name.startswith("._")`.
 """
 
 from __future__ import annotations
@@ -23,10 +27,6 @@ class ReaderHit:
     path: Path
     # All detected formats in priority order: [(format_name, path), ...]
     all_present: list[tuple[str, Path]] = field(default_factory=list)
-
-
-def _is_resource_fork(p: Path) -> bool:
-    return p.name.startswith("._")
 
 
 def detect(folder: Path) -> ReaderHit | None:
@@ -50,12 +50,9 @@ def detect(folder: Path) -> ReaderHit | None:
         ("csv",      traj_dir / "trajectories_csv"),
     ]
 
-    found: list[tuple[str, Path]] = []
-    for fmt, path in candidates:
-        if _is_resource_fork(path):
-            continue
-        if path.exists() and not _is_resource_fork(path):
-            found.append((fmt, path))
+    found: list[tuple[str, Path]] = [
+        (fmt, path) for fmt, path in candidates if path.exists()
+    ]
 
     if not found:
         return None

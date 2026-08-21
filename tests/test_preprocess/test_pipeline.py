@@ -155,3 +155,28 @@ def test_report_total_affected_frames(tiny_session: Session) -> None:
     cfg = PreprocessConfig()
     result = run(tiny_session, cfg)
     assert result.report.total_affected_frames >= 0
+
+
+def test_pipeline_passes_velocity_threshold_to_jump_detect() -> None:
+    """Session.velocity_threshold_px_frame must reach detect_jumps() when
+    JumpCfg.method='idtracker_velocity_threshold' -- regression coverage
+    for the pipeline-level wiring, not just the jump_detect unit itself."""
+    xy = np.zeros((60, 1, 2), dtype=np.float64)
+    frames = np.arange(60, dtype=np.float64)
+    xy[:, 0, 0] = frames * 3.0
+    xy[:, 0, 1] = 0.0
+    xy[30, 0, 0] += 500.0  # injected jump
+
+    session = _make_session(xy)
+    session = session.model_copy(update={"velocity_threshold_px_frame": 20.0})
+    cfg = PreprocessConfig(
+        gap_fill=GapFillCfg(enabled=False),
+        jump=JumpCfg(
+            enabled=True, method="idtracker_velocity_threshold", replacement="nan"
+        ),
+        identity_switch=IdSwitchCfg(enabled=False),
+        smoothing=SmoothCfg(enabled=False),
+    )
+    psess = run(session, cfg)
+    jump_step = next(s for s in psess.report.steps if s.step_name == "jump_detect")
+    assert jump_step.affected_frames >= 1

@@ -102,14 +102,16 @@ def test_manifest_property_returns_the_manifest() -> None:
     assert engine.manifest is manifest
 
 
-# ── import_sessions: failure handling (FR-IMP-3 partial coverage) ──────────────
+# ── import_sessions: failure handling (issue #7 / FR-IMP-3) ────────────────────
 
 
-def test_import_sessions_skips_a_session_that_fails_to_import(tmp_path: Path) -> None:
-    """A session whose folder isn't a recognised idtracker.ai output is
-    skipped, not raised -- import_sessions() logs and continues per its
-    current (documented-as-imperfect, see issue #7) contract."""
+def test_import_sessions_raises_on_a_session_that_fails_to_import(tmp_path: Path) -> None:
+    """FR-IMP-3: flag failures with an actionable message, never silently.
+    A session whose folder isn't a recognised idtracker.ai output must
+    raise -- not be logged and dropped -- so a bad session in a project
+    is impossible to miss."""
     from track2data.api import Engine
+    from track2data.core.errors import Track2DataError
 
     bad_folder = tmp_path / "not_a_session"
     bad_folder.mkdir()
@@ -119,8 +121,31 @@ def test_import_sessions_skips_a_session_that_fails_to_import(tmp_path: Path) ->
         ]
     )
     engine = Engine(manifest)
-    sessions = engine.import_sessions()
-    assert sessions == []
+    with pytest.raises(Track2DataError) as exc_info:
+        engine.import_sessions()
+    # Actionable: names the offending folder, not just "something failed".
+    assert str(bad_folder) in str(exc_info.value)
+
+
+def test_import_sessions_stops_at_the_first_failure(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """Fail loud means fail immediately -- a later, importable session
+    must never be silently attempted/skipped past a broken one."""
+    from track2data.api import Engine
+    from track2data.core.errors import Track2DataError
+
+    bad_folder = tmp_path / "not_a_session"
+    bad_folder.mkdir()
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="bad", folder=bad_folder, sha256="x"),
+            SessionRef(session_id="good", folder=tiny_real_session, sha256="x"),
+        ]
+    )
+    engine = Engine(manifest)
+    with pytest.raises(Track2DataError):
+        engine.import_sessions()
 
 
 # ── preprocess: body-length calibration ─────────────────────────────────────
@@ -177,6 +202,42 @@ def test_preprocess_assigns_zones_when_rois_configured() -> None:
     assert psess.main_zone.shape == (session.n_frames, session.n_animals)
 
 
+# ── compute_metrics: exclusive_rois guard on group metrics ─────────────────
+#
+# Regression coverage: exclusive_rois=True means identities are physically
+# partitioned by ROI -- animals in different partitions can never interact,
+# so a group metric computed across the whole session (nearest-neighbour
+# distance, polarisation, cohesion, ...) is meaningless. Before this guard,
+# such metrics were computed silently and would look like valid data.
+
+
+def test_group_metrics_skipped_when_exclusive_rois_true(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)
+    session = session.model_copy(update={"exclusive_rois": True})
+    psess = _make_psess(session)
+    manifest = _make_manifest(metrics=MetricSelection(group=["GL-1"]))
+    engine = Engine(manifest)
+    with caplog.at_level("WARNING"):
+        results = engine.compute_metrics(psess)
+    assert "GL-1" not in results
+    assert any("exclusive_rois" in rec.message for rec in caplog.records)
+
+
+def test_group_metrics_computed_when_exclusive_rois_false_or_none() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)  # exclusive_rois defaults to None
+    psess = _make_psess(session)
+    manifest = _make_manifest(metrics=MetricSelection(group=["GL-1"]))
+    engine = Engine(manifest)
+    results = engine.compute_metrics(psess)
+    assert "GL-1" in results
+
+
 # ── compute_metrics: unregistered metric / metric exception ────────────────────
 
 
@@ -226,6 +287,178 @@ def test_compute_metrics_catches_a_raising_metric(monkeypatch: pytest.MonkeyPatc
     assert "D-1" in results
 
 
+# ── build_fish_by_frame: tracking_intervals frame/time offset ──────────────
+#
+# Regression coverage: frame/time_s used to be the raw array position,
+# ignoring Session.tracking_intervals. A session tracked with
+# --tracking_intervals "[9000,18000]" would export frame=0..8999 for data
+# that is really frames 9000..17999. All 70 real corpus sessions happen to
+# have a single trivial interval [0, n_frames], so this can only be
+# verified synthetically -- see also the direct unit tests on
+# api._map_array_index_to_true_frame.
+
+
+def test_frame_column_offset_by_tracking_interval_start() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=1)
+    session = session.model_copy(update={"tracking_intervals": [(9000, 9005)]})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == [9000, 9001, 9002, 9003, 9004]
+    assert df["in_tracking_interval"].all()
+
+
+def test_time_s_reflects_gap_between_multiple_intervals() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=4, n_animals=1)
+    session = session.model_copy(
+        update={"tracking_intervals": [(0, 2), (150, 152)], "video": session.video.model_copy(
+            update={"fps": 1.0}
+        )}
+    )
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == [0, 1, 150, 151]
+    assert list(df["time_s"]) == [0.0, 1.0, 150.0, 151.0]
+
+
+def test_mismatched_tracking_intervals_falls_back_to_array_position() -> None:
+    """Intervals that don't reconcile with n_frames (e.g. a partial
+    session.json) must not corrupt the frame axis -- fall back to today's
+    behaviour and mark in_tracking_interval as unknown (NaN), not False."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    session = session.model_copy(update={"tracking_intervals": [(0, 3)]})  # sums to 3, not 10
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == list(range(10))
+    assert df["in_tracking_interval"].isna().all()
+
+
+def test_no_tracking_intervals_falls_back_to_array_position() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=1)  # tracking_intervals defaults to None
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["frame"]) == [0, 1, 2, 3, 4]
+    assert df["in_tracking_interval"].isna().all()
+
+
+# ── build_fish_by_frame: identities_labels / identities_colors ─────────────
+#
+# Regression coverage: identities_labels was on Session and unused;
+# identities_colors wasn't even read. A user who spent time naming/
+# colouring identities in the Validator got bare 0..N-1 individual_id
+# integers back in the export.
+
+
+def test_individual_label_column_present_when_labels_set() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=2)
+    session = session.model_copy(update={"identities_labels": ["Alpha", "Beta"]})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert set(df.loc[df["individual_id"] == 0, "individual_label"]) == {"Alpha"}
+    assert set(df.loc[df["individual_id"] == 1, "individual_label"]) == {"Beta"}
+
+
+def test_individual_color_column_present_when_colors_set() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=2)
+    session = session.model_copy(
+        update={"identities_colors": ["#ff0000", "#00ff00"]}
+    )
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert set(df.loc[df["individual_id"] == 0, "individual_color"]) == {"#ff0000"}
+    assert set(df.loc[df["individual_id"] == 1, "individual_color"]) == {"#00ff00"}
+
+
+def test_no_label_color_columns_when_absent() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=2)
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert "individual_label" not in df.columns
+    assert "individual_color" not in df.columns
+
+
+def test_labels_shorter_than_n_animals_does_not_crash() -> None:
+    """A malformed/partial identities_labels must degrade to None per
+    row, not IndexError the whole export."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=2, n_animals=2)
+    session = session.model_copy(update={"identities_labels": ["OnlyOne"]})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert set(df.loc[df["individual_id"] == 0, "individual_label"]) == {"OnlyOne"}
+    assert df.loc[df["individual_id"] == 1, "individual_label"].isna().all()
+
+
+# ── build_fish_by_frame: was_interpolated ───────────────────────────────────
+#
+# Regression coverage: trajectory_variant was a Session-level constant
+# (always "with_gaps"), so nothing in the export could distinguish a
+# measured position from a reconstructed one.
+
+
+def test_was_interpolated_true_where_raw_nan_now_filled() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=1)
+    raw_xy = session.raw_xy.copy()
+    raw_xy[2, 0, :] = np.nan  # frame 2 was originally missing
+    session = session.model_copy(update={"raw_xy": raw_xy})
+
+    n_frames, n_animals = session.n_frames, session.n_animals
+    kine = KinematicsArrays(
+        speed_px_s=np.zeros((n_frames, n_animals)),
+        accel_px_s2=np.zeros((n_frames, n_animals)),
+        heading_rad=np.zeros((n_frames, n_animals)),
+    )
+    filled_xy = raw_xy.copy()
+    filled_xy[2, 0, :] = [123.0, 456.0]  # gap_fill filled it in
+    psess = PreprocessedSession(
+        session=session, xy=filled_xy, kinematics=kine, report=PreprocessReport()
+    )
+
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["was_interpolated"]) == [False, False, True, False, False]
+
+
+def test_was_interpolated_false_when_still_nan() -> None:
+    """A gap left unfilled (too long) must not be marked interpolated --
+    it's still missing, not reconstructed."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=1)
+    raw_xy = session.raw_xy.copy()
+    raw_xy[1, 0, :] = np.nan
+    session = session.model_copy(update={"raw_xy": raw_xy})
+    psess = _make_psess(session)  # xy = raw_xy unchanged, still NaN at frame 1
+
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["was_interpolated"]) == [False, False, False]
+
+
 # ── build_fish_by_frame: zone columns ───────────────────────────────────────
 
 
@@ -246,6 +479,81 @@ def test_build_fish_by_frame_includes_zone_columns_when_present() -> None:
     assert "sec_zone" in df.columns
     assert (df["main_zone"] == "zone_A").all()
     assert (df["sec_zone"] == "zone_B").all()
+
+
+# ── build_fish_by_frame: quality_threshold gate ─────────────────────────────
+#
+# Regression coverage: MetricSelection.quality_threshold was collected by the
+# UI, saved in the manifest, and read by zero lines of the engine -- setting
+# "0.9" and exporting produced a manifest that asserted a filter that was
+# never applied. See core/models.py's quality_threshold docstring.
+
+
+def test_quality_threshold_zero_masks_nothing() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)
+    session = session.model_copy(
+        update={"id_probabilities": np.full((10, 2), 0.5)}
+    )
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.0)))
+    df = engine.build_fish_by_frame(psess)
+    assert df["x_px"].isna().sum() == 0
+    assert "id_probability" in df.columns
+
+
+def test_quality_threshold_masks_only_low_confidence_rows() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=4, n_animals=2)
+    probs = np.array([[0.95, 0.2], [0.95, 0.2], [0.95, 0.2], [0.95, 0.2]])
+    session = session.model_copy(update={"id_probabilities": probs})
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.5)))
+    df = engine.build_fish_by_frame(psess)
+
+    animal0 = df[df["individual_id"] == 0]
+    animal1 = df[df["individual_id"] == 1]
+    assert animal0["x_px"].isna().sum() == 0
+    assert animal1["x_px"].isna().sum() == len(animal1)
+    assert animal1["y_px"].isna().sum() == len(animal1)
+    assert animal1["speed_px_s"].isna().sum() == len(animal1)
+    # session_id/individual_id/frame/time_s survive the mask -- the row is
+    # still locatable, only its measured values are withheld.
+    assert animal1["frame"].isna().sum() == 0
+
+
+def test_quality_threshold_masks_calibrated_columns_too() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=2, n_animals=1)
+    session = session.model_copy(update={"id_probabilities": np.array([[0.1], [0.1]])})
+    psess = _make_psess(session)
+    from dataclasses import replace
+
+    psess = replace(psess, px_per_cm=10.0)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.5)))
+    df = engine.build_fish_by_frame(psess)
+    assert df["x_cm"].isna().all()
+    assert df["speed_cm_s"].isna().all()
+
+
+def test_quality_threshold_without_id_probabilities_warns_and_masks_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A configured threshold with no id_probabilities to evaluate it
+    against must not silently pretend the filter was applied."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=2)  # id_probabilities=None
+    psess = _make_psess(session)
+    engine = Engine(_make_manifest(metrics=MetricSelection(quality_threshold=0.9)))
+    with caplog.at_level("WARNING"):
+        df = engine.build_fish_by_frame(psess)
+    assert df["x_px"].isna().sum() == 0
+    assert df["id_probability"].isna().all()
+    assert any("quality_threshold" in rec.message for rec in caplog.records)
 
 
 # ── run_session: default exporters / unregistered exporter / exporter exception ─
@@ -361,15 +669,16 @@ def test_validate_flags_scalar_mode_without_px_per_cm() -> None:
 # ── progress reporting (issue #18) ──────────────────────────────────────────────
 
 
-def test_import_sessions_without_progress_still_works() -> None:
+def test_import_sessions_without_progress_still_works(tiny_real_session: Path) -> None:
     """Backward compatibility: progress is optional and defaults to None."""
     from track2data.api import Engine
 
     manifest = _make_manifest(
-        sessions=[SessionRef(session_id="s1", folder=Path("/does/not/exist"), sha256="x")]
+        sessions=[SessionRef(session_id="s1", folder=tiny_real_session, sha256="x")]
     )
     engine = Engine(manifest)
-    assert engine.import_sessions() == []  # fails to import, logged+skipped, no crash
+    sessions = engine.import_sessions()
+    assert len(sessions) == 1
 
 
 def test_import_sessions_emits_one_event_per_session(tiny_real_session: Path) -> None:
@@ -553,7 +862,9 @@ def test_build_payload_buckets_metrics_by_level(tmp_path: Path) -> None:
     assert "IL-1" not in payload.group_metrics
     assert "GL-1" not in payload.individual_metrics
     assert all(k.startswith("D-") for k in payload.diagnostic_metrics)
-    assert set(payload.diagnostic_metrics) == {"D-1", "D-2", "D-3", "D-4", "D-5"}
+    assert set(payload.diagnostic_metrics) == {
+        "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9",
+    }
 
 
 def test_run_session_still_returns_list_of_paths_unchanged(tmp_path: Path) -> None:
@@ -755,10 +1066,10 @@ def test_run_leaves_preprocess_report_none_when_preprocessing_fails(tmp_path: Pa
 
 
 def test_run_keeps_preprocess_report_when_a_later_stage_fails(tmp_path: Path) -> None:
-    """_run_one_session()'s except block covers preprocess, metrics, payload
-    build and export alike. When preprocessing succeeded and a *later* stage
-    blew up, the report exists and is exactly what the user needs to diagnose
-    the failure -- it must not be discarded along with the rest."""
+    """_run_one_session()'s except block covers import, preprocess, metrics,
+    payload build and export alike. When preprocessing succeeded and a *later*
+    stage blew up, the report exists and is exactly what the user needs to
+    diagnose the failure -- it must not be discarded along with the rest."""
     from track2data.api import Engine
 
     session = _make_session(n_frames=10, n_animals=1)
@@ -807,6 +1118,38 @@ def test_session_run_result_preprocess_report_survives_pickle(tmp_path: Path) ->
     assert _report_fingerprint(restored.preprocess_report) == _report_fingerprint(
         result.sessions[0].preprocess_report
     )
+
+
+def test_run_captures_an_import_failure_as_a_per_session_error_without_aborting_batch(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """Engine.run() is the batch orchestrator: unlike import_sessions()
+    (which now fails loud, see #7), a session that fails to *import*
+    inside run() must be captured as that session's SessionRunResult.error
+    -- exactly like a preprocess/metrics/export failure already is --
+    rather than silently vanishing from RunResult.sessions."""
+    from track2data.api import Engine
+
+    bad_folder = tmp_path / "not_a_session"
+    bad_folder.mkdir()
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="bad", folder=bad_folder, sha256="x"),
+            SessionRef(session_id="good", folder=tiny_real_session, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    by_id = {s.session_id: s for s in result.sessions}
+    assert len(result.sessions) == 2  # both sessions present, not just the good one
+    assert by_id["bad"].error is not None
+    assert str(bad_folder) in by_id["bad"].error
+    assert by_id["bad"].written == []
+    assert by_id["good"].error is None
+    assert len(by_id["good"].written) > 0
 
 
 def test_run_all_is_a_thin_wrapper_returning_run_written(tmp_path: Path) -> None:

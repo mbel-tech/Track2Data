@@ -352,6 +352,57 @@ def test_cli_run_produces_csv(
     assert (out_dir / session_id / "master_fish_by_frame.csv").exists()
 
 
+def test_cli_run_reports_a_failed_session_and_exits_nonzero(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """
+    Issue #7 / FR-IMP-3: a session that can't be imported must be flagged
+    with an actionable message, not silently dropped. Before this fix,
+    `run` called Engine.run_all() -- which only returns written paths --
+    so a failed session was invisible: the command still exited 0 and
+    the only symptom was fewer files than expected. Now it calls
+    Engine.run() directly, prints one [error] line per failed session,
+    and exits 1 -- while still writing every session that *did* succeed.
+    """
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+    from track2data.core.manifest import write as manifest_write
+    from track2data.core.models import SessionRef
+
+    manifest = _minimal_manifest(tiny_real_session)
+    bad_folder = tmp_path / "not_a_session"
+    bad_folder.mkdir()
+    manifest = manifest.model_copy(
+        update={
+            "sessions": [
+                *manifest.sessions,
+                SessionRef(session_id="bad", folder=bad_folder, sha256="x"),
+            ]
+        }
+    )
+    manifest_path = tmp_path / "project.t2d.json"
+    manifest_write(manifest, manifest_path)
+
+    out_dir = tmp_path / "out"
+    runner = CliRunner()
+    result = runner.invoke(cli, [
+        "run",
+        str(manifest_path),
+        "--out-dir", str(out_dir),
+        "--exporter", "csv_long",
+    ])
+
+    assert result.exit_code == 1, (
+        f"CLI exited {result.exit_code}, expected 1:\n{result.output}"
+    )
+    assert "bad" in result.output
+    assert "failed" in result.output.lower()
+    # The good session still ran and wrote its output despite the other's failure.
+    session_id = tiny_real_session.name
+    assert (out_dir / session_id / "master_fish_by_frame.csv").exists()
+
+
 # ── 7. CLI: validate ──────────────────────────────────────────────────────────
 
 
@@ -430,6 +481,22 @@ def test_cli_list_metrics_level_filter() -> None:
     # D-1 is a diagnostic metric; should NOT appear in the individual filter
     assert "D-1" not in result.output
     assert "IL-1" in result.output
+
+
+def test_cli_list_metrics_group_level_natural_sort() -> None:
+    """CLI `list-metrics --level group` sorts GL-10 after GL-9, not GL-1."""
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["list-metrics", "--level", "group"])
+
+    assert result.exit_code == 0, result.output
+    ids = [
+        line.split()[0] for line in result.output.splitlines() if line.startswith("GL-")
+    ]
+    assert ids.index("GL-10") > ids.index("GL-9")
 
 
 # ── 9. CLI: new ───────────────────────────────────────────────────────────────

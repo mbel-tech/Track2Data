@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 #: listed here (e.g. "import", "run") aren't session-scoped in the same
 #: way and don't drive this table.
 _STAGE_LABELS = {
+    "import": "Importing",
     "preprocess": "Preprocessing",
     "metrics": "Computing metrics",
     "export": "Exporting",
