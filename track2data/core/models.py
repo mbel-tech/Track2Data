@@ -129,6 +129,10 @@ class Session(BaseModel):
     # across sessions for identity matching to be valid), not for use here.
     resolution_reduction: float | None = None
     id_image_size: list[int] | None = None
+    # Paths only, not decoded pixel data -- see
+    # readers/idtrackerai/preprocessing.py's module docstring for why.
+    roi_mask_path: Path | None = None
+    background_image_path: Path | None = None
 
     @property
     def n_frames(self) -> int:
