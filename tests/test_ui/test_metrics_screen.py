@@ -117,3 +117,72 @@ def test_load_from_store_checks_rows_matching_the_manifest_selection(qtbot) -> N
 
     row = _row_for_id(screen._ind_table, "IL-1")
     assert screen._ind_table.item(row, 0).checkState() == Qt.CheckState.Checked
+
+
+# ── per-row ⓘ / ⚙ buttons ─────────────────────────────────────────────────────
+
+
+def test_every_row_has_a_config_stub_button_that_shows_a_message(qtbot, monkeypatch) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "ui.metrics_screen.QMessageBox.information",
+        staticmethod(lambda *a, **k: messages.append(a[2]) or None),
+    )
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    screen._ind_table.cellWidget(row, 4).click()
+
+    assert messages == ["Per-metric configuration isn't available yet."]
+
+
+def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    opened: list[str] = []
+
+    class _StubDialog:
+        def __init__(self, metric_cls, parent=None) -> None:
+            opened.append(metric_cls.id)
+
+        def exec(self) -> None:
+            return None
+
+    monkeypatch.setattr("ui.metrics_screen.MetricInfoDialog", _StubDialog)
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    screen._ind_table.cellWidget(row, 3).click()
+
+    assert opened == ["IL-1"]
+
+
+def test_info_button_is_absent_when_metric_has_no_formula_or_citation(qtbot, monkeypatch) -> None:
+    from track2data.metrics.base import MetricDocumentation
+    from ui.metrics_screen import MetricsScreen
+
+    class _NoDocMetric:
+        id = "X-1"
+        name = "No-doc metric"
+        label = "No-doc metric"
+        level = "individual"
+        priority = "diagnostic"
+        requires_identity = False
+        output_columns: list[str] = []
+        documentation = MetricDocumentation.model_construct(
+            definition="d", formula_plain=None, inputs=[], assumptions=[],
+            warnings=[], citation=None, citation_doi=None,
+        )
+
+    monkeypatch.setattr("ui.metrics_screen.metrics.list_for_level", lambda level: [_NoDocMetric])
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    assert screen._ind_table.cellWidget(0, 3) is None

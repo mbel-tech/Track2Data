@@ -9,6 +9,8 @@ config (⚙, stub). Quality threshold QDoubleSpinBox + Apply button.
 
 from __future__ import annotations
 
+from functools import partial
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from track2data import metrics
 from track2data.core.models import MetricSelection
+from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
 _COLUMN_HEADERS = ["Include", "ID", "Name", "Info", "Config"]
 _COL_INCLUDE, _COL_ID, _COL_NAME, _COL_INFO, _COL_CONFIG = range(5)
@@ -116,7 +119,28 @@ class MetricsScreen(QWidget):
             table.setItem(row, _COL_ID, QTableWidgetItem(metric_cls.id))
             table.setItem(row, _COL_NAME, QTableWidgetItem(metric_cls.name))
 
+            doc = metric_cls.documentation
+            if doc.formula_plain is not None or doc.citation is not None:
+                info_btn = QPushButton("ⓘ")
+                info_btn.setFixedWidth(28)
+                info_btn.clicked.connect(partial(self._show_metric_info, metric_cls))
+                table.setCellWidget(row, _COL_INFO, info_btn)
+
+            config_btn = QPushButton("⚙")
+            config_btn.setFixedWidth(28)
+            config_btn.clicked.connect(self._show_config_stub)
+            table.setCellWidget(row, _COL_CONFIG, config_btn)
+
         return table
+
+    def _show_metric_info(self, metric_cls) -> None:
+        dlg = MetricInfoDialog(metric_cls, self)
+        dlg.exec()
+
+    def _show_config_stub(self) -> None:
+        QMessageBox.information(
+            self, "Not yet implemented", "Per-metric configuration isn't available yet."
+        )
 
     # ── slots ──────────────────────────────────────────────────────────────
 
