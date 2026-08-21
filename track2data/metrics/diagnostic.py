@@ -335,17 +335,79 @@ class IdentityStability(Metric):
         )
 
 
+# ── D-6: Segmentation Error Frames ──────────────────────────────────────────
+
+
+class SegmentationErrorFrames(Metric):
+    """D-6: idtracker.ai's own count of frames with more blobs than animals."""
+
+    id = "D-6"
+    name = "segmentation_error_frames"
+    label = "Segmentation Error Frames"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "number_of_error_frames",
+        "error_frame_fraction",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "idtracker.ai's own authoritative count of frames where more "
+            "blobs than animals were detected -- segmentation contamination "
+            "from shadows, reflections, dust, etc. (idtracker.ai_usage.md: "
+            "'indicate a bad segmentation'). Independent of any user-side "
+            "inconsistent_frames.csv (see D-4), and the only place this "
+            "surfaces when the tracking run had check_segmentation "
+            "disabled, which silences it in idtracker.ai's own log."
+        ),
+        formula_plain=(
+            "number_of_error_frames = Session.number_of_error_frames; "
+            "error_frame_fraction = number_of_error_frames / n_frames"
+        ),
+        inputs=["Session.number_of_error_frames", "Session.n_frames"],
+        assumptions=["Returns NaN when Session.number_of_error_frames is None."],
+        warnings=[
+            "A high fraction indicates segmentation contamination that can "
+            "degrade identification accuracy, independent of D-4's post-hoc "
+            "inconsistency flags."
+        ],
+    )
+
+    def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        n_error = session.number_of_error_frames
+        if n_error is None:
+            n_error_val = float("nan")
+            fraction = float("nan")
+        else:
+            n_error_val = float(n_error)
+            fraction = n_error / session.n_frames if session.n_frames > 0 else float("nan")
+
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "number_of_error_frames": n_error_val,
+                    "error_frame_fraction": fraction,
+                }
+            ],
+            columns=self.output_columns,
+        )
+
+
 # ── Convenience function ───────────────────────────────────────────────────────
 
 
 def compute_all_diagnostics(session: Session) -> dict[str, pd.DataFrame]:
-    """Run all 5 diagnostic metrics and return {metric_id: DataFrame}."""
+    """Run all 6 diagnostic metrics and return {metric_id: DataFrame}."""
     metrics: list[Metric] = [
         TrackingCoverage(),
         TrackingAccuracy(),
         IdProbabilityStats(),
         InconsistentFrameCount(),
         IdentityStability(),
+        SegmentationErrorFrames(),
     ]
     return {m.id: m.compute(session) for m in metrics}
 
@@ -359,3 +421,4 @@ _register(TrackingAccuracy)
 _register(IdProbabilityStats)
 _register(InconsistentFrameCount)
 _register(IdentityStability)
+_register(SegmentationErrorFrames)
