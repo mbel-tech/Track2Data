@@ -43,7 +43,10 @@ def test_individual_tab_has_one_row_per_registered_individual_metric(qtbot) -> N
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    expected_ids = sorted(m.id for m in metrics.list_for_level("individual"))
+    expected_ids = sorted(
+        (m.id for m in metrics.list_for_level("individual")),
+        key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
+    )
     actual_ids = [
         screen._ind_table.item(row, 1).text() for row in range(screen._ind_table.rowCount())
     ]
@@ -56,9 +59,28 @@ def test_group_tab_has_one_row_per_registered_group_metric(qtbot) -> None:
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    expected_ids = sorted(m.id for m in metrics.list_for_level("group"))
+    expected_ids = sorted(
+        (m.id for m in metrics.list_for_level("group")),
+        key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
+    )
     actual_ids = [
         screen._grp_table.item(row, 1).text() for row in range(screen._grp_table.rowCount())
+    ]
+    assert actual_ids == expected_ids
+
+
+def test_zone_tab_has_one_row_per_registered_zone_metric(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    expected_ids = sorted(
+        (m.id for m in metrics.list_for_level("zone")),
+        key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
+    )
+    actual_ids = [
+        screen._zone_table.item(row, 1).text() for row in range(screen._zone_table.rowCount())
     ]
     assert actual_ids == expected_ids
 

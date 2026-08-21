@@ -33,6 +33,12 @@ _ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
 _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
 
 
+def _natural_sort_key(metric_cls):
+    """Sort metrics naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2)."""
+    prefix, _, number = metric_cls.id.rpartition("-")
+    return (prefix, int(number))
+
+
 class MetricsScreen(QWidget):
     """Stage 6b — Select behavioural metrics to compute."""
 
@@ -86,7 +92,7 @@ class MetricsScreen(QWidget):
         root.addWidget(apply_btn)
 
     def _make_table(self, level: str) -> QTableWidget:
-        metric_classes = sorted(metrics.list_for_level(level), key=lambda m: m.id)
+        metric_classes = sorted(metrics.list_for_level(level), key=_natural_sort_key)
         table = QTableWidget(len(metric_classes), len(_COLUMN_HEADERS))
         table.setHorizontalHeaderLabels(_COLUMN_HEADERS)
         table.horizontalHeader().setSectionResizeMode(
