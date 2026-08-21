@@ -696,11 +696,12 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 **Next Button Logic:**
 - Enabled if ≥1 metric selected
-- On Next: emit `metricsChanged`, save `MetricSelection`, advance to Screen 6.3
+- Next is the shared toolbar ◀ Back / Next ▶ action, not a per-screen button — it just advances the `QStackedWidget` to the next built stage (the Processing screen). It does not itself save the selection. `MetricSelection` is saved separately by the screen's own **Apply selection** button, which calls `ProjectStore.update_metrics()` (this is what emits `metricsChanged`).
+- Screen 6.3 (below) is not implemented — there is no config schema or navigation target for it yet, so Next never routes there.
 
 ---
 
-### 6.11 Screen 6.3 — Per-Metric Advanced Configuration
+### 6.11 Screen 6.3 — Per-Metric Advanced Configuration (Aspirational — Not Yet Implemented)
 
 **Stage:** Stage 6 (Preprocessing & Metrics)  
 **Purpose:** Configure metric-specific parameters (e.g., activity threshold).
