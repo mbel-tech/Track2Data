@@ -125,7 +125,6 @@ def test_identity_probes_cleared_on_open_project(store, tmp_path: Path) -> None:
 
     # Create a dummy project file to open
     from track2data.core.models import ProjectManifest
-    import json
 
     now = datetime.now(tz=UTC)
     manifest = ProjectManifest(
