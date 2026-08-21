@@ -156,6 +156,14 @@ class TestUILayer:
         assert len(PAGE_TO_STAGE) == 10
         assert all(0 <= s < len(STAGES) for s in PAGE_TO_STAGE)
 
+    def test_app_state_is_a_genuine_reexport_not_a_duplicate(self) -> None:
+        """D-004 / issue #27: app/state.py is a deprecated shim over
+        ui/store/project_store.py, not a second copy of the class."""
+        from app.state import ProjectStore as ShimProjectStore
+        from ui.store.project_store import ProjectStore as RealProjectStore
+
+        assert ShimProjectStore is RealProjectStore
+
     @pytest.fixture(scope="class")
     def qt_app(self):
         """One QApplication per test class (cannot create more than one)."""
@@ -196,6 +204,163 @@ class TestUILayer:
         store2.open_project(saved)
         assert store2.manifest is not None
         assert store2.manifest.project_name == "save-test"
+
+    def test_project_store_update_metadata_source(self, qt_app, tmp_path: Path) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import MetadataSource
+
+        store = ProjectStore()
+        store.new_project("meta-test", tmp_path)
+        fired: list[bool] = []
+        store.metadataChanged.connect(lambda: fired.append(True))
+
+        source = MetadataSource(path=tmp_path / "meta.csv", sha256="abc123")
+        store.update_metadata_source(source)
+
+        assert store.manifest.metadata_source == source
+        assert fired == [True]
+
+    def test_project_store_update_metadata_source_to_none(
+        self, qt_app, tmp_path: Path
+    ) -> None:
+        """Skipping metadata must be representable -- source goes back to None."""
+        from app.state import ProjectStore
+        from track2data.core.models import MetadataSource
+
+        store = ProjectStore()
+        store.new_project("meta-skip-test", tmp_path)
+        store.update_metadata_source(MetadataSource(path=tmp_path / "m.csv", sha256="x"))
+
+        store.update_metadata_source(None)
+
+        assert store.manifest.metadata_source is None
+
+    def test_project_store_update_mapping(self, qt_app, tmp_path: Path) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import MappingRule
+
+        store = ProjectStore()
+        store.new_project("mapping-test", tmp_path)
+        fired: list[bool] = []
+        store.metadataChanged.connect(lambda: fired.append(True))
+
+        rule = MappingRule(rules={"treatment": "condition"})
+        store.update_mapping(rule)
+
+        assert store.manifest.mapping == rule
+        assert fired == [True]
+
+    def test_project_store_update_export_targets(self, qt_app, tmp_path: Path) -> None:
+        """exportChanged has never had an emitter anywhere in the codebase
+        before this setter -- this is what makes the export wizard stage
+        able to persist anything at all."""
+        from app.state import ProjectStore
+        from track2data.core.models import ExportTarget
+
+        store = ProjectStore()
+        store.new_project("export-test", tmp_path)
+        fired: list[bool] = []
+        store.exportChanged.connect(lambda: fired.append(True))
+
+        targets = [ExportTarget(exporter_name="csv_long"), ExportTarget(exporter_name="readme")]
+        store.update_export_targets(targets)
+
+        assert store.manifest.export_targets == targets
+        assert fired == [True]
+
+    def test_project_store_setters_are_noop_without_a_project(self, qt_app) -> None:
+        """Matches the existing guard on every other setter (update_calibration,
+        update_zones, etc.): silently do nothing when no project is open,
+        rather than crash on self._manifest.model_copy(...)."""
+        from app.state import ProjectStore
+        from track2data.core.models import ExportTarget, MappingRule, MetadataSource
+
+        store = ProjectStore()
+        assert store.manifest is None
+
+        store.update_metadata_source(MetadataSource(path=Path("x.csv"), sha256="x"))
+        store.update_mapping(MappingRule())
+        store.update_export_targets([ExportTarget(exporter_name="csv_long")])
+
+        assert store.manifest is None
+
+    # ── tasks property + forwarding, run_results (issue #27) ───────────────
+
+    def test_store_owns_a_single_task_runner_instance(self, qt_app) -> None:
+        from app.state import ProjectStore
+        from ui.store.task_runner import TaskRunner
+
+        store = ProjectStore()
+        assert isinstance(store.tasks, TaskRunner)
+        assert store.tasks is store.tasks  # same instance, not re-created
+
+    def test_store_forwards_task_progress(self, qtbot, qt_app) -> None:
+        from app.state import ProjectStore
+        from track2data.core.progress import ProgressEvent
+
+        store = ProjectStore()
+        forwarded: list[tuple[str, int]] = []
+        store.taskProgress.connect(lambda tid, pct: forwarded.append((tid, pct)))
+
+        def do_work(progress) -> str:
+            progress(ProgressEvent(stage="run", current=1, total=2))
+            return "ok"
+
+        with qtbot.waitSignal(store.taskFinished, timeout=2000):
+            store.tasks.submit_with_progress(do_work)
+
+        assert forwarded == [(forwarded[0][0], 50)]
+
+    def test_store_forwards_successful_task_result(self, qtbot, qt_app) -> None:
+        from app.state import ProjectStore
+
+        store = ProjectStore()
+        with qtbot.waitSignal(store.taskFinished, timeout=2000) as blocker:
+            store.tasks.submit(lambda: "the result")
+
+        _task_id, result = blocker.args
+        assert result == "the result"
+
+    def test_store_forwards_task_failure_as_exception_on_task_finished(
+        self, qtbot, qt_app
+    ) -> None:
+        """
+        taskFailed -> taskFinished, per taskFinished's documented
+        "result-or-exception" contract -- so UI code only ever needs to
+        listen to one signal to learn a task is done, success or not.
+        """
+        from app.state import ProjectStore
+
+        store = ProjectStore()
+
+        def boom() -> None:
+            raise RuntimeError("simulated failure")
+
+        with qtbot.waitSignal(store.taskFinished, timeout=2000) as blocker:
+            store.tasks.submit(boom)
+
+        _task_id, result = blocker.args
+        assert isinstance(result, Exception)
+        assert "simulated failure" in str(result)
+        assert "RuntimeError" in result.traceback
+        assert "boom" in result.traceback
+
+    def test_store_run_results_starts_none_and_set_run_results_emits(
+        self, qt_app
+    ) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import RunResult, SessionRunResult
+
+        store = ProjectStore()
+        assert store.run_results is None
+        fired: list[bool] = []
+        store.runResultsChanged.connect(lambda: fired.append(True))
+
+        result = RunResult(sessions=[SessionRunResult(session_id="s1")])
+        store.set_run_results(result)
+
+        assert store.run_results is result
+        assert fired == [True]
 
     def test_wizard_sidebar_creation(self, qt_app) -> None:
         from app.navigation import WizardSidebar

@@ -13,16 +13,15 @@ Typical usage::
     manifest = read(Path("project.t2d.json"))
     engine = Engine(manifest)
 
-    # Import all sessions listed in the manifest.
-    sessions = engine.import_sessions()
+    # Everything below in one call, one output subdirectory per session:
+    result = engine.run(Path("output/"))
 
-    # Run preprocessing + calibration + zone assignment.
-    psessions = [engine.preprocess(s) for s in sessions]
-
-    # Compute metrics and export.
-    for ps in psessions:
-        payload = engine.compute_metrics(ps)
-        engine.export(payload, Path("output/"))
+    # ...or drive it by hand, e.g. to inspect intermediate results:
+    for session in engine.import_sessions():
+        psess = engine.preprocess(session)
+        metric_results = engine.compute_metrics(psess)
+        payload = engine.build_payload(psess, metric_results)
+        engine.export(payload, Path("output/") / session.session_id)
 """
 
 from __future__ import annotations
@@ -35,8 +34,11 @@ from typing import Any
 from track2data.core.models import (
     PreprocessedSession,
     ProjectManifest,
+    RunResult,
     Session,
+    SessionRunResult,
 )
+from track2data.core.progress import ProgressCallback, ProgressEvent, emit
 from track2data.readers import read_session
 
 logger = logging.getLogger(__name__)
@@ -101,10 +103,27 @@ class Engine:
         """Auto-detect reader and return a Session for *folder*."""
         return read_session(Path(folder))
 
-    def import_sessions(self) -> list[Session]:
+    def import_sessions(
+        self, *, progress: ProgressCallback | None = None
+    ) -> list[Session]:
         """Import all sessions listed in ``manifest.sessions``."""
         sessions: list[Session] = []
-        for ref in self._manifest.sessions:
+        refs = self._manifest.sessions
+        for i, ref in enumerate(refs):
+            # Emit BEFORE the try opens: if the callback raises
+            # OperationCancelled, it must propagate out of this method,
+            # not be caught by the except below and treated as just
+            # another session that failed to import.
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="import",
+                    current=i + 1,
+                    total=len(refs),
+                    session_id=ref.session_id,
+                    message=f"Importing {ref.session_id}",
+                ),
+            )
             try:
                 sess = self.import_session(ref.folder)
                 sessions.append(sess)
@@ -247,32 +266,20 @@ class Engine:
             drop=True
         )
 
-    # ── full run ───────────────────────────────────────────────────────────
+    # ── payload / export ──────────────────────────────────────────────────
 
-    def run_session(
-        self,
-        session: Session,
-        out_dir: Path,
-        exporters: list[str] | None = None,
-    ) -> list[Path]:
+    def build_payload(
+        self, psess: PreprocessedSession, metric_results: dict[str, Any]
+    ) -> Any:
         """
-        End-to-end pipeline for a single session.
-
-        Returns list of written output paths.
+        Assemble an ``ExportPayload`` from a preprocessed session and its
+        computed metric results, bucketing results by level (IL-*/GL-*/
+        Z-*/D-*) and building the master per-frame table.
         """
-        from track2data.exporters import get_exporter
         from track2data.exporters.base import ExportPayload
 
-        # Preprocessing + calibration + zones.
-        psess = self.preprocess(session)
-
-        # Metrics.
-        metric_results = self.compute_metrics(psess)
-
-        # Build master frame table.
         fish_by_frame = self.build_fish_by_frame(psess)
 
-        # Separate metric results by level.
         individual_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("IL-")}
         group_metrics = {k: v for k, v in metric_results.items()
@@ -282,7 +289,7 @@ class Engine:
         diagnostic_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("D-")}
 
-        payload = ExportPayload(
+        return ExportPayload(
             session_id=psess.session_id,
             project_name=self._manifest.project_name,
             project_hash=self._manifest.project_hash(),
@@ -295,6 +302,16 @@ class Engine:
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
         )
+
+    def export(
+        self,
+        payload: Any,
+        out_dir: Path,
+        exporters: list[str] | None = None,
+    ) -> list[Path]:
+        """Write *payload* to *out_dir* via the requested (or configured
+        default) exporters. Returns the list of written paths."""
+        from track2data.exporters import get_exporter
 
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -316,13 +333,196 @@ class Engine:
 
         return written
 
-    def run_all(self, out_dir: Path, exporters: list[str] | None = None) -> list[Path]:
-        """Run the full pipeline for every session in the manifest."""
-        sessions = self.import_sessions()
-        written: list[Path] = []
-        for sess in sessions:
-            written.extend(self.run_session(sess, out_dir, exporters=exporters))
+    # ── full run ───────────────────────────────────────────────────────────
+
+    def run_session(
+        self,
+        session: Session,
+        out_dir: Path,
+        exporters: list[str] | None = None,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> list[Path]:
+        """
+        End-to-end pipeline for a single session.
+
+        Returns list of written output paths.
+        """
+        psess = self.preprocess(session)
+        emit(
+            progress,
+            ProgressEvent(
+                stage="preprocess",
+                current=1,
+                total=3,
+                session_id=session.session_id,
+                message="Preprocessing complete",
+            ),
+        )
+
+        metric_results = self.compute_metrics(psess)
+        payload = self.build_payload(psess, metric_results)
+        emit(
+            progress,
+            ProgressEvent(
+                stage="metrics",
+                current=2,
+                total=3,
+                session_id=session.session_id,
+                message="Metrics computed",
+            ),
+        )
+
+        written = self.export(payload, out_dir, exporters)
+        emit(
+            progress,
+            ProgressEvent(
+                stage="export",
+                current=3,
+                total=3,
+                session_id=session.session_id,
+                message="Export complete",
+            ),
+        )
+
         return written
+
+    def run(
+        self,
+        out_dir: Path,
+        exporters: list[str] | None = None,
+        *,
+        progress: ProgressCallback | None = None,
+        n_workers: int = 1,
+    ) -> RunResult:
+        """
+        Run the full pipeline for every session in the manifest.
+
+        Each session's output is written to ``out_dir/<session_id>/`` so
+        multi-session runs never collide. A session that raises during
+        preprocessing, metrics, or export is captured as that session's
+        ``SessionRunResult.error`` without aborting the rest of the batch
+        -- ``OperationCancelled`` is the one exception never caught here,
+        since it must propagate to actually stop the run.
+
+        ``n_workers`` is accepted for forward compatibility with a future
+        parallel implementation but only the sequential (n_workers=1)
+        path is implemented today; see DECISIONS.md D-013 and D-014.
+        """
+        if n_workers > 1:
+            logger.warning(
+                "Engine.run(n_workers=%d) requested, but only sequential "
+                "execution is implemented; running with n_workers=1.",
+                n_workers,
+            )
+
+        n_configured = len(self._manifest.sessions)
+        emit(
+            progress,
+            ProgressEvent(stage="run", current=0, total=n_configured, message="Run started"),
+        )
+
+        sessions = self.import_sessions(progress=progress)
+        results: list[SessionRunResult] = []
+        for i, sess in enumerate(sessions):
+            results.append(
+                self._run_one_session(sess, Path(out_dir) / sess.session_id, exporters, progress)
+            )
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="session",
+                    current=i + 1,
+                    total=len(sessions),
+                    session_id=sess.session_id,
+                    message="Session complete",
+                ),
+            )
+
+        emit(
+            progress,
+            ProgressEvent(
+                stage="run", current=n_configured, total=n_configured, message="Run complete"
+            ),
+        )
+        return RunResult(sessions=results)
+
+    def _run_one_session(
+        self,
+        session: Session,
+        session_out_dir: Path,
+        exporters: list[str] | None,
+        progress: ProgressCallback | None,
+    ) -> SessionRunResult:
+        """Run one session for ``run()``, capturing its outcome (including
+        any failure) as a SessionRunResult rather than raising -- except
+        OperationCancelled, which must propagate to stop the whole run."""
+        import time
+
+        from track2data.core.progress import OperationCancelled
+
+        start = time.monotonic()
+        try:
+            psess = self.preprocess(session)
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="preprocess", current=1, total=3,
+                    session_id=session.session_id, message="Preprocessing complete",
+                ),
+            )
+            metric_results = self.compute_metrics(psess)
+            payload = self.build_payload(psess, metric_results)
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="metrics", current=2, total=3,
+                    session_id=session.session_id, message="Metrics computed",
+                ),
+            )
+            written = self.export(payload, session_out_dir, exporters)
+            emit(
+                progress,
+                ProgressEvent(
+                    stage="export", current=3, total=3,
+                    session_id=session.session_id, message="Export complete",
+                ),
+            )
+            diagnostics = {k: v for k, v in metric_results.items() if k.startswith("D-")}
+            metric_previews = {
+                k: v.head(200) for k, v in metric_results.items() if not k.startswith("D-")
+            }
+            return SessionRunResult(
+                session_id=session.session_id,
+                written=written,
+                diagnostics=diagnostics,
+                metric_previews=metric_previews,
+                duration_s=time.monotonic() - start,
+            )
+        except OperationCancelled:
+            raise
+        except Exception as exc:
+            logger.exception("Session %s failed.", session.session_id)
+            return SessionRunResult(
+                session_id=session.session_id,
+                duration_s=time.monotonic() - start,
+                error=str(exc),
+            )
+
+    def run_all(
+        self,
+        out_dir: Path,
+        exporters: list[str] | None = None,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> list[Path]:
+        """Run the full pipeline for every session in the manifest.
+
+        Thin wrapper over ``run()`` for callers that only need the
+        written paths, not the full ``RunResult`` (diagnostics, metric
+        previews, per-session timing/errors).
+        """
+        return self.run(out_dir, exporters, progress=progress).written
 
     # ── preview ────────────────────────────────────────────────────────────
 

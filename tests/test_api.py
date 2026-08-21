@@ -356,3 +356,360 @@ def test_validate_flags_scalar_mode_without_px_per_cm() -> None:
     engine = Engine(manifest)
     issues = engine.validate()
     assert any("px_per_cm" in issue for issue in issues)
+
+
+# ── progress reporting (issue #18) ──────────────────────────────────────────────
+
+
+def test_import_sessions_without_progress_still_works() -> None:
+    """Backward compatibility: progress is optional and defaults to None."""
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=Path("/does/not/exist"), sha256="x")]
+    )
+    engine = Engine(manifest)
+    assert engine.import_sessions() == []  # fails to import, logged+skipped, no crash
+
+
+def test_import_sessions_emits_one_event_per_session(tiny_real_session: Path) -> None:
+    from track2data.api import Engine
+    from track2data.core.progress import ProgressEvent
+
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="s1", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s2", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s3", folder=tiny_real_session, sha256="x"),
+        ]
+    )
+    engine = Engine(manifest)
+    events: list[ProgressEvent] = []
+    engine.import_sessions(progress=events.append)
+
+    assert [e.stage for e in events] == ["import", "import", "import"]
+    assert [e.session_id for e in events] == ["s1", "s2", "s3"]
+    assert [e.current for e in events] == [1, 2, 3]
+    assert all(e.total == 3 for e in events)
+
+
+def test_import_sessions_cancellation_propagates_not_swallowed(
+    tiny_real_session: Path,
+) -> None:
+    """
+    The progress emit for a session must happen BEFORE that session's
+    import try/except opens -- otherwise a raised OperationCancelled from
+    the callback would be caught by the broad `except Exception` around
+    the import attempt and silently treated as "this session failed to
+    import", continuing the loop instead of actually stopping the run.
+    """
+    from track2data.api import Engine
+    from track2data.core.progress import OperationCancelled
+
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="s1", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s2", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s3", folder=tiny_real_session, sha256="x"),
+        ]
+    )
+    engine = Engine(manifest)
+    seen: list[str] = []
+
+    def cancel_on_second(event) -> None:
+        seen.append(event.session_id)
+        if event.session_id == "s2":
+            raise OperationCancelled()
+
+    with pytest.raises(OperationCancelled):
+        engine.import_sessions(progress=cancel_on_second)
+
+    # Stopped at s2 -- s3 was never reached, proving the exception
+    # propagated out of the loop rather than being logged and skipped.
+    assert seen == ["s1", "s2"]
+
+
+def test_run_session_emits_preprocess_metrics_export_in_order(tmp_path: Path) -> None:
+    from track2data.api import Engine
+    from track2data.core.progress import ProgressEvent
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    events: list[ProgressEvent] = []
+
+    engine.run_session(session, tmp_path, exporters=["csv_long"], progress=events.append)
+
+    assert [e.stage for e in events] == ["preprocess", "metrics", "export"]
+    assert all(e.session_id == session.session_id for e in events)
+    assert all(e.total == 3 for e in events)
+    assert [e.current for e in events] == [1, 2, 3]
+
+
+def test_run_all_emits_run_bookends_and_session_complete(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    from track2data.api import Engine
+    from track2data.core.progress import ProgressEvent
+
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="s1", folder=tiny_real_session, sha256="x"),
+            SessionRef(session_id="s2", folder=tiny_real_session, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    events: list[ProgressEvent] = []
+
+    engine.run_all(tmp_path, exporters=["csv_long"], progress=events.append)
+
+    stages = [e.stage for e in events]
+    assert stages[0] == "run"
+    assert stages[-1] == "run"
+    assert stages.count("import") == 2
+    assert stages.count("session") == 2
+    # preprocess/metrics/export per session, twice.
+    assert stages.count("preprocess") == 2
+    assert stages.count("metrics") == 2
+    assert stages.count("export") == 2
+
+    run_events = [e for e in events if e.stage == "run"]
+    assert run_events[0].current == 0
+    assert run_events[-1].current == run_events[-1].total
+
+
+def test_run_all_per_session_call_count_is_bounded(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """A per-frame hook would queue thousands of events; this bounds the
+    actual call count to a small, fixed number of stage-boundary emits."""
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=tiny_real_session, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    call_count = 0
+
+    def counter(_event) -> None:
+        nonlocal call_count
+        call_count += 1
+
+    engine.run_all(tmp_path, exporters=["csv_long"], progress=counter)
+
+    # 1 run-start + 1 import + 3 run_session stages + 1 session-complete
+    # + 1 run-end = 7 for a single-session run.
+    assert call_count <= 8
+
+
+# ── build_payload / export extraction, Engine.run()/RunResult (issue #19) ──────
+
+
+def test_engine_has_export_method() -> None:
+    from track2data.api import Engine
+
+    assert hasattr(Engine, "export")
+    assert callable(Engine.export)
+
+
+def test_export_writes_only_requested_exporters(tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(metrics=MetricSelection(individual=["IL-1"]))
+    engine = Engine(manifest)
+    psess = engine.preprocess(session)
+    metric_results = engine.compute_metrics(psess)
+    payload = engine.build_payload(psess, metric_results)
+
+    written = engine.export(payload, tmp_path, exporters=["csv_long"])
+
+    assert len(written) > 0
+    assert all(p.exists() for p in written)
+    # csv_long writes 3 files; readme/excel weren't requested.
+    assert not (tmp_path / "README.md").exists()
+
+
+def test_build_payload_buckets_metrics_by_level(tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2)
+    manifest = _make_manifest(
+        metrics=MetricSelection(individual=["IL-1"], group=["GL-1"], zone=[], diagnostic=[])
+    )
+    engine = Engine(manifest)
+    psess = engine.preprocess(session)
+    metric_results = engine.compute_metrics(psess)
+
+    payload = engine.build_payload(psess, metric_results)
+
+    assert "IL-1" in payload.individual_metrics
+    assert "GL-1" in payload.group_metrics
+    assert "IL-1" not in payload.group_metrics
+    assert "GL-1" not in payload.individual_metrics
+    assert all(k.startswith("D-") for k in payload.diagnostic_metrics)
+    assert set(payload.diagnostic_metrics) == {"D-1", "D-2", "D-3", "D-4", "D-5"}
+
+
+def test_run_session_still_returns_list_of_paths_unchanged(tmp_path: Path) -> None:
+    """run_session's signature/return type must be exactly preserved by the
+    build_payload/export extraction -- CLI and existing callers depend on it."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(metrics=MetricSelection(individual=["IL-1"]))
+    engine = Engine(manifest)
+
+    written = engine.run_session(session, tmp_path, exporters=["csv_long"])
+
+    assert isinstance(written, list)
+    assert all(isinstance(p, Path) for p in written)
+    assert len(written) > 0
+
+
+def test_run_two_sessions_produces_non_colliding_output(tmp_path: Path) -> None:
+    """
+    The overwrite regression test. Before this fix, run_all() passed the
+    same out_dir to every session's run_session() call, so session 2's
+    master_fish_by_frame.csv silently clobbered session 1's.
+    """
+    from track2data.api import Engine
+
+    session_a = _make_session(session_id="session_a", n_frames=10, n_animals=1)
+    session_b = _make_session(session_id="session_b", n_frames=15, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="session_a", folder=session_a.folder, sha256="x"),
+            SessionRef(session_id="session_b", folder=session_b.folder, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+
+    # import_session() auto-detects by folder; monkeypatch it to hand back
+    # our two in-memory sessions instead of reading real folders from disk.
+    sessions_by_folder = {session_a.folder: session_a, session_b.folder: session_b}
+    engine.import_session = lambda folder: sessions_by_folder[Path(folder)]  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    csv_a = tmp_path / "session_a" / "master_fish_by_frame.csv"
+    csv_b = tmp_path / "session_b" / "master_fish_by_frame.csv"
+    assert csv_a.exists()
+    assert csv_b.exists()
+
+    import pandas as pd
+
+    df_a = pd.read_csv(csv_a)
+    df_b = pd.read_csv(csv_b)
+    assert len(df_a) == 10  # session_a's n_frames * n_animals
+    assert len(df_b) == 15  # session_b's n_frames * n_animals -- distinct, not clobbered
+    assert len(result.sessions) == 2
+
+
+def test_run_all_also_uses_non_colliding_per_session_dirs(tmp_path: Path) -> None:
+    """run_all() is a thin wrapper over run() -- must inherit the fix too."""
+    from track2data.api import Engine
+
+    session_a = _make_session(session_id="session_a", n_frames=10, n_animals=1)
+    session_b = _make_session(session_id="session_b", n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="session_a", folder=session_a.folder, sha256="x"),
+            SessionRef(session_id="session_b", folder=session_b.folder, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    sessions_by_folder = {session_a.folder: session_a, session_b.folder: session_b}
+    engine.import_session = lambda folder: sessions_by_folder[Path(folder)]  # type: ignore[method-assign]
+
+    written = engine.run_all(tmp_path, exporters=["csv_long"])
+
+    assert (tmp_path / "session_a" / "master_fish_by_frame.csv").exists()
+    assert (tmp_path / "session_b" / "master_fish_by_frame.csv").exists()
+    assert len(written) > 2  # 3 files/session * 2 sessions
+
+
+def test_session_run_result_does_not_retain_fish_by_frame_and_is_picklable(
+    tmp_path: Path,
+) -> None:
+    from track2data.api import Engine
+    from track2data.core.models import SessionRunResult
+
+    # Structural check: fish_by_frame (or any full per-frame table) is not
+    # even a field this dataclass can hold, not just "empty this time".
+    field_names = {f.name for f in __import__("dataclasses").fields(SessionRunResult)}
+    assert "fish_by_frame" not in field_names
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    import pickle
+
+    pickled = pickle.dumps(result.sessions[0])
+    restored = pickle.loads(pickled)
+    assert restored.session_id == session.session_id
+
+
+def test_run_captures_per_session_error_without_aborting_batch(tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    good = _make_session(session_id="good", n_frames=10, n_animals=1)
+    bad = _make_session(session_id="bad", n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="good", folder=good.folder, sha256="x"),
+            SessionRef(session_id="bad", folder=bad.folder, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    sessions_by_folder = {good.folder: good, bad.folder: bad}
+    engine.import_session = lambda folder: sessions_by_folder[Path(folder)]  # type: ignore[method-assign]
+
+    real_preprocess = engine.preprocess
+
+    def flaky_preprocess(session):
+        if session.session_id == "bad":
+            raise RuntimeError("simulated preprocessing failure")
+        return real_preprocess(session)
+
+    engine.preprocess = flaky_preprocess  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    by_id = {s.session_id: s for s in result.sessions}
+    assert by_id["good"].error is None
+    assert len(by_id["good"].written) > 0
+    assert by_id["bad"].error is not None
+    assert "simulated preprocessing failure" in by_id["bad"].error
+    assert by_id["bad"].written == []
+
+
+def test_run_all_is_a_thin_wrapper_returning_run_written(tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    written = engine.run_all(tmp_path, exporters=["csv_long"])
+    assert isinstance(written, list)
+    assert len(written) > 0
