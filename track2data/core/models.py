@@ -161,12 +161,28 @@ class ROI(BaseModel):
     level: str = "main"
     vertices: list[tuple[float, float]]
     area_units: float | None = None
+    # "+" (additive) or "-" (subtractive/exclusion). idtracker.ai's roi_list
+    # defines an arena as one or more "+ Polygon" outer boundaries minus any
+    # number of "- Polygon" exclusion holes (idtracker.ai_usage.md:30-31).
+    # Multiple ROIs sharing the same (name, level) with different signs
+    # combine: a point belongs to the zone iff it is covered by at least
+    # one "+" polygon and not covered by any "-" polygon of that name.
+    # Defaults to "+" so hand-drawn zones (which have no notion of holes)
+    # are unaffected.
+    sign: Literal["+", "-"] = "+"
 
 
 class ZoneSet(BaseModel):
     rois: list[ROI] = []
     orientation_tag: str | None = None
     zone_levels: dict[str, str] = {}
+    # Pixel dimensions of the video these ROIs were defined against. Set
+    # when seeding a ZoneSet from Session.roi_list; None for hand-drawn
+    # zones (no source video to compare against). Used to detect (not
+    # silently ignore) reusing a ZoneSet on a session tracked at a
+    # different resolution -- see zones/io.py::zone_set_from_roi_list.
+    source_width_px: int | None = None
+    source_height_px: int | None = None
 
 
 # ── Metric selection ──────────────────────────────────────────────────────────

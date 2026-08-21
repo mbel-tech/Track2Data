@@ -191,3 +191,52 @@ class TestPipelineDoesNotCorruptRealData:
         # identity_switch ran unconditionally. With it disabled, the pipeline's
         # own jump_detect + smoothing bound displacement far below that.
         assert np.all(max_disp < 200.0), f"unexpectedly large displacement: {max_disp}"
+
+
+class TestRoiListZonesOnRealCorpus:
+    """roi_list used to be stored unparsed with zero consumers -- a user
+    would redraw by hand an arena idtracker.ai already had. Verification
+    criterion #5 from the format-alignment plan: the net area must be
+    smaller than the sum of additive polygons, since ~85% of real
+    roi_list entries are subtractive exclusion holes."""
+
+    SESSION = "session_trial10_Segment1"
+
+    def test_net_arena_area_smaller_than_additive_sum(self) -> None:
+        from shapely.geometry import Polygon
+
+        from track2data.readers import read_session
+        from track2data.zones.io import zone_set_from_roi_list
+
+        folder = CORPUS_DIR / self.SESSION
+        if not folder.is_dir():
+            pytest.skip(f"{self.SESSION} not present in corpus")
+
+        s = read_session(folder)
+        assert s.roi_list, "expected a non-empty roi_list on a real session"
+        zs = zone_set_from_roi_list(
+            s.roi_list, width_px=s.video.width_px, height_px=s.video.height_px
+        )
+
+        def _area(vertices):
+            poly = Polygon(vertices)
+            return poly.buffer(0).area if not poly.is_valid else poly.area
+
+        additive = sum(_area(r.vertices) for r in zs.rois if r.sign == "+")
+        subtractive = sum(_area(r.vertices) for r in zs.rois if r.sign == "-")
+        assert subtractive > 0, "expected at least one subtractive ROI in this session"
+        assert additive - subtractive < additive
+
+    def test_all_sessions_roi_list_parses_and_seeds_a_zone_set(self) -> None:
+        from track2data.readers import read_session
+        from track2data.zones.io import zone_set_from_roi_list
+
+        for folder in _corpus_sessions():
+            s = read_session(folder)
+            if not s.roi_list:
+                continue
+            zs = zone_set_from_roi_list(
+                s.roi_list, width_px=s.video.width_px, height_px=s.video.height_px
+            )
+            assert len(zs.rois) > 0
+            assert all(r.sign in ("+", "-") for r in zs.rois)

@@ -106,3 +106,56 @@ def zone_set_from_dict(data: dict) -> ZoneSet:  # type: ignore[type-arg]
         Validated zone set instance.
     """
     return ZoneSet.model_validate(data)
+
+
+def zone_set_from_roi_list(
+    roi_list: list[dict] | None,  # type: ignore[type-arg]
+    *,
+    name: str = "arena",
+    level: str = "main",
+    width_px: int | None = None,
+    height_px: int | None = None,
+) -> ZoneSet:
+    """
+    Seed a ``ZoneSet`` from ``Session.roi_list``.
+
+    idtracker.ai defines the tracked arena as one or more additive
+    ("+") outer-boundary polygons minus zero or more subtractive ("-")
+    exclusion holes (idtracker.ai_usage.md:30-31) -- all sharing one
+    logical zone. Every parsed entry becomes an ``ROI`` with that shared
+    *name*/*level* and its own ``sign``; ``zones.geometry.assign_zones``
+    combines same-named ROIs by sign (covered by a "+" polygon and not
+    covered by any "-" polygon of that name).
+
+    Parameters
+    ----------
+    roi_list:
+        ``Session.roi_list`` -- a list of ``{"sign", "vertices", "raw"}``
+        dicts as produced by
+        ``readers.idtrackerai.session_json.parse_roi_string``. ``None`` or
+        empty returns an empty ``ZoneSet``.
+    name, level:
+        Zone name/level assigned to every ROI built from *roi_list*. All
+        entries share these because idtracker.ai's roi_list has no
+        per-polygon naming -- it describes one arena.
+    width_px, height_px:
+        The session's video dimensions, recorded on the returned
+        ``ZoneSet`` so that reusing it against a session tracked at a
+        different resolution can be detected rather than silently
+        misapplied.
+
+    Returns
+    -------
+    ZoneSet
+        Never raises on a malformed entry -- entries lacking "sign" or
+        "vertices" are skipped.
+    """
+    if not roi_list:
+        return ZoneSet()
+
+    rois = [
+        ROI(name=name, level=level, vertices=entry["vertices"], sign=entry["sign"])
+        for entry in roi_list
+        if "sign" in entry and "vertices" in entry
+    ]
+    return ZoneSet(rois=rois, source_width_px=width_px, source_height_px=height_px)
