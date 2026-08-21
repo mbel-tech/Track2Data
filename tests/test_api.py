@@ -102,14 +102,16 @@ def test_manifest_property_returns_the_manifest() -> None:
     assert engine.manifest is manifest
 
 
-# ── import_sessions: failure handling (FR-IMP-3 partial coverage) ──────────────
+# ── import_sessions: failure handling (issue #7 / FR-IMP-3) ────────────────────
 
 
-def test_import_sessions_skips_a_session_that_fails_to_import(tmp_path: Path) -> None:
-    """A session whose folder isn't a recognised idtracker.ai output is
-    skipped, not raised -- import_sessions() logs and continues per its
-    current (documented-as-imperfect, see issue #7) contract."""
+def test_import_sessions_raises_on_a_session_that_fails_to_import(tmp_path: Path) -> None:
+    """FR-IMP-3: flag failures with an actionable message, never silently.
+    A session whose folder isn't a recognised idtracker.ai output must
+    raise -- not be logged and dropped -- so a bad session in a project
+    is impossible to miss."""
     from track2data.api import Engine
+    from track2data.core.errors import Track2DataError
 
     bad_folder = tmp_path / "not_a_session"
     bad_folder.mkdir()
@@ -119,8 +121,31 @@ def test_import_sessions_skips_a_session_that_fails_to_import(tmp_path: Path) ->
         ]
     )
     engine = Engine(manifest)
-    sessions = engine.import_sessions()
-    assert sessions == []
+    with pytest.raises(Track2DataError) as exc_info:
+        engine.import_sessions()
+    # Actionable: names the offending folder, not just "something failed".
+    assert str(bad_folder) in str(exc_info.value)
+
+
+def test_import_sessions_stops_at_the_first_failure(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """Fail loud means fail immediately -- a later, importable session
+    must never be silently attempted/skipped past a broken one."""
+    from track2data.api import Engine
+    from track2data.core.errors import Track2DataError
+
+    bad_folder = tmp_path / "not_a_session"
+    bad_folder.mkdir()
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="bad", folder=bad_folder, sha256="x"),
+            SessionRef(session_id="good", folder=tiny_real_session, sha256="x"),
+        ]
+    )
+    engine = Engine(manifest)
+    with pytest.raises(Track2DataError):
+        engine.import_sessions()
 
 
 # ── preprocess: body-length calibration ─────────────────────────────────────
@@ -361,15 +386,16 @@ def test_validate_flags_scalar_mode_without_px_per_cm() -> None:
 # ── progress reporting (issue #18) ──────────────────────────────────────────────
 
 
-def test_import_sessions_without_progress_still_works() -> None:
+def test_import_sessions_without_progress_still_works(tiny_real_session: Path) -> None:
     """Backward compatibility: progress is optional and defaults to None."""
     from track2data.api import Engine
 
     manifest = _make_manifest(
-        sessions=[SessionRef(session_id="s1", folder=Path("/does/not/exist"), sha256="x")]
+        sessions=[SessionRef(session_id="s1", folder=tiny_real_session, sha256="x")]
     )
     engine = Engine(manifest)
-    assert engine.import_sessions() == []  # fails to import, logged+skipped, no crash
+    sessions = engine.import_sessions()
+    assert len(sessions) == 1
 
 
 def test_import_sessions_emits_one_event_per_session(tiny_real_session: Path) -> None:
@@ -697,6 +723,38 @@ def test_run_captures_per_session_error_without_aborting_batch(tmp_path: Path) -
     assert by_id["bad"].error is not None
     assert "simulated preprocessing failure" in by_id["bad"].error
     assert by_id["bad"].written == []
+
+
+def test_run_captures_an_import_failure_as_a_per_session_error_without_aborting_batch(
+    tmp_path: Path, tiny_real_session: Path
+) -> None:
+    """Engine.run() is the batch orchestrator: unlike import_sessions()
+    (which now fails loud, see #7), a session that fails to *import*
+    inside run() must be captured as that session's SessionRunResult.error
+    -- exactly like a preprocess/metrics/export failure already is --
+    rather than silently vanishing from RunResult.sessions."""
+    from track2data.api import Engine
+
+    bad_folder = tmp_path / "not_a_session"
+    bad_folder.mkdir()
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id="bad", folder=bad_folder, sha256="x"),
+            SessionRef(session_id="good", folder=tiny_real_session, sha256="x"),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    by_id = {s.session_id: s for s in result.sessions}
+    assert len(result.sessions) == 2  # both sessions present, not just the good one
+    assert by_id["bad"].error is not None
+    assert str(bad_folder) in by_id["bad"].error
+    assert by_id["bad"].written == []
+    assert by_id["good"].error is None
+    assert len(by_id["good"].written) > 0
 
 
 def test_run_all_is_a_thin_wrapper_returning_run_written(tmp_path: Path) -> None:
