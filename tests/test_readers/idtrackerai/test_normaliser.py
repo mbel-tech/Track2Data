@@ -138,6 +138,21 @@ class TestNormaliserIdentities:
         s = Normaliser(tmp_path).normalise(payload)
         assert s.identities_groups == []
 
+    def test_identities_groups_accepts_dict(self, tmp_path: Path) -> None:
+        """session_idtrackerai.md:21 documents this as a dict (exclusive-ROI groups);
+        real 6.x sessions ship a dict in 70/70 of the GOT corpus. Must not raise."""
+        payload = _minimal_payload(tmp_path)
+        payload["identities_groups"] = {"region_a": [1, 2], "region_b": [3, 4]}
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.identities_groups == {"region_a": [1, 2], "region_b": [3, 4]}
+
+    def test_identities_groups_accepts_empty_dict(self, tmp_path: Path) -> None:
+        """The common real case: exclusive_rois=False -> identities_groups == {}."""
+        payload = _minimal_payload(tmp_path)
+        payload["identities_groups"] = {}
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.identities_groups == {}
+
 
 class TestNormaliserVersion:
     def test_version_stored(self, tmp_path: Path) -> None:
