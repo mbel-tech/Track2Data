@@ -162,6 +162,14 @@ def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -
 
     assert opened == ["IL-1"]
 
+    # A different row's button must open ITS OWN metric, not IL-1 again --
+    # guards against a lambda-over-loop-variable bug where every row's
+    # button would close over the same (last) metric_cls.
+    other_row = _row_for_id(screen._ind_table, "IL-3")
+    screen._ind_table.cellWidget(other_row, 3).click()
+
+    assert opened == ["IL-1", "IL-3"]
+
 
 def test_info_button_is_absent_when_metric_has_no_formula_or_citation(qtbot, monkeypatch) -> None:
     from track2data.metrics.base import MetricDocumentation
