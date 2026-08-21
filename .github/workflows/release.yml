@@ -78,14 +78,12 @@ jobs:
           fi
 
       - name: Compute SHA-256 sums
-        shell: bash
-        # macOS runners have no GNU sha256sum -- shasum -a 256 is the
-        # portable equivalent, available on macOS/Linux/Git-Bash-on-Windows.
-        run: |
-          cd dist
-          for f in *; do
-            [ -f "$f" ] && shasum -a 256 "$f" >> "../${{ runner.os }}-SHA256SUMS.txt"
-          done
+        # Python's hashlib, not a shell checksum tool: sha256sum is
+        # Linux/GNU-only, and shasum -- the usual fallback -- isn't on
+        # windows-2022's Git Bash either (confirmed by a real CI failure
+        # here). Python is guaranteed present in every job via
+        # actions/setup-python above.
+        run: python packaging/compute_sha256.py dist "${{ runner.os }}-SHA256SUMS.txt"
 
       - uses: actions/upload-artifact@v4
         with:
