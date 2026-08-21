@@ -39,9 +39,15 @@ def list_for_level(
     return [m for m in _registry.values() if m.level == level]
 
 
+def _natural_sort_key(metric_id: str) -> tuple[str, int]:
+    """Sort metric IDs naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2)."""
+    prefix, _, number = metric_id.rpartition("-")
+    return (prefix, int(number))
+
+
 def all_ids() -> list[str]:
     """Return sorted list of all registered metric IDs."""
-    return sorted(_registry.keys())
+    return sorted(_registry.keys(), key=_natural_sort_key)
 
 
 # ── Load built-in metrics ──────────────────────────────────────────────────────
