@@ -1,20 +1,23 @@
 """
-Metric info dialog (issue #26).
+Metric info dialog -- a read-only ``QDialog`` that renders a
+``Metric`` subclass's ``documentation: MetricDocumentation`` --
+definition, formula, inputs, assumptions, warnings, and citation. See
+``docs/METRICS_SPEC.md`` §5.2/§6 for the canonical field list.
+``formula_latex`` is shown as a raw LaTeX source string (no renderer)
+-- the "not feasible to render" fallback the spec itself allows.
 
-A small read-only ``QDialog`` that looks up a metric by id in the
-``track2data.metrics`` registry and renders its ``documentation:
-MetricDocumentation`` -- definition, formula, inputs, assumptions,
-warnings, and citation. See ``docs/METRICS_SPEC.md`` §5.2/§6 for the
-canonical field list; this is a deliberately minimal renderer (no
-LaTeX rendering, no copy-citation button, no per-row popup) -- a
-plain-text dump of ``formula_latex`` is used as the "not feasible to
-render" fallback the spec itself allows.
+Closes on the title-bar close button, Escape (QDialog's own default
+behaviour), or a click outside the dialog's own rect (a
+QApplication-wide event filter installed for the dialog's lifetime).
 """
 
 from __future__ import annotations
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QTextEdit,
@@ -22,47 +25,73 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data import metrics
 from track2data.metrics.base import Metric
 
 
 class MetricInfoDialog(QDialog):
-    """Read-only popup showing the documentation for one metric.
+    """Read-only popup showing the documentation for one metric."""
 
-    Looks up *metric_id* in the metric registry at construction time.
-    If it isn't registered (e.g. a stale id from a caller's own list),
-    a graceful "no documentation available" message is shown instead
-    of raising.
-    """
-
-    def __init__(self, metric_id: str, parent: QWidget | None = None) -> None:
+    def __init__(self, metric_cls: type[Metric], parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._metric_id = metric_id
-        self.setWindowTitle(f"Metric info — {metric_id}")
+        self._metric_cls = metric_cls
+        self.setWindowTitle(f"Metric info — {metric_cls.id}")
         self.resize(480, 420)
+        self.setModal(True)
 
         layout = QVBoxLayout(self)
 
-        metric_cls = metrics.get(metric_id)
-        if metric_cls is None:
-            missing = QLabel(f"No documentation available for {metric_id}")
-            missing.setWordWrap(True)
-            layout.addWidget(missing)
-        else:
-            header = QLabel(f"{metric_cls.id} — {metric_cls.name} ({metric_cls.label})")
-            header.setStyleSheet("font-weight: bold; font-size: 14px;")
-            header.setWordWrap(True)
-            layout.addWidget(header)
+        header = QLabel(f"{metric_cls.id} — {metric_cls.name} ({metric_cls.label})")
+        header.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header.setWordWrap(True)
+        layout.addWidget(header)
 
-            body = QTextEdit()
-            body.setReadOnly(True)
-            body.setPlainText(self._format_documentation(metric_cls))
-            layout.addWidget(body)
+        body = QTextEdit()
+        body.setReadOnly(True)
+        body.setPlainText(self._format_documentation(metric_cls))
+        layout.addWidget(body)
+
+        footer = QHBoxLayout()
+        doc = metric_cls.documentation
+        self._copy_citation_btn = QPushButton("Copy citation")
+        self._copy_citation_btn.setEnabled(doc.citation is not None)
+        self._copy_citation_btn.clicked.connect(self._copy_citation)
+        footer.addWidget(self._copy_citation_btn)
+        footer.addStretch()
 
         close_btn = QPushButton("Close")
         close_btn.setFixedWidth(90)
         close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
+        footer.addWidget(close_btn)
+        layout.addLayout(footer)
+
+    def _copy_citation(self) -> None:
+        doc = self._metric_cls.documentation
+        if doc.citation is None:
+            return
+        text = doc.citation
+        if doc.citation_doi:
+            text += f" (DOI: {doc.citation_doi})"
+        QApplication.clipboard().setText(text)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def hideEvent(self, event) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().hideEvent(event)
+
+    def eventFilter(self, watched: object, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonPress:
+            local_pos = self.mapFromGlobal(event.globalPosition().toPoint())
+            if not self.rect().contains(local_pos):
+                self.reject()
+                return True
+        return super().eventFilter(watched, event)
 
     @staticmethod
     def _format_documentation(metric_cls: type[Metric]) -> str:
@@ -71,8 +100,6 @@ class MetricInfoDialog(QDialog):
         lines: list[str] = ["Definition:", doc.definition, "", "Formula:", doc.formula_plain]
 
         if doc.formula_latex:
-            # Not feasible to render LaTeX here -- show the raw source
-            # string, per the issue's own documented fallback.
             lines += ["", "Formula (LaTeX source):", doc.formula_latex]
 
         lines += ["", "Inputs:"]
