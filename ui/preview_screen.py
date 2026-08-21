@@ -16,15 +16,16 @@ Diagnostics tab, per selected session (store.run_results.sessions):
   - a session-level table stacking D-2 (TrackingAccuracy), D-4
     (InconsistentFrameCount), D-5 (IdentityStability) -- each
     contributes exactly one row per session.
-  Both tables are built by concatenating the metric DataFrames with a
-  leading "metric_id" column (pd.concat(..., sort=False), which is an
-  outer join on the union of columns).
-
-  - a preprocessing-steps table listing SessionRunResult.preprocess_report
-    .steps (step_name/affected_frames/affected_per_individual/notes), one
-    row per PPStepResult. preprocess_report is None for a session whose
-    preprocessing failed (see Engine._run_one_session in
-    track2data/api.py), in which case this table just renders empty.
+  - a preprocessing-steps table listing the steps of
+    SessionRunResult.preprocess_report (step_name/affected_frames/
+    affected_per_individual/notes), one row per PPStepResult. The
+    report is None when the session never got past preprocessing (see
+    Engine._run_one_session in track2data/api.py, which preserves it
+    for failures in any later stage), in which case this table renders
+    empty.
+  The two diagnostic tables are built by concatenating the metric
+  DataFrames with a leading "metric_id" column (pd.concat(..., sort=False),
+  which is an outer join on the union of columns).
 
 Metrics tab: a session selector + a metric-ID selector (populated from
 the selected session's SessionRunResult.metric_previews keys) showing
