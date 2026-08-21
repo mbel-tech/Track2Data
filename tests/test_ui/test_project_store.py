@@ -21,7 +21,7 @@ from track2data.core.models import ProjectManifest, Session, VideoInfo
 
 
 @pytest.fixture
-def store(tmp_path: Path):
+def store(qtbot, tmp_path: Path):
     from ui.store.project_store import ProjectStore
 
     now = datetime.now(tz=UTC)
@@ -94,3 +94,48 @@ def test_add_session_leaves_has_stable_identities_none_on_probe_failure(
 
     assert store.manifest.sessions[0].has_stable_identities is None
     assert any("Identity probe failed" in line for line in logged)
+
+
+def test_identity_probes_cleared_on_new_project(store, tmp_path: Path) -> None:
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+
+    # Add a session, which submits a probe task
+    store.add_session(folder)
+
+    # Verify the probe is tracked
+    assert len(store._identity_probes) == 1
+
+    # Create a new project
+    store.new_project("new_project", tmp_path)
+
+    # Verify probes are cleared
+    assert store._identity_probes == {}
+
+
+def test_identity_probes_cleared_on_open_project(store, tmp_path: Path) -> None:
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+
+    # Add a session, which submits a probe task
+    store.add_session(folder)
+
+    # Verify the probe is tracked
+    assert len(store._identity_probes) == 1
+
+    # Create a dummy project file to open
+    from track2data.core.models import ProjectManifest
+    import json
+
+    now = datetime.now(tz=UTC)
+    manifest = ProjectManifest(
+        project_name="existing_project", created_at=now, updated_at=now
+    )
+    project_file = tmp_path / "existing_project.t2d.json"
+    project_file.write_text(manifest.model_dump_json())
+
+    # Open the project
+    store.open_project(project_file)
+
+    # Verify probes are cleared
+    assert store._identity_probes == {}

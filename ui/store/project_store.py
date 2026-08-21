@@ -121,6 +121,7 @@ class ProjectStore(QObject):
 
     def new_project(self, name: str, directory: Path) -> None:
         """Create a blank manifest for a new project."""
+        self._identity_probes.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
             project_name=name,
@@ -135,6 +136,7 @@ class ProjectStore(QObject):
 
     def open_project(self, t2d_path: Path) -> None:
         """Load an existing project from a .t2d.json file."""
+        self._identity_probes.clear()
         from track2data.core.manifest import read as manifest_read
 
         self._manifest = manifest_read(t2d_path)
