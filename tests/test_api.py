@@ -826,7 +826,7 @@ def test_build_payload_buckets_metrics_by_level(tmp_path: Path) -> None:
     assert "IL-1" not in payload.group_metrics
     assert "GL-1" not in payload.individual_metrics
     assert all(k.startswith("D-") for k in payload.diagnostic_metrics)
-    assert set(payload.diagnostic_metrics) == {"D-1", "D-2", "D-3", "D-4", "D-5"}
+    assert set(payload.diagnostic_metrics) == {"D-1", "D-2", "D-3", "D-4", "D-5", "D-6"}
 
 
 def test_run_session_still_returns_list_of_paths_unchanged(tmp_path: Path) -> None:

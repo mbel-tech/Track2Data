@@ -1,4 +1,4 @@
-"""Tests for diagnostic metrics D-1 through D-5 (TDD)."""
+"""Tests for diagnostic metrics D-1 through D-6 (TDD)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from track2data.metrics.diagnostic import (
     IdentityStability,
     IdProbabilityStats,
     InconsistentFrameCount,
+    SegmentationErrorFrames,
     TrackingAccuracy,
     TrackingCoverage,
     compute_all_diagnostics,
@@ -283,6 +284,50 @@ class TestInconsistentFrameCount:
         assert m.level == "diagnostic"
 
 
+# ── D-6: Segmentation Error Frames ──────────────────────────────────────────
+#
+# Regression coverage: number_of_error_frames is idtracker.ai's own
+# authoritative count of frames with more blobs than animals -- it was read
+# from session.json and had zero consumers. Distinct from D-4's
+# inconsistent_frames.csv, which is a user-side post-processing artefact.
+
+
+class TestSegmentationErrorFrames:
+    def test_d6_columns_present(self) -> None:
+        sess = make_session()
+        df = SegmentationErrorFrames().compute(sess)
+        for col in ["session_id", "number_of_error_frames", "error_frame_fraction"]:
+            assert col in df.columns
+
+    def test_d6_one_row(self) -> None:
+        sess = make_session()
+        df = SegmentationErrorFrames().compute(sess)
+        assert len(df) == 1
+
+    def test_d6_none_returns_nan(self) -> None:
+        sess = make_session(number_of_error_frames=None)
+        df = SegmentationErrorFrames().compute(sess)
+        assert np.isnan(df["number_of_error_frames"].values[0])
+        assert np.isnan(df["error_frame_fraction"].values[0])
+
+    def test_d6_count_and_fraction(self) -> None:
+        sess = make_session(number_of_error_frames=75)  # n_frames=100 default
+        df = SegmentationErrorFrames().compute(sess)
+        assert df["number_of_error_frames"].values[0] == 75
+        assert df["error_frame_fraction"].values[0] == pytest.approx(0.75)
+
+    def test_d6_zero_error_frames(self) -> None:
+        sess = make_session(number_of_error_frames=0)
+        df = SegmentationErrorFrames().compute(sess)
+        assert df["number_of_error_frames"].values[0] == 0
+        assert df["error_frame_fraction"].values[0] == pytest.approx(0.0)
+
+    def test_d6_metric_attributes(self) -> None:
+        m = SegmentationErrorFrames()
+        assert m.id == "D-6"
+        assert m.level == "diagnostic"
+
+
 # ── D-5: Identity Stability ────────────────────────────────────────────────────
 
 
@@ -354,10 +399,10 @@ class TestIdentityStability:
 
 
 class TestComputeAllDiagnostics:
-    def test_returns_five_keys(self) -> None:
+    def test_returns_six_keys(self) -> None:
         sess = make_session()
         result = compute_all_diagnostics(sess)
-        assert set(result.keys()) == {"D-1", "D-2", "D-3", "D-4", "D-5"}
+        assert set(result.keys()) == {"D-1", "D-2", "D-3", "D-4", "D-5", "D-6"}
 
     def test_values_are_dataframes(self) -> None:
         import pandas as pd
