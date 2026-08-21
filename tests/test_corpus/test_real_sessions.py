@@ -87,6 +87,34 @@ class TestAllSessionsImport:
         assert formats_used == {"h5"}
 
 
+class TestLogDigestOnRealCorpus:
+    """The old idtrackerai.log parser matched neither the real timestamp
+    format nor the real terminal-status line, so every session -- healthy
+    or crashed -- reported status "Unknown". session_trial15_Segment1 is a
+    genuine crash in the corpus (OSError: Too many open files); this test
+    pins that it is now distinguishable from a healthy run."""
+
+    def test_no_session_reports_unknown_status(self) -> None:
+        from track2data.readers.idtrackerai.log import load_log_digest
+
+        offenders = []
+        for folder in _corpus_sessions():
+            digest = load_log_digest(folder)
+            if digest is not None and digest["status"] == "Unknown":
+                offenders.append(folder.name)
+        assert not offenders, f"log status still 'Unknown' for: {offenders}"
+
+    def test_known_crashed_session_reports_failed(self) -> None:
+        from track2data.readers.idtrackerai.log import load_log_digest
+
+        folder = CORPUS_DIR / "session_trial15_Segment1"
+        if not folder.is_dir():
+            pytest.skip("session_trial15_Segment1 not present in corpus")
+        digest = load_log_digest(folder)
+        assert digest["status"] == "Failed"
+        assert "OSError" in digest["failure_summary"]
+
+
 class TestPipelineDoesNotCorruptRealData:
     """Regression coverage for the pipeline-corruption bugs found on the
     real corpus: jump_detect erasing gap_fill's NaN policy, and

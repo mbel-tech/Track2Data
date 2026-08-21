@@ -359,12 +359,17 @@ def _build_tiny_real_session(base: Path) -> None:
     (base / "session.json").write_text(session_json_text, encoding="utf-8")
 
     # ── idtrackerai.log ───────────────────────────────────────────────────────
+    # Real format (verified against the 70-session GOT corpus): a timestamp
+    # is shown only when it changes from the previous line; every entry is
+    # right-padded with a "module.py:line" source reference; WARNING/ERROR
+    # lines carry the level as a literal token; the terminal status on a
+    # successful run is the bare word "Success" on its own line.
     log_text = (
-        "2024-01-15 10:17:32 INFO  [tracking] Starting session tracking\n"
-        "2024-01-15 10:17:33 INFO  [preprocessing] ROI mask applied\n"
-        "2024-01-15 10:17:45 INFO  [tracking] Tracking complete in 12.5s\n"
-        "2024-01-15 10:30:00 INFO  [validation] Session validated successfully\n"
-        "2024-01-15 10:30:00 INFO  [done] Status: Success\n"
+        "10:17:32 Welcome to idtracker.ai 6.0.13                          logging_utils.py:184\n"
+        "         Loading parameters from                                        py_utils.py:84\n"
+        "10:17:33 WARNING There are 2 frames with more blobs than animals animals_detection.py:110\n"
+        "10:17:45 Tracking complete. It took 0:00:12                              session.py:1035\n"
+        "         Success                                                                 run.py:81\n"
     )
     (base / "idtrackerai.log").write_text(log_text, encoding="utf-8")
 
