@@ -720,6 +720,7 @@ and headless CLI report the same identifier. The full list:
 | `SMOOTH_EVEN_WINDOW` | 6 | warning | "Savitzky-Golay window must be odd; rounding to <N>." |
 | `SMOOTH_ORDER_GE_WINDOW` | 6 | error | "Polynomial order must be smaller than the window length." |
 | `COVERAGE_LOOSE` | 6 | warning | "Coverage gate above 50 % NA is very permissive." |
+| `PREPROCESS_STAGE_FAILED` | 6 | error | "Preprocessing succeeded but a later stage failed: <reason>" |
 | `EXPORT_OVERWRITE` | 7 | confirmation | "Will overwrite <N> file(s)." |
 | `EXPORT_PARTIAL_FAIL` | 7 | error | "Export aborted after <N> file(s)." |
 | `IDT_NO_TRAJ` | 2 | error | "No trajectory file found in `<folder>/trajectories/`." |

@@ -33,6 +33,7 @@ from typing import Any
 
 from track2data.core.models import (
     PreprocessedSession,
+    PreprocessReport,
     ProjectManifest,
     RunResult,
     Session,
@@ -90,6 +91,32 @@ def _map_array_index_to_true_frame(
         true_frames[pos : pos + length] = np.arange(start, start + length)
         pos += length
     return true_frames, True
+
+
+def _recover_preprocess_report(
+    psess: PreprocessedSession | None, exc: BaseException
+) -> PreprocessReport | None:
+    """Best available PreprocessReport for a failed session run.
+
+    Two ways the step log can survive a failure, and both matter to a
+    user staring at a broken run:
+
+    * the failure came after ``preprocess()`` returned (metrics, payload
+      build, export) -- the report is on the PreprocessedSession;
+    * the failure came from a stage *inside* ``preprocess()`` that runs
+      after the pipeline (calibration, zones) -- ``preprocess()`` raises
+      PreprocessStageError, which carries the report.
+
+    Returns None only when preprocessing genuinely never got far enough
+    to produce one (e.g. import failed, or the pipeline itself blew up).
+    """
+    from track2data.core.errors import PreprocessStageError
+
+    if psess is not None:
+        return psess.report
+    if isinstance(exc, PreprocessStageError):
+        return exc.report
+    return None
 
 
 class Engine:
@@ -195,32 +222,51 @@ class Engine:
              switch, smoothing, coverage validation, kinematics.
           2. Calibration (scalar or body-length) if configured.
           3. Zone assignment if zones are configured.
+
+        Steps 2 and 3 run after step 1 has already produced the step
+        report. A failure in either still propagates -- silently
+        continuing would emit pixel-unit or zone-less results as if they
+        were fine -- but it propagates as a ``PreprocessStageError``
+        carrying that report, so callers can surface the step log instead
+        of losing it to where the exception happened to be raised.
         """
         from track2data.preprocess.pipeline import run as pp_run
 
         psess = pp_run(session, self._manifest.preprocess)
 
-        # Calibration.
-        cfg = self._manifest.calibration
-        if cfg.mode == "scalar" and cfg.px_per_cm is not None:
-            from track2data.calibration.scalar import apply_scalar_calibration
-            psess = apply_scalar_calibration(psess, cfg)
-        elif cfg.mode == "bodylength":
-            try:
-                from track2data.calibration.bodylength import (
-                    apply_bodylength_calibration,
-                )
-                psess = apply_bodylength_calibration(psess, cfg)
-            except Exception:
-                logger.warning("Body-length calibration failed; skipping.")
+        try:
+            # Calibration.
+            cfg = self._manifest.calibration
+            if cfg.mode == "scalar" and cfg.px_per_cm is not None:
+                from track2data.calibration.scalar import apply_scalar_calibration
+                psess = apply_scalar_calibration(psess, cfg)
+            elif cfg.mode == "bodylength":
+                try:
+                    from track2data.calibration.bodylength import (
+                        apply_bodylength_calibration,
+                    )
+                    psess = apply_bodylength_calibration(psess, cfg)
+                except Exception:
+                    logger.warning("Body-length calibration failed; skipping.")
 
-        # Zone assignment.
-        zone_set = self._manifest.zones
-        if zone_set.rois:
-            from track2data.zones.geometry import assign_zones
-            main_zone, sec_zone = assign_zones(psess.xy, zone_set)
-            from dataclasses import replace
-            psess = replace(psess, main_zone=main_zone, sec_zone=sec_zone)
+            # Zone assignment.
+            zone_set = self._manifest.zones
+            if zone_set.rois:
+                from track2data.zones.geometry import assign_zones
+                main_zone, sec_zone = assign_zones(psess.xy, zone_set)
+                from dataclasses import replace
+                psess = replace(psess, main_zone=main_zone, sec_zone=sec_zone)
+        except Exception as exc:
+            from track2data.core.errors import PreprocessStageError
+            raise PreprocessStageError(
+                f"Preprocessing succeeded but a later stage failed: {exc}",
+                report=psess.report,
+                subject=session.session_id,
+                remediation=(
+                    "Check the calibration and zone settings for this project; "
+                    "the preprocessing step log is attached to this result."
+                ),
+            ) from exc
 
         return psess
 
@@ -696,9 +742,7 @@ class Engine:
             logger.exception("Session %s failed.", ref.session_id)
             return SessionRunResult(
                 session_id=ref.session_id,
-                # Preserved when the failure came *after* preprocessing: the
-                # step log is often what explains why the later stage blew up.
-                preprocess_report=psess.report if psess is not None else None,
+                preprocess_report=_recover_preprocess_report(psess, exc),
                 duration_s=time.monotonic() - start,
                 error=str(exc),
             )
