@@ -188,27 +188,36 @@ with enable toggle + parameter widgets. Defaults shown greyed; "Reset
 to defaults" link per group.
 
 **Right — metric catalogue:** three tabs (Individual / Group / Zone)
-populated from `metrics.registry.list_for_level(level)`. Each row =
-checkbox + name + ⓘ icon + per-metric config button. Identity-aware
-metrics greyed-out for identity-free sessions with an explanatory
-tooltip.
+populated from `metrics.list_for_level(level)`. Each row = checkbox +
+id + name + ⓘ icon + ⚙ config icon (stub in v1 — see below).
+Identity-aware metrics (`Metric.requires_identity`) greyed-out when
+every *probed* session in the project has `has_stable_identities is
+False` — sessions not yet probed (or whose probe failed) don't count
+toward that "every", so an all-unprobed project greys nothing — with
+an explanatory tooltip. Zone tab disabled when no zones are defined.
 
 **Footer:** "Timepoint binning" spinbox (minutes; 0 = whole session).
 
 #### MetricInfoDialog (info-button modal)
 
 Clicking the ⓘ icon next to a metric opens a `MetricInfoDialog`
-(`QDialog` subclass) that renders the metric's `documentation:
+(`QDialog` subclass, constructed from a `Metric` class — not an id
+string) that renders the metric's `documentation:
 MetricDocumentation` field:
 
 - Definition · Formula · Inputs · Assumptions / warnings · Reference
 - Footer button: **Copy citation** (writes citation + DOI to clipboard)
-- Closes on: ✕ button · `Escape` key · click outside the dialog area
-  (`setModal(True)` + a `mousePressEvent` hook on the dimmed overlay)
+- Closes on: title-bar ✕ · `Escape` key (QDialog's own default
+  behaviour) · click outside the dialog's rect (a QApplication-wide
+  event filter installed for the dialog's lifetime, not a separate
+  overlay widget)
 
 The ⓘ icon is **hidden** when both `documentation.formula_plain` and
 `documentation.citation` are `None` — those metrics fall back to the
-existing tooltip-only behaviour. See
+existing tooltip-only behaviour. In practice this never currently
+hides anything, since `MetricDocumentation.formula_plain` is a
+required (non-`None`) `str` field on every built-in metric today; the
+check is implemented as specified for forward compatibility. See
 [`METRICS_SPEC.md` §6](./METRICS_SPEC.md) for the canonical
 architecture and the per-metric content this dialog renders.
 
@@ -672,35 +681,38 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 **Per-tab structure:**
 - QTableWidget: `metric_list`
-  - Columns: `include` (checkbox), `metric_id`, `metric_name`, `info` (ⓘ icon), `config` (⚙ icon)
-  - Rows: auto-populated from `metrics.registry` filtered by level
-  - Greyed rows: identity-aware metrics for identity-free sessions (with tooltip)
-  - Greyed Zone tab if no zones defined on Stage 4
+  - Columns: `include` (checkbox), `metric_id`, `metric_name`, `info` (ⓘ icon), `config` (⚙ icon — **stub in v1**: shows "Not yet implemented"; no Screen 6.3 or config schema exists yet)
+  - Rows: auto-populated from `metrics.list_for_level(level)`
+  - Greyed rows: metrics where `Metric.requires_identity` is `True`, when every session in the project has `has_stable_identities is False` (with tooltip). Sessions with `has_stable_identities is None` (not yet probed, or probe failed) are treated as unknown, not identity-free — they don't trigger greying.
+  - Disabled Zone tab if no zones defined on Stage 4
 
 **MetricInfoDialog (Modal):**
-- Opens on ⓘ click
+- Opens on ⓘ click, constructed from the row's `Metric` class directly
 - Renders `Metric.documentation` fields (definition, formula_plain, formula_latex, inputs, assumptions, warnings, citation, citation_doi)
 - Footer button: "Copy citation" (to clipboard)
-- Close: ✕, Escape, or outside-click
+- Close: title-bar ✕, Escape, or a click outside the dialog's rect (QApplication-wide event filter)
 
 **Data Bindings:**
 - Checkboxes ↔ `ProjectStore.metrics.individual` / `.group` / `.zone`
+- `SessionRef.has_stable_identities` ↔ populated by a background probe (`read_session` via `TaskRunner`) when a session is added in Stage 2
 
 **Validation Rules:**
 - ≥1 metric selected across all tabs (required)
-- Identity-free sessions → IL-* greyed (still count if checked; engine skips per-session)
+- Identity-free sessions → rows for `requires_identity` metrics greyed when *every* session lacks stable identities (still count if checked; engine skips per-session)
 - No zones → Z-* tab disabled
 
 **Error Messages:**
 - "Select at least one metric." (Next button disabled + tooltip)
 
 **Next Button Logic:**
-- Enabled if ≥1 metric selected
-- On Next: emit `metricsChanged`, save `MetricSelection`, advance to Screen 6.3
+- Next is the shared toolbar ◀ Back / Next ▶ action, not a per-screen button — its enabled state depends only on stack position (`page_index < last_page`), not on how many metrics are selected, and it just advances the `QStackedWidget` to the next built stage (the Processing screen). It does not itself save the selection. `MetricSelection` is saved separately by the screen's own **Apply selection** button, which calls `ProjectStore.update_metrics()` (this is what emits `metricsChanged`).
+- Screen 6.3 (below) is not implemented — there is no config schema or navigation target for it yet, so Next never routes there.
 
 ---
 
-### 6.11 Screen 6.3 — Per-Metric Advanced Configuration
+### 6.11 Screen 6.3 — Per-Metric Advanced Configuration (Aspirational — Not Yet Implemented)
+
+> **Status:** This screen does not exist in the shipped app — no config schema, no navigation target, nothing below is built. Kept as a design reference only; everything in this section is proposed, not current behavior.
 
 **Stage:** Stage 6 (Preprocessing & Metrics)  
 **Purpose:** Configure metric-specific parameters (e.g., activity threshold).
@@ -717,7 +729,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 - QLabel: "Global parameters" (section header)
 - QSpinBox: `timepoint_minutes_spinbox` (range 0–N, 0=whole session, default None)
-- QDoubleSpinBox: `quality_threshold_slider` (range 0–1, default 0.0; display as slider or spinner; masks per-frame metrics when `id_probabilities[frame, animal] < threshold`)
+- QDoubleSpinBox: `quality_threshold_slider` (range 0–1, default 0.0; display as slider or spinner; masks per-frame metrics when `id_probabilities[frame, animal] < threshold`) — **already implemented today**, on the real Screen 6.2 (§6.10) as `_quality_spin`, not gated behind this unbuilt screen
 
 **Data Bindings:**
 - `timepoint_minutes_spinbox` ↔ `ProjectStore.metrics.timepoint_minutes`
