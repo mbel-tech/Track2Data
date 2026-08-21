@@ -378,3 +378,44 @@ def test_greyed_row_still_has_clickable_info_and_config_buttons(qtbot) -> None:
     config_btn = screen._ind_table.cellWidget(row, 4)
     assert info_btn is not None and info_btn.isEnabled()
     assert config_btn is not None and config_btn.isEnabled()
+
+
+# ── sort-key robustness ───────────────────────────────────────────────────────
+
+
+def test_table_builds_without_crashing_for_a_non_conforming_plugin_metric_id(
+    qtbot, monkeypatch
+) -> None:
+    """Third-party metrics (loaded via the track2data.metrics entry
+    point) aren't required to use the built-in PREFIX-NUMBER id shape.
+    _natural_sort_key must fall back gracefully instead of crashing the
+    whole screen on one non-conforming plugin metric id."""
+    from track2data.metrics.base import MetricDocumentation
+    from ui.metrics_screen import MetricsScreen
+
+    class _PluginMetric:
+        id = "MyPluginMetric"  # no "-NUMBER" suffix at all
+        name = "Plugin metric"
+        label = "Plugin metric"
+        level = "individual"
+        priority = "diagnostic"
+        requires_identity = False
+        output_columns: list[str] = []
+        documentation = MetricDocumentation.model_construct(
+            definition="d", formula_plain="f", inputs=[], assumptions=[],
+            warnings=[], citation=None, citation_doi=None,
+        )
+
+    original_list_for_level = metrics.list_for_level
+
+    def _with_plugin_metric(level: str):
+        real = original_list_for_level(level)
+        return [*real, _PluginMetric] if level == "individual" else real
+
+    monkeypatch.setattr("ui.metrics_screen.metrics.list_for_level", _with_plugin_metric)
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    ids = [screen._ind_table.item(row, 1).text() for row in range(screen._ind_table.rowCount())]
+    assert "MyPluginMetric" in ids
