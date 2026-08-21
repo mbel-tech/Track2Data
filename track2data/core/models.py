@@ -365,3 +365,23 @@ class PreprocessedSession:
     @property
     def fps(self) -> float:
         return self.session.video.fps
+
+    @property
+    def was_interpolated(self) -> np.ndarray:
+        """
+        (n_frames, n_animals) bool -- True where a position was originally
+        missing (NaN in ``Session.raw_xy``) and is now present after
+        preprocessing.
+
+        Before this, ``trajectory_variant`` was a Session-level constant
+        (always ``"with_gaps"``), so nothing in the exported per-frame
+        table could distinguish a measured position from a reconstructed
+        one. This is the honest, minimal version of that distinction: it
+        does NOT flag ``jump_detect``'s anomaly-corrected replacements
+        that did not originate from a NaN gap (those are already visible
+        in ``PreprocessReport``'s ``jump_detect`` step, which records
+        exactly how many frames it touched).
+        """
+        raw_nan = np.isnan(self.session.raw_xy[:, :, 0])
+        final_present = ~np.isnan(self.xy[:, :, 0])
+        return raw_nan & final_present

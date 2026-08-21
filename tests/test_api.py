@@ -375,6 +375,54 @@ def test_labels_shorter_than_n_animals_does_not_crash() -> None:
     assert df.loc[df["individual_id"] == 1, "individual_label"].isna().all()
 
 
+# ── build_fish_by_frame: was_interpolated ───────────────────────────────────
+#
+# Regression coverage: trajectory_variant was a Session-level constant
+# (always "with_gaps"), so nothing in the export could distinguish a
+# measured position from a reconstructed one.
+
+
+def test_was_interpolated_true_where_raw_nan_now_filled() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=5, n_animals=1)
+    raw_xy = session.raw_xy.copy()
+    raw_xy[2, 0, :] = np.nan  # frame 2 was originally missing
+    session = session.model_copy(update={"raw_xy": raw_xy})
+
+    n_frames, n_animals = session.n_frames, session.n_animals
+    kine = KinematicsArrays(
+        speed_px_s=np.zeros((n_frames, n_animals)),
+        accel_px_s2=np.zeros((n_frames, n_animals)),
+        heading_rad=np.zeros((n_frames, n_animals)),
+    )
+    filled_xy = raw_xy.copy()
+    filled_xy[2, 0, :] = [123.0, 456.0]  # gap_fill filled it in
+    psess = PreprocessedSession(
+        session=session, xy=filled_xy, kinematics=kine, report=PreprocessReport()
+    )
+
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["was_interpolated"]) == [False, False, True, False, False]
+
+
+def test_was_interpolated_false_when_still_nan() -> None:
+    """A gap left unfilled (too long) must not be marked interpolated --
+    it's still missing, not reconstructed."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=3, n_animals=1)
+    raw_xy = session.raw_xy.copy()
+    raw_xy[1, 0, :] = np.nan
+    session = session.model_copy(update={"raw_xy": raw_xy})
+    psess = _make_psess(session)  # xy = raw_xy unchanged, still NaN at frame 1
+
+    engine = Engine(_make_manifest())
+    df = engine.build_fish_by_frame(psess)
+    assert list(df["was_interpolated"]) == [False, False, False]
+
+
 # ── build_fish_by_frame: zone columns ───────────────────────────────────────
 
 

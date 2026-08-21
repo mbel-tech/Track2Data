@@ -273,10 +273,13 @@ class Engine:
         Build the master per-frame DataFrame for *psess*.
 
         Columns: session_id, individual_id, frame, time_s, x_px, y_px,
-                 speed_px_s, heading_rad, main_zone, sec_zone.
+                 was_interpolated, speed_px_s, heading_rad, main_zone, sec_zone.
         Calibrated columns added when psess.px_per_cm is set.
         individual_label/individual_color added when
         Session.identities_labels/identities_colors are present.
+        was_interpolated is True where a position was originally missing
+        and is now present after preprocessing -- see
+        PreprocessedSession.was_interpolated.
 
         When ``MetricSelection.quality_threshold`` > 0, rows whose
         ``id_probabilities[frame, animal] < threshold`` have their position/
@@ -321,6 +324,7 @@ class Engine:
             "in_tracking_interval": in_interval,
             "x_px": xy_flat[:, 0],
             "y_px": xy_flat[:, 1],
+            "was_interpolated": psess.was_interpolated.reshape(-1),
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
