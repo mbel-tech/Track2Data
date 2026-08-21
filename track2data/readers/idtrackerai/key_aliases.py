@@ -41,4 +41,9 @@ QUALITY_KEYS: frozenset[str] = frozenset({
     "fraction_identified",
     "silhouette_score",
     "fragment_connectivity",
+    # areas: {"mean": ndarray(n_animals,), "median": ..., "std": ...} -- per-
+    # individual blob-area stats (output_structure_idtrackerai.md:87). A high
+    # std/mean ratio for one identity usually means its blobs are repeatedly
+    # merged with a neighbour's during crossings.
+    "areas",
 })

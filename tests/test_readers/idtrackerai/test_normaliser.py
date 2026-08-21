@@ -36,6 +36,105 @@ def _minimal_payload(tmp_path: Path) -> dict:
     }
 
 
+class TestNormaliserFpsWidthHeightFallback:
+    """Regression coverage for the fabricated-25.0-fps bug found on the real
+    corpus: no session in a 70-session sample has fps==25.0 (real range is
+    24.833-24.880), yet the old fallback made every session missing this
+    key report exactly 25.0 with no warning."""
+
+    def test_missing_fps_falls_back_to_session_json(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        del payload["frames_per_second"]
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"frames_per_second": 24.86}
+        )
+        assert s.video.fps == pytest.approx(24.86)
+
+    def test_missing_fps_and_session_json_raises(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)
+        del payload["frames_per_second"]
+        with pytest.raises(DataValidationError) as exc_info:
+            Normaliser(tmp_path).normalise(payload, session_meta=None)
+        assert exc_info.value.code == "IDT_DICT_MISSING_KEY"
+
+    def test_nan_fps_is_rejected_not_silently_passed(self, tmp_path: Path) -> None:
+        """float('nan') or 25.0 == nan in plain Python (NaN is truthy) --
+        the old `payload.get(...) or 25.0` fallback let a NaN fps straight
+        through. Must now be treated as invalid and fall back / raise."""
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)
+        payload["frames_per_second"] = float("nan")
+        with pytest.raises(DataValidationError):
+            Normaliser(tmp_path).normalise(payload, session_meta=None)
+
+    def test_missing_width_falls_back_to_session_json(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        del payload["width"]
+        s = Normaliser(tmp_path).normalise(payload, session_meta={"width": 1920})
+        assert s.video.width_px == 1920
+
+    def test_zero_width_is_rejected(self, tmp_path: Path) -> None:
+        """width used to silently default to 0 via `int(payload.get("width") or 0)`."""
+        from track2data.core.errors import DataValidationError
+
+        payload = _minimal_payload(tmp_path)
+        payload["width"] = 0
+        with pytest.raises(DataValidationError):
+            Normaliser(tmp_path).normalise(payload, session_meta=None)
+
+    def test_version_falls_back_to_session_json(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        del payload["version"]
+        s = Normaliser(tmp_path).normalise(payload, session_meta={"version": "6.0.15a0"})
+        assert s.idtrackerai_version == "6.0.15a0"
+
+
+class TestNormaliserBodyLengthAndAreas:
+    """Regression coverage: body_length and areas were read from the
+    trajectory payload (they're in KNOWN_TRAJECTORY_KEYS) and then silently
+    discarded -- neither reached any Session field. Since
+    CalibrationConfig.mode defaults to 'bodylength', every idtracker.ai
+    session hit CAL-BL-MISSING unconditionally."""
+
+    def test_body_length_broadcast_to_all_animals(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["body_length"] = 150.15
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.body_length_px is not None
+        assert s.body_length_px.shape == (M,)
+        np.testing.assert_allclose(s.body_length_px, [150.15] * M)
+
+    def test_missing_body_length_is_none(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        del payload["body_length"]
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.body_length_px is None
+
+    def test_zero_body_length_is_none(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["body_length"] = 0.0
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.body_length_px is None
+
+    def test_body_length_reliable_stays_false(self, tmp_path: Path) -> None:
+        """output_structure_idtrackerai.md:104 warns this depends on
+        segmentation params; must start unacknowledged regardless of source."""
+        payload = _minimal_payload(tmp_path)
+        payload["body_length"] = 150.15
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.body_length_reliable is False
+
+    def test_areas_land_in_quality(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        s = Normaliser(tmp_path).normalise(payload)
+        assert s.quality is not None
+        assert "areas" in s.quality
+        assert set(s.quality["areas"].keys()) == {"mean", "median", "std"}
+
+
 class TestNormaliserIdProbabilities:
     def test_2d_id_probabilities_unchanged(self, tmp_path: Path) -> None:
         payload = _minimal_payload(tmp_path)

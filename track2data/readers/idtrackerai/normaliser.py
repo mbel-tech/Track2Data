@@ -20,6 +20,7 @@ from typing import Any
 
 import numpy as np
 
+from track2data.core.errors import DataValidationError
 from track2data.core.models import Session, VideoInfo
 from track2data.readers.idtrackerai.key_aliases import KNOWN_TRAJECTORY_KEYS, QUALITY_KEYS
 
@@ -56,13 +57,20 @@ class Normaliser:
         )
         length_unit = self._normalise_length_unit(payload.get("length_unit"))
         quality = self._extract_quality(payload)
-        version = payload.get("version")
+        version = payload.get("version") or (session_meta or {}).get("version")
         raw_attrs = self._collect_unknown_keys(payload)
 
-        fps = float(payload.get("frames_per_second") or 25.0)
-        width = int(payload.get("width") or 0)
-        height = int(payload.get("height") or 0)
-        video_paths = payload.get("video_paths") or []
+        meta = session_meta or {}
+        fps = self._require_positive_number(
+            "frames_per_second", payload.get("frames_per_second"), meta.get("frames_per_second")
+        )
+        width = int(self._require_positive_number(
+            "width", payload.get("width"), meta.get("width")
+        ))
+        height = int(self._require_positive_number(
+            "height", payload.get("height"), meta.get("height")
+        ))
+        video_paths = payload.get("video_paths") or meta.get("video_paths") or []
         video_path = self._resolve_video_path(video_paths)
 
         video = VideoInfo(
@@ -74,6 +82,7 @@ class Normaliser:
         )
 
         has_stable = self._check_stability(raw_xy)
+        body_length_px = self._normalise_body_length(payload.get("body_length"), n_animals)
 
         return Session(
             session_id=self._folder.name,
@@ -84,6 +93,10 @@ class Normaliser:
             trajectory_variant="with_gaps",
             has_stable_identities=has_stable,
             raw_xy=raw_xy,
+            body_length_px=body_length_px,
+            # output_structure_idtrackerai.md:104 warns this value depends on
+            # segmentation parameters and video conditions, so it starts
+            # unacknowledged regardless of source; see Session docstring.
             body_length_reliable=False,
             id_probabilities=id_prob,
             quality=quality,
@@ -130,6 +143,75 @@ class Normaliser:
         if arr.ndim != 2:
             return None
         return arr
+
+    @staticmethod
+    def _require_positive_number(
+        field_name: str, primary: Any, fallback: Any
+    ) -> float:
+        """
+        Resolve *field_name* from the trajectory dict, falling back to
+        session.json, and raise rather than fabricate a value when neither
+        source has a valid (finite, > 0) number.
+
+        Previously this silently defaulted frames_per_second to 25.0 and
+        width/height to 0 -- on the real idtracker.ai corpus every session's
+        true fps sits in [24.833, 24.880] and none is 25.0, so a payload
+        missing this key was producing every downstream speed/duration
+        metric wrong by (true_fps / 25) with no warning at all. Also,
+        `float("nan") or 25.0` evaluates to `nan` (NaN is truthy in Python),
+        so a NaN value used to pass this check silently too -- isfinite()
+        below closes that hole.
+        """
+        for candidate in (primary, fallback):
+            if candidate is None:
+                continue
+            try:
+                value = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0:
+                return value
+        raise DataValidationError(
+            f"{field_name} is missing or invalid in both the trajectory payload "
+            "and session.json.",
+            code="IDT_DICT_MISSING_KEY",
+            severity="error",
+            subject=field_name,
+            remediation=(
+                f"Ensure the session's trajectory file or session.json carries a "
+                f"valid '{field_name}' value; it cannot be safely defaulted."
+            ),
+        )
+
+    @staticmethod
+    def _normalise_body_length(raw: Any, n_animals: int) -> np.ndarray | None:
+        """
+        Map the trajectory dict's ``body_length`` to ``Session.body_length_px``.
+
+        ``body_length`` (output_structure_idtrackerai.md:81 / session_idtrackerai.md:17)
+        is a single session-wide scalar -- the median diagonal of individual
+        blob bounding boxes -- not a per-animal value. It is broadcast across
+        all animals rather than fabricated per-identity: this is honestly
+        the same session-wide estimate applied uniformly, and it is what
+        unblocks the default 'bodylength' calibration mode
+        (CalibrationConfig.mode default, calibration/bodylength.py), which
+        previously raised CAL-BL-MISSING on every idtracker.ai session because
+        this field was read from the payload and then silently discarded.
+
+        A genuinely per-identity body length requires the blob layer
+        (preprocessing/list_of_blobs.pickle) filtered on seems_like_individual
+        + unicity frames -- out of scope here; see the format-alignment plan
+        Fase 6c/7.
+        """
+        if raw is None or n_animals <= 0:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value) or value <= 0:
+            return None
+        return np.full(n_animals, value, dtype=np.float64)
 
     @staticmethod
     def _normalise_length_unit(raw: Any) -> float | None:

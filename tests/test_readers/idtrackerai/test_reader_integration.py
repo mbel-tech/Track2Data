@@ -205,6 +205,8 @@ class TestReaderFormatFallback:
             "trajectories": np.zeros((3, 2, 2)),
             "version": "6.0.13",
             "frames_per_second": 25.0,
+            "width": 1920,
+            "height": 1080,
         }
         np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
 
