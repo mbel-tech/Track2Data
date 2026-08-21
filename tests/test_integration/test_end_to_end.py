@@ -483,6 +483,22 @@ def test_cli_list_metrics_level_filter() -> None:
     assert "IL-1" in result.output
 
 
+def test_cli_list_metrics_group_level_natural_sort() -> None:
+    """CLI `list-metrics --level group` sorts GL-10 after GL-9, not GL-1."""
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["list-metrics", "--level", "group"])
+
+    assert result.exit_code == 0, result.output
+    ids = [
+        line.split()[0] for line in result.output.splitlines() if line.startswith("GL-")
+    ]
+    assert ids.index("GL-10") > ids.index("GL-9")
+
+
 # ── 9. CLI: new ───────────────────────────────────────────────────────────────
 
 
