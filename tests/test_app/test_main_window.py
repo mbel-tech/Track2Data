@@ -179,14 +179,35 @@ def test_cancel_action_exists_and_starts_disabled(qtbot) -> None:
 
 
 def test_cancel_action_enabled_on_start_and_disabled_on_finish(
-    qtbot, tmp_path: Path, tiny_real_session: Path
+    qtbot, tmp_path: Path, tiny_real_session: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Slow the pipeline down enough to reliably observe the in-flight state --
+    # same technique as test_cancel_action_disabled_after_cancellation below.
+    # Without this, a fast enough run can finish within the same GUI-thread
+    # event-loop pass that delivers taskStarted: qtbot.waitSignal's exec()
+    # loop drains every already-queued event (started AND finished) before
+    # returning, so _cancel_action is back to disabled by the time the
+    # assertion below runs -- reproduced on Linux/macOS CI, not locally on
+    # Windows, where thread scheduling happened to never win that race.
+    import time
+
+    from track2data.api import Engine
+
+    real_preprocess = Engine.preprocess
+
+    def slow_preprocess(self, session):
+        time.sleep(0.3)
+        return real_preprocess(self, session)
+
+    monkeypatch.setattr(Engine, "preprocess", slow_preprocess)
+
     win = _make_ready_window(qtbot, tmp_path, tiny_real_session)
     assert win._cancel_action.isEnabled() is False
 
     with qtbot.waitSignal(win._store.tasks.taskStarted, timeout=5000):
         win._action_run()
 
+    qtbot.waitUntil(lambda: win._cancel_action.isEnabled(), timeout=2000)
     assert win._cancel_action.isEnabled() is True
 
     qtbot.waitUntil(lambda: not win._cancel_action.isEnabled(), timeout=15000)
