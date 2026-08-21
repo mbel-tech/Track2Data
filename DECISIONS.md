@@ -56,7 +56,7 @@ of async/await bridging in Qt.
 
 ---
 
-### D-004 · `ProjectStore` implemented in `app/state.py` for Phase 1
+### D-004 · `ProjectStore` implemented in `app/state.py` for Phase 1 — CLOSED
 
 **Decision:** `ProjectStore` (QObject with signals) lives in
 `app/state.py` for Phase 1.
@@ -70,6 +70,20 @@ simple and matches the proposed layout.
 **Future:** Will be refactored to `ui/store/project_store.py` +
 `ui/store/task_runner.py` in Phase 3 when the full signal surface is
 wired to actual engine calls.
+
+**Closed (issue #27, M3):** `ProjectStore` now lives in
+`ui/store/project_store.py`, moved as its own isolated commit once
+`ui/store/task_runner.py` existed for it to own and forward signals
+from — deliberately *not* bundled with the new `tasks`/`run_results`
+wiring, so a regression is trivially `git bisect`-able to "the move"
+vs. "the wiring". `app/state.py` keeps a deprecated re-export
+(`from ui.store.project_store import ProjectStore`) rather than being
+deleted outright, since `app/main_window.py` and pre-existing tests
+still import from the old path; verified as a genuine re-export (not
+a duplicate class) by an identity check
+(`test_app_state_is_a_genuine_reexport_not_a_duplicate`). All
+pre-existing `ProjectStore` tests in `test_app_smoke.py` pass
+unmodified — the proof the move itself preserved behavior.
 
 ---
 
