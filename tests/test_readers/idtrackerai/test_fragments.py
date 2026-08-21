@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from track2data.readers.idtrackerai.fragments import (
+    crossing_frame_mask,
     fragment_swap_boundaries,
     individual_fragments,
     load_fragments,
@@ -153,3 +154,37 @@ class TestFragmentSwapBoundaries:
 
     def test_empty_fragments_returns_empty_set(self) -> None:
         assert fragment_swap_boundaries({"fragments": []}) == set()
+
+
+class TestCrossingFrameMask:
+    def test_marks_frames_inside_crossing_fragment(self) -> None:
+        data = {"fragments": [
+            _minimal_fragment(identifier=0, start_frame=5, end_frame=10, is_an_individual=False),
+        ]}
+        mask = crossing_frame_mask(data, n_frames=20)
+        assert mask.dtype == bool
+        assert mask[5:10].all()
+        assert not mask[:5].any()
+        assert not mask[10:].any()
+
+    def test_individual_fragments_do_not_mark_crossing(self) -> None:
+        data = {"fragments": [
+            _minimal_fragment(identifier=0, start_frame=5, end_frame=10, is_an_individual=True),
+        ]}
+        mask = crossing_frame_mask(data, n_frames=20)
+        assert not mask.any()
+
+    def test_end_frame_beyond_n_frames_clamped(self) -> None:
+        """A fragment whose end_frame exceeds n_frames must not raise or
+        write out of bounds."""
+        data = {"fragments": [
+            _minimal_fragment(identifier=0, start_frame=15, end_frame=30, is_an_individual=False),
+        ]}
+        mask = crossing_frame_mask(data, n_frames=20)
+        assert mask.shape == (20,)
+        assert mask[15:20].all()
+
+    def test_empty_fragments_all_false(self) -> None:
+        mask = crossing_frame_mask({"fragments": []}, n_frames=10)
+        assert not mask.any()
+        assert mask.shape == (10,)
