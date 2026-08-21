@@ -32,6 +32,7 @@ from track2data.readers.idtrackerai.formats.h5 import load_h5
 from track2data.readers.idtrackerai.formats.npy import load_npy
 from track2data.readers.idtrackerai.log import load_log_digest
 from track2data.readers.idtrackerai.normaliser import Normaliser
+from track2data.readers.idtrackerai.preprocessing import find_preprocessing_images
 from track2data.readers.idtrackerai.session_json import (
     load_session_json,
     parse_roi_string,
@@ -108,6 +109,15 @@ class IDTrackerAiReader(SessionReader):
             "bbox_summary": load_bbox_summary(folder),
             "matching_results": load_matching_results(folder),
         })
+
+        # Attach preprocessing/ image paths (opportunistic — data_policy
+        # can delete this folder entirely).
+        images = find_preprocessing_images(folder)
+        if images:
+            session = session.model_copy(update={
+                "roi_mask_path": images.get("roi_mask"),
+                "background_image_path": images.get("background"),
+            })
 
         return session
 

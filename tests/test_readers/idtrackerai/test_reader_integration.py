@@ -211,6 +211,15 @@ class TestReaderRead:
         assert s.tracking_log is not None
         assert s.tracking_log["durations"]["Tracking session"] == pytest.approx(13.0)
 
+    def test_preprocessing_image_paths_recorded(
+        self, reader: IDTrackerAiReader, tiny_real_session: Path
+    ) -> None:
+        s = reader.read(tiny_real_session)
+        assert s.roi_mask_path is not None
+        assert s.roi_mask_path.exists()
+        assert s.background_image_path is not None
+        assert s.background_image_path.exists()
+
     # ── custom artefacts ──────────────────────────────────────────────────────
 
     def test_inconsistent_frames_loaded(self, reader: IDTrackerAiReader,
