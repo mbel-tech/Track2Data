@@ -133,6 +133,11 @@ class Session(BaseModel):
     # readers/idtrackerai/preprocessing.py's module docstring for why.
     roi_mask_path: Path | None = None
     background_image_path: Path | None = None
+    # Parsed preprocessing/list_of_fragments.json -- see
+    # readers/idtrackerai/fragments.py's module docstring for the schema
+    # (undocumented on the official side; derived empirically) and the
+    # defensive-parsing rules any consumer of session.fragments must follow.
+    fragments: dict[str, Any] | None = None
 
     @property
     def n_frames(self) -> int:
