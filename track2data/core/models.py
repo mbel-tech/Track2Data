@@ -150,7 +150,14 @@ class GapFillCfg(BaseModel):
 
 class JumpCfg(BaseModel):
     enabled: bool = True
-    method: Literal["sd_multiple", "percentile"] = "sd_multiple"
+    # "idtracker_velocity_threshold" uses Session.velocity_threshold_px_frame
+    # -- idtracker.ai's own outlier-displacement bound, computed from the
+    # actual tracked data -- as an absolute px/frame threshold, instead of
+    # the hardcoded SD-multiple/percentile heuristics below. Falls back to
+    # sd_multiple (with a warning) when the session has no such value.
+    method: Literal["sd_multiple", "percentile", "idtracker_velocity_threshold"] = (
+        "sd_multiple"
+    )
     sd_mult: float = 10.0
     percentile: float = 99.0
     pct_mult: float = 2.0

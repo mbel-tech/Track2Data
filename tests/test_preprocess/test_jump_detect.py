@@ -151,3 +151,47 @@ def test_pre_existing_gap_survives_jump_detect(smooth_xy: np.ndarray) -> None:
     # no longer at the anomalous magnitude).
     assert not np.isnan(out[80, 0, 0])
     assert result.affected_per_individual[0] >= 1
+
+
+# ── idtracker_velocity_threshold method ─────────────────────────────────────
+#
+# Regression coverage: Session.velocity_threshold_px_frame (idtracker.ai's
+# own outlier-displacement bound, computed from the actual tracked data) was
+# captured and had zero consumers -- jump_detect only ever used the
+# hardcoded sd_multiple/percentile heuristics.
+
+
+def test_idtracker_velocity_threshold_flags_above_threshold(
+    smooth_xy: np.ndarray,
+) -> None:
+    xy = _inject_jump(smooth_xy, animal=0, frame=50, magnitude=1000.0)
+    cfg = JumpCfg(enabled=True, method="idtracker_velocity_threshold", replacement="nan")
+    out, result = detect_jumps(xy, cfg, velocity_threshold_px_frame=50.0)
+    assert result.affected_per_individual[0] >= 1
+    assert np.isnan(out[50, 0, 0])
+
+
+def test_idtracker_velocity_threshold_does_not_flag_below_threshold(
+    smooth_xy: np.ndarray,
+) -> None:
+    # smooth_xy has constant 5px/frame and 3px/frame steps -- well under 50.
+    cfg = JumpCfg(enabled=True, method="idtracker_velocity_threshold", replacement="nan")
+    out, result = detect_jumps(smooth_xy, cfg, velocity_threshold_px_frame=50.0)
+    assert result.affected_frames == 0
+    np.testing.assert_array_equal(out, smooth_xy)
+
+
+def test_idtracker_velocity_threshold_falls_back_to_sd_multiple_when_none(
+    smooth_xy: np.ndarray, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The method was requested but the session has no such value --
+    must not silently flag nothing; falls back with a warning."""
+    xy = _inject_jump(smooth_xy, animal=0, frame=50, magnitude=5000.0)
+    cfg = JumpCfg(
+        enabled=True, method="idtracker_velocity_threshold",
+        sd_mult=5.0, replacement="nan",
+    )
+    with caplog.at_level("WARNING"):
+        _out, result = detect_jumps(xy, cfg, velocity_threshold_px_frame=None)
+    assert result.affected_per_individual[0] >= 1  # sd_multiple caught it
+    assert any("falling back" in rec.message for rec in caplog.records)

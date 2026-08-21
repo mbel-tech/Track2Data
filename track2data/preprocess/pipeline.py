@@ -56,7 +56,9 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # 2. Jump detection
-    xy, step = detect_jumps(xy, config.jump)
+    xy, step = detect_jumps(
+        xy, config.jump, velocity_threshold_px_frame=session.velocity_threshold_px_frame
+    )
     report.steps.append(step)
 
     # 3. Identity-switch correction
