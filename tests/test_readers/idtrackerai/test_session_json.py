@@ -140,3 +140,59 @@ class TestParseRoiString:
         from track2data.readers.idtrackerai.session_json import parse_roi_string
 
         assert parse_roi_string("+ Polygon [[0.0, 0.0], [1.0, 1.0]]") is None
+
+
+class TestParseTimersToDurations:
+    """Regression coverage: log.py's own duration regex never matched any
+    real idtrackerai.log format. session.json's timers dict has real ISO
+    timestamps and is the structured, parse-free replacement."""
+
+    def test_computes_duration_from_iso_timestamps(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_timers_to_durations
+
+        timers = {
+            "Animal detection": {
+                "name": "Animal detection",
+                "start_time": "2026-02-02T12:22:58.542053",
+                "finish_time": "2026-02-02T12:23:53.788033",
+            }
+        }
+        durations = parse_timers_to_durations(timers)
+        assert durations["Animal detection"] == pytest.approx(55.24598, abs=1e-3)
+
+    def test_multiple_stages(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_timers_to_durations
+
+        timers = {
+            "A": {"start_time": "2026-01-01T00:00:00", "finish_time": "2026-01-01T00:00:10"},
+            "B": {"start_time": "2026-01-01T00:00:10", "finish_time": "2026-01-01T00:00:30"},
+        }
+        durations = parse_timers_to_durations(timers)
+        assert durations == {"A": 10.0, "B": 20.0}
+
+    def test_null_finish_time_stage_skipped(self) -> None:
+        """A stage that started but never finished (e.g. a crashed run) is
+        the exact signal that a run didn't complete -- must not raise or
+        fabricate a duration for it."""
+        from track2data.readers.idtrackerai.session_json import parse_timers_to_durations
+
+        timers = {
+            "Crashed stage": {"start_time": "2026-01-01T00:00:00", "finish_time": None},
+            "Completed": {
+                "start_time": "2026-01-01T00:00:00",
+                "finish_time": "2026-01-01T00:00:05",
+            },
+        }
+        durations = parse_timers_to_durations(timers)
+        assert "Crashed stage" not in durations
+        assert durations["Completed"] == 5.0
+
+    def test_none_timers_returns_empty(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_timers_to_durations
+
+        assert parse_timers_to_durations(None) == {}
+
+    def test_non_dict_timers_returns_empty(self) -> None:
+        from track2data.readers.idtrackerai.session_json import parse_timers_to_durations
+
+        assert parse_timers_to_durations([1, 2, 3]) == {}

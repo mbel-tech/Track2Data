@@ -97,3 +97,39 @@ def load_session_json(folder: Path) -> dict[str, Any] | None:
             exc,
         )
         return None
+
+
+def parse_timers_to_durations(timers: Any) -> dict[str, float]:
+    """
+    Convert ``session.json['timers']`` into ``{stage_name: seconds}``.
+
+    ``timers`` is a dict keyed by stage name, each value carrying
+    ``start_time``/``finish_time`` ISO-8601 timestamps (verified against
+    the real 70-session corpus -- undocumented in the official reference).
+    A stage whose ``finish_time`` is null (observed once in the corpus, on
+    a session whose tracking run crashed mid-stage) is skipped rather than
+    guessed at; a partial timers dict is exactly the signal that a run
+    didn't complete cleanly.
+
+    This is the structured, parse-free replacement for the log parser's
+    old (and never-matching) duration regex -- see readers/idtrackerai/log.py.
+    """
+    from datetime import datetime
+
+    if not isinstance(timers, dict):
+        return {}
+
+    durations: dict[str, float] = {}
+    for stage_name, entry in timers.items():
+        if not isinstance(entry, dict):
+            continue
+        start, finish = entry.get("start_time"), entry.get("finish_time")
+        if not start or not finish:
+            continue
+        try:
+            t0 = datetime.fromisoformat(start)
+            t1 = datetime.fromisoformat(finish)
+        except (TypeError, ValueError):
+            continue
+        durations[stage_name] = (t1 - t0).total_seconds()
+    return durations

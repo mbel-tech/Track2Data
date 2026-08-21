@@ -32,7 +32,11 @@ from track2data.readers.idtrackerai.formats.h5 import load_h5
 from track2data.readers.idtrackerai.formats.npy import load_npy
 from track2data.readers.idtrackerai.log import load_log_digest
 from track2data.readers.idtrackerai.normaliser import Normaliser
-from track2data.readers.idtrackerai.session_json import load_session_json, parse_roi_string
+from track2data.readers.idtrackerai.session_json import (
+    load_session_json,
+    parse_roi_string,
+    parse_timers_to_durations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +91,15 @@ class IDTrackerAiReader(SessionReader):
         # Enrich from session.json (tracking_intervals, roi_list, etc.).
         session = self._enrich_from_session_json(session, session_meta)
 
-        # Attach log digest.
-        session = session.model_copy(
-            update={"tracking_log": load_log_digest(folder)}
-        )
+        # Attach log digest, with durations merged in from session.json's
+        # structured `timers` dict -- the log's own duration text ("It took
+        # H:MM:SS") has no reliable regex; timers has real ISO timestamps.
+        log_digest = load_log_digest(folder)
+        if log_digest is not None and session_meta:
+            durations = parse_timers_to_durations(session_meta.get("timers"))
+            if durations:
+                log_digest = {**log_digest, "durations": durations}
+        session = session.model_copy(update={"tracking_log": log_digest})
 
         # Attach custom artefacts (all opportunistic — never required).
         session = session.model_copy(update={
@@ -197,5 +206,42 @@ class IDTrackerAiReader(SessionReader):
             ]
             if parsed_roi:
                 updates["roi_list"] = parsed_roi
+
+        # Straightforward scalar/list passthroughs -- see the Session field
+        # docstrings (core/models.py) for why each of these matters.
+        if (v := meta.get("number_of_error_frames")) is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                updates["number_of_error_frames"] = int(v)
+
+        if (v := meta.get("exclusive_rois")) is not None:
+            updates["exclusive_rois"] = bool(v)
+
+        if (v := meta.get("last_validated")):
+            updates["last_validated"] = str(v)
+
+        if (v := meta.get("data_policy")):
+            updates["data_policy"] = str(v)
+
+        if (v := meta.get("length_calibrations")):
+            updates["length_calibrations"] = list(v)
+
+        if (v := meta.get("velocity_threshold")) is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                updates["velocity_threshold_px_frame"] = float(v)
+
+        if (v := meta.get("resolution_reduction")) is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                updates["resolution_reduction"] = float(v)
+
+        if (v := meta.get("id_image_size")):
+            updates["id_image_size"] = list(v)
+
+        segmentation_keys = (
+            "intensity_ths", "area_ths", "use_bkg",
+            "background_subtraction_stat", "erosion_kernel_size",
+        )
+        segmentation_params = {k: meta[k] for k in segmentation_keys if k in meta}
+        if segmentation_params:
+            updates["segmentation_params"] = segmentation_params
 
         return session.model_copy(update=updates) if updates else session

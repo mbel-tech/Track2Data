@@ -88,6 +88,48 @@ class Session(BaseModel):
     # Verbatim unknown keys from the source trajectory dict.
     raw_attrs: dict[str, Any] | None = None
 
+    # ── session.json fields (Fase 4) ────────────────────────────────────────
+    # idtracker.ai's own authoritative count of frames with more blobs than
+    # animals -- independent of any user-side inconsistent_frames.csv, and
+    # the only place a `Check_segmentation is False` (silenced) session can
+    # still surface segmentation contamination.
+    number_of_error_frames: int | None = None
+    # When True, identities are physically partitioned by ROI: every group
+    # metric (nearest-neighbour distance, polarisation, cohesion, ...) is
+    # meaningless across partitions, since those animals can never interact.
+    exclusive_rois: bool | None = None
+    # ISO timestamp of the last Validator manual-review pass, or None if the
+    # session was never opened in the Validator.
+    last_validated: str | None = None
+    # Predicts which output folders survive (idtracker.ai_usage.md's
+    # data_policy table) -- e.g. "trajectories" deletes preprocessing/,
+    # identification_images/, and accumulation/.
+    data_policy: str | None = None
+    # [{"point_A": [x,y], "point_B": [x,y], "distance": float}, ...] -- the
+    # raw pixel-endpoint pairs behind length_unit. Multiple entries give a
+    # real uncertainty estimate on every calibrated metric (see
+    # calibration/bodylength.py); length_unit alone is just their average.
+    length_calibrations: list[dict[str, Any]] | None = None
+    # Segmentation parameters that body_length/areas are *defined by*
+    # (output_structure_idtrackerai.md:104): intensity_ths, area_ths,
+    # use_bkg, background_subtraction_stat, erosion_kernel_size. Comparing
+    # body length/area across sessions is only valid when these match --
+    # kept as a single dict since they're always used together for that
+    # one batch-consistency question, not individually.
+    segmentation_params: dict[str, Any] | None = None
+    # idtracker.ai's own outlier-displacement threshold (px/frame),
+    # computed from the actual tracked data -- a better-grounded default
+    # for jump detection than a hardcoded SD-multiple; see
+    # preprocess/jump_detect.py's "idtracker_velocity_threshold" method.
+    velocity_threshold_px_frame: float | None = None
+    # resolution_reduction/id_image_size apply ONLY to the identification
+    # CNN's input images (idtracker.ai_usage.md:370), never to trajectory
+    # coordinates -- do NOT scale raw_xy by resolution_reduction. Recorded
+    # for idmatcher.ai cross-session-matching provenance (both must match
+    # across sessions for identity matching to be valid), not for use here.
+    resolution_reduction: float | None = None
+    id_image_size: list[int] | None = None
+
     @property
     def n_frames(self) -> int:
         return int(self.raw_xy.shape[0])
