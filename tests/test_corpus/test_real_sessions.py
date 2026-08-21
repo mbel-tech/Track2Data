@@ -85,3 +85,81 @@ class TestAllSessionsImport:
         sessions = _corpus_sessions()
         formats_used = {read_session(f).trajectory_format for f in sessions}
         assert formats_used == {"h5"}
+
+
+class TestPipelineDoesNotCorruptRealData:
+    """Regression coverage for the pipeline-corruption bugs found on the
+    real corpus: jump_detect erasing gap_fill's NaN policy, and
+    identity_switch injecting large artificial displacements. Pinned to
+    session_trial10_Segment1's exact measured numbers so a future change
+    reintroducing either bug fails loudly instead of silently."""
+
+    SESSION = "session_trial10_Segment1"
+
+    def _raw_xy(self):
+        import numpy as np
+
+        from track2data.readers.idtrackerai.formats.npy import load_npy
+
+        folder = CORPUS_DIR / self.SESSION
+        if not folder.is_dir():
+            pytest.skip(f"{self.SESSION} not present in corpus")
+        payload = load_npy(folder / "trajectories" / "trajectories.npy")
+        return np.asarray(payload["trajectories"], dtype=np.float64)
+
+    def test_jump_detect_preserves_gap_fill_policy(self) -> None:
+        import numpy as np
+
+        from track2data.core.models import PreprocessConfig
+        from track2data.preprocess.gap_fill import fill_gaps
+        from track2data.preprocess.jump_detect import detect_jumps
+
+        xy = self._raw_xy()
+        cfg = PreprocessConfig()
+        after_gap_fill, _ = fill_gaps(xy.copy(), cfg.gap_fill)
+        n_nan_after_gap_fill = int(np.isnan(after_gap_fill[:, :, 0]).sum())
+
+        after_jump_detect, _ = detect_jumps(after_gap_fill, cfg.jump)
+        n_nan_after_jump_detect = int(np.isnan(after_jump_detect[:, :, 0]).sum())
+
+        assert n_nan_after_gap_fill == 9767
+        assert n_nan_after_jump_detect == n_nan_after_gap_fill, (
+            "jump_detect changed the NaN count left by gap_fill -- it must "
+            "only touch frames it flags as jumps, never pre-existing gaps"
+        )
+
+    def test_identity_switch_disabled_by_default_does_not_alter_pipeline_output(self) -> None:
+        """With the fragment-unaware corrector default-disabled, running the
+        full pipeline must not inject the ~640px teleports and +5234% path
+        length inflation measured on this session when it ran unconditionally."""
+        import numpy as np
+
+        from track2data.core.models import PreprocessConfig, VideoInfo, Session
+        from track2data.preprocess.pipeline import run
+
+        xy = self._raw_xy()
+        session = Session(
+            session_id=self.SESSION,
+            folder=CORPUS_DIR / self.SESSION,
+            reader="idtrackerai",
+            video=VideoInfo(fps=24.851666666666667, n_frames=xy.shape[0],
+                             width_px=1920, height_px=1080),
+            n_animals=xy.shape[1],
+            trajectory_variant="with_gaps",
+            has_stable_identities=True,
+            raw_xy=xy,
+        )
+        cfg = PreprocessConfig()
+        assert cfg.identity_switch.enabled is False, (
+            "identity_switch must default to disabled until it is "
+            "fragment-boundary-aware -- see plan Fase 1.5b / 6d"
+        )
+        psess = run(session, cfg)
+
+        max_disp = np.nanmax(
+            np.linalg.norm(np.diff(psess.xy, axis=0), axis=2), axis=0
+        )
+        # Pre-fix, animal 0/1 max displacement jumped to ~642/~628 px after
+        # identity_switch ran unconditionally. With it disabled, the pipeline's
+        # own jump_detect + smoothing bound displacement far below that.
+        assert np.all(max_disp < 200.0), f"unexpectedly large displacement: {max_disp}"

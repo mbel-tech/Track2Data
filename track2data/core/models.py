@@ -110,7 +110,18 @@ class JumpCfg(BaseModel):
 
 
 class IdSwitchCfg(BaseModel):
-    enabled: bool = True
+    # Defaults to OFF. This corrector reasons about identity from raw
+    # geometry alone (nearest-neighbour + Hungarian assignment), with no
+    # knowledge of idtracker.ai's own fragment boundaries -- the only
+    # frames where an identity swap is even possible. Measured on the real
+    # idtracker.ai corpus (session_trial10_Segment1), it re-permutes 17.1%
+    # of the recording and injects ~640px single-frame teleports (a
+    # stationary animal's path length inflated from 218px to 11,639px,
+    # +5234%). See docs_from_idtracker.ai/fragment_idtrackerai.md and the
+    # format-alignment plan Fase 1.5b/6d: a fragment-boundary-aware
+    # replacement is planned; this pass is not safe to run unconditionally
+    # until then. Enable only if you understand and accept that risk.
+    enabled: bool = False
     tier1_ratio: float = 1.5
     tier2_hungarian: bool = True
     consolidate_window: int = 5

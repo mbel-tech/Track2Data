@@ -122,3 +122,32 @@ def test_only_affected_animal_flagged(smooth_xy: np.ndarray) -> None:
     out, _result = detect_jumps(xy, cfg)
     # Animal 1 should remain unchanged
     np.testing.assert_allclose(out[:, 1, :], smooth_xy[:, 1, :], rtol=1e-9)
+
+
+def test_pre_existing_gap_survives_jump_detect(smooth_xy: np.ndarray) -> None:
+    """detect_jumps must not fill NaN runs it did not itself flag.
+
+    Regression test for a corruption bug found on the real idtracker.ai
+    corpus: pd.Series.interpolate(method="linear", limit_direction="both")
+    with no `limit=` bound fills *every* NaN gap in the column, not just the
+    frames this step just flagged. That silently erased gap_fill's decision
+    to leave long gaps (> max_gap_frames) as NaN -- on session_trial10_Segment1
+    (real data), NaN count went from 9767 (post gap_fill, policy respected)
+    to 0 (post jump_detect, policy erased) before this fix.
+    """
+    xy = smooth_xy.copy()
+    # A gap gap_fill would have deliberately left unfilled (too long to
+    # interpolate) -- simulates gap_fill's output, not raw input.
+    xy[20:60, 0, :] = np.nan
+    # An unrelated, genuine jump elsewhere in the same animal's series.
+    xy = _inject_jump(xy, animal=0, frame=80, magnitude=5000.0)
+
+    cfg = JumpCfg(enabled=True, method="sd_multiple", sd_mult=5.0, replacement="linear_interp")
+    out, result = detect_jumps(xy, cfg)
+
+    # The pre-existing long gap must survive untouched.
+    assert np.all(np.isnan(out[20:60, 0, 0])), "pre-existing gap was filled by jump_detect"
+    # The genuinely flagged jump frame must have been replaced (no longer NaN,
+    # no longer at the anomalous magnitude).
+    assert not np.isnan(out[80, 0, 0])
+    assert result.affected_per_individual[0] >= 1
