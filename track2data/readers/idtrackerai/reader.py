@@ -71,12 +71,20 @@ class IDTrackerAiReader(SessionReader):
         # idtracker.ai's own default) has no loader yet.
         fmt_used, payload = self._load_payload(hit)
 
+        # Load session.json once, up front: it is both a fallback source for
+        # fps/width/height/version (some formats' payloads omit them -- see
+        # Normaliser._require_positive_number) and the enrichment source for
+        # tracking_intervals/roi_list below.
+        session_meta = load_session_json(folder)
+
         # Build the normalised Session (core trajectory data + quality + labels).
         normaliser = Normaliser(folder)
-        session = normaliser.normalise(payload, trajectory_format=fmt_used)
+        session = normaliser.normalise(
+            payload, trajectory_format=fmt_used, session_meta=session_meta
+        )
 
         # Enrich from session.json (tracking_intervals, roi_list, etc.).
-        session = self._enrich_from_session_json(session, folder)
+        session = self._enrich_from_session_json(session, session_meta)
 
         # Attach log digest.
         session = session.model_copy(
@@ -156,8 +164,7 @@ class IDTrackerAiReader(SessionReader):
         )
 
     @staticmethod
-    def _enrich_from_session_json(session: Session, folder: Path) -> Session:
-        meta = load_session_json(folder)
+    def _enrich_from_session_json(session: Session, meta: dict | None) -> Session:
         if not meta:
             return session
 
