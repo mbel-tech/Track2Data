@@ -18,7 +18,7 @@ Foundation is in place and tested:
 | Legacy readers (`idtrackerai_v5`, `idtrackerai_v4`) | ✅ Kept for back-compat |
 | Metric abstract base + `MetricDocumentation` | ✅ Implemented |
 | Behavioural metrics specification (`docs/METRICS_SPEC.md`) | ✅ 29 metrics specified |
-| GUI specification (`docs/UI_DESIGN.md`) | ✅ 14 screens fully specified |
+| GUI specification (`docs/UI_DESIGN.md`) | ✅ Specified — 10 screens / 7 stages shipped (`DECISIONS.md` D-005); doc originally scoped 14 |
 | Test suite | ✅ 200+ tests passing |
 | CI workflow | ✅ Configured |
 
@@ -129,7 +129,7 @@ ui/ app/                          ← M3 (PySide6 layer)
 
 ## M3 — UI layer (PySide6)
 
-**Goal:** Fully functional desktop wizard matching all 14 screens in `docs/UI_DESIGN.md`.
+**Goal:** Fully functional desktop wizard matching the 10-screen/7-stage layout in `docs/UI_DESIGN.md` (`DECISIONS.md` D-005).
 
 | Area | Items |
 |---|---|
@@ -186,4 +186,4 @@ Private until v1.0 release. Switch to public after M5 tag is cut.
 - [`docs/TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md) — system architecture, testing strategy
 - [`docs/ENGINE_DESIGN.md`](ENGINE_DESIGN.md) — engine internals and module layout
 - [`docs/METRICS_SPEC.md`](METRICS_SPEC.md) — 29 behavioural metrics with formulas and citations
-- [`docs/UI_DESIGN.md`](UI_DESIGN.md) — 14-screen PySide6 GUI specification
+- [`docs/UI_DESIGN.md`](UI_DESIGN.md) — PySide6 GUI specification (10 screens / 7 stages shipped; `DECISIONS.md` D-005)

@@ -217,6 +217,10 @@ through Pydantic on every change; invalid fields highlight red.
 **Engine calls:** `Engine.set_preprocess(cfg)`,
 `Engine.set_metric_selection(sel)`.
 
+**Follow-on:** validating and running the configured pipeline happens
+on a dedicated screen (`ProcessingScreen`) reached via Next — see
+§6.11 "Screen 6.3 — Pipeline Processing" below.
+
 ### 5.7 Page 7.1 — Pipeline Preview & Validation
 
 Read-only summary of entire pipeline configuration; optionally run a dry-run preview.
@@ -253,9 +257,9 @@ Select export format(s), configure per-exporter options, run export pipeline.
 
 ---
 
-## 6. Detailed Screen Specifications (14 screens across 7 stages)
+## 6. Detailed Screen Specifications (originally scoped as 14 screens across 7 stages; shipped as 10 — see `DECISIONS.md` D-005)
 
-This section provides implementation-ready detail for all 14 screens: widget types, data bindings, validation rules, error messages, and navigation logic.
+This section provides implementation-ready detail for the wizard screens: widget types, data bindings, validation rules, error messages, and navigation logic.
 
 ### 6.1 Screen 1.1 — Project Metadata Entry
 
@@ -700,41 +704,91 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ---
 
-### 6.11 Screen 6.3 — Per-Metric Advanced Configuration
+### 6.11 Screen 6.3 — Pipeline Processing
 
 **Stage:** Stage 6 (Preprocessing & Metrics)  
-**Purpose:** Configure metric-specific parameters (e.g., activity threshold).
+**Purpose:** Validate the assembled pipeline configuration, then run
+preprocessing + metric extraction across all included sessions.
+
+> This section previously documented a "Per-Metric Advanced
+> Configuration" screen (a `metric_config_table` with per-metric
+> parameter rows, a `timepoint_minutes_spinbox`, a
+> `quality_threshold_slider`). That screen was never built — the
+> shipped 10-screen layout (`DECISIONS.md` D-005) has only three
+> screens in this stage: Preprocessing (§6.9), Metric Selection
+> (§6.10), and this one. See §10's `MetricConfigWidgetRegistry` row
+> for where that idea now lives.
 
 **Widget List:**
-- QTableWidget: `metric_config_table`
-  - Columns: `metric_id`, `parameter_name`, `value`, `unit`, `reset`
-  - Rows: auto-generated from selected metrics' config schemas
-  - Example rows:
-    - IL-4 Activity threshold: QDoubleSpinBox (default 1.0) BL/s
-    - IL-7 Min freezing bout: QSpinBox (default 5) frames
-    - GL-3 Minimum speed: QDoubleSpinBox (default 0.1) BL/s
-  - Reset button (↺) per row
-
-- QLabel: "Global parameters" (section header)
-- QSpinBox: `timepoint_minutes_spinbox` (range 0–N, 0=whole session, default None)
-- QDoubleSpinBox: `quality_threshold_slider` (range 0–1, default 0.0; display as slider or spinner; masks per-frame metrics when `id_probabilities[frame, animal] < threshold`)
+- QLabel: "Processing" (title)
+- QLabel: subtitle — "Validate the pipeline configuration and run
+  preprocessing + metric extraction across all sessions."
+- QPushButton: `validate_btn` ("Validate pipeline") — shows a
+  `QMessageBox` summary (session count, calibration mode, metric
+  count) built independently of the gate `start_run()` applies below
+  (both call `Engine(manifest).validate()`, but this button composes
+  its own summary text)
+- QPushButton: `run_btn` ("Run pipeline") — disabled until a project
+  is open; calls `start_run()`
+- QPushButton: `cancel_btn` ("Cancel") — disabled until a run is in
+  flight; calls `store.tasks.cancel_all()`
+- QProgressBar: `progress_bar` (0–100), driven by `taskProgress`
+- QLabel: `status_label` — defaults to "Ready"; shows "Running…
+  writing to `<out_dir>`", "Cancelling…", "Finished.", "Finished with
+  N failed session(s).", "Failed — see log for details.", or
+  "Cancelled."
+- QTableWidget: `status_table` — columns `Session | Status | Frames |
+  Duration`, one row per `manifest.sessions`; `Frames` and `Duration`
+  stay `"—"` until a session finishes (no per-session frame count is
+  available mid-run)
 
 **Data Bindings:**
-- `timepoint_minutes_spinbox` ↔ `ProjectStore.metrics.timepoint_minutes`
-- `quality_threshold_slider` ↔ `ProjectStore.metrics.quality_threshold`
-- Per-metric config → new `MetricSelection.config: dict[str, Any] = {}` field
+- `status_table` rows ← `ProjectStore.manifest.sessions` (rebuilt on
+  `sessionsChanged` / `projectChanged`)
+- Per-session `Status` cell ← `store.tasks.taskEvent` (a
+  `ProgressEvent.stage` of `import` / `preprocess` / `metrics` /
+  `export` / `session` maps to a friendly label; other stages don't
+  drive this table)
+- `progress_bar` ← `store.taskProgress(task_id, percent)`, filtered to
+  the run's own `task_id`
+- Final state ← `store.taskFinished(task_id, result)`: a `RunResult`
+  updates each session's `Status`/`Duration` and calls
+  `store.set_run_results(result)`; an `Exception` shows the failure
+  state instead
+- Cancellation ← `store.tasks.taskCancelled(task_id)` (connected
+  directly — it is *not* re-forwarded through `taskFinished`; see
+  `ProjectStore`'s own docstring)
 
 **Validation Rules:**
-- `timepoint_minutes >= 0`
-- `quality_threshold` in [0, 1]
-- Per-metric validation (e.g., activity threshold < 10 BL/s → warning)
+- `run_btn` calls `Engine(manifest).validate()` before submitting the
+  run; any returned issues block the run with a warning dialog listing
+  them ("no metrics selected" is a warning in `validate_btn`'s summary,
+  not a blocker)
+- `run_btn` / `validate_btn` are disabled while no project is open
 
 **Error Messages:**
-- "Activity threshold > 5 BL/s. Typical cruise is <2 BL/s. Confirm or reset." (warning)
+- "No project is open." (`validate_btn` / `run_btn` with no manifest)
+- "Cannot run pipeline — Fix these issues first:\n\n<issues>"
+  (`start_run()`'s validation gate)
+- Pipeline-validation summary lines: "✗ No sessions imported", "✗
+  Scalar calibration: px_per_cm not set", "⚠ No metrics selected", or
+  their ✓ counterparts (`validate_btn`'s own summary; independent text
+  from the gate above)
 
 **Next Button Logic:**
-- Enabled if all config parameters valid
-- On Next: emit `metricsChanged`, advance to Stage 7.1
+- This screen has no page-local Next gate — the shared toolbar
+  Back/Next (§3) advances linearly regardless of run state; nothing
+  blocks moving on to the Preview screen before a run finishes, or
+  without running at all
+- The toolbar's "Run pipeline" action (and the Run menu) jump here
+  directly and call `start_run()`, so Stage 7 (Preview) can be reached
+  without ever visiting this screen via Next
+
+**Navigation Context:**
+- Back to Screen 6.2 (Metric Selection) allowed at any time; an
+  in-flight run keeps running in the background thread pool
+  (`TaskRunner`) regardless of which page is showing
+- Forward to Stage 7 (`PreviewScreen`) via Next or the sidebar
 
 ---
 
@@ -812,7 +866,7 @@ stages green.
 | Hook | Use case |
 |---|---|
 | `WizardRegistry.register(page_cls, after="zones")` | drop in a custom stage (e.g. a stats page for v1.2) |
-| `MetricConfigWidgetRegistry` | metric plug-ins ship a per-metric config widget that the metrics tab renders automatically |
+| `MetricConfigWidgetRegistry` | metric plug-ins ship a per-metric config widget that the metrics tab renders automatically — this doc previously sketched that as a dedicated "Per-Metric Advanced Configuration" screen, which was never built; `MetricSelection.timepoint_minutes` remains an unexposed model field pending this hook |
 | `ExporterRegistry` | exporter plug-ins auto-populate the Export tab |
 | Theme plug-ins | additional QSS files discoverable via entry point |
 
