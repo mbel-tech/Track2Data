@@ -11,6 +11,7 @@ See [PRD.md](PRD.md) for the full product requirements. Design and workflow docs
 - [`docs/ENGINE_DESIGN.md`](docs/ENGINE_DESIGN.md) — pure-Python `track2data` engine: layout, models, plug-in surface.
 - [`docs/IDTRACKERAI_FORMAT_ANALYSIS.md`](docs/IDTRACKERAI_FORMAT_ANALYSIS.md) — gap analysis of the current reader against the official idtracker.ai 6.0.14 docs and a 70-session real-data corpus; cross-version normalisation strategy.
 - [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — canonical, implementation-ready specification for every behavioural metric (formulas, inputs, outputs, units, citations) plus the UI info-button architecture.
+- [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) — how to enable signed releases on each OS, what it costs, and why the first release is necessarily unsigned.
 
 Contributing: see [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup, TDD workflow, branch policy, and how to run tests.
 
@@ -31,9 +32,12 @@ track2data-gui
 
 **Pre-built binaries** (no Python install needed): download the latest
 release for your OS from the [Releases page](https://github.com/mbel-tech/Track2Data/releases).
-v1.0 ships these unsigned (code signing is planned for v1.1 — see
-[`docs/TECHNICAL_SPEC.md` §10.3](docs/TECHNICAL_SPEC.md#103-code-signing)),
-so your OS will warn before the first run:
+These ship unsigned, so your OS will warn before the first run. That is
+expected, and it is not a sign of a corrupted download — the free
+code-signing programme for open-source projects requires a project to
+have already published a release, so the first one cannot be signed.
+See [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) for the full picture
+and the plan for signing later releases.
 
 - **Windows**: SmartScreen shows "Windows protected your PC". Click
   **More info**, then **Run anyway**.

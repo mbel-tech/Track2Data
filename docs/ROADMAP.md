@@ -176,10 +176,18 @@ implementation.
       back for a signed, fully-polished `v1.0.0`
 - [ ] Cut the semver tag on `main` — this triggers `release.yml`, which
       builds all three binaries and publishes the GitHub Release
-- [ ] Switch the repository to public, and enable branch protection on
-      `main` at the same time (both require it to be public or Pro —
-      see `CONTRIBUTING.md` §4)
-- [ ] Code signing — **not** a v1.0 blocker; explicitly deferred to v1.1
+- [x] Switch the repository to public — done; the repository is public
+      and MIT-licensed
+- [ ] **Enable branch protection on `main`** — now unblocked by the
+      repository being public, but not yet applied. `CONTRIBUTING.md` §4
+      already describes the intended rules (`CI passed` as the single
+      required check, no review requirement, admins exempt) as though
+      they were live, so this is a documentation/reality gap until the
+      setting is turned on
+- [ ] Code signing — **not** a v1.0 blocker, and cannot be done before
+      the first release: SignPath Foundation's free OSS signing requires
+      an already-published release. Infrastructure is implemented and
+      activates on secrets alone — see [`./CODE_SIGNING.md`](CODE_SIGNING.md)
 
 ---
 
