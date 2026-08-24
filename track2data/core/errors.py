@@ -6,7 +6,10 @@ a contextual banner with a one-line remediation hint.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from track2data.core.models import PreprocessReport
 
 
 class Track2DataError(Exception):
@@ -62,6 +65,45 @@ class ZoneValidationError(DataValidationError):
 
 class ProcessingError(Track2DataError):
     """Runtime error inside preprocessing or metric computation."""
+
+
+class PreprocessStageError(ProcessingError):
+    """A stage that runs *after* the preprocessing pipeline -- calibration
+    or zone assignment -- failed, once the pipeline's own step report had
+    already been computed.
+
+    The failure is still raised, never swallowed: continuing past a failed
+    calibration would emit pixel-unit numbers as if they were real-world
+    units, and continuing past a failed zone assignment would compute zone
+    metrics against no zones. Both are wrong results wearing a success
+    costume, which is exactly what issue #7's fail-loud rule exists to
+    prevent.
+
+    What this exception adds is ``report``: the already-computed
+    ``PreprocessReport``, carried alongside the failure so callers can
+    still show the step log. That log is usually what explains why the
+    later stage blew up, and it would otherwise be lost purely because of
+    where the exception happened to be raised.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        report: PreprocessReport,
+        code: str = "PREPROCESS_STAGE_FAILED",
+        severity: Literal["error", "warning", "info"] = "error",
+        subject: str = "",
+        remediation: str = "",
+    ) -> None:
+        super().__init__(
+            message,
+            code=code,
+            severity=severity,
+            subject=subject,
+            remediation=remediation,
+        )
+        self.report = report
 
 
 class ExportError(Track2DataError):

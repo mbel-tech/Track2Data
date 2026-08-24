@@ -14,9 +14,11 @@ from track2data.core.models import (
     CalibrationConfig,
     MetricSelection,
     PreprocessConfig,
+    PreprocessReport,
     ProjectManifest,
     Session,
     SessionRef,
+    SessionRunResult,
     VideoInfo,
     ZoneSet,
 )
@@ -389,3 +391,17 @@ class TestSessionRef:
             session_id="s1", folder=tmp_path, sha256="abc", has_stable_identities=True
         )
         assert ref.has_stable_identities is True
+
+
+# ── SessionRunResult ─────────────────────────────────────────────────────────
+
+
+class TestSessionRunResult:
+    def test_preprocess_report_defaults_to_none(self) -> None:
+        result = SessionRunResult(session_id="s1")
+        assert result.preprocess_report is None
+
+    def test_preprocess_report_stored(self) -> None:
+        report = PreprocessReport()
+        result = SessionRunResult(session_id="s1", preprocess_report=report)
+        assert result.preprocess_report is report
