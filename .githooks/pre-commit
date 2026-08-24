@@ -1,0 +1,51 @@
+#!/bin/sh
+# Lint GitHub Actions workflows before they can be committed.
+#
+# Enable in your clone (once, per CONTRIBUTING.md §4):
+#     git config core.hooksPath .githooks
+#
+# A broken workflow can only be discovered by pushing it and burning
+# Actions minutes on a run that dies at parse time, and this repo is
+# private, so those minutes are metered. actionlint type-checks the
+# ${{ }} expressions too -- including the matrix `fromJSON` selector in
+# ci.yml -- which is exactly the class of mistake that survives a plain
+# YAML parse.
+
+set -e
+
+# Nothing to do unless a workflow file is part of this commit.
+staged=$(git diff --cached --name-only --diff-filter=ACMR \
+         -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+[ -n "$staged" ] || exit 0
+
+ACTIONLINT=$(command -v actionlint 2>/dev/null || true)
+
+# Fallback for Windows/winget: the installer appends its package dir to
+# the user PATH in the registry, so shells already running when it was
+# installed never see it. Probe the well-known location before giving up.
+if [ -z "$ACTIONLINT" ]; then
+    for candidate in         "$LOCALAPPDATA/Microsoft/WinGet/Packages"/rhysd.actionlint_*/actionlint.exe         "$HOME/AppData/Local/Microsoft/WinGet/Packages"/rhysd.actionlint_*/actionlint.exe
+    do
+        [ -x "$candidate" ] && ACTIONLINT="$candidate" && break
+    done
+fi
+
+if [ -z "$ACTIONLINT" ]; then
+    # Advisory, not fatal: a contributor without the tool installed
+    # should still be able to commit. CI is the backstop.
+    echo "pre-commit: actionlint not found, skipping workflow lint." >&2
+    echo "            Install it with: winget install --id rhysd.actionlint --exact" >&2
+    echo "            (macOS: brew install actionlint  --  Go: go install github.com/rhysd/actionlint/cmd/actionlint@latest)" >&2
+    exit 0
+fi
+
+# Lint every workflow, not just the staged ones: they share reusable
+# workflows and a repo-wide config, so one file's edit can invalidate
+# another. This is fast enough (<1s) that the extra coverage is free.
+echo "pre-commit: linting .github/workflows/ with actionlint..."
+if ! "$ACTIONLINT"; then
+    echo "" >&2
+    echo "pre-commit: actionlint failed -- commit aborted." >&2
+    echo "            Fix the above, or bypass with: git commit --no-verify" >&2
+    exit 1
+fi

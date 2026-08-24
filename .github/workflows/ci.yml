@@ -3,7 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: &docs_only
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
   pull_request:
+    paths-ignore: *docs_only
+
+# Superseded runs on the same PR branch are cancelled -- private-repo
+# Actions minutes are metered, and a 3-push burst used to bill three full
+# matrices for one final answer. Pushes to main are never cancelled: every
+# commit on main should have its own recorded CI result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -22,8 +35,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2022, macos-26]
+        # PRs run Linux only; the full three-OS matrix runs on pushes to
+        # main and in release.yml (which builds all three on `v*` tags and
+        # via workflow_dispatch). GitHub bills each job rounded up to a
+        # whole minute times a per-OS multiplier -- Linux 1x, Windows 2x,
+        # macOS 10x -- so the two ~1-minute macOS jobs were ~30 of the ~45
+        # billed minutes per run, two thirds of the bill for under two
+        # minutes of real work.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-22.04"]') || fromJSON('["ubuntu-22.04", "windows-2022", "macos-26"]') }}
         python: ["3.11", "3.12"]
+        # Both interpreters are covered on Linux; the expensive runners
+        # only need to prove the platform works, not the version spread.
+        # These excludes are inert on PRs, where neither OS is in the list.
+        exclude:
+          - os: windows-2022
+            python: "3.12"
+          - os: macos-26
+            python: "3.12"
     runs-on: ${{ matrix.os }}
     env:
       # PySide6 has no display to attach to on CI runners; the offscreen

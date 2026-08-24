@@ -17,6 +17,29 @@ pip install -e ".[dev]"
 
 Python 3.11+ is required (see `pyproject.toml`).
 
+### Git hooks
+
+Enable the repo's hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This turns on a `pre-commit` hook that runs [`actionlint`](https://github.com/rhysd/actionlint) over `.github/workflows/` whenever a commit touches a workflow file. A malformed workflow is otherwise only discoverable by pushing it and letting a run die at parse time -- and this repo is private, so those Actions minutes are metered. actionlint also type-checks `${{ }}` expressions, including the `fromJSON` matrix selector in `ci.yml`, which a plain YAML parse accepts happily.
+
+Install actionlint itself:
+
+```bash
+# Windows
+winget install --id rhysd.actionlint --exact
+# macOS
+brew install actionlint
+# Any platform with a Go toolchain
+go install github.com/rhysd/actionlint/cmd/actionlint@latest
+```
+
+The hook degrades to a warning if actionlint isn't installed, so it never blocks a contributor who hasn't set it up. Bypass it for a single commit with `git commit --no-verify`.
+
 ## 2. Running tests
 
 ```bash
