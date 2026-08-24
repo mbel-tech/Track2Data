@@ -54,6 +54,23 @@ def test_individual_tab_has_one_row_per_registered_individual_metric(qtbot) -> N
     assert actual_ids == expected_ids
 
 
+def test_name_column_shows_the_display_label_not_the_snake_case_name(qtbot) -> None:
+    """Metric declares both `name` (snake_case identifier, e.g.
+    "path_length") and `label` (display string, e.g. "Path Length") --
+    track2data/metrics/base.py:37-38. The Name column must show the
+    label. MetricInfoDialog and cli.py already do this correctly; the
+    table read the wrong attribute."""
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    metric_cls = metrics.get("IL-1")
+    assert metric_cls.label != metric_cls.name  # otherwise this test proves nothing
+    assert screen._ind_table.item(row, 2).text() == metric_cls.label
+
+
 def test_group_tab_has_one_row_per_registered_group_metric(qtbot) -> None:
     from ui.metrics_screen import MetricsScreen
 

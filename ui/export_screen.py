@@ -51,10 +51,12 @@ from PySide6.QtWidgets import (
 from track2data.core.hashing import file_sha256
 from track2data.core.models import ExportTarget, RunResult
 from track2data.exporters import list_exporters
+from ui.widgets.labels import label_for
 
 #: registry name -> pretty label. Anything not listed here falls back
-#: to a title-cased version of the raw name, so future entry-point
-#: exporters still show up with *some* reasonable label automatically.
+#: to a title-cased version of the raw name (ui/widgets/labels.py), so
+#: future entry-point exporters still show up with *some* reasonable
+#: label automatically.
 _LABELS = {
     "csv_long": "CSV Long",
     "csv_wide": "CSV Wide",
@@ -73,7 +75,7 @@ _SHORT_HASH_LEN = 10
 
 
 def _label_for(name: str) -> str:
-    return _LABELS.get(name, name.replace("_", " ").title())
+    return label_for(name, _LABELS)
 
 
 class ExportScreen(QWidget):

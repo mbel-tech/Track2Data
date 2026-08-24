@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import ZoneSet
+from ui.widgets.labels import label_for
 
 
 class ZonesScreen(QWidget):
@@ -106,6 +107,11 @@ class ZonesScreen(QWidget):
             return
         rois = self._store.manifest.zones.rois
         for roi in rois:
-            self._zone_list.addItem(f"{roi.name}  [{roi.level}]")
+            # roi.name is user-authored free text (whatever the
+            # researcher named their ROI) -- shown verbatim, never
+            # relabelled. roi.level is a free-text field too, but its
+            # conventional values ("main"/"secondary") are lowercase
+            # engine-side defaults, so title-case just that part.
+            self._zone_list.addItem(f"{roi.name}  [{label_for(roi.level)}]")
         n = len(rois)
         self._count_label.setText(f"{n} zone{'s' if n != 1 else ''} loaded")

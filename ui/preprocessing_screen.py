@@ -1,8 +1,11 @@
 """
-Stage 6a — Preprocessing configuration screen (M3 real widgets).
+Stage 6 — Preprocessing configuration screen (M3 real widgets).
 
-Five QGroupBox sections (checkable):
-  Gap Fill · Jump Detection · Smoothing  +  Coverage Gate
+Four QGroupBox sections:
+  Gap Fill · Jump Detection · Smoothing · Coverage Gate
+Each group's own "Enabled" QCheckBox is the single source of truth for
+whether that step runs -- the QGroupBox itself is not checkable (see
+_apply()'s comment for why).
 Apply button → store.update_preprocess(PreprocessConfig(...))
 """
 
@@ -30,6 +33,25 @@ from track2data.core.models import (
     SmoothCfg,
     ValidateCfg,
 )
+
+#: engine literal -> pretty label. Every value is enumerated explicitly
+#: (no ui.widgets.labels.label_for() fallback needed) since both
+#: vocabularies are small and closed -- Literal-typed on the Pydantic
+#: models, not open to arbitrary third-party values the way exporter
+#: names are. The combo stores the real literal as
+#: userData (read back via currentData()/findData()) and shows the
+#: label as text -- prettifying displayed text must never change what
+#: gets persisted into PreprocessConfig, which is exactly what reading
+#: currentText() back as the value would do.
+_JUMP_METHOD_LABELS = {
+    "sd_multiple": "Standard-deviation multiple",
+    "percentile": "Percentile",
+}
+_SMOOTH_METHOD_LABELS = {
+    "none": "None",
+    "moving_avg": "Moving average",
+    "savgol": "Savitzky-Golay",
+}
 
 
 class PreprocessingScreen(QWidget):
@@ -70,7 +92,6 @@ class PreprocessingScreen(QWidget):
 
         # ── Gap Fill ──────────────────────────────────────────────────────
         self._gap_group = QGroupBox("Gap Fill")
-        self._gap_group.setCheckable(True)
         gap_form = QFormLayout(self._gap_group)
         self._gap_enabled = QCheckBox("Enabled")
         self._gap_enabled.setChecked(True)
@@ -83,12 +104,12 @@ class PreprocessingScreen(QWidget):
 
         # ── Jump Detection ────────────────────────────────────────────────
         self._jump_group = QGroupBox("Jump Detection")
-        self._jump_group.setCheckable(True)
         jump_form = QFormLayout(self._jump_group)
         self._jump_enabled = QCheckBox("Enabled")
         self._jump_enabled.setChecked(True)
         self._jump_method = QComboBox()
-        self._jump_method.addItems(["sd_multiple", "percentile"])
+        for value, label in _JUMP_METHOD_LABELS.items():
+            self._jump_method.addItem(label, userData=value)
         self._jump_sd = QDoubleSpinBox()
         self._jump_sd.setRange(0.1, 1000.0)
         self._jump_sd.setValue(10.0)
@@ -105,12 +126,12 @@ class PreprocessingScreen(QWidget):
 
         # ── Smoothing ─────────────────────────────────────────────────────
         self._smooth_group = QGroupBox("Smoothing")
-        self._smooth_group.setCheckable(True)
         smooth_form = QFormLayout(self._smooth_group)
         self._smooth_enabled = QCheckBox("Enabled")
         self._smooth_enabled.setChecked(True)
         self._smooth_method = QComboBox()
-        self._smooth_method.addItems(["none", "moving_avg", "savgol"])
+        for value, label in _SMOOTH_METHOD_LABELS.items():
+            self._smooth_method.addItem(label, userData=value)
         self._smooth_window = QSpinBox()
         self._smooth_window.setRange(1, 500)
         self._smooth_window.setValue(5)
@@ -143,6 +164,14 @@ class PreprocessingScreen(QWidget):
     # ── slots ──────────────────────────────────────────────────────────────
 
     def _apply(self) -> None:
+        # Reads each group's own inner "Enabled" QCheckBox, never a
+        # QGroupBox.isChecked() -- the three QGroupBoxes above used to
+        # also be setCheckable(True), giving each section *two*
+        # checkboxes (the group's own title checkbox, and this inner
+        # one) that could show disagreeing states, since only the
+        # inner one was ever read here. Removed the redundant one
+        # rather than start reading a second control for the same
+        # value.
         if self._store is None:
             QMessageBox.information(self, "Info", "No project open.")
             return
@@ -154,13 +183,13 @@ class PreprocessingScreen(QWidget):
                 ),
                 jump=JumpCfg(
                     enabled=self._jump_enabled.isChecked(),
-                    method=self._jump_method.currentText(),  # type: ignore[arg-type]
+                    method=self._jump_method.currentData(),  # type: ignore[arg-type]
                     sd_mult=self._jump_sd.value(),
                     percentile=self._jump_pct.value(),
                 ),
                 smoothing=SmoothCfg(
                     enabled=self._smooth_enabled.isChecked(),
-                    method=self._smooth_method.currentText(),  # type: ignore[arg-type]
+                    method=self._smooth_method.currentData(),  # type: ignore[arg-type]
                     window=self._smooth_window.value(),
                 ),
                 coverage=ValidateCfg(
@@ -178,13 +207,13 @@ class PreprocessingScreen(QWidget):
         self._gap_enabled.setChecked(cfg.gap_fill.enabled)
         self._gap_max.setValue(cfg.gap_fill.max_gap_frames)
         self._jump_enabled.setChecked(cfg.jump.enabled)
-        idx = self._jump_method.findText(cfg.jump.method)
+        idx = self._jump_method.findData(cfg.jump.method)
         if idx >= 0:
             self._jump_method.setCurrentIndex(idx)
         self._jump_sd.setValue(cfg.jump.sd_mult)
         self._jump_pct.setValue(cfg.jump.percentile)
         self._smooth_enabled.setChecked(cfg.smoothing.enabled)
-        idx2 = self._smooth_method.findText(cfg.smoothing.method)
+        idx2 = self._smooth_method.findData(cfg.smoothing.method)
         if idx2 >= 0:
             self._smooth_method.setCurrentIndex(idx2)
         self._smooth_window.setValue(cfg.smoothing.window)

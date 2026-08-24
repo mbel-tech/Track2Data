@@ -131,7 +131,11 @@ class MetricsScreen(QWidget):
             table.setItem(row, _COL_INCLUDE, include_item)
 
             table.setItem(row, _COL_ID, QTableWidgetItem(metric_cls.id))
-            table.setItem(row, _COL_NAME, QTableWidgetItem(metric_cls.name))
+            # .label ("Path Length"), not .name ("path_length") -- the
+            # latter is the snake_case identifier used internally
+            # (registry keys, exported column name suffixes), not
+            # something a researcher should see in the UI.
+            table.setItem(row, _COL_NAME, QTableWidgetItem(metric_cls.label))
 
             doc = metric_cls.documentation
             if doc.formula_plain is not None or doc.citation is not None:

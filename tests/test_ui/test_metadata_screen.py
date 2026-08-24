@@ -21,6 +21,27 @@ def _make_store(tmp_path: Path):
     return store
 
 
+# ── field row labels ─────────────────────────────────────────────────────────
+
+
+def test_mapping_row_labels_are_pretty_not_raw_field_names(qtbot) -> None:
+    """The mapping form's row labels come from _CANONICAL_FIELDS
+    (snake_case dict keys like "session_id", "trial_id") -- these must
+    never appear verbatim as on-screen text, and "id"-suffixed fields
+    need an explicit override since str.title() alone would render
+    "Session Id" / "Trial Id", not the correct "...ID"."""
+    from ui.metadata_screen import MetadataScreen
+
+    screen = MetadataScreen()
+    qtbot.addWidget(screen)
+
+    labels = [screen._mapping_form.itemAt(i).widget().text() for i in range(0, 8, 2)]
+    assert "session_id" not in labels
+    assert "trial_id" not in labels
+    assert "Session ID:" in labels
+    assert "Trial ID:" in labels
+
+
 # ── _load_csv(): persisting MetadataSource ──────────────────────────────────
 
 
