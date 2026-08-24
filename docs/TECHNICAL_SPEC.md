@@ -308,7 +308,7 @@ User clicks Run pipeline   ──►  ui/main_window.run_pipeline()
   "preprocess": {
     "gap_fill": {"enabled": true, "max_gap_frames": 30},
     "jump":     {"enabled": true, "method": "sd_multiple", "sd_mult": 10.0, "replacement": "linear_interp"},
-    "identity_switch": {"enabled": true, "tier1_ratio": 1.5, "tier2_hungarian": true},
+    "identity_switch": {"enabled": false, "tier1_ratio": 1.5, "tier2_hungarian": true},
     "smoothing": {"enabled": true, "method": "savgol", "window": 5, "polyorder": 2},
     "coverage":  {"min_track_frames": 0, "max_pct_na_per_individual": 0.10}
   },
