@@ -22,9 +22,14 @@ def main() -> None:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
+    # track2data.__version__, not app.main_window.APP_VERSION: this runs
+    # before QApplication is constructed, and importing main_window here
+    # would pull in the whole PySide6 widget tree earlier than needed.
+    from track2data import __version__
+
     app = QApplication(sys.argv)
     app.setApplicationName("Track2Data")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("Track2Data")
     app.setOrganizationDomain("track2data.io")
 

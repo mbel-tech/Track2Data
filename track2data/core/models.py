@@ -22,6 +22,11 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
+# Imported from the module, not the package, to keep this import leaf-level:
+# track2data/__init__.py re-exports __version__ from here too, and models.py
+# is imported during that package init.
+from track2data._version import __version__
+
 # ── Video / Session ───────────────────────────────────────────────────────────
 
 
@@ -315,7 +320,11 @@ class ExportTarget(BaseModel):
 
 class ProjectManifest(BaseModel):
     schema_version: int = 1
-    app_version: str = "0.1.0"
+    # Stamped into every exported manifest.json and the run README's
+    # "App version" row -- part of the reproducibility record, so it must
+    # track the real build rather than being an independent literal that
+    # goes stale the moment a release is cut.
+    app_version: str = __version__
     project_name: str
     created_at: datetime
     updated_at: datetime

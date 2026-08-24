@@ -45,8 +45,13 @@ jobs:
       - name: Build Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
+        # Inno Setup can't read track2data/_version.py itself, so pass the
+        # version in explicitly -- without this the installer falls back to
+        # its "0.0.0-local" placeholder. See packaging/inno_setup.iss.
         run: |
-          iscc packaging\inno_setup.iss
+          $version = python -c "import re,pathlib; print(re.search(r'__version__\s*=\s*[\x27\x22]([^\x27\x22]+)', pathlib.Path('track2data/_version.py').read_text()).group(1))"
+          Write-Host "Building installer for version $version"
+          iscc /DMyAppVersion=$version packaging\inno_setup.iss
 
       # ── macOS: pack the .app bundle into a .dmg (issue #45) ────────────
       - name: Build macOS .dmg
