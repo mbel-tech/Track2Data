@@ -92,6 +92,7 @@ def test_table_shows_session_facts_once_cached(qtbot, tmp_path: Path) -> None:
         setup_points=None,
         roi_list=None,
         has_body_length=False,
+        background_image_path=None,
     )
 
     screen = ImportScreen(store)
@@ -126,6 +127,7 @@ def test_table_refreshes_when_facts_arrive_after_construction(qtbot, tmp_path: P
         setup_points=None,
         roi_list=None,
         has_body_length=False,
+        background_image_path=None,
     )
     store.sessionFactsChanged.emit()
 

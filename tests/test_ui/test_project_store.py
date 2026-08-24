@@ -147,6 +147,7 @@ def test_session_facts_populated_on_probe_success(
             length_unit=12.5,
             setup_points={"feeder": [10, 20]},
             roi_list=[{"name": "arena", "level": "main", "points": [[0, 0]]}],
+            background_image_path=folder / "preprocessing" / "background.png",
         )
 
     monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
@@ -167,6 +168,7 @@ def test_session_facts_populated_on_probe_success(
     assert facts.width_px == 100
     assert facts.height_px == 200
     assert facts.has_stable_identities is True
+    assert facts.background_image_path == folder / "preprocessing" / "background.png"
     assert facts.idtrackerai_version == "6.0.15a0"
     assert facts.length_unit == 12.5
     assert facts.setup_points == {"feeder": [10, 20]}

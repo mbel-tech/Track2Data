@@ -224,11 +224,13 @@ def test_readiness_list_distinguishes_calibrated_from_uncalibrated_sessions(
         session_id="calibrated", reader="idtrackerai", fps=30.0, n_frames=100, n_animals=1,
         width_px=640, height_px=480, has_stable_identities=True, idtrackerai_version=None,
         length_unit=12.5, setup_points=None, roi_list=None, has_body_length=False,
+        background_image_path=None,
     )
     store._session_facts["uncalibrated"] = SessionFacts(
         session_id="uncalibrated", reader="idtrackerai", fps=30.0, n_frames=100, n_animals=1,
         width_px=640, height_px=480, has_stable_identities=True, idtrackerai_version=None,
         length_unit=None, setup_points=None, roi_list=None, has_body_length=False,
+        background_image_path=None,
     )
 
     screen = CalibrationScreen(store)
