@@ -3,17 +3,21 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore: &docs_only
+    # Docs-only pushes to main skip CI. Deliberately NOT mirrored onto
+    # pull_request below: `CI passed` is a required status check on main,
+    # and a required check that never reports leaves the PR permanently
+    # unmergeable. Running CI on a docs-only PR costs nothing now that the
+    # repository is public and Actions minutes are unmetered.
+    paths-ignore:
       - "docs/**"
       - "**.md"
       - "LICENSE"
   pull_request:
-    paths-ignore: *docs_only
 
-# Superseded runs on the same PR branch are cancelled -- private-repo
-# Actions minutes are metered, and a 3-push burst used to bill three full
-# matrices for one final answer. Pushes to main are never cancelled: every
-# commit on main should have its own recorded CI result.
+# Superseded runs on the same PR branch are cancelled -- a 3-push burst
+# used to run three full matrices to answer a question only the last one
+# was asking. Pushes to main are never cancelled: every commit on main
+# should have its own recorded CI result.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -101,3 +105,28 @@ jobs:
         # r_parity_local tests use embargoed choice-pipeline data and are
         # excluded here. Run them locally with: pytest -m r_parity_local
         run: pytest tests/test_r_parity/ -v -m "r_parity and not r_parity_local"
+
+  required:
+    name: CI passed
+    # Single aggregate gate, and the only check required by branch
+    # protection on main. The matrix job names encode the OS and Python
+    # spread ("Tests (ubuntu-22.04 / Python 3.11)"), so requiring them
+    # directly would mean editing the branch-protection settings by hand
+    # every time the matrix changes -- and a required check whose name no
+    # longer exists blocks every PR until someone notices. One stable name
+    # keeps settings and workflow decoupled.
+    if: always()
+    needs: [lint, test, r_parity]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Fail unless every upstream job succeeded
+        # `needs` results are only 'success' when the whole job (every
+        # matrix leg included) passed, so this catches a single failing
+        # matrix entry as well as a wholesale job failure.
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "test=${{ needs.test.result }}"
+          echo "r_parity=${{ needs.r_parity.result }}"
+          echo "::error::One or more CI jobs did not succeed."
+          exit 1
