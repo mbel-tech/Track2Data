@@ -23,6 +23,18 @@ listed under **Unreleased** pending the v0.1.0 tag.
 
 ### Fixed
 
+- **`trial_activity_summary` and `group_dynamics_summary` had one row per
+  (individual × metric) instead of one row per individual.** The
+  `csv_long` and `feather` exporters merged metric tables on *every*
+  shared column name rather than on the key columns, and every metric
+  emits a `metric_id` column holding its own ID — so the join key never
+  matched and each metric contributed its own near-empty row. A
+  3-metric, 2-animal session produced 6 mostly-`NaN` rows where it should
+  have produced 2 complete ones. Both exporters now restrict the join to
+  `session_id`/`individual_id`, matching what `csv_wide` already did.
+  Note: `metric_id` no longer appears as a column in these two summary
+  files — it was the column corrupting the join and carried no
+  information there; per-metric provenance remains in the run README.
 - Session import previously failed on every real idtracker.ai session
   shipping the default `trajectories.h5` output format (0/70 in the real
   corpus used to validate this project) — the reader had no HDF5 loader and

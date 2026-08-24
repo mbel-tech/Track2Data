@@ -171,3 +171,171 @@ class TestCsvLongExporter:
         paths = exporter.write(minimal_payload, tmp_path)
         for p in paths:
             assert p.exists(), f"{p} does not exist"
+
+
+# ── metric merge key tests ────────────────────────────────────────────────────
+
+
+def _payload_with(
+    individual_metrics: dict[str, pd.DataFrame] | None = None,
+    group_metrics: dict[str, pd.DataFrame] | None = None,
+) -> ExportPayload:
+    return ExportPayload(
+        session_id="sess1",
+        project_name="TestProject",
+        project_hash="abcd1234efgh5678",
+        app_version="0.1.0",
+        fish_by_frame=_make_fish_frame_df(),
+        individual_metrics=individual_metrics if individual_metrics is not None else {},
+        group_metrics=group_metrics if group_metrics is not None else {},
+        zone_metrics={},
+        diagnostic_metrics={},
+        preprocess_report=PreprocessReport(),
+        manifest_json="{}",
+    )
+
+
+class TestCsvLongMetricMergeKeys:
+    """Metric frames must be joined on identity keys only, never on whatever
+    column names two metrics happen to share.
+
+    Every shipped metric emits a ``metric_id`` column holding its *own* id, so
+    joining on all shared column names means joining IL-1 rows to IL-2 rows on
+    a key that can never match — one individual is split across several
+    half-empty rows instead of being widened into one.
+    """
+
+    def test_individual_metrics_sharing_incidental_column_produce_one_row_per_individual(
+        self, tmp_path: Path
+    ) -> None:
+        individual_metrics = {
+            "IL-1": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "n_frames": [100, 100],
+                    "path_length_px": [100.0, 200.0],
+                }
+            ),
+            "IL-2": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "n_frames": [90, 80],
+                    "mean_speed_px_s": [10.0, 20.0],
+                }
+            ),
+        }
+        exporter = CsvLongExporter()
+        exporter.write(_payload_with(individual_metrics=individual_metrics), tmp_path)
+        df = pd.read_csv(tmp_path / "trial_activity_summary.csv")
+        assert len(df) == 2
+
+    def test_individual_metrics_sharing_incidental_column_keep_values_on_one_row(
+        self, tmp_path: Path
+    ) -> None:
+        individual_metrics = {
+            "IL-1": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "n_frames": [100, 100],
+                    "path_length_px": [100.0, 200.0],
+                }
+            ),
+            "IL-2": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "n_frames": [90, 80],
+                    "mean_speed_px_s": [10.0, 20.0],
+                }
+            ),
+        }
+        exporter = CsvLongExporter()
+        exporter.write(_payload_with(individual_metrics=individual_metrics), tmp_path)
+        df = pd.read_csv(tmp_path / "trial_activity_summary.csv")
+        row0 = df[df["individual_id"] == 0]
+        assert len(row0) == 1
+        assert row0.iloc[0]["path_length_px"] == pytest.approx(100.0)
+        assert row0.iloc[0]["mean_speed_px_s"] == pytest.approx(10.0)
+
+    def test_individual_metrics_carrying_metric_id_produce_one_row_per_individual(
+        self, tmp_path: Path
+    ) -> None:
+        individual_metrics = {
+            "IL-1": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "metric_id": ["IL-1", "IL-1"],
+                    "path_length_px": [100.0, 200.0],
+                }
+            ),
+            "IL-2": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "metric_id": ["IL-2", "IL-2"],
+                    "mean_speed_px_s": [10.0, 20.0],
+                }
+            ),
+        }
+        exporter = CsvLongExporter()
+        exporter.write(_payload_with(individual_metrics=individual_metrics), tmp_path)
+        df = pd.read_csv(tmp_path / "trial_activity_summary.csv")
+        assert len(df) == 2
+        row1 = df[df["individual_id"] == 1].iloc[0]
+        assert row1["path_length_px"] == pytest.approx(200.0)
+        assert row1["mean_speed_px_s"] == pytest.approx(20.0)
+
+    def test_four_individual_metrics_carrying_metric_id_merge_into_one_row_per_individual(
+        self, tmp_path: Path
+    ) -> None:
+        """Four metrics is the case a keys-only fix that still lets ``metric_id``
+        reach the merge cannot survive: the second collision would need the
+        ``_x``/``_y`` suffixes pandas already handed out, and pandas raises."""
+        individual_metrics = {
+            f"IL-{i}": pd.DataFrame(
+                {
+                    "session_id": ["sess1", "sess1"],
+                    "individual_id": [0, 1],
+                    "metric_id": [f"IL-{i}", f"IL-{i}"],
+                    f"value_{i}": [float(i), float(i) * 2],
+                }
+            )
+            for i in range(1, 5)
+        }
+        exporter = CsvLongExporter()
+        exporter.write(_payload_with(individual_metrics=individual_metrics), tmp_path)
+        df = pd.read_csv(tmp_path / "trial_activity_summary.csv")
+        assert len(df) == 2
+        row0 = df[df["individual_id"] == 0].iloc[0]
+        for i in range(1, 5):
+            assert row0[f"value_{i}"] == pytest.approx(float(i))
+
+    def test_group_metrics_carrying_metric_id_produce_one_row_per_session(
+        self, tmp_path: Path
+    ) -> None:
+        group_metrics = {
+            "GL-1": pd.DataFrame(
+                {
+                    "session_id": ["sess1"],
+                    "metric_id": ["GL-1"],
+                    "mean_nnd_px": [5.0],
+                }
+            ),
+            "GL-3": pd.DataFrame(
+                {
+                    "session_id": ["sess1"],
+                    "metric_id": ["GL-3"],
+                    "mean_polarisation": [0.5],
+                }
+            ),
+        }
+        exporter = CsvLongExporter()
+        exporter.write(_payload_with(group_metrics=group_metrics), tmp_path)
+        df = pd.read_csv(tmp_path / "group_dynamics_summary.csv")
+        assert len(df) == 1
+        assert df.iloc[0]["mean_nnd_px"] == pytest.approx(5.0)
+        assert df.iloc[0]["mean_polarisation"] == pytest.approx(0.5)
