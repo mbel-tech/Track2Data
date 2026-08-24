@@ -19,7 +19,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QTableWidget
 
-from track2data.core.models import RunResult, SessionRunResult
+from track2data.core.models import PPStepResult, PreprocessReport, RunResult, SessionRunResult
 
 # ── synthetic RunResult builders ──────────────────────────────────────────────
 
@@ -119,6 +119,37 @@ def _session2() -> SessionRunResult:
     )
 
 
+def _session3_with_preprocess_report() -> SessionRunResult:
+    return SessionRunResult(
+        session_id="s3",
+        diagnostics=_diagnostics_for(
+            "s3",
+            coverage=[(0, 0.9, 1)],
+            accuracy=(0.9, 0.9, ""),
+            id_prob=[(0, 0.9, 0.8, 1.0, 0.7)],
+            inconsistent=(1, 0.01),
+            stability="stable",
+        ),
+        metric_previews={"IL-1": pd.DataFrame({"session_id": ["s3"], "value": [1.0]})},
+        preprocess_report=PreprocessReport(
+            steps=[
+                PPStepResult(
+                    step_name="gap_fill",
+                    affected_frames=12,
+                    affected_per_individual=[7, 5],
+                    notes="filled short gaps",
+                ),
+                PPStepResult(
+                    step_name="jump_detect",
+                    affected_frames=3,
+                    affected_per_individual=[3, 0],
+                    notes="",
+                ),
+            ]
+        ),
+    )
+
+
 # ── table-content helpers ─────────────────────────────────────────────────────
 
 
@@ -168,6 +199,7 @@ def test_diagnostics_tab_shows_placeholder_before_any_run(qtbot) -> None:
     assert screen._diag_placeholder.isHidden() is False
     assert screen._diag_individual_table.rowCount() == 0
     assert screen._diag_session_table.rowCount() == 0
+    assert screen._diag_preprocess_table.rowCount() == 0
     assert screen._diag_session_combo.count() == 0
 
 
@@ -270,6 +302,85 @@ def test_diagnostics_tab_session_selector_switches_sessions(qtbot) -> None:
     assert d2_row["note"] == "low accuracy"
     ind_row = _find_row(screen._diag_individual_table, metric_id="D-1", individual_id="0")
     assert ind_row["coverage_fraction"] == "0.5"
+
+
+def test_diagnostics_tab_shows_preprocess_steps_table(qtbot) -> None:
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+
+    store.set_run_results(RunResult(sessions=[_session3_with_preprocess_report()]))
+
+    table = screen._diag_preprocess_table
+    assert table.rowCount() == 2
+    assert _headers(table) == ["step_name", "affected_frames", "affected_per_individual", "notes"]
+    row0 = _row_dict(table, 0)
+    assert row0["step_name"] == "gap_fill"
+    assert row0["affected_frames"] == "12"
+    assert row0["affected_per_individual"] == "[7, 5]"
+    assert row0["notes"] == "filled short gaps"
+    row1 = _row_dict(table, 1)
+    assert row1["step_name"] == "jump_detect"
+    assert row1["affected_frames"] == "3"
+
+
+def test_diagnostics_tab_preprocess_table_empty_when_report_is_none(qtbot) -> None:
+    """s1 has no preprocess_report (defaults to None) -- the steps table
+    must render empty rather than crash on a missing report."""
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+
+    store.set_run_results(RunResult(sessions=[_session1()]))
+
+    assert screen._diag_preprocess_table.rowCount() == 0
+
+
+def test_diagnostics_tab_preprocess_table_empty_when_report_has_no_steps(qtbot) -> None:
+    """A report that exists but logged no steps is distinct from None and
+    must also render as an empty table, not a header-only ghost row."""
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+
+    session = _session1()
+    session.preprocess_report = PreprocessReport(steps=[])
+    store.set_run_results(RunResult(sessions=[session]))
+
+    assert screen._diag_preprocess_table.rowCount() == 0
+    assert screen._diag_preprocess_table.columnCount() == 0
+
+
+def test_diagnostics_tab_preprocess_table_clears_when_switching_to_a_reportless_session(
+    qtbot,
+) -> None:
+    """The stale-table regression guard: switching from a session that has
+    a report to one that doesn't (and back) must repopulate each time
+    rather than leaving the previous session's steps on screen."""
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+    store.set_run_results(
+        RunResult(sessions=[_session3_with_preprocess_report(), _session1()])
+    )
+
+    assert screen._diag_session_combo.currentText() == "s3"
+    assert screen._diag_preprocess_table.rowCount() == 2
+
+    screen._diag_session_combo.setCurrentText("s1")
+    assert screen._diag_preprocess_table.rowCount() == 0
+
+    screen._diag_session_combo.setCurrentText("s3")
+    assert screen._diag_preprocess_table.rowCount() == 2
+    assert _row_dict(screen._diag_preprocess_table, 0)["step_name"] == "gap_fill"
 
 
 # ── Metrics tab: populated after a run ──────────────────────────────────────

@@ -16,17 +16,16 @@ Diagnostics tab, per selected session (store.run_results.sessions):
   - a session-level table stacking D-2 (TrackingAccuracy), D-4
     (InconsistentFrameCount), D-5 (IdentityStability) -- each
     contributes exactly one row per session.
-  Both tables are built by concatenating the metric DataFrames with a
-  leading "metric_id" column (pd.concat(..., sort=False), which is an
-  outer join on the union of columns).
-
-  A third table for PreprocessReport.steps was part of the original
-  design but is NOT implemented here: PreprocessReport is produced
-  inside Engine.preprocess() as PreprocessedSession.report and is only
-  threaded through to ExportPayload.preprocess_report for the
-  exporters (see Engine.build_payload in track2data/api.py) -- it is
-  never attached to SessionRunResult, so it is not reachable from
-  store.run_results as the pipeline is currently structured.
+  - a preprocessing-steps table listing the steps of
+    SessionRunResult.preprocess_report (step_name/affected_frames/
+    affected_per_individual/notes), one row per PPStepResult. The
+    report is None when the session never got past preprocessing (see
+    Engine._run_one_session in track2data/api.py, which preserves it
+    for failures in any later stage), in which case this table renders
+    empty.
+  The two diagnostic tables are built by concatenating the metric
+  DataFrames with a leading "metric_id" column (pd.concat(..., sort=False),
+  which is an outer join on the union of columns).
 
 Metrics tab: a session selector + a metric-ID selector (populated from
 the selected session's SessionRunResult.metric_previews keys) showing
@@ -135,6 +134,12 @@ class PreviewScreen(QWidget):
         self._diag_session_table = QTableWidget()
         diag_layout.addWidget(self._diag_session_table)
 
+        preprocess_label = QLabel("Preprocessing steps")
+        preprocess_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        diag_layout.addWidget(preprocess_label)
+        self._diag_preprocess_table = QTableWidget()
+        diag_layout.addWidget(self._diag_preprocess_table)
+
         diag_layout.addStretch()
         return diag_w
 
@@ -190,15 +195,18 @@ class PreviewScreen(QWidget):
             self._diag_session_combo.hide()
             self._diag_individual_table.hide()
             self._diag_session_table.hide()
+            self._diag_preprocess_table.hide()
             self._diag_session_combo.clear()
             clear_table(self._diag_individual_table)
             clear_table(self._diag_session_table)
+            clear_table(self._diag_preprocess_table)
             return
 
         self._diag_placeholder.hide()
         self._diag_session_combo.show()
         self._diag_individual_table.show()
         self._diag_session_table.show()
+        self._diag_preprocess_table.show()
         _repopulate_session_combo(self._diag_session_combo, run_results)
         self._render_diagnostics_for_current_selection()
 
@@ -210,6 +218,7 @@ class PreviewScreen(QWidget):
         if session_result is None:
             clear_table(self._diag_individual_table)
             clear_table(self._diag_session_table)
+            clear_table(self._diag_preprocess_table)
             return
 
         individual_df = _stack_diagnostics(
@@ -221,6 +230,9 @@ class PreviewScreen(QWidget):
             session_result.diagnostics, _SESSION_LEVEL_DIAGNOSTIC_IDS
         )
         populate_table(self._diag_session_table, session_df)
+
+        preprocess_df = _preprocess_steps_to_dataframe(session_result.preprocess_report)
+        populate_table(self._diag_preprocess_table, preprocess_df)
 
     # ── slots: Metrics ───────────────────────────────────────────────────
 
@@ -313,3 +325,22 @@ def _stack_diagnostics(diagnostics: dict, metric_ids: list[str]) -> pd.DataFrame
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def _preprocess_steps_to_dataframe(report) -> pd.DataFrame:
+    """Build a step_name/affected_frames/affected_per_individual/notes
+    DataFrame from a PreprocessReport's steps, or an empty DataFrame when
+    *report* is None (a session whose preprocessing failed)."""
+    if report is None or not report.steps:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [
+            {
+                "step_name": s.step_name,
+                "affected_frames": s.affected_frames,
+                "affected_per_individual": s.affected_per_individual,
+                "notes": s.notes,
+            }
+            for s in report.steps
+        ]
+    )

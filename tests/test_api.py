@@ -1010,6 +1010,183 @@ def test_run_captures_per_session_error_without_aborting_batch(tmp_path: Path) -
     assert by_id["bad"].written == []
 
 
+def _report_fingerprint(report: PreprocessReport) -> list[tuple]:
+    """Full per-step content, not just step_name: every session's report
+    carries the same five step names, so comparing names alone would pass
+    even against a report computed from entirely different data."""
+    return [
+        (s.step_name, s.affected_frames, s.affected_per_individual, s.notes)
+        for s in report.steps
+    ]
+
+
+def test_run_attaches_preprocess_report_to_session_run_result(tmp_path: Path) -> None:
+    """SessionRunResult.preprocess_report must carry the same PreprocessReport
+    that Engine.preprocess() produces for that session -- currently it's
+    computed but discarded before _run_one_session() builds the result."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    expected_report = engine.preprocess(session).report
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    got = result.sessions[0].preprocess_report
+    assert isinstance(got, PreprocessReport)
+    assert _report_fingerprint(got) == _report_fingerprint(expected_report)
+
+
+def test_run_leaves_preprocess_report_none_when_preprocessing_fails(tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    def failing_preprocess(_session):
+        raise RuntimeError("boom")
+
+    engine.preprocess = failing_preprocess  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    assert result.sessions[0].error is not None
+    assert result.sessions[0].preprocess_report is None
+
+
+def test_run_keeps_preprocess_report_when_a_later_stage_fails(tmp_path: Path) -> None:
+    """_run_one_session()'s except block covers import, preprocess, metrics,
+    payload build and export alike. When preprocessing succeeded and a *later*
+    stage blew up, the report exists and is exactly what the user needs to
+    diagnose the failure -- it must not be discarded along with the rest."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    expected_report = engine.preprocess(session).report
+
+    def failing_compute_metrics(_psess):
+        raise RuntimeError("metrics exploded")
+
+    engine.compute_metrics = failing_compute_metrics  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    assert result.sessions[0].error is not None
+    assert "metrics exploded" in result.sessions[0].error
+    got = result.sessions[0].preprocess_report
+    assert got is not None
+    assert _report_fingerprint(got) == _report_fingerprint(expected_report)
+
+
+def test_preprocess_attaches_report_to_a_post_pipeline_stage_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Calibration and zone assignment run *inside* Engine.preprocess(),
+    after pp_run() has already produced the step report. When one of them
+    fails, preprocess() must still raise -- continuing would silently yield
+    pixel-unit or zone-less results, which issue #7's fail-loud rule exists
+    to prevent -- but the already-computed report rides along on the
+    exception so callers can still surface the step log."""
+    from track2data.api import Engine
+    from track2data.core.errors import PreprocessStageError
+
+    session = _make_session(n_frames=10, n_animals=1)
+    engine = Engine(_make_manifest())
+
+    expected_report = engine.preprocess(session).report
+
+    def failing_apply_scalar_calibration(*_args, **_kwargs):
+        raise RuntimeError("calibration exploded")
+
+    monkeypatch.setattr(
+        "track2data.calibration.scalar.apply_scalar_calibration",
+        failing_apply_scalar_calibration,
+    )
+
+    with pytest.raises(PreprocessStageError) as excinfo:
+        engine.preprocess(session)
+
+    assert _report_fingerprint(excinfo.value.report) == _report_fingerprint(expected_report)
+    # The original failure is chained, not swallowed.
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert "calibration exploded" in str(excinfo.value.__cause__)
+
+
+def test_run_keeps_preprocess_report_when_zone_assignment_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same rule as a later-stage failure, one layer down: zone assignment
+    blowing up inside preprocess() must not discard the step report that
+    pp_run() already produced."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        zones=ZoneSet(rois=[ROI(name="arena", vertices=[(0.0, 0.0), (99.0, 0.0), (99.0, 99.0)])]),
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    expected_report = engine.preprocess(session).report
+
+    def failing_assign_zones(*_args, **_kwargs):
+        raise RuntimeError("zones exploded")
+
+    monkeypatch.setattr("track2data.zones.geometry.assign_zones", failing_assign_zones)
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+
+    assert result.sessions[0].error is not None
+    assert "zones exploded" in result.sessions[0].error
+    got = result.sessions[0].preprocess_report
+    assert got is not None
+    assert _report_fingerprint(got) == _report_fingerprint(expected_report)
+
+
+def test_session_run_result_preprocess_report_survives_pickle(tmp_path: Path) -> None:
+    import pickle
+
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=1)
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id=session.session_id, folder=session.folder, sha256="x")],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    engine.import_session = lambda folder: session  # type: ignore[method-assign]
+
+    result = engine.run(tmp_path, exporters=["csv_long"])
+    restored = pickle.loads(pickle.dumps(result.sessions[0]))
+
+    assert restored.preprocess_report is not None
+    # Fingerprint, not step names: this is what proves the nested list[int]
+    # and notes survived the round-trip, which is the point of the test.
+    assert _report_fingerprint(restored.preprocess_report) == _report_fingerprint(
+        result.sessions[0].preprocess_report
+    )
+
+
 def test_run_captures_an_import_failure_as_a_per_session_error_without_aborting_batch(
     tmp_path: Path, tiny_real_session: Path
 ) -> None:
