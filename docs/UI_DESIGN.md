@@ -631,7 +631,10 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 - QComboBox: `jump_replacement` (nan / linear_interp, default linear_interp)
 
 **Identity Switch Correction:**
-- QCheckBox: `id_switch_enabled` (☑, default True)
+- QCheckBox: `id_switch_enabled` (☐, default **False** — re-permutes 17.1% of
+  a real recording and injects ~640px single-frame teleports, measured
+  against the real corpus; off pending a fragment-boundary-aware
+  replacement, see `track2data/core/models.py`'s `IdSwitchCfg`)
 - QDoubleSpinBox: `id_switch_tier1_ratio` (range 1–10, default 1.5)
 - QCheckBox: `id_switch_tier2_hungarian` (☑, default True)
 - QSpinBox: `id_switch_consolidate_window` (range 1–100, default 5)
