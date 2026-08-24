@@ -153,7 +153,7 @@ parameterise the following steps, in this order:
 |---|---|---|
 | **PP-1 Gap filling** | max gap length (frames) for interpolation | 30 frames |
 | **PP-2 Jump detection** | method = `sd_multiple` \| `percentile`; multiplier; replacement = `NA` \| `linear-interp` | `sd_multiple`, mult=10, linear-interp |
-| **PP-3 Identity-switch detection** | Tier-1 mutual-NN ratio threshold; optional Tier-2 Hungarian; consolidation window | ratio=1.5, Tier-2 on |
+| **PP-3 Identity-switch detection** | Tier-1 mutual-NN ratio threshold; optional Tier-2 Hungarian; consolidation window | **off by default** (ratio=1.5, Tier-2 on when enabled) — measured on real data to re-permute 17.1% of a recording and inject ~640px single-frame teleports; pending a fragment-boundary-aware replacement |
 | **PP-4 Smoothing** | method = none \| moving-avg \| Savitzky-Golay; window; polynomial order | Savitzky-Golay, window=5, order=2 |
 | **PP-5 Trajectory validation** | min track length (frames); max % NA per individual | 90% coverage |
 
