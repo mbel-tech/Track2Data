@@ -179,16 +179,23 @@ button stays disabled while any session is unmatched **unless** the
 user explicitly ticks "Proceed without metadata for these sessions".
 **Engine calls:** `metadata.join.match(sessions, mapping)`.
 
-### 5.6 Page 6 — Preprocessing & Metrics
+### 5.6 Page 6 — Preprocessing, and Page 7 — Metrics
 
-Split pane.
+> **Reality note:** through v0.1.0 this was one page, split-pane, and
+> the sidebar could only ever reach the Preprocessing half — Metrics
+> and Processing were reachable only via the toolbar's Next button,
+> never a direct click. They are now two separate screens with their
+> own sidebar rows (`app/navigation.py`); the split-pane description
+> below is retained as the original intent but no longer matches the
+> implementation, which is two independent, scrollable single-column
+> screens.
 
-**Left — preprocessing:** one collapsible group per step
+**Preprocessing (Page 6):** one collapsible group per step
 (`gap_fill`, `jump_detect`, `identity_switch`, `smoothing`, `validate`)
 with enable toggle + parameter widgets. Defaults shown greyed; "Reset
 to defaults" link per group.
 
-**Right — metric catalogue:** three tabs (Individual / Group / Zone)
+**Metrics (Page 7):** three tabs (Individual / Group / Zone)
 populated from `metrics.list_for_level(level)`. Each row = checkbox +
 id + name + ⓘ icon + ⚙ config icon (stub in v1 — see below).
 Identity-aware metrics (`Metric.requires_identity`) greyed-out when
@@ -197,7 +204,10 @@ False` — sessions not yet probed (or whose probe failed) don't count
 toward that "every", so an all-unprobed project greys nothing — with
 an explanatory tooltip. Zone tab disabled when no zones are defined.
 
-**Footer:** "Timepoint binning" spinbox (minutes; 0 = whole session).
+**Footer (aspirational — not built on either screen today):**
+"Timepoint binning" spinbox (minutes; 0 = whole session). Note this
+predates the split above; `MetricSelection.timepoint_minutes` exists
+on the model but has no widget on Page 6 or Page 7 yet.
 
 #### MetricInfoDialog (info-button modal)
 
@@ -263,7 +273,7 @@ Select export format(s), configure per-exporter options, run export pipeline.
 
 ---
 
-## 6. Detailed Screen Specifications (14 screens across 7 stages)
+## 6. Detailed Screen Specifications (14 screens across 9 stages)
 
 This section provides implementation-ready detail for all 14 screens: widget types, data bindings, validation rules, error messages, and navigation logic.
 
@@ -528,7 +538,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 - "ROI extends beyond frame. It will be clipped during metric computation." (warning banner)
 
 **Next Button Logic:**
-- Enabled if all ROIs valid (or no ROIs and user skips zone metrics on Stage 6)
+- Enabled if all ROIs valid (or no ROIs and user skips zone metrics on Stage 7)
 - On Next: emit `store.zonesChanged`, advance to Stage 5
 
 ---
@@ -614,7 +624,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ### 6.9 Screen 6.1 — Preprocessing Configuration
 
-**Stage:** Stage 6 (Preprocessing & Metrics)  
+**Stage:** Stage 6 (Preprocessing)  
 **Purpose:** Configure trajectory cleaning steps.
 
 **Widget List (5 collapsible sections):**
@@ -677,7 +687,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ### 6.10 Screen 6.2 — Metric Selection (Registry-Driven Tabs)
 
-**Stage:** Stage 6 (Preprocessing & Metrics)  
+**Stage:** Stage 7 (Metrics)  
 **Purpose:** Select which metrics to compute.
 
 **Widget List:**
@@ -716,9 +726,9 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ### 6.11 Screen 6.3 — Per-Metric Advanced Configuration (Aspirational — Not Yet Implemented)
 
-> **Status:** This screen does not exist in the shipped app — no config schema, no navigation target, nothing below is built. Kept as a design reference only; everything in this section is proposed, not current behavior.
+> **Status:** This screen does not exist in the shipped app — no config schema, no navigation target, nothing below is built. Kept as a design reference only; everything in this section is proposed, not current behavior. The "6.3" label is unchanged from before Preprocessing/Metrics became separate stages (§5.6) — it was never renumbered to "7.x", since resolving the Screen-X.Y numbering scheme for real needs its own pass, not a side effect of this one.
 
-**Stage:** Stage 6 (Preprocessing & Metrics)  
+**Stage:** Stage 7 (Metrics)  
 **Purpose:** Configure metric-specific parameters (e.g., activity threshold).
 
 **Widget List:**
@@ -750,7 +760,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 **Next Button Logic:**
 - Enabled if all config parameters valid
-- On Next: emit `metricsChanged`, advance to Stage 7.1
+- On Next: emit `metricsChanged`, advance to Stage 8 (Processing)
 
 ---
 
@@ -762,9 +772,10 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 | Page 3 calibration | `Engine.set_calibration(cfg)` |
 | Page 4 zones | `Engine.set_zones(zone_set)` / `zones.io.read_csv` |
 | Page 5 metadata | `metadata.loader.load` / `metadata.join.match` / `Engine.set_metadata_mapping` |
-| Page 6 preprocess | `Engine.set_preprocess(cfg)`, `Engine.set_metric_selection(sel)` |
-| Page 7 preview | `Engine.run_session(session_id) -> PreprocessedSession` (cached) |
-| Page 7 export | `Engine.export(payload, exporters, out_dir)` |
+| Page 6 preprocess | `Engine.set_preprocess(cfg)` |
+| Page 7 metrics | `Engine.set_metric_selection(sel)` |
+| Page 8 processing | `Engine.run(out_dir, progress=...) -> RunResult` (real entry point; supersedes the aspirational `run_session`-per-preview flow §5.7 describes) |
+| Page 9 export | `Engine.export(payload, exporters, out_dir)` |
 | Run-log dock | engine logging callback → `store.runLogAppended` signal |
 
 `Engine` is constructed once per project and lives on the main thread;
