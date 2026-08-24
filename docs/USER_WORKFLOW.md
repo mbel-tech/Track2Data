@@ -188,7 +188,7 @@ metadata that travels with every export.
 **Wireframe:**
 
 ```
-┌─ Stage 1 of 7  •  Project ───────────────────────────────────────┐
+┌─ Stage 1 of 9  •  Project ───────────────────────────────────────┐
 │                                                                  │
 │   Project name *      [ feb-experiment                       ]   │
 │   Project directory * [ D:/projects/feb-experiment      ] [📂]   │
@@ -231,7 +231,7 @@ process.
 **Wireframe:**
 
 ```
-┌─ Stage 2 of 7  •  Sessions ──────────────────────────────────────┐
+┌─ Stage 2 of 9  •  Sessions ──────────────────────────────────────┐
 │                                                                  │
 │   Drag-drop session folders here, or click ➕ Add…               │
 │   ┌────────────────────────────────────────────────────────────┐ │
@@ -292,7 +292,7 @@ or body lengths, not pixels.
 **Wireframe:**
 
 ```
-┌─ Stage 3 of 7  •  Calibration ───────────────────────────────────┐
+┌─ Stage 3 of 9  •  Calibration ───────────────────────────────────┐
 │                                                                  │
 │  Mode  ( ) Scalar px-per-cm     (•) Body length (recommended)    │
 │  ─────────────────────────────────────────────────────────────   │
@@ -353,7 +353,7 @@ frame; assign each ROI a level (main / secondary / custom).
 **Wireframe:**
 
 ```
-┌─ Stage 4 of 7  •  Zones ─────────────────────────────────────────┐
+┌─ Stage 4 of 9  •  Zones ─────────────────────────────────────────┐
 │                                                                  │
 │  Pick frame from   [ S-N1_T1  ▾ ]      Orientation   [ FT  ▾ ]   │
 │                                                                  │
@@ -379,7 +379,7 @@ frame; assign each ROI a level (main / secondary / custom).
 
 **Required inputs:** at least one ROI for any session that will be
 used in zone-based metrics. Zones are **optional overall** — if no
-ROI is defined, zone-based metrics on Stage 6 are greyed out.
+ROI is defined, zone-based metrics on Stage 7 (Metrics) are greyed out.
 
 **Optional inputs:** ROI area (for area-corrected occupancy); ROI
 level beyond the two defaults.
@@ -415,7 +415,7 @@ timepoint, …) so that every output row carries the right context.
 **Wireframe:**
 
 ```
-┌─ Stage 5 of 7  •  Metadata (optional) ───────────────────────────┐
+┌─ Stage 5 of 9  •  Metadata (optional) ───────────────────────────┐
 │                                                                  │
 │   [ 📂 Choose file (CSV / XLSX) ]    [ Skip metadata for now ]   │
 │   Selected: D:/data/trial_meta.xlsx (24 rows, 7 columns)         │
@@ -478,91 +478,193 @@ timepoint, …) so that every output row carries the right context.
 
 ---
 
-### Stage 6 — Preprocessing & Metrics
+### Stage 6 — Preprocessing
 
-**Purpose:** Choose how trajectories are cleaned, then choose which
-metrics to compute.
+**Purpose:** Choose how trajectories are cleaned before any metric is
+computed.
 
-**Wireframe:**
+Through v0.1.0 this shared a single wizard page with Metrics. They are
+now two screens with their own sidebar rows — the combined page made
+Metrics reachable only via the toolbar's "Next" button, never from the
+sidebar, which read as "the metrics screen is empty" (it wasn't empty;
+it was unreachable). See `app/navigation.py`.
+
+**Wireframe (current implementation — a scrollable single column, not
+the aspirational two-pane layout of earlier drafts):**
 
 ```
-┌─ Stage 6 of 7  •  Preprocessing & Metrics ───────────────────────┐
-│                                                                  │
-│ ┌─ Preprocessing ─────────────┐ ┌─ Metrics ──────────────────┐   │
-│ │ ▼ Gap filling      ☑       │ │ [ Individual ][Group][Zone] │   │
-│ │   max gap [ 30  ] frames    │ │                            │   │
-│ │                             │ │ Individual                 │   │
-│ │ ▼ Jump detection   ☑       │ │  ☑ IL-1 Path length        │   │
-│ │   method [ sd_mult ▾ ]      │ │  ☑ IL-2 Mean / max speed   │   │
-│ │   mult   [ 10.0 ]           │ │  ☐ IL-3 Distance from cent │   │
-│ │   repl   [ linear-interp ▾] │ │  ☑ IL-4 Active vs inactive │   │
-│ │                             │ │      threshold [ 1.0 ] BL/s│   │
-│ │ ▼ Identity switches ☑      │ │  ☐ IL-5 Tortuosity         │   │
-│ │   Tier-1 ratio [ 1.5 ]      │ │                            │   │
-│ │   Tier-2 Hungarian ☑       │ │ (Greyed for session N2_T1 –│   │
-│ │                             │ │  no stable identities.)    │   │
-│ │ ▼ Smoothing       ☑        │ │                            │   │
-│ │   method [ savgol ▾ ]       │ │                            │   │
-│ │   window [ 5 ]  order [ 2 ] │ │                            │   │
-│ │                             │ │                            │   │
-│ │ ▼ Coverage gate   ☑        │ │                            │   │
-│ │   max % NA / indiv [ 10% ]  │ │                            │   │
-│ │                             │ │                            │   │
-│ │ [ Reset all to defaults ]   │ │                            │   │
-│ └─────────────────────────────┘ └────────────────────────────┘   │
-│                                                                  │
-│   Timepoint binning  [ 20 ] minutes  ( 0 = whole session )       │
-│                                                                  │
-│   ◀ Back                                  Next: Preview ▶        │
-└──────────────────────────────────────────────────────────────────┘
+┌─ Stage 6  •  Preprocessing ───────────────────────────────────────┐
+│  Enable and configure the preprocessing pipeline steps.           │
+│                                                                    │
+│  ☑ Gap Fill                                                       │
+│      ☑ Enabled     Max gap frames  [ 30 ]                         │
+│                                                                    │
+│  ☑ Jump Detection                                                 │
+│      ☑ Enabled     Method  [ Standard-deviation multiple ▾ ]      │
+│                     SD multiplier  [ 10.0 ]  Percentile [ 99.0 ]  │
+│                                                                    │
+│  ☐ Identity Switch Correction                                     │
+│      ☐ Enabled  (off by default — see tooltip)                    │
+│      Tier-1 ratio [ 1.5 ]   ☑ Tier-2 Hungarian assignment          │
+│                                                                    │
+│  ☑ Smoothing                                                      │
+│      ☑ Enabled     Method  [ None ▾ ]   Window  [ 5 ]             │
+│                                                                    │
+│  ☑ Coverage Gate                     ▲ (scrolls)                  │
+│      Max % missing per individual  [ 10 % ]                       │
+│                                                                    │
+│  [ Apply ]                                                        │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Optional inputs:** every toggle and parameter (sensible defaults
+preselected; Identity Switch Correction defaults **off**).
+
+**Decisions / branches:**
+- **Identity Switch Correction is off by default.** Tooltip explains
+  why: measured against real idtracker.ai recordings, this corrector
+  re-permuted 17% of a session and injected large single-frame
+  teleports, because it reasons from raw geometry alone with no
+  knowledge of idtracker.ai's own fragment boundaries. Turning it on
+  is a deliberate, informed choice, not a default.
+- **Reset to defaults** is per-step, not all-or-nothing (each group's
+  own "Enabled" checkbox and fields reset independently).
+
+**Validation messages:**
+
+| Condition | Message | Severity |
+|---|---|---|
+| Smoothing window even (e.g. 4) for Savitzky-Golay | *"Savitzky-Golay window must be odd; rounding to 5."* | warning (auto-fix) |
+| Polynomial order ≥ window | *"Polynomial order must be smaller than the window length."* | error |
+| `max % NA per individual > 0.5` | *"A coverage gate above 50 % NA is very permissive — most published thresholds are 10 % NA. Continue anyway?"* | warning |
+
+**Saved at advance:** `PreprocessConfig`.
+
+---
+
+### Stage 7 — Metrics
+
+**Purpose:** Choose which behavioural metrics to extract.
+
+**Wireframe (current implementation):**
+
+```
+┌─ Stage 7  •  Metrics ─────────────────────────────────────────────┐
+│  Choose which behavioural metrics to extract.                     │
+│                                                                    │
+│  [ Individual ] [ Group ] [ Zone ]                                │
+│  ┌────────┬────────┬───────────────────┬──────┬────────┐          │
+│  │Include │  ID    │ Name              │ Info │ Config │          │
+│  ├────────┼────────┼───────────────────┼──────┼────────┤          │
+│  │  ☑     │ IL-1   │ Path Length       │  ⓘ   │   ⚙    │          │
+│  │  ☑     │ IL-2   │ Speed             │  ⓘ   │   ⚙    │          │
+│  │  ☐     │ IL-3   │ Centre Distance   │  ⓘ   │   ⚙    │          │
+│  │  ☑     │ IL-4   │ Activity          │  ⓘ   │   ⚙    │          │
+│  │  ☐     │ IL-5   │ Tortuosity        │  ⓘ   │   ⚙    │          │
+│  │  ☐     │ IL-6   │ Acceleration      │  ⓘ   │   ⚙    │          │
+│  │  ☐     │ IL-7   │ Freezing Bouts    │  ⓘ   │   ⚙    │          │
+│  │  ☐     │ IL-8   │ Turn Rate         │  ⓘ   │   ⚙    │          │
+│  └────────┴────────┴───────────────────┴──────┴────────┘          │
+│  (Greyed for a session with no stable identities.)                │
+│                                                                    │
+│  Quality threshold  [ 0.00 ]                                      │
+│  [ Apply selection ]                                               │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 **Required inputs:** at least one metric selected.
 
-**Optional inputs:** every preprocessing toggle and parameter
-(sensible defaults preselected).
-
 **Decisions / branches:**
-- **Identity-free fallback** — when *any* included session is
-  identity-free, that session's individual metrics are greyed out
-  with tooltip: *"This session does not have stable identities;
-  individual-level metrics will be skipped for it."*
-- **No zones defined** → zone tab disabled with tooltip: *"Define at
-  least one zone on Stage 4 to enable these metrics."*
-- **Timepoint binning** — set to 0 to disable and report whole-session
-  values only.
-- **Metric info ⓘ icon** — each metric row carries an ⓘ icon to the
-  right of the name. Click opens a `MetricInfoDialog` showing the
+- **Identity-free fallback** — when *every* session in the project is
+  identity-free, `requires_identity` metric rows are greyed out with
+  a tooltip. A session with unknown status (not yet probed) does not
+  trigger this.
+- **No zones defined** → the Zone tab is disabled.
+- **Metric info ⓘ icon** — opens a `MetricInfoDialog` with the
   metric's definition, formula, inputs, assumptions, and reference
-  (rendered from `Metric.documentation`). Closes on ✕, `Escape`, or
-  outside-click. The icon is hidden for metrics whose
-  `MetricDocumentation` carries neither a formula nor a citation
-  (those fall back to the existing tooltip). See
-  [`METRICS_SPEC.md` §6](./METRICS_SPEC.md) for the full architecture.
+  (from `Metric.documentation`). Closes on ✕, `Escape`, or
+  outside-click. Hidden for metrics with neither a formula nor a
+  citation. See [`METRICS_SPEC.md` §6](./METRICS_SPEC.md).
+- **⚙ Config icon** — stub in v1; shows "Not yet implemented."
 
 **Validation messages:**
 
 | Condition | Message | Severity |
 |---|---|---|
 | 0 metrics selected | Next disabled; tooltip *"Select at least one metric."* | (disabled) |
-| Smoothing window even (e.g. 4) for Savitzky-Golay | *"Savitzky-Golay window must be odd; rounding to 5."* | warning (auto-fix) |
-| Polynomial order ≥ window | *"Polynomial order must be smaller than the window length."* | error |
-| `max % NA per individual > 0.5` | *"A coverage gate above 50 % NA is very permissive — most published thresholds are 10 % NA. Continue anyway?"* | warning |
-| Active-threshold > 5 BL/s | *"Threshold is unusually high — fish typically cruise at <2 BL/s. Confirm or reset to default 1.0."* | warning |
 
-**Saved at advance:** `PreprocessConfig`, `MetricSelection`,
-timepoint bin size.
+**Saved at advance:** `MetricSelection` (only when **Apply selection**
+is clicked — the toolbar's Next action advances the page but does not
+itself save the selection).
 
 ---
 
-### Stage 7 — Preview & Export
+### Stage 8 — Processing
+
+**Purpose:** Run preprocessing + metric extraction across every
+session, and watch it happen.
+
+Reachable directly from the sidebar, and via the toolbar's **Run**
+action from any stage (`app/main_window.py::_action_run`) — both paths
+call the same `ProcessingScreen.start_run()`, so there is exactly one
+run code path regardless of how the user got here.
+
+**Wireframe (current implementation):**
+
+```
+┌─ Stage 8  •  Processing ──────────────────────────────────────────┐
+│  Validate the pipeline configuration and run preprocessing +      │
+│  metric extraction across all sessions.                           │
+│                                                                    │
+│  [ Validate pipeline ]  [ Run pipeline ]  [ Cancel ]               │
+│                                                                    │
+│  ████████████████████████░░░░░░░░░░░░░░  62%                      │
+│  Running… writing to <project>/exports/<ISO timestamp>/           │
+│                                                                    │
+│  ┌────────────┬────────────────┬────────┬──────────┐              │
+│  │ Session    │ Status         │ Frames │ Duration │              │
+│  ├────────────┼────────────────┼────────┼──────────┤              │
+│  │ N1_T1      │ Done           │ —      │ 4.2s     │              │
+│  │ N1_T2      │ Computing…     │ —      │ —        │              │
+│  │ N2_T1      │ Queued         │ —      │ —        │              │
+│  └────────────┴────────────────┴────────┴──────────┘              │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Decisions / branches:**
+- **Validate pipeline** runs `Engine.validate()` synchronously and
+  shows a summary dialog — it is a pure manifest read, no engine run.
+- **Run pipeline** validates first; if issues are found, shows them
+  in a warning dialog and does not submit anything.
+- A session that fails (import, preprocess, metrics, or export) is
+  captured as that session's own error and shown as "Failed" in the
+  table — it does not abort the rest of the batch (see issue #7).
+- **Frames** is currently always "—": neither the progress event nor
+  the per-session result carries a frame count today.
+
+**Saved at advance:** nothing new — this stage produces `RunResult`
+(diagnostics + capped metric previews) held in memory for Stage 9's
+Preview tab, and the actual output files on disk.
+
+---
+
+### Stage 9 — Preview & Export
+
+> **Doc/reality note (unrelated to the Stage 6/7 split above):** this
+> section's three-tab design (Preview / Diagnostics / Export sharing one
+> session picker) predates the current implementation. `PreviewScreen`
+> (page 8) actually has **Summary / Diagnostics / Metrics** tabs, and
+> Export is its own separate screen (`ExportScreen`, page 9) — the two
+> share a sidebar row per `PAGE_TO_STAGE`, but they are not tabs of one
+> screen. This section's wireframes below are only renumbered here, not
+> rewritten to match; that is a separate follow-up.
 
 The final stage has three tabs that share a session picker on top.
 
-#### 7.1 Tab — Preview
+#### 9.1 Tab — Preview
 
 ```
-┌─ Stage 7  •  Preview ────────────────────────────────────────────┐
+┌─ Stage 9  •  Preview ────────────────────────────────────────────┐
 │  Session [ S-N1_T1 ▾ ]    [ ▶ Run preview ]                      │
 │                                                                  │
 │   Layers   ☑ Frame  ☑ Zones  ☑ Raw trajectories                 │
@@ -584,10 +686,10 @@ The final stage has three tabs that share a session picker on top.
 - Layers can be toggled live.
 - The QC panel mirrors the per-session diagnostics row.
 
-#### 7.2 Tab — Diagnostics
+#### 9.2 Tab — Diagnostics
 
 ```
-┌─ Stage 7  •  Diagnostics ────────────────────────────────────────┐
+┌─ Stage 9  •  Diagnostics ────────────────────────────────────────┐
 │  Per-session QC                                                  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │ Session  valid%  jumps  switches  NA%   speed-spark         │  │
@@ -600,10 +702,10 @@ The final stage has three tabs that share a session picker on top.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-#### 7.3 Tab — Export
+#### 9.3 Tab — Export
 
 ```
-┌─ Stage 7  •  Export ─────────────────────────────────────────────┐
+┌─ Stage 9  •  Export ─────────────────────────────────────────────┐
 │                                                                  │
 │   Format                                                         │
 │    ☑ CSV (long)        master_fish_by_frame.csv  trial_*.csv     │
@@ -640,7 +742,7 @@ After success the **reproducibility receipt** described in §2.4
 appears.
 
 **Saved at advance:** `ExportTarget` list, run-log entry, manifest
-hash. The user remains on Stage 7 — there is no Stage 8.
+hash. The user remains on Stage 9 — it is the last stage.
 
 ---
 
@@ -649,7 +751,7 @@ hash. The user remains on Stage 7 — there is no Stage 8.
 ```
                        ┌─ identity-free? ─┐
                        │                  │
-        Sessions ──────┤                  ├──► Stage 6 hides IL-* for that session
+        Sessions ──────┤                  ├──► Stage 7 (Metrics) hides IL-* for that session
                        │                  │
                        └──────────────────┘
 
@@ -661,7 +763,7 @@ hash. The user remains on Stage 7 — there is no Stage 8.
 
                        ┌─ no zones? ──────┐
                        │                  │
-        Zones    ──────┤                  ├──► Stage 6 zone tab disabled
+        Zones    ──────┤                  ├──► Stage 7 (Metrics) zone tab disabled
                        │                  │
                        └──────────────────┘
 
@@ -684,8 +786,10 @@ hash. The user remains on Stage 7 — there is no Stage 8.
 | 3 | Calibration | Depends on `n_animals` and FPS from Stage 2; must precede zones if zone areas use cm. |
 | 4 | Zones | Depends on having an extracted video frame from Stage 2 and an orientation tag from Stage 3. |
 | 5 | Metadata | Optional; placed late so that the user already knows which sessions are real. |
-| 6 | Preprocessing & Metrics | Needs identity status, FPS, BL, zones, and metadata-level options (treatment list) to render correctly. |
-| 7 | Preview & Export | The output stage — depends on every previous stage. |
+| 6 | Preprocessing | Needs FPS from Stage 2 and calibration from Stage 3 to render its parameters meaningfully. |
+| 7 | Metrics | Needs identity status, zones, and metadata-level options (treatment list) to grey rows correctly. |
+| 8 | Processing | Runs the pipeline — depends on every configuration stage above. |
+| 9 | Preview & Export | The output stage — depends on every previous stage. |
 
 The order is gated but not strictly serial: jumping back to fix
 Stage 3 from Stage 6 is fully supported and only invalidates fields
@@ -721,8 +825,8 @@ and headless CLI report the same identifier. The full list:
 | `SMOOTH_ORDER_GE_WINDOW` | 6 | error | "Polynomial order must be smaller than the window length." |
 | `COVERAGE_LOOSE` | 6 | warning | "Coverage gate above 50 % NA is very permissive." |
 | `PREPROCESS_STAGE_FAILED` | 6 | error | "Preprocessing succeeded but a later stage failed: <reason>" |
-| `EXPORT_OVERWRITE` | 7 | confirmation | "Will overwrite <N> file(s)." |
-| `EXPORT_PARTIAL_FAIL` | 7 | error | "Export aborted after <N> file(s)." |
+| `EXPORT_OVERWRITE` | 9 | confirmation | "Will overwrite <N> file(s)." |
+| `EXPORT_PARTIAL_FAIL` | 9 | error | "Export aborted after <N> file(s)." |
 | `IDT_NO_TRAJ` | 2 | error | "No trajectory file found in `<folder>/trajectories/`." |
 | `IDT_FORMAT_AMBIGUOUS` | 2 | info | "Multiple trajectory formats present (`<list>`); chose `<best>`." |
 | `IDT_PICKLE_REFUSED` | 2 | error | "Loading `<path>` requires explicit consent (`--allow-pickle` / GUI prompt)." |
@@ -743,7 +847,7 @@ The `IDT_*` codes are sourced from [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRAC
 
 ## 7. Reproducibility outputs (user perspective)
 
-After Stage 7 the user has, on disk:
+After Stage 9 the user has, on disk:
 
 ```
 <project_dir>/
