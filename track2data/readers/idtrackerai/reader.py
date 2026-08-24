@@ -150,7 +150,7 @@ class IDTrackerAiReader(SessionReader):
         one sits right next to it. Only raise once nothing in the folder is
         readable.
         """
-        from track2data.core.errors import ImportError_
+        from track2data.core.errors import DataValidationError, ImportError_
 
         skipped: list[str] = []
         for fmt, path in hit.all_present:
@@ -165,6 +165,16 @@ class IDTrackerAiReader(SessionReader):
                 # installed -- treat exactly like "no loader" and keep
                 # falling back, rather than crashing the whole import.
                 skipped.append(f"{fmt} (missing optional dependency)")
+                continue
+            except (OSError, DataValidationError) as exc:
+                # The file is *present* but unreadable -- corrupt/truncated
+                # (h5py.File() raises a plain OSError on a malformed file,
+                # not anything this reader controls) or structurally wrong
+                # (a loader's own DataValidationError/ImportError_, e.g. no
+                # 'trajectories' dataset). Same fallback logic as a missing
+                # loader: try the next-best format rather than crashing the
+                # whole import when a readable one sits right next to it.
+                skipped.append(f"{fmt} (unreadable: {exc})")
                 continue
             if skipped:
                 logger.info(

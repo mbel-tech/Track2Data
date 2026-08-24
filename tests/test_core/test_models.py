@@ -112,6 +112,16 @@ class TestPreprocessConfig:
         assert cfg.gap_fill.max_gap_frames == 30
         assert cfg.jump.method == "sd_multiple"
         assert cfg.jump.sd_mult == 10.0
+        # Off by default: re-permutes 17.1% of a real recording and injects
+        # ~640px single-frame teleports (measured on the real corpus, see
+        # IdSwitchCfg's docstring) -- pending a fragment-boundary-aware
+        # replacement. Unlike gap_fill/jump/smoothing above, this one is
+        # NOT on by default, and the only other place that was asserted
+        # (tests/test_corpus/test_real_sessions.py) is corpus_local-marked
+        # and skips automatically in CI, so a regression here would
+        # otherwise pass CI silently. code-reviewer finding on #51,
+        # Important #1.
+        assert cfg.identity_switch.enabled is False
         assert cfg.identity_switch.tier1_ratio == 1.5
         assert cfg.identity_switch.tier2_hungarian is True
         assert cfg.smoothing.method == "savgol"

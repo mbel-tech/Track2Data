@@ -322,3 +322,35 @@ class TestReaderFormatFallback:
         with pytest.raises(ImportError_) as exc_info:
             reader.read(session_dir)
         assert exc_info.value.code == "IDT_FORMAT_AMBIGUOUS"
+
+    def test_reads_via_npy_when_h5_is_corrupt(
+        self, reader: IDTrackerAiReader, tmp_path: Path
+    ) -> None:
+        """_load_payload's own docstring promises it "only raise[s] once
+        nothing in the folder is readable" -- but a *present, higher-
+        priority, corrupt* format (as opposed to one with no loader at
+        all, covered above) used to defeat that promise: load_h5() raises
+        OSError from h5py.File() on a malformed file, and _load_payload
+        only caught ImportError, so the OSError propagated uncaught
+        instead of falling through to the readable npy sitting right next
+        to it. code-reviewer finding on #51, Important #3."""
+        import numpy as np
+
+        session_dir = tmp_path / "session_corrupt_h5"
+        traj_dir = session_dir / "trajectories"
+        traj_dir.mkdir(parents=True)
+        # Not valid HDF5 -- h5py.File() raises OSError opening this, not
+        # anything read_h5() itself throws deliberately.
+        (traj_dir / "trajectories.h5").write_bytes(b"not a real hdf5 file")
+        traj_dict = {
+            "trajectories": np.zeros((3, 2, 2)),
+            "version": "6.0.13",
+            "frames_per_second": 25.0,
+            "width": 1920,
+            "height": 1080,
+        }
+        np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
+
+        s = reader.read(session_dir)
+        assert s.raw_xy.shape == (3, 2, 2)
+        assert s.trajectory_format == "npy"
