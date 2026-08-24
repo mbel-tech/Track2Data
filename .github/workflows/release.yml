@@ -11,6 +11,15 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# This repository's default GITHUB_TOKEN permission is read-only, so the
+# publish job has to ask for write access explicitly -- without it,
+# `gh release create` fails with "HTTP 403: Resource not accessible by
+# integration". Declared here rather than by flipping the repository-wide
+# default to read/write, which would hand every job in every workflow more
+# access than it needs. Build jobs only ever read.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build (${{ matrix.os }})
@@ -255,6 +264,10 @@ jobs:
     needs: [build, determinism]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
+    # Creating a release writes to the repository; this is the only job
+    # that needs more than the workflow-level read above.
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
