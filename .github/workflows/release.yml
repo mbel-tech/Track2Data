@@ -293,7 +293,13 @@ jobs:
             notes="Unsigned binaries -- see the README for the trust path on each OS, and verify your download against the attached SHA-256 sums."
           fi
 
+          # --repo is required: this job only downloads artifacts and never
+          # checks the repository out, so gh has no git remote to infer the
+          # target from and fails with "not a git repository". Adding a
+          # checkout would also work but pulls the whole tree just to name
+          # a repo that github.repository already holds.
           gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
             --title "Track2Data ${{ github.ref_name }}" \
             --notes "$notes" \
             "${assets[@]}"
