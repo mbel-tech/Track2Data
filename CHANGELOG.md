@@ -2,11 +2,21 @@
 
 All notable changes to Track2Data are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-this project has not yet made a versioned release, so everything below is
-listed under **Unreleased** pending the v0.1.0 tag.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] — 2026-08-24
+
+First public release: the engine, the wizard GUI, and the CLI, wired
+end to end and validated against a real 70-session idtracker.ai corpus.
+
+Binaries for Windows, macOS and Linux are published on the release page.
+They are **unsigned** — see [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md)
+for the per-OS trust path and why the first release cannot be signed.
+
+Everything below is the change history that led here; for a new user
+it reads as a description of what the tool does and does not do rather
+than as a diff.
 
 ### Changed
 
