@@ -549,27 +549,27 @@ preselected; Identity Switch Correction defaults **off**).
 **Wireframe (current implementation):**
 
 ```
-┌─ Stage 7  •  Metrics ─────────────────────────────────────────────┐
-│  Choose which behavioural metrics to extract.                     │
-│                                                                    │
-│  [ Individual ] [ Group ] [ Zone ]                                │
-│  ┌────────┬────────┬───────────────────┬──────┬────────┐          │
-│  │Include │  ID    │ Name              │ Info │ Config │          │
-│  ├────────┼────────┼───────────────────┼──────┼────────┤          │
-│  │  ☑     │ IL-1   │ Path Length       │  ⓘ   │   ⚙    │          │
-│  │  ☑     │ IL-2   │ Speed             │  ⓘ   │   ⚙    │          │
-│  │  ☐     │ IL-3   │ Centre Distance   │  ⓘ   │   ⚙    │          │
-│  │  ☑     │ IL-4   │ Activity          │  ⓘ   │   ⚙    │          │
-│  │  ☐     │ IL-5   │ Tortuosity        │  ⓘ   │   ⚙    │          │
-│  │  ☐     │ IL-6   │ Acceleration      │  ⓘ   │   ⚙    │          │
-│  │  ☐     │ IL-7   │ Freezing Bouts    │  ⓘ   │   ⚙    │          │
-│  │  ☐     │ IL-8   │ Turn Rate         │  ⓘ   │   ⚙    │          │
-│  └────────┴────────┴───────────────────┴──────┴────────┘          │
-│  (Greyed for a session with no stable identities.)                │
-│                                                                    │
-│  Quality threshold  [ 0.00 ]                                      │
-│  [ Apply selection ]                                               │
-└────────────────────────────────────────────────────────────────────┘
+┌─ Stage 7  •  Metrics ──────────────────────────────────────────────────────┐
+│  Choose which behavioural metrics to extract.                              │
+│                                                                             │
+│  [ Individual ] [ Group ] [ Zone ]                                         │
+│  ┌────────┬────────┬─────────────────────────────────────┬──────┬────────┐ │
+│  │Include │  ID    │ Name                                │ Info │ Config │ │
+│  ├────────┼────────┼─────────────────────────────────────┼──────┼────────┤ │
+│  │  ☑     │ IL-1   │ Distance Travelled                  │  ⓘ   │   ⚙    │ │
+│  │  ☑     │ IL-2   │ Speed (mean / median / max)         │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ IL-3   │ Distance from Arena Centre          │  ⓘ   │   ⚙    │ │
+│  │  ☑     │ IL-4   │ Activity / Freezing Fraction        │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ IL-5   │ Tortuosity                          │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ IL-6   │ Acceleration (mean abs / RMS / max) │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ IL-7   │ Freezing-Bout Count & Duration      │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ IL-8   │ Turn Rate (Heading Change)          │  ⓘ   │   ⚙    │ │
+│  └────────┴────────┴─────────────────────────────────────┴──────┴────────┘ │
+│  (Greyed for a session with no stable identities.)                        │
+│                                                                             │
+│  Quality threshold  [ 0.00 ]                                              │
+│  [ Apply selection ]                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Required inputs:** at least one metric selected.

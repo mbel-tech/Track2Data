@@ -30,8 +30,16 @@ from PySide6.QtWidgets import (
 
 from track2data.core.hashing import file_sha256
 from track2data.core.models import MappingRule, MetadataSource
+from ui.widgets.labels import label_for
 
 _CANONICAL_FIELDS = ["session_id", "treatment", "trial_id", "trial_date"]
+
+#: field -> row label override, for the ones str.title() gets wrong.
+#: title() capitalises the first letter of each word with no idea that
+#: "id" is an acronym -- "session_id" -> "Session Id", not "Session
+#: ID" -- so both id-suffixed fields need an explicit entry; treatment
+#: and trial_date already read fine through the mechanical fallback.
+_FIELD_LABELS = {"session_id": "Session ID", "trial_id": "Trial ID"}
 
 
 class MetadataScreen(QWidget):
@@ -86,15 +94,18 @@ class MetadataScreen(QWidget):
         map_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
         root.addWidget(map_label)
 
-        mapping_form = QFormLayout()
-        mapping_form.setSpacing(8)
+        # Stored on self (not just a local) so tests can inspect the
+        # actual rendered row labels -- see test_metadata_screen.py's
+        # pretty-label regression test.
+        self._mapping_form = QFormLayout()
+        self._mapping_form.setSpacing(8)
         self._combos: dict[str, QComboBox] = {}
         for field in _CANONICAL_FIELDS:
             combo = QComboBox()
             combo.addItem("(skip)")
             self._combos[field] = combo
-            mapping_form.addRow(f"{field}:", combo)
-        root.addLayout(mapping_form)
+            self._mapping_form.addRow(f"{label_for(field, _FIELD_LABELS)}:", combo)
+        root.addLayout(self._mapping_form)
 
         apply_btn = QPushButton("Apply mapping")
         apply_btn.setFixedWidth(130)
