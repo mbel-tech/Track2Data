@@ -12,9 +12,21 @@ Widgets:
                                    height_px disagree with a project
                                    session's own video dimensions
   • landmarks_list  QListWidget -- Session.setup_points for the
-                                   selected session, shown as reference
-                                   guides only (never turned into
-                                   auto-generated polygons)
+                                   selected session, shown as a text
+                                   list alongside the interactive
+                                   canvas below
+  • canvas          ZoneCanvas  -- the session's background.png with
+                                   setup_points overlaid as clickable
+                                   markers (ui/widgets/zone_canvas.py);
+                                   clicking points in order selects
+                                   them as polygon vertices
+  • custom_point_btn QPushButton (checkable) -- toggles click-to-add-
+                                   point mode on the canvas, for points
+                                   not in setup_points
+  • zone_name_edit / zone_level_combo / save_zone_btn -- name + level
+                                   for the polygon the canvas selection
+                                   currently describes; save_zone_btn is
+                                   enabled once >= 3 points are selected
 """
 
 from __future__ import annotations
@@ -25,6 +37,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QMessageBox,
     QPushButton,
@@ -32,8 +45,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data.core.models import ZoneSet
+from track2data.core.models import ROI, ZoneSet
 from ui.widgets.labels import label_for
+from ui.widgets.zone_canvas import ZoneCanvas
+
+#: Minimum vertices for a valid polygon.
+_MIN_ZONE_VERTICES = 3
 
 
 class ZonesScreen(QWidget):
@@ -51,6 +68,7 @@ class ZonesScreen(QWidget):
             store.sessionsChanged.connect(self._refresh_session_combo)
             store.sessionFactsChanged.connect(self._refresh_mismatch_warning)
             store.sessionFactsChanged.connect(self._refresh_landmarks)
+            store.sessionFactsChanged.connect(self._refresh_canvas)
         self._refresh_session_combo()
         self._refresh_list()
 
@@ -131,7 +149,47 @@ class ZonesScreen(QWidget):
         self._landmarks_list.setMinimumHeight(80)
         root.addWidget(self._landmarks_list)
 
+        # ── interactive canvas: click points to build a zone polygon ────
+        canvas_label = QLabel(
+            "Click points below to select them as zone vertices, in order:"
+        )
+        canvas_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        root.addWidget(canvas_label)
+
+        self._canvas = ZoneCanvas()
+        root.addWidget(self._canvas)
+        self._canvas.selectionChanged.connect(self._on_canvas_selection_changed)
+
+        canvas_btn_row = QHBoxLayout()
+        self._custom_point_btn = QPushButton("Add Custom Point")
+        self._custom_point_btn.setCheckable(True)
+        self._custom_point_btn.toggled.connect(self._canvas.set_custom_point_mode)
+        canvas_btn_row.addWidget(self._custom_point_btn)
+        canvas_btn_row.addStretch()
+        root.addLayout(canvas_btn_row)
+
+        save_zone_form = QFormLayout()
+        self._zone_name_edit = QLineEdit()
+        save_zone_form.addRow("Zone name:", self._zone_name_edit)
+        self._zone_level_combo = QComboBox()
+        self._zone_level_combo.setEditable(True)
+        self._zone_level_combo.addItems(["main", "secondary"])
+        save_zone_form.addRow("Level:", self._zone_level_combo)
+        root.addLayout(save_zone_form)
+
+        save_zone_row = QHBoxLayout()
+        self._save_zone_btn = QPushButton("Save Zone")
+        self._save_zone_btn.setEnabled(False)
+        self._save_zone_btn.clicked.connect(self._save_zone)
+        save_zone_row.addWidget(self._save_zone_btn)
+        self._selection_count_label = QLabel("0 points selected")
+        self._selection_count_label.setStyleSheet("font-size: 13px; color: #555;")
+        save_zone_row.addWidget(self._selection_count_label)
+        save_zone_row.addStretch()
+        root.addLayout(save_zone_row)
+
         self._session_combo.currentTextChanged.connect(self._refresh_landmarks)
+        self._session_combo.currentTextChanged.connect(self._refresh_canvas)
 
         root.addStretch()
 
@@ -254,3 +312,43 @@ class ZonesScreen(QWidget):
             return
         for name, point in facts.setup_points.items():
             self._landmarks_list.addItem(f"{name}: {point}")
+
+    def _refresh_canvas(self) -> None:
+        session_id = self._session_combo.currentText()
+        if self._store is None or not session_id:
+            self._canvas.load_session(None, None)
+            return
+        facts = self._store.session_facts(session_id)
+        if facts is None:
+            self._canvas.load_session(None, None)
+            return
+        self._canvas.load_session(facts.background_image_path, facts.setup_points)
+
+    def _on_canvas_selection_changed(self) -> None:
+        n = len(self._canvas.selected_points())
+        self._selection_count_label.setText(f"{n} point{'s' if n != 1 else ''} selected")
+        self._save_zone_btn.setEnabled(n >= _MIN_ZONE_VERTICES)
+
+    def _save_zone(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        name = self._zone_name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Name required", "Give this zone a name before saving.")
+            return
+        vertices = self._canvas.selected_points()
+        if len(vertices) < _MIN_ZONE_VERTICES:
+            return
+        level = self._zone_level_combo.currentText().strip() or "main"
+        roi = ROI(name=name, level=level, vertices=vertices)
+        try:
+            self._store.update_zones(
+                self._store.manifest.zones.model_copy(
+                    update={"rois": [*self._store.manifest.zones.rois, roi]}
+                )
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to save zone:\n{exc}")
+            return
+        self._canvas.clear_selection()
+        self._zone_name_edit.clear()

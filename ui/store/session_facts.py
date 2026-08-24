@@ -21,6 +21,7 @@ never in the manifest schema.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -55,6 +56,10 @@ class SessionFacts:
     # track2data.zones.io.zone_set_from_roi_list().
     roi_list: list[dict[str, Any]] | None
     has_body_length: bool
+    # Path only, not decoded pixel data (see readers/idtrackerai/
+    # preprocessing.py's module docstring) -- the zone canvas decodes
+    # it directly via QImage when it needs a backdrop.
+    background_image_path: Path | None
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -74,4 +79,5 @@ class SessionFacts:
             setup_points=session.setup_points,
             roi_list=session.roi_list,
             has_body_length=session.body_length_px is not None,
+            background_image_path=session.background_image_path,
         )

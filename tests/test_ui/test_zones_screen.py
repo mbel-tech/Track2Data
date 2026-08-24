@@ -49,6 +49,7 @@ def _add_session_with_facts(store, session_id: str, tmp_path: Path, **facts_kwar
         setup_points=None,
         roi_list=None,
         has_body_length=False,
+        background_image_path=None,
     )
     defaults.update(facts_kwargs)
     store._session_facts[session_id] = SessionFacts(**defaults)
@@ -237,6 +238,156 @@ def test_roi_level_shown_title_cased_not_raw(qtbot, tmp_path: Path) -> None:
     text = screen._zone_list.item(0).text()
     assert "secondary" not in text
     assert "Secondary" in text
+
+
+# ── canvas: loading a session's background + setup_points ───────────────────
+
+
+def test_selecting_a_session_loads_its_points_into_the_canvas(qtbot, tmp_path: Path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store, "session_a", tmp_path, setup_points={"BP1": [[303, 477]], "BP2": [[1037, 497]]}
+    )
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    assert screen._canvas.selected_points() == []
+    # Points are loaded (clickable), even though nothing is selected yet.
+    screen._canvas.click_at(303.0, 477.0)
+    assert screen._canvas.selected_points() == [(303.0, 477.0)]
+
+
+def test_custom_point_button_toggles_canvas_custom_mode(qtbot, tmp_path: Path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(store, "session_a", tmp_path)
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    screen._custom_point_btn.setChecked(True)
+    screen._canvas.click_at(15.0, 15.0)  # empty space -- only works in custom mode
+
+    assert screen._canvas.selected_points() == [(15.0, 15.0)]
+
+
+# ── canvas: saving a selection as a zone ─────────────────────────────────────
+
+
+def test_save_zone_button_disabled_until_three_points_selected(qtbot, tmp_path: Path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store,
+        "session_a",
+        tmp_path,
+        setup_points={"BP1": [[0, 0]], "BP2": [[10, 0]], "BP3": [[10, 10]]},
+    )
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    assert not screen._save_zone_btn.isEnabled()
+
+    screen._canvas.click_at(0.0, 0.0)
+    screen._canvas.click_at(10.0, 0.0)
+    assert not screen._save_zone_btn.isEnabled()
+
+    screen._canvas.click_at(10.0, 10.0)
+    assert screen._save_zone_btn.isEnabled()
+
+
+def test_save_zone_appends_an_roi_built_from_the_selection_in_click_order(
+    qtbot, tmp_path: Path
+) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store,
+        "session_a",
+        tmp_path,
+        setup_points={"BP1": [[0, 0]], "BP2": [[10, 0]], "BP3": [[10, 10]]},
+    )
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    screen._canvas.click_at(10.0, 10.0)
+    screen._canvas.click_at(0.0, 0.0)
+    screen._canvas.click_at(10.0, 0.0)
+    screen._zone_name_edit.setText("arena")
+    screen._zone_level_combo.setCurrentText("main")
+
+    screen._save_zone()
+
+    rois = store.manifest.zones.rois
+    assert len(rois) == 1
+    assert rois[0].name == "arena"
+    assert rois[0].level == "main"
+    assert rois[0].vertices == [(10.0, 10.0), (0.0, 0.0), (10.0, 0.0)]
+
+
+def test_save_zone_requires_a_name(qtbot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    monkeypatch.setattr(
+        "ui.zones_screen.QMessageBox.warning", staticmethod(lambda *a, **k: None)
+    )
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store,
+        "session_a",
+        tmp_path,
+        setup_points={"BP1": [[0, 0]], "BP2": [[10, 0]], "BP3": [[10, 10]]},
+    )
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+    screen._canvas.click_at(0.0, 0.0)
+    screen._canvas.click_at(10.0, 0.0)
+    screen._canvas.click_at(10.0, 10.0)
+    screen._zone_name_edit.setText("")  # blank
+
+    screen._save_zone()
+
+    assert store.manifest.zones.rois == []
+
+
+def test_save_zone_clears_canvas_selection_and_name_field(qtbot, tmp_path: Path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store,
+        "session_a",
+        tmp_path,
+        setup_points={"BP1": [[0, 0]], "BP2": [[10, 0]], "BP3": [[10, 10]]},
+    )
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+    screen._canvas.click_at(0.0, 0.0)
+    screen._canvas.click_at(10.0, 0.0)
+    screen._canvas.click_at(10.0, 10.0)
+    screen._zone_name_edit.setText("arena")
+
+    screen._save_zone()
+
+    assert screen._canvas.selected_points() == []
+    assert screen._zone_name_edit.text() == ""
 
 
 # ── existing CSV load/clear behaviour (regression) ───────────────────────────
