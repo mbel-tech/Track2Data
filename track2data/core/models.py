@@ -229,7 +229,12 @@ class PreprocessConfig(BaseModel):
 
 
 class CalibrationConfig(BaseModel):
-    mode: Literal["scalar", "bodylength"] = "bodylength"
+    # "session" reads each session's own length_unit (the validator's
+    # px-to-real-unit ratio) directly -- see
+    # track2data/calibration/session_unit.py. Distinct from
+    # "bodylength", which no longer consumes length_unit at all (see
+    # that module's docstring for why).
+    mode: Literal["scalar", "bodylength", "session"] = "bodylength"
     px_per_cm: float | None = None
     bl_min_samples: int = 30
     # idtracker.ai's length_unit (session_idtrackerai.md:242) is a ratio

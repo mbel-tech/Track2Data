@@ -248,6 +248,15 @@ class Engine:
                     psess = apply_bodylength_calibration(psess, cfg)
                 except Exception:
                     logger.warning("Body-length calibration failed; skipping.")
+            elif cfg.mode == "session":
+                # Deliberately not caught-and-skipped like bodylength
+                # above: a missing length_unit here means Engine.validate()
+                # should already have blocked the run (fail loudly, name
+                # the sessions) rather than silently emitting uncalibrated
+                # output under a mode the user explicitly chose because
+                # they wanted per-session calibration.
+                from track2data.calibration.session_unit import apply_session_calibration
+                psess = apply_session_calibration(psess, cfg)
 
             # Zone assignment.
             zone_set = self._manifest.zones
@@ -785,7 +794,44 @@ class Engine:
         cfg = self._manifest.calibration
         if cfg.mode == "scalar" and (cfg.px_per_cm is None or cfg.px_per_cm <= 0):
             issues.append("Scalar calibration selected but px_per_cm is not set.")
+        elif cfg.mode == "session":
+            issues.extend(self._session_calibration_issues())
         sel = self._manifest.metrics
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
+        return issues
+
+    def _session_calibration_issues(self) -> list[str]:
+        """Fail loudly, name the sessions: for 'session' calibration
+        mode, every imported session must carry its own length_unit, or
+        the run should be blocked here rather than each affected
+        session silently failing calibration one at a time inside
+        Engine.run() (see apply_session_calibration's CAL-SESSION-MISSING).
+        Reads every session up front (same I/O cost as import_sessions())
+        -- validate() is an explicit pre-flight action, not something
+        called on every keystroke, so this is worth the cost for a
+        complete report instead of a partial one."""
+        missing: list[str] = []
+        unreadable: list[str] = []
+        for ref in self._manifest.sessions:
+            try:
+                session = read_session(ref.folder)
+            except Exception:
+                unreadable.append(ref.session_id)
+                continue
+            if session.length_unit is None:
+                missing.append(ref.session_id)
+
+        issues: list[str] = []
+        if missing:
+            issues.append(
+                "Session calibration selected but these sessions have no length_unit: "
+                + ", ".join(missing)
+                + ". Calibrate them in the idtracker.ai validator, or switch calibration mode."
+            )
+        if unreadable:
+            issues.append(
+                "Session calibration selected but these sessions could not be read to "
+                "check length_unit: " + ", ".join(unreadable)
+            )
         return issues

@@ -5,6 +5,40 @@ All notable changes to Track2Data are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **New "session" calibration mode** (`CalibrationConfig.mode = "session"`).
+  Uses each session's own `length_unit` -- idtracker.ai's px-to-real-unit
+  ratio from the validator's Length Calibration tool -- so different
+  sessions in the same project can have their own calibration, instead of
+  one project-wide scalar value. The Calibration screen now shows three
+  modes (Body length / Custom / Session calibration) with a unit picker,
+  a required "I confirm" checkbox, and a per-session readiness list so a
+  session missing `length_unit` is visible before running.
+  `Engine.validate()` blocks the run and names every session missing it
+  rather than letting each one fail individually mid-pipeline.
+- **`IDT_LENGTH_UNIT_INVALID` warning** is now logged when a session's
+  `length_unit` is a genuinely corrupt value (non-numeric, non-finite, or
+  a non-positive number other than idtracker.ai's own `-1` "never
+  calibrated" sentinel) -- distinguishing "never calibrated" from
+  "corrupt value", both of which previously normalised to `None`
+  identically and silently.
+
+### Changed
+
+- **Body-length calibration mode no longer reads `length_unit`.**
+  Previously, whenever a session happened to carry a `length_unit`,
+  `bodylength` mode silently divided by it and set `px_per_cm` from it --
+  every `*_cm` export column was quietly calibrated from a value the user
+  never confirmed using. `body_length_cm` is now always stored in pixel
+  units (the field name is a long-standing misnomer, kept for interface
+  stability) regardless of whether `length_unit` is present. If your
+  project relied on the implicit calibration, switch to the new
+  **"session" calibration mode** for the same ratio, now with an explicit
+  user confirmation step.
+
 ## [0.1.0] — 2026-08-24
 
 First public release: the engine, the wizard GUI, and the CLI, wired

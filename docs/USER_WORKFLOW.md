@@ -318,7 +318,17 @@ or body lengths, not pixels.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Required inputs:** mode (scalar or body-length).
+> **Reality note:** the real screen is simpler than this wireframe
+> (no measure-on-frame tool, BL sample-count table, or orientation
+> pairing yet) and, as of Part 2 of the post-v0.1.0 GUI fixes, offers
+> a **third mode** this wireframe doesn't show: **Session
+> calibration**, which uses each session's own `length_unit` (the
+> validator's calibration ratio) instead of one project-wide scalar or
+> a derived body-length ratio. It adds a unit picker, a required
+> confirmation checkbox, and a per-session readiness list so a session
+> missing `length_unit` is visible before running.
+
+**Required inputs:** mode (scalar, body-length, or session).
 
 **Optional inputs:** orientation tag per session (only required if
 the user wants to reuse one zone set across mirrored videos).
