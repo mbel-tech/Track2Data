@@ -98,6 +98,9 @@ ignore = [
 "track2data/core/errors.py" = ["N801", "N818"]  # ImportError_ uses trailing _ to avoid shadowing built-in
 "track2data/core/progress.py" = ["N818"]  # OperationCancelled is a control-flow signal, not an "error"
 "extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
+".claude/skills/**" = ["ANN"]  # agent tooling (GUI driver), not product surface -- same
+                                # rationale as extract_bboxes.py above. Only ANN is relaxed,
+                                # so real errors (F, E, B, SIM, ...) still gate normally.
 "app/**" = ["ANN", "N815"]   # N815: Qt signal names are camelCase by convention
 "ui/**" = ["ANN", "N815", "N802"]    # N802: Qt event-handler overrides (showEvent, etc.) are camelCase by convention
 

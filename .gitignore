@@ -51,3 +51,6 @@ Checked sessions GOT/
 
 # Vendored idtracker.ai reference docs -- third-party content, not ours to redistribute
 docs_from_idtracker.ai/
+
+# GUI driver screenshots (.claude/skills/run-track2data/driver.py smoke)
+artifacts/
