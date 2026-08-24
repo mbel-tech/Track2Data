@@ -30,6 +30,7 @@ from track2data.core.models import (
     SessionRef,
     ZoneSet,
 )
+from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
 
@@ -66,6 +67,7 @@ class ProjectStore(QObject):
     runLogAppended     = Signal(str)           # one Markdown line
     taskProgress       = Signal(str, int)      # task_id, percent 0-100
     taskFinished       = Signal(str, object)   # task_id, result-or-exception
+    sessionFactsChanged = Signal()             # a SessionFacts entry was added/removed
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -73,6 +75,9 @@ class ProjectStore(QObject):
         self._project_dir: Path | None = None
         self._run_results: RunResult | None = None
         self._identity_probes: dict[str, str] = {}  # task_id -> session_id
+        # Derived cache, never persisted -- see ui/store/session_facts.py's
+        # module docstring for why this lives here and not on SessionRef.
+        self._session_facts: dict[str, SessionFacts] = {}
 
         self._tasks = TaskRunner(self)
         self._tasks.taskProgress.connect(self.taskProgress)
@@ -106,6 +111,13 @@ class ProjectStore(QObject):
     def run_results(self) -> RunResult | None:
         return self._run_results
 
+    def session_facts(self, session_id: str) -> SessionFacts | None:
+        """Derived facts read from *session_id*'s own trajectory files
+        (length_unit, setup_points, roi_list, video dims, ...), or None
+        before its background probe has completed / if it failed. See
+        ui/store/session_facts.py."""
+        return self._session_facts.get(session_id)
+
     def set_run_results(self, results: RunResult) -> None:
         """Record the outcome of the most recent Engine.run() and notify
         listeners (e.g. the preview screen's Diagnostics/Metrics tabs)."""
@@ -122,6 +134,7 @@ class ProjectStore(QObject):
     def new_project(self, name: str, directory: Path) -> None:
         """Create a blank manifest for a new project."""
         self._identity_probes.clear()
+        self._session_facts.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
             project_name=name,
@@ -137,6 +150,7 @@ class ProjectStore(QObject):
     def open_project(self, t2d_path: Path) -> None:
         """Load an existing project from a .t2d.json file."""
         self._identity_probes.clear()
+        self._session_facts.clear()
         from track2data.core.manifest import read as manifest_read
 
         self._manifest = manifest_read(t2d_path)
@@ -183,6 +197,14 @@ class ProjectStore(QObject):
             return
         self._manifest = self._manifest.model_copy(update={"sessions": list(sessions)})
         self.sessionsChanged.emit()
+        # Prune cached facts for anything no longer in the list, so a
+        # removed session's stale entry doesn't linger indefinitely.
+        kept_ids = {s.session_id for s in sessions}
+        removed = [sid for sid in self._session_facts if sid not in kept_ids]
+        if removed:
+            for sid in removed:
+                del self._session_facts[sid]
+            self.sessionFactsChanged.emit()
 
     def add_session(self, folder: Path) -> None:
         """Append a new SessionRef for *folder*, emit sessionsChanged, and
@@ -209,6 +231,11 @@ class ProjectStore(QObject):
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
             return
         self._set_session_identity(session_id, result.has_stable_identities)
+        # The probe already read the full Session for that one boolean --
+        # cache the rest of it too rather than discard it (see
+        # ui/store/session_facts.py).
+        self._session_facts[session_id] = SessionFacts.from_session(result)
+        self.sessionFactsChanged.emit()
 
     def _set_session_identity(self, session_id: str, has_stable_identities: bool) -> None:
         if self._manifest is None:
