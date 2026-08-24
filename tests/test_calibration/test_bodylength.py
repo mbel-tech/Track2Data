@@ -59,9 +59,11 @@ def session_with_bl(tmp_path: Path) -> Session:
 
 @pytest.fixture()
 def session_with_bl_and_unit(tmp_path: Path) -> Session:
-    """Session with body_length_px AND length_unit set (calibrated cm mode)."""
+    """Session with body_length_px AND length_unit set -- bodylength mode
+    ignores length_unit entirely (see calibration/bodylength.py's module
+    docstring), so this fixture exercises that length_unit's presence
+    makes no difference to the output."""
     bl = np.array([100.0, 120.0])
-    # length_unit = 10.0 px/cm → body_length_cm = [10.0, 12.0]
     return _make_session(
         n_frames=50, n_animals=2, body_length_px=bl, length_unit=10.0, tmp_path=tmp_path
     )
@@ -150,26 +152,30 @@ class TestApplyBodylengthCalibrationPixelMode:
         np.testing.assert_array_equal(out.xy, psess_with_bl.xy)
 
 
-# ── Tests: calibrated-cm mode (with length_unit) ──────────────────────────────
+# ── Tests: length_unit is ignored even when present ────────────────────────
 
 
-class TestApplyBodylengthCalibrationCmMode:
-    """When length_unit is set and > 0, body_length_cm = body_length_px / length_unit."""
+class TestApplyBodylengthCalibrationIgnoresLengthUnit:
+    """A session's length_unit must make no difference to bodylength
+    mode's output -- see calibration/bodylength.py's module docstring
+    for why this mode stopped consuming it (that's now 'session' mode,
+    calibration/session_unit.py, with a required user confirmation)."""
 
-    def test_body_length_cm_computed_correctly(
+    def test_body_length_cm_stays_in_pixels(
         self, psess_with_bl_and_unit: PreprocessedSession
     ) -> None:
         cfg = CalibrationConfig(mode="bodylength")
         out = apply_bodylength_calibration(psess_with_bl_and_unit, cfg)
-        # bl=[100,120], length_unit=10 → cm=[10.0, 12.0]
-        np.testing.assert_allclose(out.body_length_cm, [10.0, 12.0])
+        # bl=[100,120], length_unit=10 -- but length_unit is not consumed,
+        # so body_length_cm equals body_length_px unchanged.
+        np.testing.assert_allclose(out.body_length_cm, [100.0, 120.0])
 
-    def test_px_per_cm_set_from_length_unit(
+    def test_px_per_cm_stays_none_despite_length_unit(
         self, psess_with_bl_and_unit: PreprocessedSession
     ) -> None:
         cfg = CalibrationConfig(mode="bodylength")
         out = apply_bodylength_calibration(psess_with_bl_and_unit, cfg)
-        assert out.px_per_cm == pytest.approx(10.0)
+        assert out.px_per_cm is None
 
     def test_body_length_cm_shape(self, psess_with_bl_and_unit: PreprocessedSession) -> None:
         cfg = CalibrationConfig(mode="bodylength")
@@ -189,8 +195,8 @@ class TestApplyBodylengthCalibrationCmMode:
         )
         cfg = CalibrationConfig(mode="bodylength")
         out = apply_bodylength_calibration(psess, cfg)
-        np.testing.assert_allclose(out.body_length_cm, [10.0])
-        assert out.px_per_cm == pytest.approx(8.0)
+        np.testing.assert_allclose(out.body_length_cm, [80.0])
+        assert out.px_per_cm is None
 
 
 # ── Tests: error cases ─────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ loader's job.  It only transforms an already-loaded dict into a Session.
 
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,16 @@ import numpy as np
 from track2data.core.errors import DataValidationError
 from track2data.core.models import Session, VideoInfo
 from track2data.readers.idtrackerai.key_aliases import KNOWN_TRAJECTORY_KEYS, QUALITY_KEYS
+
+logger = logging.getLogger(__name__)
+
+# idtracker.ai's own sentinel for "this session was never run through the
+# validator's Length Calibration tool" (session_idtrackerai.md; see
+# formats/h5.py's docstring) -- distinct from a genuinely corrupt value
+# (garbage string, NaN/inf, or some other non-positive number), which is
+# also normalised to None but, unlike this expected sentinel, is worth
+# logging so "never calibrated" and "corrupt value" aren't indistinguishable.
+_UNCALIBRATED_SENTINEL = -1.0
 
 
 class Normaliser:
@@ -293,8 +304,19 @@ class Normaliser:
         try:
             val = float(raw)
         except (TypeError, ValueError):
+            logger.warning(
+                "IDT_LENGTH_UNIT_INVALID: length_unit=%r is not numeric; "
+                "manual calibration required.",
+                raw,
+            )
+            return None
+        if val == _UNCALIBRATED_SENTINEL:
             return None
         if not math.isfinite(val) or val <= 0:
+            logger.warning(
+                "IDT_LENGTH_UNIT_INVALID: length_unit=%r invalid; manual calibration required.",
+                val,
+            )
             return None
         return val
 

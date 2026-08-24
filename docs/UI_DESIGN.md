@@ -378,6 +378,18 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ### 6.3 Screen 3.1 — Calibration Method Chooser
 
+> **Reality note (Part 2 of the post-v0.1.0 GUI fixes):** the real
+> `CalibrationScreen` is a single page (mode radios, mode-specific
+> controls, and Apply, all together) rather than this section's
+> aspirational two-screen chooser/data-entry split -- that mismatch
+> predates this note and is unchanged here. What *did* change: there
+> are now three modes, not two -- a "Session calibration" radio was
+> added alongside Scalar and Body length, using each session's own
+> `length_unit` (see `track2data/calibration/session_unit.py`), with a
+> unit picker, a required confirmation checkbox, and a per-session
+> readiness list. The widget names/behaviour below (measure-on-frame
+> tool, BL sample-count table, orientation pairing) remain unbuilt.
+
 **Stage:** Stage 3 (Calibration)  
 **Purpose:** Select between scalar px-per-cm vs. body-length calibration modes.
 

@@ -294,6 +294,73 @@ class TestNormaliserLengthUnit:
         s = Normaliser(tmp_path).normalise(payload)
         assert s.length_unit is None
 
+    # ── IDT_LENGTH_UNIT_INVALID: "never calibrated" vs "corrupt value" ──────
+    #
+    # idtracker.ai's own sentinel for "never calibrated" is -1 (see
+    # formats/h5.py's docstring) -- that, and a bare None, are the expected,
+    # silent cases. Anything else that still normalises to None (a garbage
+    # string, NaN/inf, or some other non-positive number) is a genuinely
+    # corrupt value and gets logged so the two stop being indistinguishable.
+
+    def test_uncalibrated_sentinel_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["length_unit"] = -1.0
+        with caplog.at_level("WARNING"):
+            s = Normaliser(tmp_path).normalise(payload)
+        assert s.length_unit is None
+        assert "IDT_LENGTH_UNIT_INVALID" not in caplog.text
+
+    def test_none_length_unit_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["length_unit"] = None
+        with caplog.at_level("WARNING"):
+            Normaliser(tmp_path).normalise(payload)
+        assert "IDT_LENGTH_UNIT_INVALID" not in caplog.text
+
+    def test_zero_length_unit_logs_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["length_unit"] = 0.0
+        with caplog.at_level("WARNING"):
+            s = Normaliser(tmp_path).normalise(payload)
+        assert s.length_unit is None
+        assert "IDT_LENGTH_UNIT_INVALID" in caplog.text
+
+    def test_a_negative_value_other_than_the_sentinel_logs_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["length_unit"] = -5.0
+        with caplog.at_level("WARNING"):
+            s = Normaliser(tmp_path).normalise(payload)
+        assert s.length_unit is None
+        assert "IDT_LENGTH_UNIT_INVALID" in caplog.text
+
+    def test_nan_length_unit_logs_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["length_unit"] = float("nan")
+        with caplog.at_level("WARNING"):
+            s = Normaliser(tmp_path).normalise(payload)
+        assert s.length_unit is None
+        assert "IDT_LENGTH_UNIT_INVALID" in caplog.text
+
+    def test_non_numeric_length_unit_logs_a_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = _minimal_payload(tmp_path)
+        payload["length_unit"] = "not-a-number"
+        with caplog.at_level("WARNING"):
+            s = Normaliser(tmp_path).normalise(payload)
+        assert s.length_unit is None
+        assert "IDT_LENGTH_UNIT_INVALID" in caplog.text
+
 
 class TestNormaliserBodyLength:
     def test_body_length_reliable_always_false(self, tmp_path: Path) -> None:
