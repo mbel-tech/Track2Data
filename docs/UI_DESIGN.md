@@ -2,8 +2,9 @@
 
 **Audience:** Frontend implementers.
 **Status:** Draft v0.1 (companion to PRD §14; aligned with v1.0 MVP scope).
-**Stack:** Python 3.11+, PySide6 (Qt 6.6+), `qasync` for async-Qt bridging,
-matplotlib + pyqtgraph for plots.
+**Stack:** Python 3.11+, PySide6 (Qt 6.6+), `QThreadPool`/`QRunnable` for
+background work (see `ui/store/task_runner.py`), matplotlib + pyqtgraph
+for plots. No `qasync` — see `DECISIONS.md` D-003.
 **Distribution:** packaged with PyInstaller; UI imports `track2data` engine.
 **Related:** [`./TECHNICAL_SPEC.md`](./TECHNICAL_SPEC.md) for the system-level view (tech stack, build, distribution, configuration hierarchy).
 
@@ -842,6 +843,8 @@ stages green.
   to a fixed level list ("main", "secondary") to stay compatible with
   the existing pipeline column names. Current pick: free-text name +
   `level` dropdown with the two defaults + "custom".
-- Async strategy: `qasync` integration for first-class `async def`
-  engine methods vs. `TaskRunner`-only. Current pick: `TaskRunner`-only
-  in MVP to keep the surface simple; `qasync` is a v1.1 enhancement.
+- ~~Async strategy: `qasync` integration for first-class `async def`
+  engine methods vs. `TaskRunner`-only.~~ **Settled** (`DECISIONS.md`
+  D-003): `TaskRunner`-only, built on `QThreadPool`/`QRunnable` and
+  shipped in `ui/store/task_runner.py`. `qasync` is not used anywhere in
+  v1.0; revisit no earlier than v1.1.

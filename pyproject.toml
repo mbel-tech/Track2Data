@@ -61,10 +61,16 @@ idtrackerai_v5 = "track2data.readers.idtrackerai_v5:IDTrackerAiV5Reader"
 # two above), it's just not advertised to entry-point introspection as a working reader.
 
 [project.entry-points."track2data.metrics"]
-# Populated as metrics are implemented
+# Intentionally empty -- built-in metrics register by direct import in
+# metrics/__init__.py::_load_builtins(), not via entry points, so that a
+# metric whose optional dependency (scipy, shapely) is missing degrades
+# to "not registered" instead of breaking the registry, and so built-ins
+# work from a source checkout with no installed distribution metadata.
+# Third-party plug-ins DO use this group -- see TECHNICAL_SPEC.md §12.1.
 
 [project.entry-points."track2data.exporters"]
-# Populated as exporters are implemented
+# Intentionally empty for the same reason -- see the note above and
+# exporters/__init__.py::_load_builtins().
 
 [tool.hatch.build.targets.wheel]
 packages = ["track2data", "app", "ui"]
