@@ -2,9 +2,19 @@
 
 Public API
 ----------
-apply_bodylength_calibration  -- derive body_length_cm (and optionally
-                                  px_per_cm) from Session.body_length_px
-                                  and Session.length_unit.
+apply_bodylength_calibration  -- derive body_length_cm from
+                                  Session.body_length_px.
+
+Changed: this mode used to also silently divide by Session.length_unit
+when present, setting px_per_cm=length_unit -- so every "*_cm" export
+column was quietly calibrated from a value the user never confirmed
+using. That is now what "session" mode
+(track2data/calibration/session_unit.py) does explicitly, with a
+required user confirmation in the GUI (CalibrationConfig.
+length_unit_confirmed_by_user). "bodylength" mode always stores raw
+body-length-derived values (in pixels; the "_cm" field name is a
+long-standing misnomer kept for downstream interface stability) and
+never reads length_unit for calibration purposes.
 """
 
 from __future__ import annotations
@@ -30,15 +40,12 @@ def apply_bodylength_calibration(
     2. **Checks sample count**: ``psess.n_frames`` must be >=
        ``cfg.bl_min_samples`` (default 30).  This acts as a guard against
        sessions that are too short to produce reliable body-length estimates.
-    3. **Converts** body lengths:
-
-       * If ``session.length_unit`` is set and > 0:
-         ``body_length_cm[k] = body_length_px[k] / length_unit``
-         and ``px_per_cm`` is set to ``length_unit``.
-       * Otherwise (no ``length_unit``):
-         ``body_length_cm = body_length_px``  (values remain in pixels;
-         the field name is a misnomer in this mode, but it preserves a
-         uniform interface for downstream metric code).
+    3. **Stores body lengths as-is**: ``body_length_cm = body_length_px``
+       (values remain in pixels; the field name is a long-standing
+       misnomer kept for downstream interface stability). ``px_per_cm``
+       is left unset. ``session.length_unit`` is not read here at all --
+       see this module's docstring for why, and use ``mode='session'``
+       for a px-per-cm value derived from it.
 
     Parameters
     ----------
@@ -50,8 +57,7 @@ def apply_bodylength_calibration(
     Returns
     -------
     PreprocessedSession
-        A copy of *psess* with ``body_length_cm`` (and optionally
-        ``px_per_cm``) populated.
+        A copy of *psess* with ``body_length_cm`` populated.
 
     Raises
     ------
@@ -59,7 +65,10 @@ def apply_bodylength_calibration(
         * ``cfg.mode != 'bodylength'``
         * ``session.body_length_px`` is ``None``
         * ``psess.n_frames < cfg.bl_min_samples``
-        * ``session.length_unit`` is 0 (division by zero guard)
+        * ``session.length_unit`` is exactly ``0`` -- a defensive guard
+          against corrupt session data; kept even though this mode no
+          longer *uses* length_unit, since a session shipping a literal
+          zero there points at a data problem worth surfacing regardless.
     """
     if cfg.mode != "bodylength":
         raise CalibrationError(
@@ -92,23 +101,17 @@ def apply_bodylength_calibration(
         )
 
     body_length_px: np.ndarray = session.body_length_px.astype(np.float64)
-    length_unit: float | None = session.length_unit
 
-    if length_unit is not None and length_unit == 0.0:
+    if session.length_unit is not None and session.length_unit == 0.0:
         raise CalibrationError(
-            "session.length_unit is 0, which would cause division by zero.",
+            "session.length_unit is exactly 0, which is not a valid calibration "
+            "ratio for any mode; this session's source data looks corrupt.",
             code="CAL-BL-UNIT-ZERO",
             remediation="Correct the length_unit value in the session source data.",
         )
 
-    if length_unit is not None and length_unit > 0:
-        body_length_cm = body_length_px / length_unit
-        return dataclasses.replace(
-            psess,
-            body_length_cm=body_length_cm,
-            px_per_cm=length_unit,
-        )
-
-    # No length_unit: store body lengths in pixel units under body_length_cm.
+    # Body lengths are always stored in pixel units here -- see this
+    # module's docstring for why length_unit is never consumed for
+    # conversion in this mode.
     body_length_cm = body_length_px.copy()
     return dataclasses.replace(psess, body_length_cm=body_length_cm)

@@ -145,16 +145,28 @@ class TestUILayer:
     def test_stages_constant(self) -> None:
         from app.navigation import STAGES
 
-        assert len(STAGES) == 7
+        # 9 stages, not 7: Preprocessing/Metrics/Processing each got
+        # their own sidebar row so every page is directly reachable --
+        # see app/navigation.py's module comment.
+        assert len(STAGES) == 9
         assert STAGES[0][0].startswith("1")
-        assert STAGES[-1][0].startswith("7")
+        assert STAGES[-1][0].startswith("9")
 
     def test_page_to_stage_mapping_length(self) -> None:
         from app.navigation import PAGE_TO_STAGE, STAGES
 
-        # 10 pages, 7 stages — all stage indices in range.
+        # 10 pages, 9 stages — all stage indices in range.
         assert len(PAGE_TO_STAGE) == 10
         assert all(0 <= s < len(STAGES) for s in PAGE_TO_STAGE)
+
+    def test_page_to_stage_is_one_to_one_except_preview_export(self) -> None:
+        """Every page has its own stage now, except pages 8-9 (Preview,
+        Export), which still share one row -- the one pairing that was
+        never the source of the "can't reach this screen" bug."""
+        from app.navigation import PAGE_TO_STAGE
+
+        assert PAGE_TO_STAGE[:8] == [0, 1, 2, 3, 4, 5, 6, 7]
+        assert PAGE_TO_STAGE[8] == PAGE_TO_STAGE[9] == 8
 
     def test_app_state_is_a_genuine_reexport_not_a_duplicate(self) -> None:
         """D-004 / issue #27: app/state.py is a deprecated shim over
@@ -366,7 +378,24 @@ class TestUILayer:
         from app.navigation import WizardSidebar
 
         sidebar = WizardSidebar()
-        assert sidebar.count() == 7
+        assert sidebar.count() == 9
+
+    def test_sidebar_reaches_every_page(self, qt_app) -> None:
+        """Regression test for the actual bug: clicking every sidebar row
+        used to land on only 7 of 10 pages (0,1,2,3,4,5,8 -- Metrics and
+        Processing were unreachable except via the toolbar's Next
+        button). Each stage must now land on a page no other stage
+        does, except the shared Preview/Export pair."""
+        from app.main_window import MainWindow
+
+        win = MainWindow()
+        landed = []
+        for row in range(win._sidebar.count()):
+            win._sidebar.setCurrentRow(row)
+            landed.append(win._stack.currentIndex())
+        win.close()
+
+        assert landed == [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
     def test_main_window_creation(self, qt_app) -> None:
         from app.main_window import MainWindow

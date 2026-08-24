@@ -666,6 +666,62 @@ def test_validate_flags_scalar_mode_without_px_per_cm() -> None:
     assert any("px_per_cm" in issue for issue in issues)
 
 
+def test_validate_names_session_mode_sessions_missing_length_unit(
+    tiny_real_session: Path,
+) -> None:
+    """Fail loudly, name the sessions: 'session' calibration mode
+    requires every session to carry its own length_unit -- validate()
+    must block the run and say which session(s) lack it, rather than
+    letting Engine.run() discover it one session at a time mid-pipeline.
+    tiny_real_session ships length_unit=None (never calibrated)."""
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=tiny_real_session, sha256="x")],
+        calibration=CalibrationConfig(mode="session"),
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    issues = engine.validate()
+    assert any("s1" in issue and "length_unit" in issue for issue in issues)
+
+
+def test_validate_session_mode_clean_when_every_session_is_calibrated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from track2data.api import Engine
+
+    def fake_read_session(folder: Path) -> Session:
+        return _make_session(session_id=folder.name).model_copy(update={"length_unit": 12.5})
+
+    monkeypatch.setattr("track2data.api.read_session", fake_read_session)
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=Path("/tmp/s1"), sha256="x")],
+        calibration=CalibrationConfig(mode="session"),
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    issues = engine.validate()
+    assert not any("length_unit" in issue for issue in issues)
+
+
+def test_validate_ignores_length_unit_for_non_session_modes(tiny_real_session: Path) -> None:
+    """The length_unit readiness check only applies when session mode
+    is actually selected -- an uncalibrated session is not an issue
+    under bodylength mode, which never reads length_unit at all."""
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=tiny_real_session, sha256="x")],
+        calibration=CalibrationConfig(mode="bodylength"),
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    issues = engine.validate()
+    assert not any("length_unit" in issue for issue in issues)
+
+
 # ── progress reporting (issue #18) ──────────────────────────────────────────────
 
 

@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import ZoneSet
+from ui.widgets.labels import label_for
 
 
 class ZonesScreen(QWidget):
@@ -207,8 +208,7 @@ class ZonesScreen(QWidget):
             # field too, but its conventional values ("main"/"secondary")
             # are lowercase engine-side defaults, so title-case just
             # that part.
-            level_label = roi.level.replace("_", " ").title()
-            self._zone_list.addItem(f"{roi.name}  [{level_label}]")
+            self._zone_list.addItem(f"{roi.name}  [{label_for(roi.level)}]")
         n = len(rois)
         self._count_label.setText(f"{n} zone{'s' if n != 1 else ''} loaded")
 
