@@ -72,13 +72,21 @@ Never write production code without a failing test first. If you find yourself w
 
 ## 4. Branch & PR policy
 
-- All changes go through pull requests — by convention, not yet by
-  enforcement. Branch protection and rulesets both require GitHub Pro on
-  a private repository, and this repo stays private until the v1.0 tag
-  (`docs/ROADMAP.md`), so neither can be enabled today. **Enable
-  protection on `main` — require PRs and require the CI checks in
-  `.github/workflows/ci.yml` to pass — as part of going public**, and
-  make this line unconditional again then.
+- `main` is protected. All changes go through pull requests: direct
+  pushes, force-pushes and branch deletion are all rejected, and the
+  `CI passed` status check must be green before a PR can merge.
+- `CI passed` is the aggregate job at the end of
+  `.github/workflows/ci.yml`; it fails if any of `lint`, `test` or
+  `r_parity` did. It is the *only* required check, deliberately — the
+  matrix job names carry the OS and Python version, so requiring them
+  directly would mean re-editing the repository settings every time the
+  matrix changes.
+- No approving review is required, since the project currently has a
+  single maintainer. Add a review requirement when a second regular
+  contributor appears.
+- Administrators are not subject to these rules, so a maintainer can
+  still push a hotfix directly if CI itself is broken. Treat that as an
+  escape hatch, not a shortcut.
 - Feature branches: `feat/<short-name>` (e.g. `feat/savgol-smoother`)
 - Bug fixes: `fix/<short-name>`
 - Docs-only: `docs/<short-name>`
