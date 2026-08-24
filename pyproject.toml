@@ -4,7 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "track2data"
-version = "0.1.0"
+# Sourced from track2data/_version.py -- the single source of truth for the
+# version, which also feeds ProjectManifest.app_version (stamped into every
+# exported dataset's provenance) and the GUI's About box. See
+# [tool.hatch.version] below and tests/test_version_consistency.py.
+dynamic = ["version"]
 description = "Open-source desktop app that turns idtracker.ai output folders into analysis-ready behavioural datasets."
 readme = "README.md"
 license = { text = "MIT" }
@@ -71,6 +75,9 @@ idtrackerai_v5 = "track2data.readers.idtrackerai_v5:IDTrackerAiV5Reader"
 [project.entry-points."track2data.exporters"]
 # Intentionally empty for the same reason -- see the note above and
 # exporters/__init__.py::_load_builtins().
+
+[tool.hatch.version]
+path = "track2data/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["track2data", "app", "ui"]

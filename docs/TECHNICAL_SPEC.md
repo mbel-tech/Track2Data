@@ -423,13 +423,27 @@ Built with **PyInstaller**:
 
 ### 10.3 Code signing
 
-| OS | v1.0 | v1.1 plan |
+| OS | v1.0 | After v1.0 |
 |---|---|---|
-| Windows | unsigned (SmartScreen warning) | Authenticode (DigiCert / certum) |
-| macOS | unsigned + Gatekeeper bypass instructions | Apple Developer ID + notarization |
-| Linux | unsigned `.AppImage` | optional GPG-detached sig |
+| Windows | unsigned (SmartScreen warning) | Authenticode — SignPath Foundation (free, OSS) preferred |
+| macOS | unsigned + Gatekeeper bypass instructions | Apple Developer ID + notarization ($99/yr, no free tier) |
+| Linux | unsigned `.AppImage` | GPG-detached `.asc` (free, do first) |
 
 The README documents the unsigned-binary trust path for v1.0.
+
+**v1.0 ships unsigned for a structural reason, not just cost.**
+SignPath Foundation — the standard free code-signing route for
+open-source projects — requires that the project "must already be
+released in the form that should be signed". The first release is
+therefore necessarily unsigned; it is what makes the project eligible
+to apply.
+
+The signing steps are **already implemented** in
+`.github/workflows/release.yml` and activate automatically once the
+relevant repository secrets exist, so enabling signing later is a
+secrets-only change rather than a workflow change. See
+[`./CODE_SIGNING.md`](./CODE_SIGNING.md) for the per-platform
+acquisition guide, the required secrets, and verification commands.
 
 ### 10.4 Update strategy
 

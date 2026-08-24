@@ -23,6 +23,15 @@ listed under **Unreleased** pending the v0.1.0 tag.
 
 ### Fixed
 
+- **Exported provenance could silently report the wrong app version.**
+  `ProjectManifest.app_version` — stamped into every exported
+  `manifest.json` and the run README's "App version" row — was an
+  independent string literal, one of seven places that hardcoded the
+  version with nothing coupling them. Cutting a release by bumping
+  `track2data/_version.py` would have left every subsequently exported
+  dataset claiming it came from the previous version, with nothing
+  failing to indicate it. All seven now derive from
+  `track2data/_version.py`, pinned by `tests/test_version_consistency.py`.
 - **`trial_activity_summary` and `group_dynamics_summary` had one row per
   (individual × metric) instead of one row per individual.** The
   `csv_long` and `feather` exporters merged metric tables on *every*
@@ -70,6 +79,13 @@ listed under **Unreleased** pending the v0.1.0 tag.
 
 - Standalone binaries for Windows, macOS, and Linux via PyInstaller, built
   and published through a release workflow triggered on version tags.
+- Opt-in code-signing support for all three platforms (Authenticode,
+  Apple Developer ID + notarisation, and detached GPG). The steps
+  activate automatically once the relevant repository secrets exist and
+  are skipped entirely otherwise, so enabling signing is a secrets-only
+  change. Releases remain unsigned until then — see
+  [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md), which also explains why
+  the first release necessarily cannot be signed.
 - `docs/EXTRACT_BBOXES_FIX.md` — a measured +27.8% body-length bias found in
   `extract_bboxes.py` (a script used in an adjacent pipeline) and its root
   causes.

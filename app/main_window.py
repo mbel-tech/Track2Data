@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from app.navigation import WizardSidebar
 from app.state import ProjectStore
+from track2data import __version__
 from ui.calibration_screen import CalibrationScreen
 from ui.export_screen import ExportScreen
 from ui.import_screen import ImportScreen
@@ -45,7 +46,7 @@ from ui.project_screen import ProjectScreen
 from ui.zones_screen import ZonesScreen
 
 APP_NAME = "Track2Data"
-APP_VERSION = "0.1.0"
+APP_VERSION = __version__
 
 
 class RunLogDock(QWidget):

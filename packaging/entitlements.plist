@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hardened-runtime entitlements for the notarised macOS build.
+
+  Apple requires --options runtime (hardened runtime) for notarisation,
+  but the default hardened-runtime policy breaks a PyInstaller bundle:
+  it refuses to load libraries that Apple did not sign, and CPython
+  writes executable pages at runtime. Each entitlement below is the
+  narrowest one that fixes a specific, known failure mode -- this is
+  deliberately not a blanket set.
+
+  See docs/CODE_SIGNING.md for how these were chosen and what to try
+  first if notarisation still rejects a build.
+-->
+<plist version="1.0">
+<dict>
+  <!-- PyInstaller unpacks and dlopen()s bundled .so/.dylib files that
+       carry no Apple signature. Without this, the app dies at startup
+       under the hardened runtime. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- CPython (and Qt's QML/JS engines) allocate writable-executable
+       pages. Required for the interpreter to run at all. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- PyInstaller's bootloader sets environment variables in the child
+       process it spawns; the hardened runtime otherwise scrubs them. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

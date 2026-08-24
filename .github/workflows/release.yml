@@ -41,12 +41,100 @@ jobs:
       - name: Smoke-test the built executable
         run: python packaging/smoke_test.py
 
+      # ── code signing ────────────────────────────────────────────────────
+      #
+      # Every signing step below is opt-in: it runs only when the relevant
+      # secrets are configured, and the whole release still builds and
+      # publishes unsigned when they aren't. That is the state Track2Data
+      # ships in today -- see docs/CODE_SIGNING.md for why (the free OSS
+      # signing route requires an already-published release, so the first
+      # release is necessarily unsigned) and for how to obtain and install
+      # the credentials.
+      #
+      # Order matters and is not arbitrary:
+      #   * the .app is signed BEFORE the .dmg wraps it, and the .exe
+      #     BEFORE Inno Setup wraps it -- signing afterwards would leave
+      #     the wrapped payload unsigned;
+      #   * notarisation staples a ticket INTO the .dmg, so it must run
+      #     after the .dmg exists;
+      #   * SHA-256 sums are computed last, because signing changes the
+      #     bytes and a checksum taken earlier would not match what a user
+      #     downloads.
+      - name: Detect available signing credentials
+        id: signing
+        shell: bash
+        # Secrets are compared via env, never interpolated into the script
+        # body, so nothing can echo them into the log.
+        env:
+          MACOS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          WINDOWS_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          macos=false; windows=false; gpg=false
+          [ -n "$MACOS_CERT" ] && macos=true
+          [ -n "$WINDOWS_CERT" ] && windows=true
+          [ -n "$GPG_KEY" ] && gpg=true
+          {
+            echo "macos=$macos"
+            echo "windows=$windows"
+            echo "gpg=$gpg"
+          } >> "$GITHUB_OUTPUT"
+          echo "signing available -- macos:$macos windows:$windows gpg:$gpg"
+
+      - name: Sign the macOS .app bundle
+        if: runner.os == 'macOS' && steps.signing.outputs.macos == 'true'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          # A throwaway keychain, unlocked only for this job: importing into
+          # the login keychain on a shared runner would leave the key
+          # readable by later steps.
+          KEYCHAIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+
+          echo "$CERT_P12" | base64 --decode > /tmp/certificate.p12
+          security import /tmp/certificate.p12 -k build.keychain \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f /tmp/certificate.p12
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain > /dev/null
+
+          # --options runtime (hardened runtime) is mandatory for
+          # notarisation. PyInstaller bundles unsigned .so/.dylib files that
+          # the default policy rejects, hence the entitlements file.
+          codesign --deep --force --verbose \
+            --options runtime \
+            --entitlements packaging/entitlements.plist \
+            --sign "$SIGNING_IDENTITY" \
+            dist/Track2Data.app
+          codesign --verify --deep --strict --verbose=2 dist/Track2Data.app
+
+      - name: Sign the Windows executable
+        if: runner.os == 'Windows' && steps.signing.outputs.windows == 'true'
+        shell: pwsh
+        env:
+          CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          ./packaging/sign_windows.ps1 -Path "dist\Track2Data.exe"
+
       # ── Windows: wrap the .exe in an Inno Setup installer (issue #44) ──
       - name: Build Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
+        # Inno Setup can't read track2data/_version.py itself, so pass the
+        # version in explicitly -- without this the installer falls back to
+        # its "0.0.0-local" placeholder. See packaging/inno_setup.iss.
         run: |
-          iscc packaging\inno_setup.iss
+          $version = python -c "import re,pathlib; print(re.search(r'__version__\s*=\s*[\x27\x22]([^\x27\x22]+)', pathlib.Path('track2data/_version.py').read_text()).group(1))"
+          Write-Host "Building installer for version $version"
+          iscc /DMyAppVersion=$version packaging\inno_setup.iss
 
       # ── macOS: pack the .app bundle into a .dmg (issue #45) ────────────
       - name: Build macOS .dmg
@@ -76,6 +164,56 @@ jobs:
             find dist -maxdepth 1 -type f ! -name 'Track2Data-x86_64.AppImage' -delete
             rm -rf dist/Track2Data.AppDir
           fi
+
+      # ── signing, part 2: the packaged artifacts ─────────────────────────
+      # These run after the cleanup step above, so nothing they produce
+      # (notably the .asc signature) gets swept away by it.
+      - name: Sign the Windows installer
+        if: runner.os == 'Windows' && steps.signing.outputs.windows == 'true'
+        shell: pwsh
+        env:
+          CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          ./packaging/sign_windows.ps1 -Path "dist\Track2Data-setup.exe"
+
+      - name: Notarise and staple the macOS .dmg
+        if: runner.os == 'macOS' && steps.signing.outputs.macos == 'true'
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          # --wait blocks until Apple's service returns a verdict; without
+          # it the job would "succeed" while the submission was still
+          # queued, and stapling below would then fail confusingly.
+          xcrun notarytool submit dist/Track2Data.dmg \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --wait
+          # Staple the ticket into the .dmg so Gatekeeper accepts it
+          # offline, rather than only on a machine that can reach Apple.
+          xcrun stapler staple dist/Track2Data.dmg
+          xcrun stapler validate dist/Track2Data.dmg
+
+      - name: GPG-sign the Linux .AppImage
+        if: runner.os == 'Linux' && steps.signing.outputs.gpg == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # --detach-sign, so the .AppImage itself stays byte-identical to
+          # the one the SHA-256 sum below covers; the signature travels as
+          # a sibling .asc file.
+          echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --armor --detach-sign \
+            dist/Track2Data-x86_64.AppImage
+          gpg --verify dist/Track2Data-x86_64.AppImage.asc \
+            dist/Track2Data-x86_64.AppImage
 
       - name: Compute SHA-256 sums
         # Python's hashlib, not a shell checksum tool: sha256sum is
@@ -135,10 +273,27 @@ jobs:
         # at the artifact's top level -- only the *-SHA256SUMS.txt files
         # were uploaded from the workspace root and sit untended.
         run: |
+          set -euo pipefail
+
+          assets=(
+            SHA256SUMS.txt
+            artifacts/track2data-Windows/dist/Track2Data-setup.exe
+            artifacts/track2data-macOS/dist/Track2Data.dmg
+            artifacts/track2data-Linux/dist/Track2Data-x86_64.AppImage
+          )
+
+          # The GPG signature only exists when GPG_PRIVATE_KEY is
+          # configured, so attach it conditionally rather than failing the
+          # release when the build is unsigned.
+          asc="artifacts/track2data-Linux/dist/Track2Data-x86_64.AppImage.asc"
+          if [ -f "$asc" ]; then
+            assets+=("$asc")
+            notes="Signed binaries. Verify with the attached SHA-256 sums; the Linux .AppImage additionally has a detached GPG signature (.asc). See docs/CODE_SIGNING.md."
+          else
+            notes="Unsigned binaries -- see the README for the trust path on each OS, and verify your download against the attached SHA-256 sums."
+          fi
+
           gh release create "${{ github.ref_name }}" \
             --title "Track2Data ${{ github.ref_name }}" \
-            --notes "Unsigned binaries -- see README for the trust path on each OS (issue #48). SHA-256 sums attached below." \
-            SHA256SUMS.txt \
-            artifacts/track2data-Windows/dist/Track2Data-setup.exe \
-            artifacts/track2data-macOS/dist/Track2Data.dmg \
-            artifacts/track2data-Linux/dist/Track2Data-x86_64.AppImage
+            --notes "$notes" \
+            "${assets[@]}"

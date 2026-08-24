@@ -27,6 +27,26 @@ from pathlib import Path
 
 REPO_ROOT = Path(SPECPATH).parent  # noqa: F821 -- SPECPATH is injected by PyInstaller
 
+
+def _package_version() -> str:
+    """Read __version__ out of track2data/_version.py without importing it.
+
+    PyInstaller runs this spec before the package is necessarily importable
+    from this interpreter, so parse the literal rather than `import
+    track2data`. _version.py is a single assignment by construction, which
+    is what makes a regex safe here. See tests/test_version_consistency.py.
+    """
+    import re
+
+    text = (REPO_ROOT / "track2data" / "_version.py").read_text(encoding="utf-8")
+    match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', text)
+    if match is None:
+        raise SystemExit("Cannot parse __version__ from track2data/_version.py")
+    return match.group(1)
+
+
+VERSION = _package_version()
+
 # Placeholder icon (packaging/icons/) -- a simple generated mark, not final
 # branding; swap the source PNG and regenerate the per-OS formats whenever
 # real artwork exists. .ico for Windows, .icns for macOS; Linux's AppImage
@@ -107,7 +127,7 @@ if sys.platform == "darwin":
         icon=_icon,
         bundle_identifier="io.track2data.app",
         info_plist={
-            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleShortVersionString": VERSION,
             "NSHighResolutionCapable": True,
         },
     )
