@@ -8,21 +8,36 @@ import pandas as pd
 
 from track2data.exporters.base import Exporter, ExportPayload
 
+_KEY_COLS = ("session_id", "individual_id")
+_DROP_COLS = ("metric_id",)
+
 
 def _merge_individual_metrics(individual_metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Outer-merge all individual metric DataFrames on shared key columns.
+    """Outer-merge all individual metric DataFrames on their identity key columns.
+
+    Extra identifier columns (``metric_id``) are dropped before merging so they
+    do not pollute the wide output, mirroring
+    :func:`track2data.exporters.csv_wide._build_wide`.
 
     Returns an empty DataFrame when *individual_metrics* is empty.
     """
-    dfs = list(individual_metrics.values())
+    dfs = [
+        df.drop(columns=[c for c in _DROP_COLS if c in df.columns])
+        for df in individual_metrics.values()
+    ]
     if not dfs:
         return pd.DataFrame()
 
-    result = dfs[0].copy()
+    result = dfs[0]
     for other in dfs[1:]:
-        shared = [c for c in result.columns if c in other.columns]
-        if shared:
-            result = result.merge(other, on=shared, how="outer")
+        # Join on the identity keys only.  Merging on *every* shared column name
+        # would silently make an incidentally-shared value column part of the
+        # join key, so two metrics that both emit e.g. "n_frames" with different
+        # values would split one individual across several half-empty rows
+        # instead of widening a single row.
+        shared_keys = [c for c in _KEY_COLS if c in result.columns and c in other.columns]
+        if shared_keys:
+            result = result.merge(other, on=shared_keys, how="outer")
         else:
             result = pd.concat([result, other], axis=1)
 

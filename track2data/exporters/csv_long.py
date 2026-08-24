@@ -23,22 +23,37 @@ def _write_csv(df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def _merge_metric_dfs(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Outer-merge all metric DataFrames on their shared key columns.
+_KEY_COLS = ("session_id", "individual_id")
+_DROP_COLS = ("metric_id",)
 
-    Key columns are identified as any column named ``session_id`` or
-    ``individual_id`` (or any subset that is common to all frames).
+
+def _merge_metric_dfs(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Outer-merge all metric DataFrames on their identity key columns.
+
+    Key columns are any column named ``session_id`` or ``individual_id`` that is
+    present in both frames — group-level frames therefore join on ``session_id``
+    alone.  Extra identifier columns (``metric_id``) are dropped before merging
+    so they do not pollute the merged output, mirroring
+    :func:`track2data.exporters.csv_wide._build_wide`.
+
     Returns an empty DataFrame when *metrics* is empty.
     """
-    dfs = list(metrics.values())
+    dfs = [
+        df.drop(columns=[c for c in _DROP_COLS if c in df.columns])
+        for df in metrics.values()
+    ]
     if not dfs:
         return pd.DataFrame()
     result = dfs[0]
     for other in dfs[1:]:
-        # Identify join keys as shared columns present in both frames
-        shared = [c for c in result.columns if c in other.columns]
-        if shared:
-            result = result.merge(other, on=shared, how="outer")
+        # Join on the identity keys only.  Merging on *every* shared column name
+        # would silently make an incidentally-shared value column part of the
+        # join key, so two metrics that both emit e.g. "n_frames" with different
+        # values would split one individual across several half-empty rows
+        # instead of widening a single row.
+        shared_keys = [c for c in _KEY_COLS if c in result.columns and c in other.columns]
+        if shared_keys:
+            result = result.merge(other, on=shared_keys, how="outer")
         else:
             result = pd.concat([result, other], axis=1)
     return result

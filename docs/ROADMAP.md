@@ -1,28 +1,29 @@
 # Track2Data — Implementation Roadmap
 
-**Status:** M0 foundation complete; M1 in progress.
-**Last updated:** 2026-05-18
+**Status:** M1–M4 complete. M5 (v1.0 release) is the only milestone left.
+**Last updated:** 2026-08-21
 
 ---
 
 ## Current state
 
-Foundation is in place and tested:
+The engine, the GUI, and the packaging pipeline are all built and green.
 
 | Area | Status |
 |---|---|
 | Pydantic data models (`Session`, `ProjectManifest`, `PreprocessConfig`, `MetricSelection`) | ✅ Implemented |
 | Full error hierarchy (`core/errors.py`) | ✅ Implemented |
 | Manifest read/write + migration (`core/manifest.py`) | ✅ Implemented |
-| Unified idtracker.ai reader (`readers/idtrackerai/`) — all v4–v6 formats | ✅ Implemented |
-| Legacy readers (`idtrackerai_v5`, `idtrackerai_v4`) | ✅ Kept for back-compat |
-| Metric abstract base + `MetricDocumentation` | ✅ Implemented |
-| Behavioural metrics specification (`docs/METRICS_SPEC.md`) | ✅ 29 metrics specified |
-| GUI specification (`docs/UI_DESIGN.md`) | ✅ 14 screens fully specified |
-| Test suite | ✅ 200+ tests passing |
-| CI workflow | ✅ Configured |
+| Unified idtracker.ai reader (`readers/idtrackerai/`) — h5 / npy / csv | ✅ Implemented; 70/70 real corpus sessions import |
+| Behavioural metrics | ✅ 33 registered (IL-1..8, GL-1..10, Z-1..6, D-1..9) |
+| Exporters | ✅ 5 (`csv_long`, `csv_wide`, `excel`, `feather`, `readme`) |
+| Metadata join wired into `Engine` | ✅ Implemented |
+| Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |
+| Standalone binaries (Windows / macOS / Linux) | ✅ Built + validated in CI |
+| Test suite | ✅ ~1170 passing (plus `r_parity` and `corpus_local` gates) |
+| CI workflow | ✅ Green across a 6-cell OS × Python matrix |
 
-All remaining modules below are **stubs** — correct skeleton, no logic yet.
+Remaining work is release mechanics, not implementation — see **M5** below.
 
 ---
 
@@ -66,7 +67,7 @@ ui/ app/                          ← M3 (PySide6 layer)
 
 ---
 
-## M1 — Engine foundation
+## M1 — Engine foundation ✅ complete
 
 **Goal:** `track2data run project.t2d.json` produces a correct CSV for the `tiny_v5` fixture.
 
@@ -75,6 +76,9 @@ ui/ app/                          ← M3 (PySide6 layer)
 - `pytest tests/ -m "not r_parity"` passes with coverage ≥ 70 %
 - `pytest tests/test_r_parity/ -m "r_parity and not r_parity_local"` passes
 - `ruff check .` clean
+
+The coverage floor was temporarily 70% during M1 and was restored to 80%
+in M2; it sits well above that in practice.
 
 **Build order (TDD — each module fully green before moving on):**
 
@@ -111,53 +115,71 @@ ui/ app/                          ← M3 (PySide6 layer)
 
 ---
 
-## M2 — Metadata + remaining metrics
+## M2 — Metadata + remaining metrics ✅ complete
 
 **Goal:** Full metric suite + metadata join; R-parity gate enabled for choice-pipeline fixtures (post-embargo).
 
-| Area | Items |
-|---|---|
-| Metadata pipeline | `metadata/{schema,loader,mapping,join}.py` |
-| Remaining individual metrics | IL-3..IL-8 |
-| Remaining group metrics | GL-2, GL-4, GL-6, GL-8, GL-9, GL-10 |
-| Remaining zone metrics | Z-2, Z-4, Z-5, Z-6 |
-| Additional exporters | `csv_wide.py`, `feather.py` |
-| R-parity gate | Enable `r_parity_local` → `r_parity` after embargo lift |
-| Coverage gate | Restore to 80 % (from temporary 70 % in M1) |
+| Area | Items | Status |
+|---|---|---|
+| Metadata pipeline | `metadata/{schema,loader,mapping,join}.py`, wired into `Engine` | ✅ |
+| Remaining individual metrics | IL-3..IL-8 | ✅ |
+| Remaining group metrics | GL-2, GL-4, GL-6, GL-8, GL-9, GL-10 | ✅ |
+| Remaining zone metrics | Z-2, Z-4, Z-5, Z-6 | ✅ |
+| Additional exporters | `csv_wide.py`, `feather.py` | ✅ |
+| Additional diagnostics | D-6..D-9 (fragment-derived; added alongside the reader realignment) | ✅ |
+| Coverage gate | Restored to 80 % | ✅ |
+| R-parity gate | Enable `r_parity_local` → `r_parity` after embargo lift | ⏳ blocked on the pre-publication embargo, not on code |
 
 ---
 
-## M3 — UI layer (PySide6)
+## M3 — UI layer (PySide6) ✅ complete
 
-**Goal:** Fully functional desktop wizard matching all 14 screens in `docs/UI_DESIGN.md`.
+**Goal:** Fully functional desktop wizard, wired end-to-end to the engine.
 
-| Area | Items |
-|---|---|
-| State management | `ui/store/project_store.py`, `ui/store/task_runner.py` |
-| Shell | `app/main.py`, `app/main_window.py`, `app/navigation.py`, `app/state.py` |
-| Pages | `ui/project_screen.py`, `ui/import_screen.py`, `ui/calibration_screen.py`, `ui/zones_screen.py`, `ui/metadata_screen.py`, `ui/metrics_screen.py`, `ui/export_screen.py` |
-| Dialogs | `ui/dialogs/metric_info_dialog.py` |
-| Testing | `pytest-qt` integration tests for each page |
+| Area | Items | Status |
+|---|---|---|
+| State management | `ui/store/project_store.py`, `ui/store/task_runner.py` | ✅ |
+| Shell | `app/main.py`, `app/main_window.py`, `app/navigation.py`, `app/state.py` | ✅ |
+| Screens (flat in `ui/`, per D-006) | `project`, `import`, `calibration`, `zones`, `metadata`, `metrics`, `preprocessing`, `processing`, `preview`, `export` | ✅ |
+| Dialogs / shared widgets | `ui/dialogs/metric_info_dialog.py`, `ui/widgets/dataframe_table.py` | ✅ |
+| Testing | `pytest-qt` integration tests per screen, headless via `QT_QPA_PLATFORM=offscreen` | ✅ |
+
+Background execution is `QThreadPool`/`QRunnable` only — no `qasync`
+(D-003). The engine never imports PySide6 (D-001).
 
 ---
 
 ## M4 — Packaging + cross-OS
 
 | Area | Items |
-|---|---|
-| PyInstaller | `packaging/track2data.spec` + entry-point freeze |
-| Release matrix | GitHub Actions build + upload for Win / macOS / Linux |
-| Signed binaries | macOS notarisation, Windows Authenticode (deferred if complex) |
-| `track2data[ui]` extra | Declared in `pyproject.toml` |
+|---|---|---|
+| PyInstaller | `packaging/track2data.spec` — onefile build, macOS `.app` bundle | ✅ |
+| Release matrix | `.github/workflows/release.yml` — builds Win / macOS / Linux on `v*` tags, publishes a GitHub Release with SHA-256 sums | ✅ validated via `workflow_dispatch` |
+| Per-OS packaging | Inno Setup `.exe`, `hdiutil` `.dmg`, `.AppImage` | ✅ |
+| Determinism gate | `packaging/check_determinism.py` — byte-diffs two independent runs | ✅ |
+| `track2data[ui]` / `[build]` extras | Declared in `pyproject.toml` | ✅ |
+| Signed binaries | macOS notarisation, Windows Authenticode | ⏳ deferred to v1.1 (TECHNICAL_SPEC §10.3); v1.0 ships unsigned with a documented trust path in `README.md` |
 
 ---
 
 ## M5 — v1.0 release
 
-- Code signing completed
-- Release notes written
-- `docs/` finalised and cross-checked against implementation
-- Semver tag `v1.0.0` on `main`
+The only milestone with work left. Nothing here is blocked on
+implementation.
+
+- [ ] Cross-check `docs/` against implementation (this pass closed the
+      known stale items: ROADMAP status, `qasync`, `ui/pages/`,
+      entry-point groups, branch-protection wording)
+- [ ] Write release notes from `CHANGELOG.md`
+- [ ] Decide the first tag: `v0.1.0` (what `pyproject.toml` declares
+      today — an honest "first working release") vs. holding the number
+      back for a signed, fully-polished `v1.0.0`
+- [ ] Cut the semver tag on `main` — this triggers `release.yml`, which
+      builds all three binaries and publishes the GitHub Release
+- [ ] Switch the repository to public, and enable branch protection on
+      `main` at the same time (both require it to be public or Pro —
+      see `CONTRIBUTING.md` §4)
+- [ ] Code signing — **not** a v1.0 blocker; explicitly deferred to v1.1
 
 ---
 

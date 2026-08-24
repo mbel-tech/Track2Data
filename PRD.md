@@ -457,5 +457,8 @@ persistent **Project** dropdown in the header. Each stage has a
 
 - Plug-in API stability target at v1.0 (frozen vs. experimental).
 - Telemetry policy (proposed: none).
-- Sample-data fixture source for parity tests — candidate:
-  `<path on the maintainer's machine>`.
+- Sample-data fixture source for parity tests — the checked-sessions
+  output of the reference choice-experiment R pipeline, which lives
+  outside this repository on the maintainer's machine (see
+  `CONTRIBUTING.md` §6; the data itself is pre-publication embargoed and
+  is never committed).

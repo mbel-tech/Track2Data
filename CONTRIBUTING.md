@@ -49,7 +49,13 @@ Never write production code without a failing test first. If you find yourself w
 
 ## 4. Branch & PR policy
 
-- `main` is protected; all changes go through pull requests
+- All changes go through pull requests — by convention, not yet by
+  enforcement. Branch protection and rulesets both require GitHub Pro on
+  a private repository, and this repo stays private until the v1.0 tag
+  (`docs/ROADMAP.md`), so neither can be enabled today. **Enable
+  protection on `main` — require PRs and require the CI checks in
+  `.github/workflows/ci.yml` to pass — as part of going public**, and
+  make this line unconditional again then.
 - Feature branches: `feat/<short-name>` (e.g. `feat/savgol-smoother`)
 - Bug fixes: `fix/<short-name>`
 - Docs-only: `docs/<short-name>`
@@ -79,7 +85,7 @@ ruff format .
 
 ## 6. R-parity fixture handling
 
-The reference R pipeline lives at `<path on the maintainer's machine>` on the maintainer's machine. **The output data from that pipeline is currently pre-publication embargoed and MUST NOT be committed to git.**
+The reference R pipeline lives outside this repository, on the maintainer's machine; ask a maintainer for its location. **The output data from that pipeline is currently pre-publication embargoed and MUST NOT be committed to git.**
 
 For maintainers with disk access:
 - Local fixture directory: `tests/fixtures/r_outputs/from_choice_pipeline/`

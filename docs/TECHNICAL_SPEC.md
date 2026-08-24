@@ -217,7 +217,7 @@ engine remains a clean, UI-free `pip install track2data` library.
 | CLI | `track2data/cli.py` | ENGINE_DESIGN §12 |
 | Errors | `track2data/core/errors.py` | ENGINE_DESIGN §13 |
 | Concurrency | `track2data/core/parallel.py` | ENGINE_DESIGN §14 |
-| UI shell & wizard | `ui/main_window.py`, `ui/pages/` | UI_DESIGN §3, §5 |
+| UI shell & wizard | `app/main_window.py`, `ui/*_screen.py` (flat — see `DECISIONS.md` D-006) | UI_DESIGN §3, §5 |
 | UI state + tasks | `ui/store/project_store.py`, `ui/store/task_runner.py` | UI_DESIGN §4, §7 |
 
 ---
@@ -227,7 +227,7 @@ engine remains a clean, UI-free `pip install track2data` library.
 A complete run, from user action to byte-on-disk:
 
 ```
-User clicks "Add folder"  ──►  ui/pages/sessions_page.py
+User clicks "Add folder"  ──►  ui/import_screen.py
                               │
                               ▼  TaskRunner.submit
                           track2data.api.Engine.import_session(folder)
@@ -502,8 +502,8 @@ release (NFR-6 + PRD DV-5).
 | Group | ABC | Discovery |
 |---|---|---|
 | `track2data.readers` | `SessionReader` | `readers/__init__.py::_load_entry_points()` |
-| `track2data.metrics` | `Metric` | `metrics/__init__.py` (planned) |
-| `track2data.exporters` | `Exporter` | `exporters/__init__.py` (planned) |
+| `track2data.metrics` | `Metric` | `metrics/__init__.py::_load_builtins()` |
+| `track2data.exporters` | `Exporter` | `exporters/__init__.py::_load_builtins()` |
 
 External packages declare entry points in their own `pyproject.toml`:
 
@@ -511,6 +511,27 @@ External packages declare entry points in their own `pyproject.toml`:
 [project.entry-points."track2data.metrics"]
 my-metric = "my_pkg.my_metric:MyMetric"
 ```
+
+**Built-ins deliberately do not use the entry-point mechanism.** The
+`track2data.metrics` / `track2data.exporters` groups in this project's
+own `pyproject.toml` are intentionally empty: built-in metrics and
+exporters are registered by direct module import inside
+`_load_builtins()`, which then loads third-party entry points on top.
+Two reasons this is not an oversight:
+
+- **Optional dependencies degrade gracefully.** Each built-in module
+  import is wrapped in `contextlib.suppress(ImportError)`, so a metric
+  needing `scipy` or `shapely` simply doesn't register when that extra
+  isn't installed, rather than breaking the whole registry. An
+  entry-point load offers no equivalent per-item guard.
+- **Built-ins work without installed package metadata.**
+  `importlib.metadata` discovery needs the distribution to actually be
+  installed; direct imports keep the engine fully functional when run
+  from a source checkout.
+
+Third-party plug-ins are unaffected — the entry-point path is live and
+is the supported extension mechanism. Only first-party registration
+takes the shorter route.
 
 ### 12.2 Compatibility policy (semver-aligned)
 
@@ -530,7 +551,7 @@ the engine** — failures surface as a warning in the run log
 ### 12.3 Versioned IDs
 
 Built-in metric IDs (`IL-1..IL-8`, `GL-1..GL-10`, `Z-1..Z-6`, and the
-diagnostic series `D-1..D-5`) are reserved. The full canonical
+diagnostic series `D-1..D-9`) are reserved. The full canonical
 catalogue lives in [`./METRICS_SPEC.md`](./METRICS_SPEC.md) §4 —
 adding or renaming a built-in ID requires a corresponding section
 there. Plug-ins must use their own namespace (`mypkg/IL-1`); the
