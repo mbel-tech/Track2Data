@@ -209,8 +209,18 @@ class ProjectStore(QObject):
     def add_session(self, folder: Path) -> None:
         """Append a new SessionRef for *folder*, emit sessionsChanged, and
         submit a background probe (see _on_identity_probe_finished) that
-        fills in has_stable_identities once the reader has read it."""
+        fills in has_stable_identities once the reader has read it.
+
+        A no-op (logged, not raised) if *folder* is already imported --
+        multi-select and drag-drop both make it easy to submit the same
+        folder twice, and without this guard that used to add two
+        SessionRefs sharing one session_id, where removing either one
+        removed both (removal filters by id)."""
         if self._manifest is None:
+            return
+        folder = Path(folder)
+        if any(s.folder.resolve() == folder.resolve() for s in self._manifest.sessions):
+            self.append_log(f"_Skipped already-imported session folder `{folder}`_\n")
             return
         from track2data.readers import read_session
 
