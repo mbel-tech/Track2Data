@@ -14,15 +14,10 @@ cleared by the data owner.
 
 ## Local fixture source
 
-The R pipeline that generates these files lives at:
-
-```
-<path on the maintainer's machine>
-```
-
-This path is specific to the maintainer's machine. Collaborators with
-access to the same pipeline outputs should copy the relevant CSVs into
-this directory following the layout below.
+The R pipeline that generates these files lives outside this repository,
+on the maintainer's machine; ask a maintainer for its location.
+Collaborators with access to the same pipeline outputs should copy the
+relevant CSVs into this directory following the layout below.
 
 ---
 

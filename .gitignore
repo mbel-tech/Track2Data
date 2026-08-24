@@ -48,3 +48,6 @@ Checked sessions GOT/
 
 # Vendored third-party skill (re-fetchable via skills-lock.json)
 .agents/
+
+# Vendored idtracker.ai reference docs -- third-party content, not ours to redistribute
+docs_from_idtracker.ai/
