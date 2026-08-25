@@ -78,6 +78,50 @@ def test_dialog_shows_inputs_assumptions_and_warnings(qtbot) -> None:
     assert "Under-smoothed data inflates path length" in text
 
 
+def test_dialog_shows_supporting_references_when_present(qtbot) -> None:
+    from ui.dialogs.metric_info_dialog import MetricInfoDialog
+
+    # IL-4 (Activity) carries three supporting references.
+    dlg = MetricInfoDialog(metrics.get("IL-4"))
+    qtbot.addWidget(dlg)
+    text = _dialog_text(dlg)
+
+    assert "Supporting references" in text
+    assert "Stewart et al. 2012" in text
+    assert "Kalueff et al. 2013" in text
+
+
+def test_dialog_omits_supporting_references_section_when_empty(qtbot) -> None:
+    from ui.dialogs.metric_info_dialog import MetricInfoDialog
+
+    # IL-6 (Acceleration) has no supporting_references.
+    dlg = MetricInfoDialog(metrics.get("IL-6"))
+    qtbot.addWidget(dlg)
+    text = _dialog_text(dlg)
+
+    assert "Supporting references" not in text
+
+
+def test_dialog_shows_superseded_by_notice(qtbot) -> None:
+    from ui.dialogs.metric_info_dialog import MetricInfoDialog
+
+    dlg = MetricInfoDialog(metrics.get("Z-2"))
+    qtbot.addWidget(dlg)
+    text = _dialog_text(dlg)
+
+    assert "Superseded by Z-8" in text
+
+
+def test_dialog_omits_superseded_by_notice_for_ordinary_metrics(qtbot) -> None:
+    from ui.dialogs.metric_info_dialog import MetricInfoDialog
+
+    dlg = MetricInfoDialog(metrics.get("IL-1"))
+    qtbot.addWidget(dlg)
+    text = _dialog_text(dlg)
+
+    assert "Superseded by" not in text
+
+
 def test_dialog_shows_citation_and_doi_when_present(qtbot) -> None:
     from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
@@ -86,8 +130,8 @@ def test_dialog_shows_citation_and_doi_when_present(qtbot) -> None:
     qtbot.addWidget(dlg)
     text = _dialog_text(dlg)
 
-    assert "Couzin et al. 2002, J. Theor. Biol." in text
-    assert "10.1006/jtbi.2002.3065" in text
+    assert "Vicsek et al. 1995, Phys. Rev. Lett." in text
+    assert "10.1103/PhysRevLett.75.1226" in text
 
 
 def test_dialog_shows_formula_latex_source_when_present(qtbot) -> None:
@@ -145,8 +189,8 @@ def test_copy_citation_button_writes_citation_and_doi_to_clipboard(qtbot) -> Non
     dlg._copy_citation_btn.click()
 
     clipboard_text = QGuiApplication.clipboard().text()
-    assert "Couzin et al. 2002, J. Theor. Biol." in clipboard_text
-    assert "10.1006/jtbi.2002.3065" in clipboard_text
+    assert "Vicsek et al. 1995, Phys. Rev. Lett." in clipboard_text
+    assert "10.1103/PhysRevLett.75.1226" in clipboard_text
 
 
 # ── Close behaviour ───────────────────────────────────────────────────────────

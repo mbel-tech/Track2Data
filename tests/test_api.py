@@ -1066,7 +1066,7 @@ def test_build_payload_buckets_metrics_by_level(tmp_path: Path) -> None:
     assert "GL-1" not in payload.individual_metrics
     assert all(k.startswith("D-") for k in payload.diagnostic_metrics)
     assert set(payload.diagnostic_metrics) == {
-        "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9",
+        "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9", "D-10",
     }
 
 

@@ -1,5 +1,5 @@
 """
-Diagnostic metrics D-1 through D-5.
+Diagnostic metrics D-1 through D-10.
 
 These are always-on metrics computed for every session regardless of user
 selection. They read directly from the Session object (no preprocessing
@@ -14,7 +14,12 @@ import numpy as np
 import pandas as pd
 
 from track2data.core.models import Session
-from track2data.metrics.base import Metric, MetricDocumentation
+from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
+from track2data.metrics.references import (
+    BERNARDIN_STIEFELHAGEN_2008,
+    BJORNERAAS_2010,
+    ROMERO_FERRERO_2019,
+)
 
 # ── D-1: Tracking Coverage ─────────────────────────────────────────────────────
 
@@ -39,7 +44,11 @@ class TrackingCoverage(Metric):
             "Fraction of frames in which each animal's position is non-NaN. "
             "A value of 1.0 means the animal was detected in every frame."
         ),
-        formula_plain="coverage[k] = count(~nan(xy[:,k,0])) / n_frames",
+        formula_plain=(
+            "coverage[k] = count(~nan(xy[:,k,0])) / n_frames; "
+            "session_coverage = mean(coverage) over k, equivalently "
+            "total non-NaN detections / (n_frames * n_animals)"
+        ),
         formula_latex=(
             r"\text{coverage}_k = "
             r"\frac{\sum_{t} \mathbf{1}[\text{xy}_{t,k} \neq \text{NaN}]}{T}"
@@ -53,6 +62,7 @@ class TrackingCoverage(Metric):
             "Tracking-pipeline convention (fraction of frames with a "
             "successfully assigned position); no single originating work"
         ),
+        supporting_references=[ROMERO_FERRERO_2019],
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -110,8 +120,8 @@ class TrackingAccuracy(Metric):
             "Returns NaN values when Session.quality is None.",
             "These are tracker self-reports and may not reflect ground-truth accuracy.",
         ],
-        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
-        citation_doi="10.1038/s41592-018-0295-5",
+        primary_reference=ROMERO_FERRERO_2019,
+        supporting_references=[BERNARDIN_STIEFELHAGEN_2008],
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -186,8 +196,7 @@ class IdProbabilityStats(Metric):
             "Returns NaN values when Session.id_probabilities is None, or "
             "when an animal has zero non-NaN entries (never detected)."
         ],
-        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
-        citation_doi="10.1038/s41592-018-0295-5",
+        primary_reference=ROMERO_FERRERO_2019,
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -328,6 +337,7 @@ class IdentityStability(Metric):
             "fraction_identified (PRD §5.2, FR-IMP-3); not an external "
             "scientific result"
         ),
+        supporting_references=[ROMERO_FERRERO_2019],
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -388,13 +398,14 @@ class SegmentationErrorFrames(Metric):
         warnings=[
             "A high fraction indicates segmentation contamination that can "
             "degrade identification accuracy, independent of D-4's post-hoc "
-            "inconsistency flags."
+            "inconsistency flags.",
+            "number_of_error_frames is idtracker.ai's own internal counter, "
+            "documented in its usage guide rather than singled out as a "
+            "named metric in Romero-Ferrero et al. 2019 -- the citation "
+            "supports the underlying software and its segmentation "
+            "pipeline, not this specific field by name.",
         ],
-        citation=(
-            "idtracker.ai's own internal segmentation-error counter "
-            "(number_of_error_frames), documented in its usage guide "
-            "rather than named as a metric in Romero-Ferrero et al. 2019"
-        ),
+        primary_reference=ROMERO_FERRERO_2019,
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -461,8 +472,7 @@ class FragmentLengthDistribution(Metric):
         assumptions=["Returns NaN values when Session.fragments is None."],
         warnings=["A very short median fragment length indicates frequent "
                    "crossings or occlusions relative to the tracked area."],
-        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
-        citation_doi="10.1038/s41592-018-0295-5",
+        primary_reference=ROMERO_FERRERO_2019,
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -551,8 +561,7 @@ class CrossingRate(Metric):
                    "the recording has animals in physical contact or "
                    "overlap, confounding distance/orientation-based group "
                    "metrics for that span."],
-        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
-        citation_doi="10.1038/s41592-018-0295-5",
+        primary_reference=ROMERO_FERRERO_2019,
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -640,8 +649,8 @@ class SwapOpportunityCount(Metric):
                    "with frequent crossings/occlusions where per-individual "
                    "trajectories should be reviewed rather than trusted "
                    "outright between boundaries."],
-        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
-        citation_doi="10.1038/s41592-018-0295-5",
+        primary_reference=ROMERO_FERRERO_2019,
+        supporting_references=[BERNARDIN_STIEFELHAGEN_2008],
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -665,11 +674,167 @@ class SwapOpportunityCount(Metric):
         )
 
 
+# ── D-10: Physical-Plausibility Violation Rate ──────────────────────────────
+
+
+class PhysicalPlausibilityViolations(Metric):
+    """D-10: Fraction of raw-data steps exceeding a plausible speed
+    limit, and a count of single-frame 'teleport' jumps.
+
+    D-1..D-9 all inherit idtracker.ai's own self-report -- this is the
+    only diagnostic INDEPENDENT of it, run on ``Session.raw_xy`` before
+    any smoothing or gap-filling, which is exactly the failure mode
+    that silently corrupts IL-2's max speed and IL-6's acceleration
+    downstream.
+    """
+
+    id = "D-10"
+    name = "physical_plausibility_violations"
+    label = "Physical-Plausibility Violation Rate"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "individual_id",
+        "violation_fraction",
+        "teleport_jump_count",
+        "speed_limit_px_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Screens the RAW (pre-preprocessing) trajectory for frame-to-frame "
+            "steps faster than a plausible speed limit, using the "
+            "movement-characteristic screening approach used for GPS "
+            "telemetry data. Reports what fraction of an animal's steps "
+            "violate the limit, and how many are severe enough ('teleport "
+            "jumps') to be near-certainly a tracking error rather than real "
+            "movement."
+        ),
+        formula_plain=(
+            "step_speed[t,k] = ||raw_xy[t+1,k] - raw_xy[t,k]|| * fps (NaN pairs "
+            "skipped); speed_limit_px_s = cfg['speed_limit_px_s'] if given, else "
+            "the speed_limit_percentile-th percentile of this session's own "
+            "pooled step_speed distribution (default 99.5th, default "
+            "multiplier 3.0 applied on top); violation_fraction = fraction of "
+            "an animal's steps with step_speed > speed_limit_px_s; "
+            "teleport_jump_count = count with step_speed > speed_limit_px_s * "
+            "teleport_multiplier (default 5.0)"
+        ),
+        inputs=["Session.raw_xy", "Session.video.fps"],
+        assumptions=[
+            "Uses raw_xy, not the preprocessed trajectory -- this is "
+            "deliberately independent of gap-fill/jump-detect/smoothing, "
+            "which this diagnostic exists to help evaluate",
+        ],
+        warnings=[
+            "No calibration-derived default: Session.body_length_reliable "
+            "is always False (METRICS_SPEC.md §2.1), so the default limit "
+            "is data-driven (a percentile of this session's own step "
+            "distribution) rather than body-length-based. A "
+            "cfg['speed_limit_bl_per_s'] override is available when the "
+            "user has explicitly acknowledged that caveat, but is not the "
+            "default.",
+            "A data-driven percentile default is circular on a session that "
+            "is mostly bad data -- it screens outliers relative to the "
+            "session's own distribution, not an absolute biological limit",
+        ],
+        primary_reference=BJORNERAAS_2010,
+        supporting_references=[ROMERO_FERRERO_2019],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="speed_limit_px_s",
+            label="Speed limit",
+            kind="float",
+            unit="px/s",
+            help=(
+                "Explicit plausible-speed ceiling. Auto-computed from this "
+                "session's data when unset."
+            ),
+        ),
+        MetricParameter(
+            name="speed_limit_percentile",
+            label="Auto speed-limit percentile",
+            kind="float",
+            default=99.5,
+            minimum=0.0,
+            maximum=100.0,
+            help=(
+                "Percentile of this session's own step-speed distribution "
+                "used when speed_limit_px_s is unset."
+            ),
+        ),
+        MetricParameter(
+            name="teleport_multiplier",
+            label="Teleport-jump multiplier",
+            kind="float",
+            default=5.0,
+            minimum=1.0,
+            help="A step this many times the speed limit counts as a teleport jump.",
+        ),
+    ]
+
+    def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        fps = session.video.fps
+        xy = session.raw_xy
+        n_animals = session.n_animals
+
+        percentile = 99.5
+        teleport_multiplier = 5.0
+        explicit_limit: float | None = None
+        if cfg is not None:
+            percentile = float(cfg.get("speed_limit_percentile", percentile))
+            teleport_multiplier = float(cfg.get("teleport_multiplier", teleport_multiplier))
+            if cfg.get("speed_limit_px_s") is not None:
+                explicit_limit = float(cfg["speed_limit_px_s"])
+
+        per_animal_speeds: list[np.ndarray] = []
+        for k in range(n_animals):
+            traj = xy[:, k, :]
+            diff = traj[1:] - traj[:-1]
+            valid = ~(np.isnan(diff[:, 0]) | np.isnan(diff[:, 1]))
+            step_speed = np.sqrt((diff[valid] ** 2).sum(axis=1)) * fps
+            per_animal_speeds.append(step_speed)
+
+        if explicit_limit is not None:
+            speed_limit = explicit_limit
+        else:
+            pooled = np.concatenate(per_animal_speeds) if per_animal_speeds else np.array([])
+            speed_limit = float(np.percentile(pooled, percentile)) if pooled.size else float("nan")
+
+        teleport_threshold = (
+            speed_limit * teleport_multiplier if not np.isnan(speed_limit) else float("nan")
+        )
+
+        rows = []
+        for k in range(n_animals):
+            step_speed = per_animal_speeds[k]
+            if step_speed.size == 0 or np.isnan(speed_limit):
+                violation_fraction = float("nan")
+                teleport_count = 0
+            else:
+                violation_fraction = float((step_speed > speed_limit).mean())
+                teleport_count = int((step_speed > teleport_threshold).sum())
+
+            rows.append(
+                {
+                    "session_id": session.session_id,
+                    "individual_id": k,
+                    "violation_fraction": violation_fraction,
+                    "teleport_jump_count": teleport_count,
+                    "speed_limit_px_s": speed_limit,
+                }
+            )
+
+        return pd.DataFrame(rows, columns=self.output_columns)
+
+
 # ── Convenience function ───────────────────────────────────────────────────────
 
 
 def compute_all_diagnostics(session: Session) -> dict[str, pd.DataFrame]:
-    """Run all 9 diagnostic metrics and return {metric_id: DataFrame}."""
+    """Run all 10 diagnostic metrics and return {metric_id: DataFrame}."""
     metrics: list[Metric] = [
         TrackingCoverage(),
         TrackingAccuracy(),
@@ -680,6 +845,7 @@ def compute_all_diagnostics(session: Session) -> dict[str, pd.DataFrame]:
         FragmentLengthDistribution(),
         CrossingRate(),
         SwapOpportunityCount(),
+        PhysicalPlausibilityViolations(),
     ]
     return {m.id: m.compute(session) for m in metrics}
 
@@ -697,3 +863,4 @@ _register(SegmentationErrorFrames)
 _register(FragmentLengthDistribution)
 _register(CrossingRate)
 _register(SwapOpportunityCount)
+_register(PhysicalPlausibilityViolations)

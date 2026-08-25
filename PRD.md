@@ -172,7 +172,13 @@ parameterise the following steps, in this order:
 > (formulas, inputs, outputs, units, edge cases, citations) plus newer
 > IDs (IL-6 acceleration, IL-7 freezing-bout stats, IL-8 turn rate,
 > GL-8 rotational order, GL-9 centroid position, GL-10 group spread,
-> Z-6 latency-to-first-entry, and the D-* diagnostic series).
+> Z-6 latency-to-first-entry, and the D-* diagnostic series), plus the
+> 2026-08 reference-audit additions (IL-9 home-base occupancy, IL-10
+> roaming entropy, IL-11 circular heading statistics, IL-14 wall-distance
+> thigmotaxis, GL-11 order-state classification, GL-13 topological k-NN
+> counts, GL-15 group elongation, Z-7 zone transition matrix, Z-8 zone
+> preference index (Jacobs' D), Z-9 zone dwell-time distribution, and
+> D-10 physical-plausibility violations).
 
 The MVP metric catalogue, all selectable per project:
 

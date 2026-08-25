@@ -144,7 +144,18 @@ class MetricsScreen(QWidget):
             # latter is the snake_case identifier used internally
             # (registry keys, exported column name suffixes), not
             # something a researcher should see in the UI.
-            table.setItem(row, _COL_NAME, QTableWidgetItem(metric_cls.label))
+            name = metric_cls.label
+            superseded_by = getattr(metric_cls, "superseded_by", None)
+            if superseded_by:
+                name += f" (superseded by {superseded_by})"
+            name_item = QTableWidgetItem(name)
+            if superseded_by:
+                name_item.setToolTip(
+                    f"{metric_cls.label} is kept for output compatibility with "
+                    f"existing projects. {superseded_by} computes the same idea "
+                    "with a better statistic -- see its ⓘ for details."
+                )
+            table.setItem(row, _COL_NAME, name_item)
 
             doc = metric_cls.documentation
             if doc.formula_plain is not None or doc.citation is not None:

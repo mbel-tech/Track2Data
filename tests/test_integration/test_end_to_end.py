@@ -201,6 +201,59 @@ def test_compute_metrics_selected_metrics_present(tiny_real_session: Path) -> No
         assert mid in results, f"{mid} not in metric results: {sorted(results.keys())}"
 
 
+def test_compute_metrics_every_registered_metric_runs_without_crashing(
+    tiny_real_session: Path,
+) -> None:
+    """Every metric in the registry -- including the 11 added by the
+    2026-08 reference audit -- computes end to end through the real
+    Engine pipeline, not just in isolation against a hand-built
+    PreprocessedSession. tiny_real_session has no zones defined, so
+    Z-* metrics are expected to return an empty (not absent, not
+    erroring) DataFrame; every other metric must emit at least one row
+    with no all-NaN column that has a non-NaN counterpart in a unit
+    test fixture.
+    """
+    from track2data import metrics as metrics_registry
+    from track2data.api import Engine
+
+    all_ids = metrics_registry.all_ids()
+    def _ids_for(level: str) -> list[str]:
+        return [mid for mid in all_ids if metrics_registry.get(mid).level == level]
+
+    manifest = _minimal_manifest(tiny_real_session)
+    manifest = manifest.model_copy(
+        update={
+            "metrics": MetricSelection(
+                individual=_ids_for("individual"),
+                group=_ids_for("group"),
+                zone=_ids_for("zone"),
+                diagnostic=[],
+            )
+        }
+    )
+    engine = Engine(manifest)
+
+    session = engine.import_session(tiny_real_session)
+    psess = engine.preprocess(session)
+    results = engine.compute_metrics(psess)
+
+    missing = [mid for mid in all_ids if mid not in results]
+    assert not missing, f"metrics absent from compute_metrics() output: {missing}"
+
+    new_metric_ids = {
+        "IL-9", "IL-10", "IL-11", "IL-14",
+        "GL-11", "GL-13", "GL-15",
+        "Z-7", "Z-8", "Z-9",
+        "D-10",
+    }
+    for mid in new_metric_ids:
+        df = results[mid]
+        assert isinstance(df, pd.DataFrame), f"{mid} did not return a DataFrame"
+        if mid.startswith("Z-"):
+            continue  # no zones defined in this fixture -- empty is correct
+        assert not df.empty, f"{mid} returned an empty DataFrame against a zone-free fixture"
+
+
 # ── 4+5. run_session → CSV ────────────────────────────────────────────────────
 
 

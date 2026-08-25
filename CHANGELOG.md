@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **11 new metrics from the 2026-08 reference audit's proposals**,
+  taking the catalogue from 33 to 44: **IL-9** Home-Base Occupancy,
+  **IL-10** Roaming Entropy, **IL-11** Circular Statistics of Heading,
+  **IL-14** Wall-Distance Thigmotaxis, **GL-11** Order-State
+  Classification (polarised/milling/swarm), **GL-13** Topological k-NN
+  Counts, **GL-15** Group Elongation/Anisotropy, **Z-7** Zone Transition
+  Matrix & Sequence Entropy, **Z-8** Zone Preference Index (Jacobs' D),
+  **Z-9** Zone Dwell-Time Distribution, and **D-10** Physical-
+  Plausibility Violation Rate -- the only diagnostic independent of
+  idtracker.ai's own self-report, screening `Session.raw_xy` directly
+  for implausible steps and single-frame "teleport" jumps. Nine other
+  proposals were deliberately not built; see `docs/ROADMAP.md`'s
+  "Reserved metric IDs" table for which, and why.
+- **`track2data/metrics/references.py`**, a canonical bibliography of
+  ~35 verified works. Metrics now cite a shared `Reference` object
+  (`MetricDocumentation.primary_reference` / `.supporting_references`)
+  rather than retyping citation strings, so two metrics citing the same
+  paper are byte-identical by construction. `docs/references.bib` is
+  generated from it alongside `docs/METRIC_REFERENCES.csv` (which
+  gained a `supporting_references` column) by
+  `scripts/generate_metric_references.py`, and both are pinned by
+  `tests/test_metric_references_consistency.py`.
+
 - **New "session" calibration mode** (`CalibrationConfig.mode = "session"`).
   Uses each session's own `length_unit` -- idtracker.ai's px-to-real-unit
   ratio from the validator's Length Calibration tool -- so different
@@ -88,6 +111,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Second reference-audit pass: primary citations corrected on 11
+  metrics, supporting references added to ~20 more.** An external
+  audit resolved every DOI in the repo against Crossref and found none
+  fabricated and none wrong, but several attributions named a paper
+  that does not actually support the metric:
+  **IL-4** (Activity/Freezing Fraction) cited Stewart et al. 2012, a
+  conceptual review with no operational velocity threshold; a
+  configurable-threshold metric needs a protocol source, so IL-4 and
+  **IL-7** (Freezing-Bout Count & Duration) now cite Cachat et al. 2010,
+  which gives one (Stewart moves to supporting).
+  **IL-8** (Turn Rate) cited Couzin et al. 2002, a *simulation* paper
+  where turning is a model parameter, not a measurement protocol; now
+  cites Kareiva & Shigesada 1983 (correlated-random-walk turn-angle
+  analysis), with Mwaffo 2015's zebrafish-specific formulation as
+  supporting.
+  **Z-4** (Zone Transitions) cited a real but Crossref-unindexed book
+  chapter (Fagen & Young 1978 in Colgan's *Quantitative Ethology*) that
+  no reader could resolve; now cites Bakeman & Gottman 1997.
+  **GL-1** (NND) cited Pitcher 1973 as primary, but the statistic
+  itself originates with Clark & Evans 1954; Pitcher moves to
+  supporting as the schooling-specific application.
+  **GL-3** (Polarisation) cited Couzin et al. 2002, but the polar order
+  parameter is Vicsek 1995's; Couzin now supports it.
+  **GL-4** (Convex Hull Area) turned out not to be reference-less after
+  all — the minimum convex polygon (of which this is the 2-D case)
+  originates with Mohr 1947.
+  **GL-7** (NN-Matched Speed) now cites Bernardin & Stiefelhagen 2008
+  (CLEAR MOT), matching what the code actually computes (a greedy,
+  one-pass nearest-neighbour match — not the Hungarian/assignment-
+  problem solve the previous "greedy or Hungarian" spec text implied).
+  Z-3, Z-5, GL-2, and GL-6 had a real citation but no DOI (Martin &
+  Bateson 2007 and Krause & Ruxton 2002's book DOIs); both are now
+  filled in. Full detail and the audit's own verdict table are in the
+  commit history; nothing above changes what any metric computes.
+- **Z-2 (Area-Corrected Occupancy) marked superseded by Z-8** (`Metric.
+  superseded_by`, rendered in the ⓘ dialog and the metrics-screen row).
+  Z-2's unbounded, asymmetric ratio cannot be meaningfully averaged
+  across animals or compared across arena designs; Z-8 (Jacobs' D) is
+  bias-corrected and bounded [-1, +1] on the same underlying data. Z-2
+  itself is untouched — no existing project's exported numbers change.
+- **Spec-vs-code corrections (no numeric change):** GL-7's spec
+  described "greedy or Hungarian matching" and "solve assignment
+  problem"; the implementation has only ever been greedy, one pass —
+  the spec now says so. IL-5's spec named no specific tortuosity
+  estimator; it now states the code computes the reciprocal of the
+  whole-track straightness index D/L, not sinuosity or a fractal
+  estimator, per Benhamou 2004's own point that these are not
+  interchangeable. D-5's spec said "pass-through + categorical" instead
+  of naming the actual `fraction_identified >= 0.5` rule the code has
+  always used. GL-10's spec now states it computes RMS distance to the
+  centroid specifically, not SD of positions or mean pairwise distance.
+  D-1's spec now states its denominator explicitly (frames ×
+  individuals). Z-6's spec now states that the `inf` convention for an
+  animal that never enters is this tool's own choice, not something its
+  citation (a rodent light/dark-box paradigm) specifies.
 - **Metric citations corrected and completed.** All 33 metrics now
   carry a reference; 15 previously had none at all (every zone metric
   and every diagnostic). The code and `METRICS_SPEC.md` disagreed on

@@ -18,6 +18,19 @@ from scipy.spatial.distance import pdist
 
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
+from track2data.metrics.references import (
+    BALLERINI_2008,
+    BERNARDIN_STIEFELHAGEN_2008,
+    CLARK_EVANS_1954,
+    COUZIN_2002,
+    DELCOURT_PONCIN_2012,
+    KRAUSE_RUXTON_2002,
+    MILLER_GERLAI_2007,
+    MOHR_1947,
+    PITCHER_1973,
+    TUNSTROM_2013,
+    VICSEK_1995,
+)
 
 # GL-6's two cohesion definitions. Kept beside the metric's own
 # `choices` declaration so the schema the ⚙ dialog offers and the values
@@ -60,14 +73,10 @@ class NearestNeighbourDistance(Metric):
         # Not Couzin et al. 2002 -- that citation and its DOI were
         # copy-pasted here from GL-3/GL-8, which genuinely do trace to
         # it. Couzin 2002 is about collective memory and spatial
-        # sorting; nearest-neighbour distance as a shoaling measure
-        # comes from Pitcher's school-structure work.
-        citation=(
-            "Pitcher 1973, Anim. Behav. 21:673-686 (three-dimensional "
-            "structure of minnow schools); see also Krause & Ruxton 2002, "
-            "Living in Groups"
-        ),
-        citation_doi="10.1016/S0003-3472(73)80091-0",
+        # sorting. NND as a statistic originates with Clark & Evans;
+        # Pitcher is its application to fish schooling specifically.
+        primary_reference=CLARK_EVANS_1954,
+        supporting_references=[PITCHER_1973, KRAUSE_RUXTON_2002],
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -188,8 +197,11 @@ class Polarisation(Metric):
             "Frames with fewer than 2 valid headings are skipped",
         ],
         warnings=["Results may be biased when many animals are stationary"],
-        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
-        citation_doi="10.1006/jtbi.2002.3065",
+        # The polar order parameter |mean unit heading| is Vicsek's; Couzin
+        # 2002 applies it (and the rotational-order parameter, GL-8) to
+        # animal-group simulation specifically.
+        primary_reference=VICSEK_1995,
+        supporting_references=[COUZIN_2002, TUNSTROM_2013],
     )
 
     _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
@@ -297,12 +309,14 @@ class CentroidSpeed(Metric):
         ),
         inputs=["PreprocessedSession.xy"],
         assumptions=["NaN animal positions are excluded from the centroid computation"],
-        warnings=["Highly variable valid-animal counts across frames may bias the metric"],
-        citation=(
-            "Standard kinematics applied to the group centroid; no single "
-            "originating work. Used as a group descriptor in e.g. Tunstrøm "
-            "et al. 2013, PLoS Comput. Biol. 9(2):e1002915"
-        ),
+        warnings=[
+            "Highly variable valid-animal counts across frames may bias the metric",
+            "Centroid speed is NOT the mean of individual speeds -- it can be "
+            "near zero even while every animal moves fast, whenever the group "
+            "mills or the animals' velocities cancel",
+        ],
+        citation="Standard kinematics applied to the group centroid; no single originating work",
+        supporting_references=[TUNSTROM_2013],
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -388,12 +402,14 @@ class NNMatchedSpeed(Metric):
             "Frame pairs where any animal has NaN position are skipped",
             "Greedy assignment; not globally optimal",
         ],
-        warnings=["Greedy assignment may be biased in crowded scenes"],
-        citation=(
-            "Frame-to-frame point matching is a standard multi-object-"
-            "tracking technique (assignment problem); no animal-behaviour-"
-            "specific originating work"
-        ),
+        warnings=[
+            "Greedy assignment may be biased in crowded scenes",
+            "The implementation is greedy nearest-neighbour matching, one "
+            "pass, NOT a globally optimal (Hungarian/assignment-problem) "
+            "solve -- the citation below is for CLEAR MOT's evaluation "
+            "framework, matched to what this metric actually computes.",
+        ],
+        primary_reference=BERNARDIN_STIEFELHAGEN_2008,
     )
 
     @staticmethod
@@ -510,7 +526,8 @@ class InterIndividualDistance(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped NaN frames may bias the metric"],
-        citation="Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
+        primary_reference=KRAUSE_RUXTON_2002,
+        supporting_references=[MILLER_GERLAI_2007, DELCOURT_PONCIN_2012],
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -609,10 +626,11 @@ class ConvexHullArea(Metric):
         # al. 2006 (marching locusts); that paper characterises order via
         # alignment and density, not convex-hull area, so the
         # attribution was dropped rather than carried into the code.
-        citation=(
-            "Standard spatial-cohesion measure; convex-hull area is widely "
-            "used as a group-spread metric in collective-behaviour studies"
-        ),
+        # Not reference-less after all: the minimum convex polygon (of
+        # which this per-frame hull is the 2-D case) originates with
+        # Mohr 1947.
+        primary_reference=MOHR_1947,
+        supporting_references=[KRAUSE_RUXTON_2002],
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -710,7 +728,8 @@ class GroupCohesion(Metric):
             "cohesion_source='iid' uses the same mean-pairwise-distance computation as GL-2"
         ],
         warnings=["Undefined (NaN) when the mean distance = 0 or when fewer than 2 animals"],
-        citation="Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
+        primary_reference=KRAUSE_RUXTON_2002,
+        supporting_references=[DELCOURT_PONCIN_2012],
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -854,14 +873,12 @@ class RotationalOrder(Metric):
             "Same heading-stability caveat as GL-3: results may be biased when "
             "many animals are stationary or headings are noisy"
         ],
-        # Single-work citation with the DOI that matches it. The
-        # compound "Couzin ...; Tunstrøm ..." this used to carry made
-        # the one DOI read as though it covered both papers. Tunstrøm
-        # et al. 2013 (10.1371/journal.pcbi.1002915) applies the same
-        # order parameter to schooling fish -- see the assumptions above
-        # rather than the citation field, which is one work per metric.
-        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
-        citation_doi="10.1006/jtbi.2002.3065",
+        # Couzin 2002 defines this angular-momentum order parameter;
+        # Tunstrøm 2013 supplies the empirical milling-state thresholds
+        # needed to interpret the value, as a supporting reference rather
+        # than folded into one compound citation string.
+        primary_reference=COUZIN_2002,
+        supporting_references=[TUNSTROM_2013],
     )
 
     _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
@@ -1071,11 +1088,17 @@ class GroupSpread(Metric):
         ),
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
-        warnings=["Skipped frames may bias the metric"],
+        warnings=[
+            "Skipped frames may bias the metric",
+            "This is RMS distance to the centroid specifically -- neither SD "
+            "of positions nor mean pairwise distance, which are different "
+            "'spread' statistics with different values",
+        ],
         citation=(
             "Standard spatial-dispersion measure; complements GL-4 "
             "(convex-hull area). No single originating work"
         ),
+        supporting_references=[CLARK_EVANS_1954],
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -1120,6 +1143,402 @@ class GroupSpread(Metric):
         )
 
 
+# ── GL-11: Order-state classification ─────────────────────────────────────────
+
+
+class OrderStateClassification(Metric):
+    """GL-11 — Classifies each frame into polarised/milling/swarm using
+    the polarisation (GL-3) x rotational-order (GL-8) plane.
+
+    Both order parameters are already computed by GL-3 and GL-8, but
+    reported there as independent time series. The 2-D state space is
+    the established way to read them together and turns two continuous
+    traces into an interpretable behavioural budget.
+    """
+
+    id = "GL-11"
+    name = "order_state_classification"
+    label = "Order-State Classification"
+    level = "group"
+    priority = "primary"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "polarised_time_pct",
+        "milling_time_pct",
+        "swarm_time_pct",
+        "n_classified_frames",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Joint classification of each frame into one of three collective "
+            "states from the GL-3 (polarisation, Φ) x GL-8 (rotational order, "
+            "M) plane: 'polarised' (Φ >= polarised_threshold), 'milling' "
+            "(Φ < polarised_threshold and M >= milling_threshold), or 'swarm' "
+            "(neither -- low order in both). Reports the time fraction spent "
+            "in each state."
+        ),
+        formula_plain=(
+            "Per frame: compute Φ[t] and M[t] exactly as GL-3/GL-8 do "
+            "(same stationary_threshold_px_s); "
+            "state[t] = 'polarised' if Φ[t] >= polarised_threshold, "
+            "else 'milling' if M[t] >= milling_threshold, else 'swarm'; "
+            "*_time_pct = fraction of classified frames in that state"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.kinematics.heading_rad",
+            "PreprocessedSession.kinematics.speed_px_s",
+        ],
+        assumptions=[
+            "A frame is classified only when both Φ[t] and M[t] are defined "
+            "(same per-frame skip rules as GL-3 and GL-8: >=2 moving animals, "
+            "and for M, >=2 of them off the centroid)",
+        ],
+        warnings=[
+            "Threshold choice is a modelling decision, not a physical "
+            "constant -- the defaults follow Tunstrøm 2013's empirical "
+            "milling-state boundaries for fish schools and may not transfer "
+            "to other species or group sizes without re-checking",
+        ],
+        primary_reference=TUNSTROM_2013,
+        supporting_references=[COUZIN_2002, VICSEK_1995],
+    )
+    _STATIONARY_THRESHOLD = 1e-6
+    _ZERO_RADIUS_EPS = 1e-9
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="polarised_threshold",
+            label="Polarised-state threshold (Φ)",
+            kind="float",
+            default=0.65,
+            minimum=0.0,
+            maximum=1.0,
+            help="Φ at or above this counts a frame as 'polarised'.",
+        ),
+        MetricParameter(
+            name="milling_threshold",
+            label="Milling-state threshold (M)",
+            kind="float",
+            default=0.65,
+            minimum=0.0,
+            maximum=1.0,
+            help="M at or above this (when not already polarised) counts a frame as 'milling'.",
+        ),
+        MetricParameter(
+            name="stationary_threshold_px_s",
+            label="Stationary threshold",
+            kind="float",
+            default=1e-6,
+            minimum=0.0,
+            unit="px/s",
+            help="Same threshold GL-3/GL-8 use to exclude stationary animals per frame.",
+        ),
+    ]
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        xy = session.xy
+        heading = session.kinematics.heading_rad
+        speed = session.kinematics.speed_px_s
+
+        polarised_thr = 0.65
+        milling_thr = 0.65
+        stationary_thr = self._STATIONARY_THRESHOLD
+        if cfg is not None:
+            polarised_thr = float(cfg.get("polarised_threshold", polarised_thr))
+            milling_thr = float(cfg.get("milling_threshold", milling_thr))
+            stationary_thr = float(cfg.get("stationary_threshold_px_s", stationary_thr))
+
+        n_frames = xy.shape[0]
+        counts = {"polarised": 0, "milling": 0, "swarm": 0}
+        n_classified = 0
+
+        for t in range(n_frames):
+            positions = xy[t]
+            h_t = heading[t]
+            s_t = speed[t]
+
+            moving = (~np.isnan(h_t)) & (~np.isnan(s_t)) & (s_t > stationary_thr)
+            if moving.sum() < 2:
+                continue
+
+            cos_h = np.cos(h_t[moving])
+            sin_h = np.sin(h_t[moving])
+            phi = float(np.sqrt(cos_h.mean() ** 2 + sin_h.mean() ** 2))
+
+            valid_pos = ~np.isnan(positions[:, 0]) & ~np.isnan(positions[:, 1])
+            if valid_pos.sum() == 0:
+                continue
+            centroid = positions[valid_pos].mean(axis=0)
+
+            rot_moving = valid_pos & (~np.isnan(h_t)) & (~np.isnan(s_t)) & (s_t > stationary_thr)
+            idx = np.where(rot_moving)[0]
+            if idx.size < 2:
+                continue
+
+            r = positions[idx] - centroid
+            r_norm = np.sqrt((r**2).sum(axis=1))
+            nonzero = r_norm > self._ZERO_RADIUS_EPS
+            if nonzero.sum() < 2:
+                continue
+
+            idx2 = idx[nonzero]
+            r_hat = r[nonzero] / r_norm[nonzero, None]
+            e_hat = np.column_stack((np.cos(h_t[idx2]), np.sin(h_t[idx2])))
+            cross = r_hat[:, 0] * e_hat[:, 1] - r_hat[:, 1] * e_hat[:, 0]
+            m_val = float(abs(cross.mean()))
+
+            n_classified += 1
+            if phi >= polarised_thr:
+                counts["polarised"] += 1
+            elif m_val >= milling_thr:
+                counts["milling"] += 1
+            else:
+                counts["swarm"] += 1
+
+        if n_classified == 0:
+            polarised_pct = milling_pct = swarm_pct = np.nan
+        else:
+            polarised_pct = counts["polarised"] / n_classified
+            milling_pct = counts["milling"] / n_classified
+            swarm_pct = counts["swarm"] / n_classified
+
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "polarised_time_pct": polarised_pct,
+                    "milling_time_pct": milling_pct,
+                    "swarm_time_pct": swarm_pct,
+                    "n_classified_frames": n_classified,
+                }
+            ]
+        )
+
+
+# ── GL-13: Topological k-NN counts ────────────────────────────────────────────
+
+
+class TopologicalNeighbourCounts(Metric):
+    """GL-13 — Distances to the 1st..k-th nearest neighbours, and the
+    count of neighbours within a metric radius.
+
+    Whether interaction range is metric or topological is a live
+    question in the collective-behaviour literature, and the two give
+    different answers about density effects. Cheap once GL-1's
+    per-frame ``cKDTree`` exists -- this queries the same tree for more
+    than one neighbour.
+    """
+
+    id = "GL-13"
+    name = "topological_neighbour_counts"
+    label = "Topological k-NN Counts"
+    level = "group"
+    priority = "optional"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "k",
+        "mean_kth_nn_distance_px",
+        "mean_neighbours_within_radius",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "For k = 1..k_max: the mean distance to each animal's k-th "
+            "nearest neighbour, averaged over animals and frames. Also the "
+            "mean count of neighbours within a fixed metric radius, for "
+            "comparison against the topological (rank-based) k-NN counts."
+        ),
+        formula_plain=(
+            "Per frame, per animal: query cKDTree for the k_max nearest "
+            "other animals; kth_nn_distance[k] = distance to the k-th; "
+            "neighbours_within_radius = count of other animals within "
+            "radius_px; both averaged over all animals and valid frames"
+        ),
+        inputs=["PreprocessedSession.xy"],
+        assumptions=["Frames where any animal has NaN position are skipped"],
+        warnings=[
+            "Requires at least k_max + 1 animals with valid positions in a "
+            "frame for that frame to contribute to the k=k_max distance",
+        ],
+        primary_reference=BALLERINI_2008,
+        supporting_references=[CLARK_EVANS_1954],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="k_max",
+            label="Maximum neighbour rank (k)",
+            kind="int",
+            default=3,
+            minimum=1,
+            help="Report distances for every rank 1..k_max.",
+        ),
+        MetricParameter(
+            name="radius_px",
+            label="Metric radius",
+            kind="float",
+            default=50.0,
+            minimum=0.0,
+            unit="px",
+            help="Radius for the topological-vs-metric neighbour-count comparison.",
+        ),
+    ]
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        xy = session.xy
+        n_frames = xy.shape[0]
+
+        k_max = 3
+        radius_px = 50.0
+        if cfg is not None:
+            k_max = int(cfg.get("k_max", k_max))
+            radius_px = float(cfg.get("radius_px", radius_px))
+
+        kth_distances: dict[int, list[float]] = {k: [] for k in range(1, k_max + 1)}
+        radius_counts: list[float] = []
+
+        for t in range(n_frames):
+            positions = xy[t]
+            valid = ~np.isnan(positions[:, 0]) & ~np.isnan(positions[:, 1])
+            pts = positions[valid]
+            if pts.shape[0] < 2:
+                continue
+
+            tree = cKDTree(pts)
+            n_query = min(k_max, pts.shape[0] - 1)
+            # k=0 is each point itself (distance 0); ranks 1..n_query are
+            # the actual neighbours.
+            dists, _idx = tree.query(pts, k=n_query + 1)
+            if n_query == 0:
+                continue
+            for k in range(1, n_query + 1):
+                kth_distances[k].extend(dists[:, k].tolist())
+
+            pair_counts = tree.query_ball_point(pts, r=radius_px)
+            # Exclude the point itself from its own neighbour count.
+            radius_counts.extend(len(neighbours) - 1 for neighbours in pair_counts)
+
+        rows = []
+        mean_radius_count = float(np.mean(radius_counts)) if radius_counts else np.nan
+        for k in range(1, k_max + 1):
+            values = kth_distances[k]
+            mean_kth = float(np.mean(values)) if values else np.nan
+            rows.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "k": k,
+                    "mean_kth_nn_distance_px": mean_kth,
+                    "mean_neighbours_within_radius": mean_radius_count,
+                }
+            )
+
+        return pd.DataFrame(rows)
+
+
+# ── GL-15: Group elongation / shape anisotropy ────────────────────────────────
+
+
+class GroupElongation(Metric):
+    """GL-15 — Aspect ratio and orientation of the group's shape, from
+    the eigenvalues of the per-frame position covariance matrix.
+
+    GL-4 (convex hull area) and GL-10 (RMS spread) are both size-only;
+    a school moving fast elongates along its direction of travel at
+    roughly constant area or spread. This is the two extra numbers that
+    say so.
+    """
+
+    id = "GL-15"
+    name = "group_elongation"
+    label = "Group Elongation / Anisotropy"
+    level = "group"
+    priority = "optional"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "mean_elongation_ratio",
+        "mean_major_axis_orientation_rad",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Per-frame shape anisotropy of the group: the ratio of the major "
+            "to minor eigenvalue of the position covariance matrix (1.0 = "
+            "circular, higher = more elongated), and the orientation of the "
+            "major axis, averaged over frames."
+        ),
+        formula_plain=(
+            "Per frame: Σ = cov(xy[t, valid, :]) (2x2); "
+            "λ1 >= λ2 = eigenvalues(Σ); "
+            "elongation_ratio[t] = sqrt(λ1 / λ2) (NaN if λ2 <= 0); "
+            "major_axis_orientation[t] = angle of the eigenvector for λ1; "
+            "metric = mean over frames with >=3 valid animals"
+        ),
+        inputs=["PreprocessedSession.xy"],
+        assumptions=[
+            "Requires >=3 valid animal positions in a frame to define a covariance matrix"
+        ],
+        warnings=[
+            "Orientation is averaged as a circular quantity mod π (an axis "
+            "has no head/tail), not as a plain arithmetic mean of angles",
+        ],
+        primary_reference=TUNSTROM_2013,
+        supporting_references=[MOHR_1947],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        xy = session.xy
+        n_frames = xy.shape[0]
+
+        ratios: list[float] = []
+        orientations: list[complex] = []
+
+        for t in range(n_frames):
+            positions = xy[t]
+            valid = ~np.isnan(positions[:, 0]) & ~np.isnan(positions[:, 1])
+            pts = positions[valid]
+            if pts.shape[0] < 3:
+                continue
+
+            cov = np.cov(pts.T)
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            # eigh returns ascending order; take the larger as major axis.
+            lam_minor, lam_major = eigvals[0], eigvals[1]
+            if lam_minor <= 0 or lam_major <= 0:
+                continue
+
+            ratios.append(float(np.sqrt(lam_major / lam_minor)))
+
+            major_vec = eigvecs[:, 1]
+            angle = float(np.arctan2(major_vec[1], major_vec[0]))
+            # Average orientation as a mod-pi circular quantity (an axis has
+            # no head/tail) via doubled-angle unit vectors.
+            orientations.append(np.exp(1j * 2 * angle))
+
+        mean_ratio = np.nan if not ratios else float(np.mean(ratios))
+
+        if not orientations:
+            mean_orientation = np.nan
+        else:
+            mean_doubled = np.mean(orientations)
+            mean_orientation = float(np.angle(mean_doubled) / 2.0)
+
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "mean_elongation_ratio": mean_ratio,
+                    "mean_major_axis_orientation_rad": mean_orientation,
+                }
+            ]
+        )
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -1134,3 +1553,6 @@ _register(NNMatchedSpeed)
 _register(RotationalOrder)
 _register(GroupCentroidPosition)
 _register(GroupSpread)
+_register(OrderStateClassification)
+_register(TopologicalNeighbourCounts)
+_register(GroupElongation)
