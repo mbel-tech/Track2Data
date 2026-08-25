@@ -38,16 +38,21 @@ def _dialog_text(widget) -> str:
 # ── MetricInfoDialog: real, fully-documented metric ─────────────────────────
 
 
-def test_dialog_shows_id_name_and_label_for_a_known_metric(qtbot) -> None:
+def test_dialog_shows_the_label_and_never_the_id_or_snake_case_name(qtbot) -> None:
+    """Neither the registry id ("IL-1") nor the snake_case internal
+    name ("path_length") belongs in the dialog -- metrics_screen.py's
+    Name column made that call for the table; the dialog used to leak
+    both anyway, in the window title and the header."""
     from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
-    dlg = MetricInfoDialog(metrics.get("IL-1"))
+    metric_cls = metrics.get("IL-1")
+    dlg = MetricInfoDialog(metric_cls)
     qtbot.addWidget(dlg)
     text = _dialog_text(dlg)
 
-    assert "IL-1" in text
-    assert "path_length" in text
     assert "Distance Travelled" in text
+    assert metric_cls.id not in text
+    assert metric_cls.name not in text
 
 
 def test_dialog_shows_real_definition_and_formula_text(qtbot) -> None:

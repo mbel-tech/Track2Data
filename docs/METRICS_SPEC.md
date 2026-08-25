@@ -652,8 +652,12 @@ class Metric(ABC):
 In `UI_DESIGN.md` Page 6, each row in the metric-selection list becomes:
 
 ```
-[ ✓ ]  IL-2 Speed (mean/median/max)         ⓘ   ⚙
+[ ✓ ]  Speed (mean/median/max)         ⓘ   ⚙
 ```
+
+Note the row shows only the display label ("Speed (mean/median/max)"),
+never the registry id ("IL-2") or the snake_case internal name
+("speed") — neither is something a researcher reads to pick a metric.
 
 - ✓ — selection checkbox (existing)
 - ⓘ — info icon
@@ -666,7 +670,7 @@ In `UI_DESIGN.md` Page 6, each row in the metric-selection list becomes:
 Click on ⓘ opens a modal `MetricInfoDialog(metric: Metric)`:
 
 ```
-┌─ Speed (IL-2) ──────────────────────────── ✕ ─┐
+┌─ Speed ─────────────────────────────────── ✕ ─┐
 │                                              │
 │  Manuscript label: Locomotor speed           │
 │  Level: Individual                           │

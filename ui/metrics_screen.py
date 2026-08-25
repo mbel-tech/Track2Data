@@ -3,8 +3,16 @@ Stage 6b — Metric selection screen (registry-driven QTableWidget).
 
 QTabWidget with three tabs: Individual / Group / Zone. Each tab is a
 QTableWidget populated from track2data.metrics.list_for_level(level),
-columns: include (checkbox) / metric_id / metric_name / info (ⓘ) /
-config (⚙, stub). Quality threshold QDoubleSpinBox + Apply button.
+columns: include (checkbox) / metric_name / info (ⓘ) / config (⚙,
+stub). Quality threshold QDoubleSpinBox + Apply button.
+
+The registry id ("IL-1") and the snake_case internal name
+("path_length") are deliberately never shown -- they're engine/export
+identifiers, not something a researcher should have to read to select
+a metric. The id still exists everywhere it's actually needed: as
+_ROLE_METRIC_ID user-data on the Include cell (the real identifier
+used for selection state and persistence), in exported column names,
+and in docs/METRICS_SPEC.md.
 """
 
 from __future__ import annotations
@@ -30,8 +38,8 @@ from track2data import metrics
 from track2data.core.models import MetricSelection
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
-_COLUMN_HEADERS = ["Include", "ID", "Name", "Info", "Config"]
-_COL_INCLUDE, _COL_ID, _COL_NAME, _COL_INFO, _COL_CONFIG = range(5)
+_COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
+_COL_INCLUDE, _COL_NAME, _COL_INFO, _COL_CONFIG = range(4)
 _ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
 _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
 
@@ -130,7 +138,6 @@ class MetricsScreen(QWidget):
             include_item.setData(_ROLE_REQUIRES_IDENTITY, metric_cls.requires_identity)
             table.setItem(row, _COL_INCLUDE, include_item)
 
-            table.setItem(row, _COL_ID, QTableWidgetItem(metric_cls.id))
             # .label ("Path Length"), not .name ("path_length") -- the
             # latter is the snake_case identifier used internally
             # (registry keys, exported column name suffixes), not
@@ -208,8 +215,8 @@ class MetricsScreen(QWidget):
         for table in (self._ind_table, self._grp_table, self._zone_table):
             for row in range(table.rowCount()):
                 include_item = table.item(row, _COL_INCLUDE)
-                id_item = table.item(row, _COL_ID)
-                if include_item is None or id_item is None:
+                name_item = table.item(row, _COL_NAME)
+                if include_item is None or name_item is None:
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
                 flags = include_item.flags()
@@ -220,11 +227,11 @@ class MetricsScreen(QWidget):
                         "this metric will be skipped for every session."
                     )
                     include_item.setToolTip(tooltip)
-                    id_item.setToolTip(tooltip)
+                    name_item.setToolTip(tooltip)
                 else:
                     include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
                     include_item.setToolTip("")
-                    id_item.setToolTip("")
+                    name_item.setToolTip("")
 
     def _update_zone_tab_enabled(self) -> None:
         if self._store is None or self._store.manifest is None:

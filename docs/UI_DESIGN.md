@@ -197,7 +197,11 @@ to defaults" link per group.
 
 **Metrics (Page 7):** three tabs (Individual / Group / Zone)
 populated from `metrics.list_for_level(level)`. Each row = checkbox +
-id + name + ⓘ icon + ⚙ config icon (stub in v1 — see below).
+name + ⓘ icon + ⚙ config icon (stub in v1 — see below). The registry
+id ("IL-1") and the snake_case internal name ("path_length") are
+never shown — they're engine/export identifiers, not something a
+researcher reads to pick a metric; the id still drives selection
+state internally as row user-data.
 Identity-aware metrics (`Metric.requires_identity`) greyed-out when
 every *probed* session in the project has `has_stable_identities is
 False` — sessions not yet probed (or whose probe failed) don't count
@@ -707,7 +711,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 **Per-tab structure:**
 - QTableWidget: `metric_list`
-  - Columns: `include` (checkbox), `metric_id`, `metric_name`, `info` (ⓘ icon), `config` (⚙ icon — **stub in v1**: shows "Not yet implemented"; no Screen 6.3 or config schema exists yet)
+  - Columns: `include` (checkbox), `metric_name` (the display label, e.g. "Distance Travelled" — never the registry id or the snake_case internal name), `info` (ⓘ icon), `config` (⚙ icon — **stub in v1**: shows "Not yet implemented"; no Screen 6.3 or config schema exists yet)
   - Rows: auto-populated from `metrics.list_for_level(level)`
   - Greyed rows: metrics where `Metric.requires_identity` is `True`, when every session in the project has `has_stable_identities is False` (with tooltip). Sessions with `has_stable_identities is None` (not yet probed, or probe failed) are treated as unknown, not identity-free — they don't trigger greying.
   - Disabled Zone tab if no zones defined on Stage 4
