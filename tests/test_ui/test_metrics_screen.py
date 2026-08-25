@@ -281,6 +281,48 @@ def test_metric_config_dialog_receives_the_saved_current_values(qtbot, monkeypat
     assert received == [{"threshold_px_s": 9.0}]
 
 
+def test_saving_metric_config_preserves_unapplied_selection_and_threshold(
+    qtbot, monkeypatch
+) -> None:
+    """Regression: saving the ⚙ dialog wrote straight to the store, whose
+    metricsChanged signal re-ran _load_from_store and reset every checkbox
+    and the quality spin to the *persisted* values -- silently discarding
+    everything the user had ticked but not yet clicked Apply on."""
+    from PySide6.QtWidgets import QDialog
+
+    from ui.metrics_screen import MetricsScreen
+
+    class _StubDialog:
+        def __init__(self, metric_cls, current_values, parent=None) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.DialogCode.Accepted
+
+        def values(self) -> dict:
+            return {"threshold_px_s": 9.0}
+
+    monkeypatch.setattr("ui.metrics_screen.MetricConfigDialog", _StubDialog)
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    # On-screen state the user has NOT applied yet.
+    il1 = _row_for_id(screen._ind_table, "IL-1")
+    il4 = _row_for_id(screen._ind_table, "IL-4")
+    screen._ind_table.item(il1, 0).setCheckState(Qt.CheckState.Checked)
+    screen._ind_table.item(il4, 0).setCheckState(Qt.CheckState.Checked)
+    screen._quality_spin.setValue(0.75)
+
+    screen._ind_table.cellWidget(il4, 3).click()  # open ⚙ and Save
+
+    assert screen._ind_table.item(il1, 0).checkState() == Qt.CheckState.Checked
+    assert screen._ind_table.item(il4, 0).checkState() == Qt.CheckState.Checked
+    assert screen._quality_spin.value() == pytest.approx(0.75)
+    assert store.manifest.metrics.config == {"IL-4": {"threshold_px_s": 9.0}}
+
+
 def test_saving_metric_config_dialog_persists_into_manifest_config(qtbot, monkeypatch) -> None:
     from PySide6.QtWidgets import QDialog
 

@@ -79,6 +79,48 @@ def test_il3_uses_the_main_roi_centroid_when_zones_are_defined() -> None:
     assert result["arena_radius"] == pytest.approx(100.0)
 
 
+def test_il3_radius_uses_the_same_convention_with_and_without_zones() -> None:
+    """Regression: the zone branch took the LONGER half-extent while the
+    video branch took the SHORTER one, so the same physical arena gave a
+    2x different radius depending only on whether a zone had been drawn.
+    At the default inner_radius_fraction=0.5 the oversized radius put
+    the 'inner' circle out at the walls, scoring wall-hugging animals as
+    centre-dwelling -- inverting the thigmotaxis reading IL-3 exists to
+    produce. Both branches must inscribe (min), never circumscribe."""
+    psess = _make_psess(width_px=1600, height_px=800)
+    no_zones = derive_metric_params("IL-3", psess, ZoneSet())
+
+    arena = ROI(
+        name="arena", level="main", vertices=[(0, 0), (1600, 0), (1600, 800), (0, 800)]
+    )
+    with_zone = derive_metric_params("IL-3", psess, ZoneSet(rois=[arena]))
+
+    assert with_zone["centre"] == pytest.approx(no_zones["centre"])
+    assert with_zone["arena_radius"] == pytest.approx(no_zones["arena_radius"])
+    assert with_zone["arena_radius"] == pytest.approx(400.0)  # min(1600,800)/2
+
+
+def test_il3_centre_stays_inside_an_arena_when_several_main_rois_exist() -> None:
+    """Regression: pooling every main ROI into one bounding box put the
+    centre in the empty gap between two separate arenas -- a point no
+    animal ever occupies, so every centre-distance in the session was
+    measured from dead space. This is the exclusive_rois layout the
+    pipeline explicitly supports."""
+    psess = _make_psess(width_px=1600, height_px=800)
+    left = ROI(name="a", level="main", vertices=[(0, 0), (400, 0), (400, 400), (0, 400)])
+    right = ROI(
+        name="b", level="main", vertices=[(1200, 0), (1600, 0), (1600, 400), (1200, 400)]
+    )
+
+    result = derive_metric_params("IL-3", psess, ZoneSet(rois=[left, right]))
+
+    cx, cy = result["centre"]
+    in_left = 0 <= cx <= 400 and 0 <= cy <= 400
+    in_right = 1200 <= cx <= 1600 and 0 <= cy <= 400
+    assert in_left or in_right, f"centre {result['centre']} is in neither arena"
+    assert result["arena_radius"] == pytest.approx(200.0)  # one arena, not the span
+
+
 def test_il3_ignores_secondary_level_rois_for_centre() -> None:
     psess = _make_psess(width_px=1000, height_px=800)
     # Only a "secondary" ROI defined -- IL-3 must fall back to video

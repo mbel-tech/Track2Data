@@ -153,8 +153,18 @@ def roi_area_px2(roi: ROI) -> float:
     float
         Area in pixels squared, using the Shapely polygon area formula
         (shoelace/Gauss formula).
+
+    Notes
+    -----
+    Repairs self-intersecting rings first, via the same
+    ``_make_valid_polygon`` that ``assign_zones`` uses. Shapely returns
+    the *signed* shoelace value for an invalid ring, so a self-crossing
+    polygon can cancel to 0.0 (or to a plausible-looking wrong value)
+    rather than raising -- and since containment is repaired but area
+    was not, ``assign_zones`` would assign frames to a zone that Z-2
+    then measured as having no area.
     """
-    return float(Polygon(roi.vertices).area)
+    return float(_make_valid_polygon(roi.vertices).area)
 
 
 def detect_overlaps(zone_set: ZoneSet) -> list[tuple[str, str]]:

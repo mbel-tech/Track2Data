@@ -13,10 +13,13 @@ scattered through the pipeline.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from track2data.core.models import PreprocessedSession, ZoneSet
 from track2data.zones.geometry import roi_area_px2
+
+logger = logging.getLogger(__name__)
 
 
 def derive_metric_params(
@@ -35,18 +38,41 @@ def derive_metric_params(
 
 
 def _derive_il3(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]:
-    """IL-3 (centre_distance)'s centre/arena_radius: the centroid and
-    half-extent of the project's "main"-level zone, if one is defined
-    -- else the video frame's own centre and half-shorter-dimension.
-    Only additive ("+") polygons contribute; a subtractive exclusion
-    hole doesn't move the arena's overall centre or extent."""
+    """IL-3 (centre_distance)'s centre/arena_radius: the bounding-box
+    midpoint and inscribed half-extent of the project's "main"-level
+    zone, if one is defined -- else the video frame's own centre and
+    half-shorter-dimension. Only additive ("+") polygons contribute; a
+    subtractive exclusion hole doesn't move the arena's overall centre
+    or extent.
+
+    Both branches inscribe -- ``min`` of the two half-extents, the
+    largest circle that fits *inside* the arena. Circumscribing instead
+    would put the default inner_radius_fraction=0.5 boundary out at the
+    walls of a non-square arena, scoring wall-hugging animals as
+    centre-dwelling and inverting the thigmotaxis reading.
+
+    With several separate "main" arenas (the ``exclusive_rois`` layout),
+    the largest one is used rather than all of them pooled: a pooled
+    bounding box is centred on the empty gap between them, which no
+    animal ever occupies. A single centre is ill-defined for that
+    layout, so this is a best effort and is logged.
+    """
     main_rois = [roi for roi in zone_set.rois if roi.level == "main" and roi.sign == "+"]
     if main_rois:
-        vertices = [v for roi in main_rois for v in roi.vertices]
-        xs = [v[0] for v in vertices]
-        ys = [v[1] for v in vertices]
+        if len(main_rois) > 1:
+            logger.warning(
+                "IL-3: %d 'main'-level zones defined (%s); a single arena centre is "
+                "ill-defined for a multi-arena layout. Using the largest ('%s'). "
+                "Per-arena centre distances would need a per-animal centre.",
+                len(main_rois),
+                ", ".join(roi.name for roi in main_rois),
+                max(main_rois, key=roi_area_px2).name,
+            )
+        roi = max(main_rois, key=roi_area_px2)
+        xs = [v[0] for v in roi.vertices]
+        ys = [v[1] for v in roi.vertices]
         centre = [(min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0]
-        radius = max(max(xs) - min(xs), max(ys) - min(ys)) / 2.0
+        radius = min(max(xs) - min(xs), max(ys) - min(ys)) / 2.0
     else:
         video = psess.session.video
         centre = [video.width_px / 2.0, video.height_px / 2.0]

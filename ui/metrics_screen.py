@@ -185,8 +185,14 @@ class MetricsScreen(QWidget):
             QMessageBox.information(self, "Info", "No project open.")
             return
 
+        # Fold in what's currently on screen, not just the new config.
+        # update_metrics() emits metricsChanged, which re-runs
+        # _load_from_store and overwrites every checkbox and the quality
+        # spin from the manifest -- so writing config alone would
+        # silently discard any selection the user had ticked but not yet
+        # clicked Apply on.
         current = self._store.manifest.metrics
-        sel = current.model_copy(
+        sel = self._selection_from_widgets(current).model_copy(
             update={"config": {**current.config, metric_cls.id: dlg.values()}}
         )
         try:
@@ -204,17 +210,16 @@ class MetricsScreen(QWidget):
                 result.append(item.data(_ROLE_METRIC_ID))
         return result
 
-    def _apply(self) -> None:
-        if self._store is None or self._store.manifest is None:
-            QMessageBox.information(self, "Info", "No project open.")
-            return
-        # model_copy(update=...) against the manifest's current
-        # MetricSelection, never a fresh MetricSelection(...) -- this
-        # screen has no widgets for `diagnostic` or `config`, and
-        # building one from scratch used to silently reset both to
-        # their defaults on every Apply click.
-        current = self._store.manifest.metrics
-        sel = current.model_copy(
+    def _selection_from_widgets(self, current):
+        """This screen's live widget state, layered onto `current`.
+
+        model_copy(update=...) against the manifest's current
+        MetricSelection, never a fresh MetricSelection(...) -- this
+        screen has no widgets for `diagnostic` or `config`, and
+        building one from scratch used to silently reset both to
+        their defaults on every Apply click.
+        """
+        return current.model_copy(
             update={
                 "individual": self._checked_ids(self._ind_table),
                 "group": self._checked_ids(self._grp_table),
@@ -222,6 +227,12 @@ class MetricsScreen(QWidget):
                 "quality_threshold": self._quality_spin.value(),
             }
         )
+
+    def _apply(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            QMessageBox.information(self, "Info", "No project open.")
+            return
+        sel = self._selection_from_widgets(self._store.manifest.metrics)
         try:
             self._store.update_metrics(sel)
         except Exception as exc:
