@@ -769,7 +769,17 @@ exposed so future per-user opt-outs are non-breaking.
    add DOI links once collected. Initial draft uses author/year only.
 2. **Zone overlap policy** — default "longest-overlap-wins"; settable
    per project. To be confirmed during Stage 4 implementation.
-3. **Per-metric config** — IL-4 threshold, IL-7 min_bout_frames, IL-3
-   centre-radius, GL-6 cohesion-source. These live in
-   `MetricSelection` sub-fields once a metric grows config; for v1.0
-   they are defaults only.
+3. **Per-metric config** — resolved at the engine level: metrics
+   declare a `parameters: list[MetricParameter]` schema
+   (`track2data/metrics/base.py`), and `MetricSelection.config` (keyed
+   `metric_id -> {param_name: value}`) now actually reaches
+   `Metric.compute()`'s `cfg` argument via `Engine._effective_cfg()` --
+   previously this path existed in several metrics but nothing ever
+   called it, so it was dead code. Parameters that are a property of
+   the session's own tracked arena rather than a user choice (IL-3's
+   centre-radius, Z-2's zone areas) are derived per session
+   (`track2data/metrics/derived.py`) instead of stored in
+   `MetricSelection.config`. Still open: the GUI's ⚙ button remains a
+   stub (no `MetricConfigDialog` yet) -- the engine-side plumbing this
+   note originally asked for is done; wiring it to the screen is
+   tracked separately.

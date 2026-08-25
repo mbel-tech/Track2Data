@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
-from track2data.core.models import MetricSelection
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
 _COLUMN_HEADERS = ["Include", "ID", "Name", "Info", "Config"]
@@ -171,14 +170,22 @@ class MetricsScreen(QWidget):
         return result
 
     def _apply(self) -> None:
-        if self._store is None:
+        if self._store is None or self._store.manifest is None:
             QMessageBox.information(self, "Info", "No project open.")
             return
-        sel = MetricSelection(
-            individual=self._checked_ids(self._ind_table),
-            group=self._checked_ids(self._grp_table),
-            zone=self._checked_ids(self._zone_table),
-            quality_threshold=self._quality_spin.value(),
+        # model_copy(update=...) against the manifest's current
+        # MetricSelection, never a fresh MetricSelection(...) -- this
+        # screen has no widgets for `diagnostic` or `config`, and
+        # building one from scratch used to silently reset both to
+        # their defaults on every Apply click.
+        current = self._store.manifest.metrics
+        sel = current.model_copy(
+            update={
+                "individual": self._checked_ids(self._ind_table),
+                "group": self._checked_ids(self._grp_table),
+                "zone": self._checked_ids(self._zone_table),
+                "quality_threshold": self._quality_spin.value(),
+            }
         )
         try:
             self._store.update_metrics(sel)

@@ -25,8 +25,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   calibrated" sentinel) -- distinguishing "never calibrated" from
   "corrupt value", both of which previously normalised to `None`
   identically and silently.
+- **Per-metric configuration is now wired end to end.**
+  `Metric.compute(session, cfg)` has accepted a config dict since it was
+  written, and six built-in metrics read one, but nothing in the
+  pipeline ever passed one -- every `cfg`-reading branch in every metric
+  was dead code. `MetricSelection.config` (keyed `metric_id ->
+  {param_name: value}`) now feeds `Engine.compute_metrics()`, layered as
+  metric defaults, then the user's saved overrides, then this session's
+  own derived values (`track2data/metrics/derived.py`) for parameters
+  that can't be user-typed, such as IL-3's arena centre or Z-2's zone
+  areas.
+- **Z-2 (Area-Corrected Occupancy) produces output for the first time.**
+  It always returned an empty `DataFrame` in production, since it
+  requires `cfg['roi_areas']`/`cfg['total_arena_area']` and nothing ever
+  supplied them. With zones defined, these are now derived automatically
+  via `zones.geometry.roi_area_px2` (also previously fully tested but
+  never called in production).
 
 ### Changed
+
+- **IL-3 (Distance from Arena Centre)'s centre/radius fallback changed.**
+  Previously, with no `cfg['centre']` supplied (which was always the
+  case -- see above), IL-3 fell back to the centroid of every tracked
+  position in the session: a circular definition where "the centre"
+  drifts toward wherever the animal happened to spend time, biasing the
+  metric it's meant to measure. It now derives the centre/radius from
+  the project's own "main"-level zone geometry when one is defined, or
+  the video frame's own geometric centre otherwise -- both fixed,
+  data-independent references. If you were relying on the old
+  centroid-of-positions fallback, `cfg['centre']`/`cfg['arena_radius']`
+  are no longer settable overrides for this reason (see "Per-metric
+  configuration" above -- derived parameters always win).
 
 - **Body-length calibration mode no longer reads `length_unit`.**
   Previously, whenever a session happened to carry a `length_unit`,

@@ -287,6 +287,149 @@ def test_compute_metrics_catches_a_raising_metric(monkeypatch: pytest.MonkeyPatc
     assert "D-1" in results
 
 
+# ── compute_metrics: per-metric cfg plumbing (was dead code) ───────────────
+#
+# Metric.compute(session, cfg) has always accepted a config dict, and six
+# built-in metrics read it -- but nothing ever passed one in production,
+# so every cfg-reading branch was dead and Z-2 (Area-Corrected Occupancy)
+# always returned an empty DataFrame regardless of what zones existed.
+
+
+def test_z2_produces_real_output_now_that_cfg_is_wired() -> None:
+    """The regression this whole feature was for: Z-2 needs
+    cfg['roi_areas']/cfg['total_arena_area'], which used to never be
+    supplied -- it always returned an empty DataFrame regardless of
+    input (a bare column-count check can't distinguish that from real
+    output, since the empty-DataFrame fallback also has the right
+    columns). Build a psess with an actual zone assignment and assert
+    Z-2 returns a real row, not the permanently-empty sentinel."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=20, n_animals=2)
+    n_frames, n_animals = session.n_frames, session.n_animals
+    kine = KinematicsArrays(
+        speed_px_s=np.zeros((n_frames, n_animals)),
+        accel_px_s2=np.zeros((n_frames, n_animals)),
+        heading_rad=np.zeros((n_frames, n_animals)),
+    )
+    main_zone = np.full((n_frames, n_animals), "arena", dtype=object)
+    psess = PreprocessedSession(
+        session=session, xy=session.raw_xy, kinematics=kine, main_zone=main_zone,
+        report=PreprocessReport(),
+    )
+    zone = ROI(name="arena", level="main", vertices=[(0, 0), (100, 0), (100, 100), (0, 100)])
+    manifest = _make_manifest(zones=ZoneSet(rois=[zone]), metrics=MetricSelection(zone=["Z-2"]))
+    engine = Engine(manifest)
+
+    results = engine.compute_metrics(psess)
+
+    assert "Z-2" in results
+    assert len(results["Z-2"]) > 0
+    row = results["Z-2"].iloc[0]
+    assert row["zone_name"] == "arena"
+    assert row["area_corrected_occupancy"] == pytest.approx(1.0)  # whole session, whole arena
+
+
+def _register_recording_metric(monkeypatch: pytest.MonkeyPatch, metric_id: str, parameters):
+    """Register a throwaway metric that records the cfg dict it was
+    called with, so tests can assert on exactly what compute_metrics
+    assembled without depending on a real metric's internal logic."""
+    import track2data.metrics as metrics_module
+    from track2data.metrics.base import Metric, MetricDocumentation
+
+    received: list[dict] = []
+
+    class RecordingMetric(Metric):
+        id = metric_id
+        name = "recording"
+        label = "Recording"
+        level = "individual"
+        priority = "optional"
+        requires_identity = False
+        output_columns = ["session_id"]
+        documentation = MetricDocumentation(
+            definition="test-only", formula_plain="n/a", inputs=[], assumptions=[], warnings=[],
+        )
+
+        def compute(self, session, cfg=None):
+            received.append(dict(cfg) if cfg is not None else None)
+            import pandas as pd
+            return pd.DataFrame({"session_id": [session.session_id]})
+
+    RecordingMetric.parameters = parameters
+    monkeypatch.setitem(metrics_module._registry, metric_id, RecordingMetric)
+    return received
+
+
+def test_declared_default_is_used_when_nothing_else_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from track2data.api import Engine
+    from track2data.metrics.base import MetricParameter
+
+    received = _register_recording_metric(
+        monkeypatch,
+        "IL-REC",
+        [MetricParameter(name="threshold_px_s", label="Threshold", kind="float", default=1.5)],
+    )
+    manifest = _make_manifest(metrics=MetricSelection(individual=["IL-REC"]))
+    engine = Engine(manifest)
+
+    engine.compute_metrics(_make_psess(_make_session()))
+
+    assert received == [{"threshold_px_s": 1.5}]
+
+
+def test_manifest_config_override_wins_over_declared_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from track2data.api import Engine
+    from track2data.metrics.base import MetricParameter
+
+    received = _register_recording_metric(
+        monkeypatch,
+        "IL-REC",
+        [MetricParameter(name="threshold_px_s", label="Threshold", kind="float", default=1.5)],
+    )
+    manifest = _make_manifest(
+        metrics=MetricSelection(
+            individual=["IL-REC"], config={"IL-REC": {"threshold_px_s": 9.0}}
+        )
+    )
+    engine = Engine(manifest)
+
+    engine.compute_metrics(_make_psess(_make_session()))
+
+    assert received == [{"threshold_px_s": 9.0}]
+
+
+def test_derived_param_ignores_any_manifest_override_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A derived parameter (e.g. IL-3's arena centre) is never
+    user-settable -- even if MetricSelection.config somehow carries a
+    value for it (a stale manifest, a hand-edited file), the derived
+    value must win."""
+    from track2data.api import Engine
+    from track2data.metrics.base import MetricParameter
+
+    received = _register_recording_metric(
+        monkeypatch,
+        "IL-3",  # the real id, so derive_metric_params actually fires
+        [MetricParameter(name="centre", label="Centre", kind="float", derived=True)],
+    )
+    manifest = _make_manifest(
+        metrics=MetricSelection(individual=["IL-3"], config={"IL-3": {"centre": [1.0, 1.0]}})
+    )
+    engine = Engine(manifest)
+
+    engine.compute_metrics(_make_psess(_make_session(n_frames=5)))
+
+    # No zones defined -> derive_metric_params falls back to the video
+    # frame's own centre (1000x1000 in _make_session), not [1.0, 1.0].
+    assert received == [{"centre": [500.0, 500.0], "arena_radius": 500.0}]
+
+
 # ── build_fish_by_frame: tracking_intervals frame/time offset ──────────────
 #
 # Regression coverage: frame/time_s used to be the raw array position,

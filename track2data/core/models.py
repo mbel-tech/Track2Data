@@ -292,6 +292,12 @@ class MetricSelection(BaseModel):
     timepoint_minutes: int | None = None
     # Mask per-frame metrics when id_probabilities[frame, animal] < threshold.
     quality_threshold: float = 0.0
+    # Per-metric parameter overrides, keyed metric_id -> {param_name:
+    # value} -- see track2data/metrics/base.py's MetricParameter and
+    # the ⚙ config dialog (ui/dialogs/metric_config_dialog.py). Only
+    # covers non-derived parameters; a metric's derived values (e.g.
+    # IL-3's arena centre) are never user-set, so never stored here.
+    config: dict[str, dict[str, Any]] = {}
 
 
 # ── Manifest building blocks ──────────────────────────────────────────────────
