@@ -218,6 +218,42 @@ class TestGroupCohesion:
     def test_metric_id(self) -> None:
         assert GroupCohesion.id == "GL-6"
 
+    def test_declares_configurable_parameters(self) -> None:
+        params = {p.name: p for p in GroupCohesion.parameters}
+        assert params.keys() == {"cohesion_source"}
+        assert params["cohesion_source"].choices == ["nnd", "iid"]
+        assert params["cohesion_source"].default == "nnd"
+
+    def test_cohesion_source_defaults_to_nnd(self) -> None:
+        """Three animals in a line: NND-based cohesion differs from
+        IID-based cohesion, so this proves the default is really NND
+        (matching the historical, only-ever behaviour) rather than
+        happening to coincide."""
+        n_frames = 5
+        xy = np.zeros((n_frames, 3, 2))
+        xy[:, 0, :] = [0.0, 0.0]
+        xy[:, 1, :] = [10.0, 0.0]
+        xy[:, 2, :] = [100.0, 0.0]
+        psess = make_psess(xy=xy)
+
+        df = GroupCohesion().compute(psess)
+
+        # mean_NND = (10 + 10 + 90) / 3 = 36.667 -> cohesion = 1/36.667
+        assert df["cohesion_index"].values[0] == pytest.approx(1.0 / (110.0 / 3.0), rel=1e-4)
+
+    def test_cohesion_source_iid_uses_mean_pairwise_distance(self) -> None:
+        n_frames = 5
+        xy = np.zeros((n_frames, 3, 2))
+        xy[:, 0, :] = [0.0, 0.0]
+        xy[:, 1, :] = [10.0, 0.0]
+        xy[:, 2, :] = [100.0, 0.0]
+        psess = make_psess(xy=xy)
+
+        df = GroupCohesion().compute(psess, cfg={"cohesion_source": "iid"})
+
+        # mean_IID = (10 + 100 + 90) / 3 = 66.667 -> cohesion = 1/66.667
+        assert df["cohesion_index"].values[0] == pytest.approx(1.0 / (200.0 / 3.0), rel=1e-4)
+
     def test_output_columns_present(self) -> None:
         psess = make_psess()
         df = GroupCohesion().compute(psess)
@@ -400,6 +436,10 @@ class TestGroupSpread:
 class TestRotationalOrder:
     def test_metric_id(self) -> None:
         assert RotationalOrder.id == "GL-8"
+
+    def test_declares_configurable_parameters(self) -> None:
+        names = {p.name for p in RotationalOrder.parameters}
+        assert names == {"stationary_threshold_px_s"}
 
     def test_output_columns_present(self) -> None:
         psess = make_psess()

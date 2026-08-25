@@ -17,7 +17,7 @@ from scipy.spatial import ConvexHull, QhullError, cKDTree
 from scipy.spatial.distance import pdist
 
 from track2data.core.models import PreprocessedSession
-from track2data.metrics.base import Metric, MetricDocumentation
+from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 
 # ── GL-1: NearestNeighbourDistance ────────────────────────────────────────────
 
@@ -52,8 +52,17 @@ class NearestNeighbourDistance(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped-frame count is reported; high counts may bias the metric"],
-        citation="Couzin et al. 2002, J. Theor. Biol.",
-        citation_doi="10.1006/jtbi.2002.3065",
+        # Not Couzin et al. 2002 -- that citation and its DOI were
+        # copy-pasted here from GL-3/GL-8, which genuinely do trace to
+        # it. Couzin 2002 is about collective memory and spatial
+        # sorting; nearest-neighbour distance as a shoaling measure
+        # comes from Pitcher's school-structure work.
+        citation=(
+            "Pitcher 1973, Anim. Behav. 21:673-686 (three-dimensional "
+            "structure of minnow schools); see also Krause & Ruxton 2002, "
+            "Living in Groups"
+        ),
+        citation_doi="10.1016/S0003-3472(73)80091-0",
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -174,11 +183,22 @@ class Polarisation(Metric):
             "Frames with fewer than 2 valid headings are skipped",
         ],
         warnings=["Results may be biased when many animals are stationary"],
-        citation="Couzin et al. 2002, J. Theor. Biol.",
+        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
         citation_doi="10.1006/jtbi.2002.3065",
     )
 
     _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="stationary_threshold_px_s",
+            label="Stationary threshold",
+            kind="float",
+            default=1e-6,
+            minimum=0.0,
+            unit="px/s",
+            help="Animals slower than this are excluded from each frame's heading average.",
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute group polarisation for *session*.
@@ -273,7 +293,11 @@ class CentroidSpeed(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["NaN animal positions are excluded from the centroid computation"],
         warnings=["Highly variable valid-animal counts across frames may bias the metric"],
-        citation="Standard collective motion",
+        citation=(
+            "Standard kinematics applied to the group centroid; no single "
+            "originating work. Used as a group descriptor in e.g. Tunstrøm "
+            "et al. 2013, PLoS Comput. Biol. 9(2):e1002915"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -360,7 +384,11 @@ class NNMatchedSpeed(Metric):
             "Greedy assignment; not globally optimal",
         ],
         warnings=["Greedy assignment may be biased in crowded scenes"],
-        citation="Identity-free tracking analysis — standard method",
+        citation=(
+            "Frame-to-frame point matching is a standard multi-object-"
+            "tracking technique (assignment problem); no animal-behaviour-"
+            "specific originating work"
+        ),
     )
 
     @staticmethod
@@ -477,7 +505,7 @@ class InterIndividualDistance(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped NaN frames may bias the metric"],
-        citation="Standard collective behaviour",
+        citation="Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -572,7 +600,14 @@ class ConvexHullArea(Metric):
             "Requires ≥3 animals for a valid convex hull",
         ],
         warnings=["Returns NaN when fewer than 3 animals are present"],
-        citation="Standard spatial analysis",
+        # An earlier draft of METRICS_SPEC.md attributed this to Buhl et
+        # al. 2006 (marching locusts); that paper characterises order via
+        # alignment and density, not convex-hull area, so the
+        # attribution was dropped rather than carried into the code.
+        citation=(
+            "Standard spatial-cohesion measure; convex-hull area is widely "
+            "used as a group-spread metric in collective-behaviour studies"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -659,12 +694,33 @@ class GroupCohesion(Metric):
             "Group cohesion defined as the reciprocal of the mean nearest-neighbour "
             "distance.  Higher values indicate a more cohesive (closer) group."
         ),
-        formula_plain="cohesion_index = 1 / mean_NND",
+        formula_plain=(
+            "cohesion_index = 1 / mean_NND (cohesion_source='nnd', default), "
+            "or 1 / mean_IID (cohesion_source='iid') -- see METRICS_SPEC.md §8 "
+            "open question 3"
+        ),
         inputs=["PreprocessedSession.xy"],
-        assumptions=["Uses the same NND computation as GL-1"],
-        warnings=["Undefined (NaN) when mean_NND = 0 or when fewer than 2 animals"],
-        citation="Standard collective behaviour",
+        assumptions=[
+            "cohesion_source='nnd' (default) uses the same NND computation as GL-1; "
+            "cohesion_source='iid' uses the same mean-pairwise-distance computation as GL-2"
+        ],
+        warnings=["Undefined (NaN) when the mean distance = 0 or when fewer than 2 animals"],
+        citation="Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="cohesion_source",
+            label="Cohesion source",
+            kind="choice",
+            default="nnd",
+            choices=["nnd", "iid"],
+            help=(
+                "Which pairwise-distance measure cohesion is derived from: "
+                "nearest-neighbour distance (nnd) or mean inter-individual "
+                "distance (iid)."
+            ),
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute group cohesion for *session*.
@@ -674,7 +730,9 @@ class GroupCohesion(Metric):
         session:
             A fully preprocessed session.
         cfg:
-            Optional configuration dict (unused).
+            Optional configuration dict. ``cfg['cohesion_source']`` selects
+            ``'nnd'`` (default, same computation as GL-1) or ``'iid'`` (same
+            computation as GL-2).
 
         Returns
         -------
@@ -683,6 +741,10 @@ class GroupCohesion(Metric):
         """
         xy = session.xy  # (n_frames, n_animals, 2)
         n_frames, n_animals = xy.shape[0], xy.shape[1]
+
+        cohesion_source = "nnd"
+        if cfg is not None and "cohesion_source" in cfg:
+            cohesion_source = cfg["cohesion_source"]
 
         if n_animals < 2:
             return pd.DataFrame(
@@ -695,20 +757,23 @@ class GroupCohesion(Metric):
                 ]
             )
 
-        frame_nnds: list[float] = []
+        frame_dists: list[float] = []
         for t in range(n_frames):
             positions = xy[t]
             if np.isnan(positions).any():
                 continue
-            tree = cKDTree(positions)
-            dists, _ = tree.query(positions, k=2)
-            frame_nnds.append(float(dists[:, 1].mean()))
+            if cohesion_source == "iid":
+                frame_dists.append(float(pdist(positions).mean()))
+            else:
+                tree = cKDTree(positions)
+                dists, _ = tree.query(positions, k=2)
+                frame_dists.append(float(dists[:, 1].mean()))
 
-        if len(frame_nnds) == 0:
+        if len(frame_dists) == 0:
             cohesion = np.nan
         else:
-            mean_nnd = float(np.mean(frame_nnds))
-            cohesion = 1.0 / mean_nnd if mean_nnd != 0 else np.nan
+            mean_dist = float(np.mean(frame_dists))
+            cohesion = 1.0 / mean_dist if mean_dist != 0 else np.nan
 
         return pd.DataFrame(
             [
@@ -775,12 +840,29 @@ class RotationalOrder(Metric):
             "Same heading-stability caveat as GL-3: results may be biased when "
             "many animals are stationary or headings are noisy"
         ],
-        citation="Couzin et al. 2002, J. Theor. Biol.; Tunstrøm et al. 2013, PLoS Comp Bio",
+        # Single-work citation with the DOI that matches it. The
+        # compound "Couzin ...; Tunstrøm ..." this used to carry made
+        # the one DOI read as though it covered both papers. Tunstrøm
+        # et al. 2013 (10.1371/journal.pcbi.1002915) applies the same
+        # order parameter to schooling fish -- see the assumptions above
+        # rather than the citation field, which is one work per metric.
+        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
         citation_doi="10.1006/jtbi.2002.3065",
     )
 
     _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
     _ZERO_RADIUS_EPS = 1e-9  # px — animals this close to the centroid are excluded
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="stationary_threshold_px_s",
+            label="Stationary threshold",
+            kind="float",
+            default=1e-6,
+            minimum=0.0,
+            unit="px/s",
+            help="Animals slower than this are excluded from each frame's rotation term.",
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute group rotational order (milling) for *session*.
@@ -896,7 +978,10 @@ class GroupCentroidPosition(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["NaN animal positions are excluded per frame"],
         warnings=["Frames where all animals are NaN are skipped"],
-        citation="Standard collective motion",
+        citation=(
+            "Standard kinematics (arithmetic mean position); no single "
+            "originating work"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -973,7 +1058,10 @@ class GroupSpread(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped frames may bias the metric"],
-        citation="Standard collective motion",
+        citation=(
+            "Standard spatial-dispersion measure; complements GL-4 "
+            "(convex-hull area). No single originating work"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:

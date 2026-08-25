@@ -29,10 +29,20 @@ def _make_store():
 
 
 def _row_for_id(table, metric_id: str) -> int:
+    """Resolve a row by the real identifier, stored as UserRole data on
+    the Include cell (column 0) -- not by any column's displayed text.
+    The Name column shows a pretty label, not the registry id, and
+    columns get reshuffled from time to time; this must survive that."""
     for row in range(table.rowCount()):
-        if table.item(row, 1).text() == metric_id:
+        if table.item(row, 0).data(Qt.ItemDataRole.UserRole) == metric_id:
             return row
     raise AssertionError(f"{metric_id} not found in table")
+
+
+def _ids_in_table(table) -> list[str]:
+    return [
+        table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(table.rowCount())
+    ]
 
 
 # ── registry-driven rows ──────────────────────────────────────────────────────
@@ -48,10 +58,7 @@ def test_individual_tab_has_one_row_per_registered_individual_metric(qtbot) -> N
         (m.id for m in metrics.list_for_level("individual")),
         key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
     )
-    actual_ids = [
-        screen._ind_table.item(row, 1).text() for row in range(screen._ind_table.rowCount())
-    ]
-    assert actual_ids == expected_ids
+    assert _ids_in_table(screen._ind_table) == expected_ids
 
 
 def test_name_column_shows_the_display_label_not_the_snake_case_name(qtbot) -> None:
@@ -68,7 +75,29 @@ def test_name_column_shows_the_display_label_not_the_snake_case_name(qtbot) -> N
     row = _row_for_id(screen._ind_table, "IL-1")
     metric_cls = metrics.get("IL-1")
     assert metric_cls.label != metric_cls.name  # otherwise this test proves nothing
-    assert screen._ind_table.item(row, 2).text() == metric_cls.label
+    assert screen._ind_table.item(row, 1).text() == metric_cls.label
+
+
+def test_id_and_snake_case_name_never_appear_anywhere_in_the_table(qtbot) -> None:
+    """Neither the registry id ("IL-1") nor the snake_case internal
+    name ("path_length") is user-facing text -- they must not appear
+    as the text of any cell (they still live as UserRole data, which
+    is never rendered)."""
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    for table in (screen._ind_table, screen._grp_table, screen._zone_table):
+        for row in range(table.rowCount()):
+            metric_id = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            metric_cls = metrics.get(metric_id)
+            for col in range(table.columnCount()):
+                item = table.item(row, col)
+                if item is None:
+                    continue
+                assert item.text() != metric_cls.id
+                assert item.text() != metric_cls.name
 
 
 def test_group_tab_has_one_row_per_registered_group_metric(qtbot) -> None:
@@ -81,10 +110,7 @@ def test_group_tab_has_one_row_per_registered_group_metric(qtbot) -> None:
         (m.id for m in metrics.list_for_level("group")),
         key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
     )
-    actual_ids = [
-        screen._grp_table.item(row, 1).text() for row in range(screen._grp_table.rowCount())
-    ]
-    assert actual_ids == expected_ids
+    assert _ids_in_table(screen._grp_table) == expected_ids
 
 
 def test_zone_tab_has_one_row_per_registered_zone_metric(qtbot) -> None:
@@ -97,10 +123,7 @@ def test_zone_tab_has_one_row_per_registered_zone_metric(qtbot) -> None:
         (m.id for m in metrics.list_for_level("zone")),
         key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
     )
-    actual_ids = [
-        screen._zone_table.item(row, 1).text() for row in range(screen._zone_table.rowCount())
-    ]
-    assert actual_ids == expected_ids
+    assert _ids_in_table(screen._zone_table) == expected_ids
 
 
 # ── checkbox selection round-trip ─────────────────────────────────────────────
@@ -137,25 +160,214 @@ def test_load_from_store_checks_rows_matching_the_manifest_selection(qtbot) -> N
     assert screen._ind_table.item(row, 0).checkState() == Qt.CheckState.Checked
 
 
+def test_apply_preserves_fields_the_table_has_no_widgets_for(qtbot) -> None:
+    """Regression: _apply() used to build a fresh MetricSelection(...)
+    from only the four fields the screen's own widgets show, silently
+    resetting `diagnostic` and `config` -- which nothing on this
+    screen edits -- to their defaults on every Apply click."""
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "metrics": MetricSelection(
+                diagnostic=["D-1", "D-2"],
+                config={"IL-4": {"threshold_px_s": 2.5}},
+            )
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+    screen._apply()
+
+    assert store.manifest.metrics.individual == ["IL-1"]
+    assert store.manifest.metrics.diagnostic == ["D-1", "D-2"]
+    assert store.manifest.metrics.config == {"IL-4": {"threshold_px_s": 2.5}}
+
+
 # ── per-row ⓘ / ⚙ buttons ─────────────────────────────────────────────────────
 
 
-def test_every_row_has_a_config_stub_button_that_shows_a_message(qtbot, monkeypatch) -> None:
+def test_config_button_is_disabled_for_a_metric_with_no_parameters(qtbot) -> None:
     from ui.metrics_screen import MetricsScreen
-
-    messages: list[str] = []
-    monkeypatch.setattr(
-        "ui.metrics_screen.QMessageBox.information",
-        staticmethod(lambda *a, **k: messages.append(a[2]) or None),
-    )
 
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    row = _row_for_id(screen._ind_table, "IL-1")
-    screen._ind_table.cellWidget(row, 4).click()
+    row = _row_for_id(screen._ind_table, "IL-1")  # IL-1 declares no MetricParameter entries
+    config_btn = screen._ind_table.cellWidget(row, 3)
 
-    assert messages == ["Per-metric configuration isn't available yet."]
+    assert config_btn is not None
+    assert config_btn.isEnabled() is False
+    assert config_btn.toolTip() != ""
+
+
+def test_config_button_is_enabled_for_a_metric_with_parameters(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-4")  # declares threshold_px_s/threshold_multiplier
+    config_btn = screen._ind_table.cellWidget(row, 3)
+
+    assert config_btn is not None
+    assert config_btn.isEnabled() is True
+
+
+def test_config_button_opens_metric_config_dialog_for_that_row(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QDialog
+
+    from ui.metrics_screen import MetricsScreen
+
+    opened: list[str] = []
+
+    class _StubDialog:
+        def __init__(self, metric_cls, current_values, parent=None) -> None:
+            opened.append(metric_cls.id)
+
+        def exec(self) -> int:
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr("ui.metrics_screen.MetricConfigDialog", _StubDialog)
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-4")
+    screen._ind_table.cellWidget(row, 3).click()
+
+    assert opened == ["IL-4"]
+
+    # A different row's button must open ITS OWN metric -- guards against a
+    # lambda-over-loop-variable bug where every row's button would close
+    # over the same (last) metric_cls, same as the ⓘ button's test above.
+    other_row = _row_for_id(screen._ind_table, "IL-7")
+    screen._ind_table.cellWidget(other_row, 3).click()
+
+    assert opened == ["IL-4", "IL-7"]
+
+
+def test_metric_config_dialog_receives_the_saved_current_values(qtbot, monkeypatch) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"metrics": MetricSelection(config={"IL-4": {"threshold_px_s": 9.0}})}
+    )
+
+    received: list[dict] = []
+
+    class _StubDialog:
+        def __init__(self, metric_cls, current_values, parent=None) -> None:
+            received.append(current_values)
+
+        def exec(self):
+            from PySide6.QtWidgets import QDialog
+
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr("ui.metrics_screen.MetricConfigDialog", _StubDialog)
+
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-4")
+    screen._ind_table.cellWidget(row, 3).click()
+
+    assert received == [{"threshold_px_s": 9.0}]
+
+
+def test_saving_metric_config_dialog_persists_into_manifest_config(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QDialog
+
+    from ui.metrics_screen import MetricsScreen
+
+    class _StubDialog:
+        def __init__(self, metric_cls, current_values, parent=None) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.DialogCode.Accepted
+
+        def values(self) -> dict:
+            return {"threshold_px_s": 9.0, "threshold_multiplier": 0.2}
+
+    monkeypatch.setattr("ui.metrics_screen.MetricConfigDialog", _StubDialog)
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-4")
+    screen._ind_table.cellWidget(row, 3).click()
+
+    assert store.manifest.metrics.config == {
+        "IL-4": {"threshold_px_s": 9.0, "threshold_multiplier": 0.2}
+    }
+
+
+def test_cancelling_metric_config_dialog_does_not_change_config(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QDialog
+
+    from ui.metrics_screen import MetricsScreen
+
+    class _StubDialog:
+        def __init__(self, metric_cls, current_values, parent=None) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.DialogCode.Rejected
+
+        def values(self) -> dict:
+            raise AssertionError("values() must not be read when the dialog is cancelled")
+
+    monkeypatch.setattr("ui.metrics_screen.MetricConfigDialog", _StubDialog)
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-4")
+    screen._ind_table.cellWidget(row, 3).click()
+
+    assert store.manifest.metrics.config == {}
+
+
+def test_saving_metric_config_preserves_other_metrics_saved_config(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QDialog
+
+    from ui.metrics_screen import MetricsScreen
+
+    class _StubDialog:
+        def __init__(self, metric_cls, current_values, parent=None) -> None:
+            pass
+
+        def exec(self) -> int:
+            return QDialog.DialogCode.Accepted
+
+        def values(self) -> dict:
+            return {"threshold_px_s": 9.0}
+
+    monkeypatch.setattr("ui.metrics_screen.MetricConfigDialog", _StubDialog)
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"metrics": MetricSelection(config={"GL-6": {"cohesion_source": "iid"}})}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-4")
+    screen._ind_table.cellWidget(row, 3).click()
+
+    assert store.manifest.metrics.config == {
+        "GL-6": {"cohesion_source": "iid"},
+        "IL-4": {"threshold_px_s": 9.0},
+    }
 
 
 def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -> None:
@@ -176,7 +388,7 @@ def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -
     qtbot.addWidget(screen)
 
     row = _row_for_id(screen._ind_table, "IL-1")
-    screen._ind_table.cellWidget(row, 3).click()
+    screen._ind_table.cellWidget(row, 2).click()
 
     assert opened == ["IL-1"]
 
@@ -184,7 +396,7 @@ def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -
     # guards against a lambda-over-loop-variable bug where every row's
     # button would close over the same (last) metric_cls.
     other_row = _row_for_id(screen._ind_table, "IL-3")
-    screen._ind_table.cellWidget(other_row, 3).click()
+    screen._ind_table.cellWidget(other_row, 2).click()
 
     assert opened == ["IL-1", "IL-3"]
 
@@ -211,7 +423,7 @@ def test_info_button_is_absent_when_metric_has_no_formula_or_citation(qtbot, mon
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    assert screen._ind_table.cellWidget(0, 3) is None
+    assert screen._ind_table.cellWidget(0, 2) is None
 
 
 # ── identity-aware graying ────────────────────────────────────────────────────
@@ -387,12 +599,15 @@ def test_greyed_row_still_has_clickable_info_and_config_buttons(qtbot) -> None:
     screen = MetricsScreen(store=store)
     qtbot.addWidget(screen)
 
-    row = _row_for_id(screen._ind_table, "IL-1")
+    # IL-4: requires_identity, and (unlike IL-1) declares parameters, so its
+    # ⚙ button is enabled on its own merits -- proving graying doesn't ALSO
+    # disable it.
+    row = _row_for_id(screen._ind_table, "IL-4")
     include_item = screen._ind_table.item(row, 0)
     assert not (include_item.flags() & Qt.ItemFlag.ItemIsEnabled)  # confirm row is greyed
 
-    info_btn = screen._ind_table.cellWidget(row, 3)
-    config_btn = screen._ind_table.cellWidget(row, 4)
+    info_btn = screen._ind_table.cellWidget(row, 2)
+    config_btn = screen._ind_table.cellWidget(row, 3)
     assert info_btn is not None and info_btn.isEnabled()
     assert config_btn is not None and config_btn.isEnabled()
 
@@ -434,5 +649,4 @@ def test_table_builds_without_crashing_for_a_non_conforming_plugin_metric_id(
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    ids = [screen._ind_table.item(row, 1).text() for row in range(screen._ind_table.rowCount())]
-    assert "MyPluginMetric" in ids
+    assert "MyPluginMetric" in _ids_in_table(screen._ind_table)

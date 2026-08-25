@@ -1,0 +1,64 @@
+name: Request a metric
+description: Propose a behavioural metric for Track2Data to compute
+title: "[Metric] "
+labels: ["metric-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a metric.
+
+        **A DOI is required.** Every metric Track2Data ships carries a
+        scientific reference, published in
+        [`docs/METRIC_REFERENCES.csv`](../blob/main/docs/METRIC_REFERENCES.csv)
+        and shown in the app's ⓘ info dialog. A request without a
+        citable source can't become one of those rows, so the DOI is
+        what turns a proposal into something implementable.
+
+        If the measure is genuinely standard with no single originating
+        paper (mean speed, say), open a normal issue instead and explain
+        that — this form is for metrics with a source to cite.
+
+  - type: dropdown
+    id: metric_type
+    attributes:
+      label: Metric type
+      description: Which level does this metric operate at?
+      options:
+        - Individual — one value per animal (e.g. distance travelled)
+        - Group — one value per group or frame (e.g. nearest-neighbour distance)
+        - Zone — relative to a user-drawn region (e.g. time in zone)
+        - Diagnostic — about tracking quality, not behaviour
+    validations:
+      required: true
+
+  - type: input
+    id: metric_name
+    attributes:
+      label: Metric name
+      description: What is the measure called in the literature?
+      placeholder: e.g. Thigmotaxis index
+    validations:
+      required: true
+
+  - type: input
+    id: citation_doi
+    attributes:
+      label: Citation (DOI)
+      description: >-
+        The DOI of the paper defining this metric. A bare DOI, not a URL
+        or a full citation — it must start with "10." and contain a "/".
+      placeholder: 10.1006/jtbi.2002.3065
+    validations:
+      required: true
+
+  - type: textarea
+    id: definition
+    attributes:
+      label: How is it computed?
+      description: >-
+        Optional but very helpful — the formula, or the section of the
+        paper that gives it, and what inputs it needs (positions,
+        speeds, zones, headings).
+    validations:
+      required: false

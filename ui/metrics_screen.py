@@ -3,8 +3,17 @@ Stage 6b — Metric selection screen (registry-driven QTableWidget).
 
 QTabWidget with three tabs: Individual / Group / Zone. Each tab is a
 QTableWidget populated from track2data.metrics.list_for_level(level),
-columns: include (checkbox) / metric_id / metric_name / info (ⓘ) /
-config (⚙, stub). Quality threshold QDoubleSpinBox + Apply button.
+columns: include (checkbox) / metric_name / info (ⓘ) / config (⚙ --
+opens MetricConfigDialog for metrics that declare `parameters`;
+disabled otherwise). Quality threshold QDoubleSpinBox + Apply button.
+
+The registry id ("IL-1") and the snake_case internal name
+("path_length") are deliberately never shown -- they're engine/export
+identifiers, not something a researcher should have to read to select
+a metric. The id still exists everywhere it's actually needed: as
+_ROLE_METRIC_ID user-data on the Include cell (the real identifier
+used for selection state and persistence), in exported column names,
+and in docs/METRICS_SPEC.md.
 """
 
 from __future__ import annotations
@@ -13,6 +22,7 @@ from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QHeaderView,
@@ -27,11 +37,11 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
-from track2data.core.models import MetricSelection
+from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
-_COLUMN_HEADERS = ["Include", "ID", "Name", "Info", "Config"]
-_COL_INCLUDE, _COL_ID, _COL_NAME, _COL_INFO, _COL_CONFIG = range(5)
+_COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
+_COL_INCLUDE, _COL_NAME, _COL_INFO, _COL_CONFIG = range(4)
 _ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
 _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
 
@@ -130,7 +140,6 @@ class MetricsScreen(QWidget):
             include_item.setData(_ROLE_REQUIRES_IDENTITY, metric_cls.requires_identity)
             table.setItem(row, _COL_INCLUDE, include_item)
 
-            table.setItem(row, _COL_ID, QTableWidgetItem(metric_cls.id))
             # .label ("Path Length"), not .name ("path_length") -- the
             # latter is the snake_case identifier used internally
             # (registry keys, exported column name suffixes), not
@@ -146,7 +155,15 @@ class MetricsScreen(QWidget):
 
             config_btn = QPushButton("⚙")
             config_btn.setFixedWidth(28)
-            config_btn.clicked.connect(self._show_config_stub)
+            # getattr, not metric_cls.parameters, for the same reason as
+            # _natural_sort_key's fallback above -- a third-party plugin
+            # metric isn't required to define it and shouldn't crash the
+            # whole screen for not doing so.
+            if getattr(metric_cls, "parameters", []):
+                config_btn.clicked.connect(partial(self._show_metric_config, metric_cls))
+            else:
+                config_btn.setEnabled(False)
+                config_btn.setToolTip("This metric has no configurable parameters.")
             table.setCellWidget(row, _COL_CONFIG, config_btn)
 
         return table
@@ -155,10 +172,27 @@ class MetricsScreen(QWidget):
         dlg = MetricInfoDialog(metric_cls, self)
         dlg.exec()
 
-    def _show_config_stub(self) -> None:
-        QMessageBox.information(
-            self, "Not yet implemented", "Per-metric configuration isn't available yet."
+    def _show_metric_config(self, metric_cls) -> None:
+        current_values: dict = {}
+        if self._store is not None and self._store.manifest is not None:
+            current_values = self._store.manifest.metrics.config.get(metric_cls.id, {})
+
+        dlg = MetricConfigDialog(metric_cls, current_values, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if self._store is None or self._store.manifest is None:
+            QMessageBox.information(self, "Info", "No project open.")
+            return
+
+        current = self._store.manifest.metrics
+        sel = current.model_copy(
+            update={"config": {**current.config, metric_cls.id: dlg.values()}}
         )
+        try:
+            self._store.update_metrics(sel)
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to save metric configuration:\n{exc}")
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -171,14 +205,22 @@ class MetricsScreen(QWidget):
         return result
 
     def _apply(self) -> None:
-        if self._store is None:
+        if self._store is None or self._store.manifest is None:
             QMessageBox.information(self, "Info", "No project open.")
             return
-        sel = MetricSelection(
-            individual=self._checked_ids(self._ind_table),
-            group=self._checked_ids(self._grp_table),
-            zone=self._checked_ids(self._zone_table),
-            quality_threshold=self._quality_spin.value(),
+        # model_copy(update=...) against the manifest's current
+        # MetricSelection, never a fresh MetricSelection(...) -- this
+        # screen has no widgets for `diagnostic` or `config`, and
+        # building one from scratch used to silently reset both to
+        # their defaults on every Apply click.
+        current = self._store.manifest.metrics
+        sel = current.model_copy(
+            update={
+                "individual": self._checked_ids(self._ind_table),
+                "group": self._checked_ids(self._grp_table),
+                "zone": self._checked_ids(self._zone_table),
+                "quality_threshold": self._quality_spin.value(),
+            }
         )
         try:
             self._store.update_metrics(sel)
@@ -208,8 +250,8 @@ class MetricsScreen(QWidget):
         for table in (self._ind_table, self._grp_table, self._zone_table):
             for row in range(table.rowCount()):
                 include_item = table.item(row, _COL_INCLUDE)
-                id_item = table.item(row, _COL_ID)
-                if include_item is None or id_item is None:
+                name_item = table.item(row, _COL_NAME)
+                if include_item is None or name_item is None:
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
                 flags = include_item.flags()
@@ -220,11 +262,11 @@ class MetricsScreen(QWidget):
                         "this metric will be skipped for every session."
                     )
                     include_item.setToolTip(tooltip)
-                    id_item.setToolTip(tooltip)
+                    name_item.setToolTip(tooltip)
                 else:
                     include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
                     include_item.setToolTip("")
-                    id_item.setToolTip("")
+                    name_item.setToolTip("")
 
     def _update_zone_tab_enabled(self) -> None:
         if self._store is None or self._store.manifest is None:

@@ -281,6 +281,39 @@ class Engine:
 
     # ── metrics ────────────────────────────────────────────────────────────
 
+    def _effective_cfg(self, metric_cls: type, psess: PreprocessedSession) -> dict[str, Any]:
+        """Build the cfg dict passed to metric_cls().compute().
+
+        Layered, lowest to highest precedence:
+          1. The metric's own MetricParameter defaults.
+          2. MetricSelection.config[metric_id] -- the user's ⚙-dialog
+             overrides, for non-derived parameters only.
+          3. This session's own derived values (metrics/derived.py) --
+             never user-settable, so they always win, even against a
+             stale/hand-edited manifest that tries to set one.
+
+        Metric.compute(session, cfg) has accepted this dict since it
+        was written, but nothing ever called it with one -- every
+        cfg-reading branch in every metric was dead code, and Z-2
+        (Area-Corrected Occupancy) always returned an empty DataFrame
+        as a direct result. This is the plumbing that was missing.
+        """
+        from track2data.metrics.derived import derive_metric_params
+
+        cfg: dict[str, Any] = {}
+        derived_names = {p.name for p in metric_cls.parameters if p.derived}
+        for param in metric_cls.parameters:
+            if not param.derived and param.default is not None:
+                cfg[param.name] = param.default
+
+        overrides = self._manifest.metrics.config.get(metric_cls.id, {})
+        for key, value in overrides.items():
+            if key not in derived_names:
+                cfg[key] = value
+
+        cfg.update(derive_metric_params(metric_cls.id, psess, self._manifest.zones))
+        return cfg
+
     def compute_metrics(self, psess: PreprocessedSession) -> dict[str, Any]:
         """
         Compute all selected metrics for *psess*.
@@ -308,7 +341,8 @@ class Engine:
                     logger.warning("Metric %s not registered; skipping.", mid)
                     continue
                 try:
-                    results[mid] = cls().compute(psess)
+                    cfg = self._effective_cfg(cls, psess)
+                    results[mid] = cls().compute(psess, cfg)
                 except Exception:
                     logger.exception("Metric %s failed; skipping.", mid)
 

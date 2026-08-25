@@ -170,6 +170,11 @@ class TestZoneVisitCount:
     def test_metric_id(self) -> None:
         assert ZoneVisitCount.id == "Z-3"
 
+    def test_declares_configurable_parameters(self) -> None:
+        params = {p.name: p for p in ZoneVisitCount.parameters}
+        assert params.keys() == {"min_visit_frames"}
+        assert params["min_visit_frames"].default == 1
+
     def test_columns(self) -> None:
         psess = make_psess_with_zones()
         df = ZoneVisitCount().compute(psess)
@@ -216,6 +221,69 @@ class TestZoneVisitCount:
         df = ZoneVisitCount().compute(psess)
         row = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)].iloc[0]
         assert row["visit_count"] == 3
+
+    def test_min_visit_frames_debounces_boundary_flicker(self) -> None:
+        """Same 3-visits fixture as test_multiple_visits (each run is
+        exactly 3 frames long), but with min_visit_frames=4 -- every
+        run is too short to qualify, so visit_count must drop to 0
+        rather than counting all 3 as with the default threshold of 1.
+        This is METRICS_SPEC.md §4.2's min_visit_frames, specified but
+        never implemented."""
+        n_frames, n_animals = 20, 1
+        xy = np.zeros((n_frames, n_animals, 2))
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:3, 0] = "zone_A"
+        main_zone[6:9, 0] = "zone_A"
+        main_zone[12:15, 0] = "zone_A"
+        sess = Session(
+            session_id="multi",
+            folder=Path("/tmp"),
+            reader="test",
+            video=VideoInfo(fps=10.0, n_frames=n_frames, width_px=100, height_px=100),
+            n_animals=n_animals,
+            trajectory_variant="wo_gaps",
+            has_stable_identities=True,
+            raw_xy=xy,
+        )
+        kine = KinematicsArrays(
+            np.zeros((n_frames, n_animals)),
+            np.zeros((n_frames, n_animals)),
+            np.zeros((n_frames, n_animals)),
+        )
+        psess = PreprocessedSession(session=sess, xy=xy, kinematics=kine, main_zone=main_zone)
+
+        df = ZoneVisitCount().compute(psess, cfg={"min_visit_frames": 4})
+
+        row = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)].iloc[0]
+        assert row["visit_count"] == 0
+
+    def test_min_visit_frames_keeps_runs_meeting_the_threshold(self) -> None:
+        n_frames, n_animals = 20, 1
+        xy = np.zeros((n_frames, n_animals, 2))
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:3, 0] = "zone_A"  # 3 frames -- too short
+        main_zone[6:11, 0] = "zone_A"  # 5 frames -- qualifies
+        sess = Session(
+            session_id="mixed",
+            folder=Path("/tmp"),
+            reader="test",
+            video=VideoInfo(fps=10.0, n_frames=n_frames, width_px=100, height_px=100),
+            n_animals=n_animals,
+            trajectory_variant="wo_gaps",
+            has_stable_identities=True,
+            raw_xy=xy,
+        )
+        kine = KinematicsArrays(
+            np.zeros((n_frames, n_animals)),
+            np.zeros((n_frames, n_animals)),
+            np.zeros((n_frames, n_animals)),
+        )
+        psess = PreprocessedSession(session=sess, xy=xy, kinematics=kine, main_zone=main_zone)
+
+        df = ZoneVisitCount().compute(psess, cfg={"min_visit_frames": 4})
+
+        row = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)].iloc[0]
+        assert row["visit_count"] == 1
 
     def test_no_zones_returns_empty(self) -> None:
         n_frames = 10

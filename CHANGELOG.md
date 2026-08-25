@@ -25,8 +25,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   calibrated" sentinel) -- distinguishing "never calibrated" from
   "corrupt value", both of which previously normalised to `None`
   identically and silently.
+- **Per-metric configuration is now wired end to end.**
+  `Metric.compute(session, cfg)` has accepted a config dict since it was
+  written, and six built-in metrics read one, but nothing in the
+  pipeline ever passed one -- every `cfg`-reading branch in every metric
+  was dead code. `MetricSelection.config` (keyed `metric_id ->
+  {param_name: value}`) now feeds `Engine.compute_metrics()`, layered as
+  metric defaults, then the user's saved overrides, then this session's
+  own derived values (`track2data/metrics/derived.py`) for parameters
+  that can't be user-typed, such as IL-3's arena centre or Z-2's zone
+  areas.
+- **Z-2 (Area-Corrected Occupancy) produces output for the first time.**
+  It always returned an empty `DataFrame` in production, since it
+  requires `cfg['roi_areas']`/`cfg['total_arena_area']` and nothing ever
+  supplied them. With zones defined, these are now derived automatically
+  via `zones.geometry.roi_area_px2` (also previously fully tested but
+  never called in production).
+- **New configurable parameters** across 9 metrics, settable via
+  `MetricSelection.config` (GUI wiring for the ⚙ dialog itself is
+  tracked separately): IL-3's `inner_radius_fraction` (default 0.5,
+  the historical hardcoded value); IL-4's `threshold_multiplier`
+  (default 0.1, the historical hardcoded value); GL-6's
+  `cohesion_source` (`'nnd'`/`'iid'`, default `'nnd'`, matching this
+  metric's prior NND-only behaviour -- see `METRICS_SPEC.md` §8 open
+  question 3); Z-3's `min_visit_frames`, Z-4's and Z-5's (and, by
+  forwarding, Z-6's) `min_dwell_frames` -- all default to 1 (every
+  run counts, matching prior behaviour) and debounce brief boundary
+  flicker when raised. IL-7's already-configurable `threshold_px_s`/
+  `min_bout_frames` and GL-3's/GL-8's `stationary_threshold_px_s` are
+  now formally declared in each metric's `parameters` schema too.
+- **The Metrics screen's ⚙ button now works.** It previously did
+  nothing but show a "not yet implemented" message. It now opens
+  `MetricConfigDialog`, rendering one widget per declared
+  `MetricParameter` (a spin box, combo box, or checkbox depending on
+  `kind`), with a per-row ↺ reset-to-default and Save/Cancel. It is
+  disabled, with an explanatory tooltip, for the 24 metrics that
+  declare no parameters. A `derived=True` parameter (IL-3's centre/
+  radius, Z-2's zone areas) renders read-only -- it is computed per
+  session and can never be saved as a user override. A parameter with
+  no declared default (IL-4's and IL-7's `threshold_px_s`, both
+  "auto-computed from data when unset") shows "Auto (data-driven)"
+  rather than defaulting the control to 0 -- 0 is a real, very
+  different threshold from "let the engine compute one" -- and leaving
+  it on Auto omits the key from the saved config entirely. Saved edits
+  persist into `MetricSelection.config[metric_id]`, round-tripping
+  through the project manifest like any other setting.
+- **`docs/METRIC_REFERENCES.csv`** — the scientific reference behind
+  every metric, in one citable, machine-readable table (`metric_id`,
+  `level`, `priority`, `metric_name`, `reference`, `doi`). Generated
+  from the code by `scripts/generate_metric_references.py` and pinned
+  by `tests/test_metric_references_consistency.py`, which fails if the
+  committed file, the code, and `METRICS_SPEC.md` ever disagree — so
+  adding a metric without regenerating is caught in CI rather than
+  silently publishing a stale list.
+- **A "Request a metric" issue form**
+  (`.github/ISSUE_TEMPLATE/metric_request.yml`), the repository's
+  first. Collects the metric's level (the four `Metric.level` values,
+  so a request maps onto the engine's own vocabulary), its name, and a
+  DOI. GitHub issue forms have no regex validation, so a companion
+  workflow labels a DOI-less request `needs-doi` with an explanatory
+  comment and clears the label once the author edits one in.
 
 ### Changed
+
+- **Metric citations corrected and completed.** All 33 metrics now
+  carry a reference; 15 previously had none at all (every zone metric
+  and every diagnostic). The code and `METRICS_SPEC.md` disagreed on
+  14 metrics and have been reconciled, with the code as the single
+  source of truth. Three substantive corrections:
+  **GL-1** (Nearest-Neighbour Distance) cited Couzin et al. 2002 and
+  carried its DOI — copy-pasted from GL-3/GL-8. Couzin 2002 is about
+  collective memory and spatial sorting, not nearest-neighbour
+  distance; GL-1 now cites Pitcher 1973, as the spec had said all
+  along. **GL-4** (Convex Hull Area) attributed convex-hull area to
+  Buhl et al. 2006, which characterises order via alignment and
+  density rather than hull area; replaced with an honest generic
+  description and no DOI. **GL-8** named two papers but carried one
+  DOI, making it read as covering both; reduced to the single work the
+  DOI belongs to. Where no specific work applies, citations now say so
+  plainly instead of borrowing an unrelated one.
+- **`METRICS_SPEC.md` now documents D-6, D-7, D-8 and D-9**, which had
+  been shipping with no section at all — the document described 29 of
+  the 33 metrics that actually run, violating its own §6.6 rule that
+  every metric must have one.
+- **IL-3 (Distance from Arena Centre)'s centre/radius fallback changed.**
+  Previously, with no `cfg['centre']` supplied (which was always the
+  case -- see above), IL-3 fell back to the centroid of every tracked
+  position in the session: a circular definition where "the centre"
+  drifts toward wherever the animal happened to spend time, biasing the
+  metric it's meant to measure. It now derives the centre/radius from
+  the project's own "main"-level zone geometry when one is defined, or
+  the video frame's own geometric centre otherwise -- both fixed,
+  data-independent references. If you were relying on the old
+  centroid-of-positions fallback, `cfg['centre']`/`cfg['arena_radius']`
+  are no longer settable overrides for this reason (see "Per-metric
+  configuration" above -- derived parameters always win).
 
 - **Body-length calibration mode no longer reads `length_unit`.**
   Previously, whenever a session happened to carry a `length_unit`,

@@ -197,7 +197,11 @@ to defaults" link per group.
 
 **Metrics (Page 7):** three tabs (Individual / Group / Zone)
 populated from `metrics.list_for_level(level)`. Each row = checkbox +
-id + name + ⓘ icon + ⚙ config icon (stub in v1 — see below).
+name + ⓘ icon + ⚙ config icon (stub in v1 — see below). The registry
+id ("IL-1") and the snake_case internal name ("path_length") are
+never shown — they're engine/export identifiers, not something a
+researcher reads to pick a metric; the id still drives selection
+state internally as row user-data.
 Identity-aware metrics (`Metric.requires_identity`) greyed-out when
 every *probed* session in the project has `has_stable_identities is
 False` — sessions not yet probed (or whose probe failed) don't count
@@ -707,7 +711,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 **Per-tab structure:**
 - QTableWidget: `metric_list`
-  - Columns: `include` (checkbox), `metric_id`, `metric_name`, `info` (ⓘ icon), `config` (⚙ icon — **stub in v1**: shows "Not yet implemented"; no Screen 6.3 or config schema exists yet)
+  - Columns: `include` (checkbox), `metric_name` (the display label, e.g. "Distance Travelled" — never the registry id or the snake_case internal name), `info` (ⓘ icon), `config` (⚙ icon — **stub in v1**: shows "Not yet implemented"; no Screen 6.3 or config schema exists yet)
   - Rows: auto-populated from `metrics.list_for_level(level)`
   - Greyed rows: metrics where `Metric.requires_identity` is `True`, when every session in the project has `has_stable_identities is False` (with tooltip). Sessions with `has_stable_identities is None` (not yet probed, or probe failed) are treated as unknown, not identity-free — they don't trigger greying.
   - Disabled Zone tab if no zones defined on Stage 4
@@ -738,7 +742,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ### 6.11 Screen 6.3 — Per-Metric Advanced Configuration (Aspirational — Not Yet Implemented)
 
-> **Status:** This screen does not exist in the shipped app — no config schema, no navigation target, nothing below is built. Kept as a design reference only; everything in this section is proposed, not current behavior. The "6.3" label is unchanged from before Preprocessing/Metrics became separate stages (§5.6) — it was never renumbered to "7.x", since resolving the Screen-X.Y numbering scheme for real needs its own pass, not a side effect of this one.
+> **Status:** This dedicated full-page screen (one table for every selected metric's parameters, plus a "Global parameters" section) does not exist in the shipped app and nothing below is built. What *did* ship, on the real Screen 6.2 (§6.10)'s ⚙ button, is smaller in scope: a per-metric modal `MetricConfigDialog` (`ui/dialogs/metric_config_dialog.py`), opened one metric at a time, mirroring `MetricInfoDialog`'s shape rather than this page's. It reuses this section's per-row ↺ reset-to-default idea but not the combined-table or global-parameters layout. Kept as a design reference for a possible future consolidated screen; everything else in this section is proposed, not current behavior. The "6.3" label is unchanged from before Preprocessing/Metrics became separate stages (§5.6) — it was never renumbered to "7.x", since resolving the Screen-X.Y numbering scheme for real needs its own pass, not a side effect of this one.
 
 **Stage:** Stage 7 (Metrics)  
 **Purpose:** Configure metric-specific parameters (e.g., activity threshold).

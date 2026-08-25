@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from typing import ClassVar
 
 import numpy as np
 import pandas as pd
 
-from track2data.metrics.base import Metric, MetricDocumentation
+from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,67 @@ def _collect_zone_arrays(psess: object) -> list[np.ndarray]:
     if sec is not None:
         arrays.append(sec)
     return arrays
+
+
+def _run_lengths(mask: np.ndarray) -> list[int]:
+    """Run-length encode consecutive True runs in a 1-D boolean mask --
+    used to debounce boundary flicker via a minimum-run-length cutoff
+    (Z-3's min_visit_frames, Z-4/Z-6's min_dwell_frames)."""
+    lengths: list[int] = []
+    current = 0
+    for val in mask:
+        if val:
+            current += 1
+        else:
+            if current > 0:
+                lengths.append(current)
+            current = 0
+    if current > 0:
+        lengths.append(current)
+    return lengths
+
+
+def _true_run_spans(mask: np.ndarray, min_length: int) -> list[tuple[int, int]]:
+    """Return (start, end) index pairs -- end exclusive -- for each run
+    of consecutive True values in mask at least min_length long. Used
+    by Z-5 to debounce a brief in-zone flicker away entirely (no
+    enter/exit events at all) rather than merely shortening it."""
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    for i, val in enumerate(mask):
+        if val and start is None:
+            start = i
+        elif not val and start is not None:
+            if i - start >= min_length:
+                spans.append((start, i))
+            start = None
+    if start is not None and len(mask) - start >= min_length:
+        spans.append((start, len(mask)))
+    return spans
+
+
+def _debounced_zone_sequence(col: np.ndarray, min_dwell_frames: int) -> list[str]:
+    """Run-length encode a per-frame zone-name column, drop any run
+    shorter than min_dwell_frames, then collapse whatever consecutive
+    duplicate zone names that leaves behind into one entry -- e.g.
+    A(9), B(2), A(9) with min_dwell_frames=3 drops the 2-frame B
+    flicker and merges the two A runs either side of it into a single
+    "A", so it contributes zero transitions instead of two."""
+    runs: list[tuple[str, int]] = []
+    for val in col:
+        name = str(val)
+        if runs and runs[-1][0] == name:
+            runs[-1] = (name, runs[-1][1] + 1)
+        else:
+            runs.append((name, 1))
+
+    kept = [name for name, length in runs if length >= min_dwell_frames]
+
+    sequence: list[str] = []
+    for name in kept:
+        if not sequence or sequence[-1] != name:
+            sequence.append(name)
+    return sequence
 
 
 # ── Z-1: Time in each zone ────────────────────────────────────────────────────
@@ -57,6 +119,12 @@ class TimeInZone(Metric):
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=["Empty-string values are treated as 'not in any zone'."],
+        citation=(
+            "Walsh & Cummins 1976, Psychol. Bull. 83(3):482-504 (the "
+            "open-field test, whose central measure is time spent in "
+            "defined sub-regions)"
+        ),
+        citation_doi="10.1037/0033-2909.83.3.482",
     )
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
@@ -149,21 +217,43 @@ class ZoneVisitCount(Metric):
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=["A single continuous stay counts as one visit regardless of duration."],
+        citation=(
+            "Martin & Bateson 2007, Measuring Behaviour: An Introductory "
+            "Guide, 3rd ed. (Cambridge University Press) -- frequency "
+            "counting of discrete behavioural events"
+        ),
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_visit_frames",
+            label="Minimum visit length",
+            kind="int",
+            default=1,
+            minimum=1,
+            unit="frames",
+            help=(
+                "Debounces boundary flicker: a run of consecutive frames inside "
+                "a zone shorter than this doesn't count as a visit."
+            ),
+        ),
+    ]
 
     def compute(
         self,
         session: object,
         cfg: dict | None = None,
     ) -> pd.DataFrame:
-        """Count zone visits (rising edges) for every (zone, animal) pair.
+        """Count zone visits (runs of consecutive in-zone frames) for
+        every (zone, animal) pair.
 
         Parameters
         ----------
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Unused; reserved for future configuration.
+            Optional dict. ``cfg['min_visit_frames']`` (default 1) sets the
+            minimum run length that counts as a visit -- shorter runs are
+            debounced away rather than counted.
 
         Returns
         -------
@@ -177,12 +267,16 @@ class ZoneVisitCount(Metric):
         if not zone_arrays:
             return pd.DataFrame(columns=empty_cols)
 
+        min_visit_frames = 1
+        if cfg is not None and "min_visit_frames" in cfg:
+            min_visit_frames = int(cfg["min_visit_frames"])
+
         session_id: str = session.session_id  # type: ignore[attr-defined]
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
 
         # Accumulate visit counts per (zone, animal) across all zone arrays.
-        # We sum rising-edge counts; if the same zone appears in both main and
-        # sec arrays we still count entries independently.
+        # We sum qualifying-run counts; if the same zone appears in both main
+        # and sec arrays we still count entries independently.
         visit_counts: dict[tuple[str, int], int] = {}
         for arr in zone_arrays:
             for k in range(n_animals):
@@ -190,9 +284,9 @@ class ZoneVisitCount(Metric):
                 zone_names = [z for z in np.unique(col) if z != _EMPTY_ZONE_VALUE]
                 for zone_name in zone_names:
                     in_zone: np.ndarray = col == zone_name  # bool (n_frames,)
-                    # Rising edges: frame 0 if in_zone[0] is True, then each
-                    # transition from False to True
-                    visits = int(in_zone[0]) + int(np.sum(~in_zone[:-1] & in_zone[1:]))
+                    visits = sum(
+                        1 for length in _run_lengths(in_zone) if length >= min_visit_frames
+                    )
                     key = (zone_name, k)
                     visit_counts[key] = visit_counts.get(key, 0) + visits
 
@@ -247,7 +341,23 @@ class AreaCorrectedOccupancy(Metric):
             "roi_areas and total_arena_area must be provided in cfg",
         ],
         warnings=["Returns empty DataFrame when cfg is missing or incomplete"],
+        citation=(
+            "Area-normalised occupancy (observed time in a zone relative to "
+            "that zone's share of the arena), the standard correction for "
+            "comparing unequal-area regions of interest. No single "
+            "originating work"
+        ),
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="roi_areas", label="Zone areas", kind="float", derived=True,
+            help="Derived per session from the project's own zone geometry.",
+        ),
+        MetricParameter(
+            name="total_arena_area", label="Total arena area", kind="float",
+            derived=True, unit="px²",
+        ),
+    ]
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Compute area-corrected occupancy for every (zone, animal) pair.
@@ -363,7 +473,27 @@ class ZoneTransitions(Metric):
             "Only named zone-to-zone transitions are counted; "
             "entering/leaving no-zone is ignored"
         ],
+        citation=(
+            "Fagen & Young 1978, 'Temporal patterns of behaviors', in "
+            "Colgan (ed.) Quantitative Ethology, pp. 79-114 (Wiley) -- "
+            "sequence and transition analysis of behavioural states"
+        ),
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_dwell_frames",
+            label="Minimum dwell length",
+            kind="int",
+            default=1,
+            minimum=1,
+            unit="frames",
+            help=(
+                "Debounces boundary flicker: a zone visit shorter than this is "
+                "dropped, merging the transitions either side of it into one "
+                "continuous stay rather than two flicker transitions."
+            ),
+        ),
+    ]
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Count zone-to-zone transitions for every (from_zone, to_zone, animal) triplet.
@@ -373,7 +503,11 @@ class ZoneTransitions(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Unused; reserved for future configuration.
+            Optional dict. ``cfg['min_dwell_frames']`` (default 1) sets the
+            minimum run length a zone visit must last to count -- shorter
+            visits are debounced away before transitions are counted, so a
+            brief flicker into a zone and back out doesn't register as two
+            transitions.
 
         Returns
         -------
@@ -386,6 +520,10 @@ class ZoneTransitions(Metric):
         if not zone_arrays:
             return pd.DataFrame(columns=empty_cols)
 
+        min_dwell_frames = 1
+        if cfg is not None and "min_dwell_frames" in cfg:
+            min_dwell_frames = int(cfg["min_dwell_frames"])
+
         session_id: str = session.session_id  # type: ignore[attr-defined]
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
 
@@ -395,16 +533,11 @@ class ZoneTransitions(Metric):
         for arr in zone_arrays:
             for k in range(n_animals):
                 col = arr[:, k]  # (n_frames,) object array
-                for t in range(len(col) - 1):
-                    from_z = col[t]
-                    to_z = col[t + 1]
+                sequence = _debounced_zone_sequence(col, min_dwell_frames)
+                for from_z, to_z in pairwise(sequence):
                     # Only count transitions between named (non-empty) zones
-                    if (
-                        from_z != _EMPTY_ZONE_VALUE
-                        and to_z != _EMPTY_ZONE_VALUE
-                        and from_z != to_z
-                    ):
-                        key = (str(from_z), str(to_z), k)
+                    if from_z != _EMPTY_ZONE_VALUE and to_z != _EMPTY_ZONE_VALUE:
+                        key = (from_z, to_z, k)
                         trans_counts[key] = trans_counts.get(key, 0) + 1
 
         if not trans_counts:
@@ -466,7 +599,26 @@ class Z5EntryExitEvents(Metric):
             "An animal still inside a zone at the final frame gets an 'enter' "
             "event with no matching 'exit' event.",
         ],
+        citation=(
+            "Boundary-crossing event extraction underlying the event/state "
+            "distinction in Martin & Bateson 2007, Measuring Behaviour, "
+            "3rd ed. (Cambridge University Press)"
+        ),
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_dwell_frames",
+            label="Minimum dwell length",
+            kind="int",
+            default=1,
+            minimum=1,
+            unit="frames",
+            help=(
+                "Debounces boundary flicker: a run inside a zone shorter than "
+                "this produces no enter/exit events at all."
+            ),
+        ),
+    ]
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Emit one row per zone entry/exit edge for every (zone, animal) pair.
@@ -476,7 +628,10 @@ class Z5EntryExitEvents(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Unused; reserved for future configuration.
+            Optional dict. ``cfg['min_dwell_frames']`` (default 1) is the
+            minimum run length inside a zone that produces an enter/exit
+            pair -- a shorter run is debounced away entirely, as if the
+            animal never entered.
 
         Returns
         -------
@@ -490,6 +645,10 @@ class Z5EntryExitEvents(Metric):
         if not zone_arrays:
             return pd.DataFrame(columns=empty_cols)
 
+        min_dwell_frames = 1
+        if cfg is not None and "min_dwell_frames" in cfg:
+            min_dwell_frames = int(cfg["min_dwell_frames"])
+
         session_id: str = session.session_id  # type: ignore[attr-defined]
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
         fps: float = session.fps  # type: ignore[attr-defined]
@@ -501,9 +660,11 @@ class Z5EntryExitEvents(Metric):
                 zone_names = [z for z in np.unique(col) if z != _EMPTY_ZONE_VALUE]
                 for zone_name in zone_names:
                     in_zone: np.ndarray = col == zone_name
-                    enter_frames = [0] if in_zone[0] else []
-                    enter_frames += (np.flatnonzero(~in_zone[:-1] & in_zone[1:]) + 1).tolist()
-                    exit_frames = (np.flatnonzero(in_zone[:-1] & ~in_zone[1:]) + 1).tolist()
+                    spans = _true_run_spans(in_zone, min_dwell_frames)
+                    enter_frames = [start for start, _end in spans]
+                    exit_frames = [
+                        end for _start, end in spans if end < len(in_zone)
+                    ]
                     for frame in enter_frames:
                         rows.append(
                             {
@@ -564,7 +725,28 @@ class Z6LatencyToFirstEntry(Metric):
             "NaN when the individual never enters the zone is encoded as inf "
             "(rather than NaN) so results sort as 'latest possible'."
         ],
+        citation=(
+            "Bourin & Hascoët 2003, Eur. J. Pharmacol. 463(1-3):55-65 -- "
+            "latency to first entry as a standard exploration/anxiety "
+            "readout in the light/dark box test"
+        ),
+        citation_doi="10.1016/S0014-2999(03)01274-3",
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_dwell_frames",
+            label="Minimum dwell length",
+            kind="int",
+            default=1,
+            minimum=1,
+            unit="frames",
+            help=(
+                "Forwarded to Z-5: debounces boundary flicker so a run "
+                "inside a zone shorter than this doesn't count as the "
+                "first entry."
+            ),
+        ),
+    ]
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Compute the first-entry latency for every (zone, animal) pair.

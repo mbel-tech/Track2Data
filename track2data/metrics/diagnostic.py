@@ -49,6 +49,10 @@ class TrackingCoverage(Metric):
         warnings=[
             "Low coverage may indicate segmentation failure or animal leaving the arena."
         ],
+        citation=(
+            "Tracking-pipeline convention (fraction of frames with a "
+            "successfully assigned position); no single originating work"
+        ),
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -106,6 +110,8 @@ class TrackingAccuracy(Metric):
             "Returns NaN values when Session.quality is None.",
             "These are tracker self-reports and may not reflect ground-truth accuracy.",
         ],
+        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
+        citation_doi="10.1038/s41592-018-0295-5",
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -180,6 +186,8 @@ class IdProbabilityStats(Metric):
             "Returns NaN values when Session.id_probabilities is None, or "
             "when an animal has zero non-NaN entries (never detected)."
         ],
+        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
+        citation_doi="10.1038/s41592-018-0295-5",
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -260,6 +268,10 @@ class InconsistentFrameCount(Metric):
         warnings=[
             "A high fraction may indicate tracking or segmentation failures.",
         ],
+        citation=(
+            "Track2Data's own bounding-box post-processing pipeline; no "
+            "external work defines this counter"
+        ),
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -311,6 +323,11 @@ class IdentityStability(Metric):
         inputs=["Session.has_stable_identities", "Session.quality"],
         assumptions=["fraction_identified defaults to 0.0 when not available."],
         warnings=["'weak' status may indicate frequent identity swaps."],
+        citation=(
+            "Track2Data engineering threshold on idtracker.ai's own "
+            "fraction_identified (PRD §5.2, FR-IMP-3); not an external "
+            "scientific result"
+        ),
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -373,6 +390,11 @@ class SegmentationErrorFrames(Metric):
             "degrade identification accuracy, independent of D-4's post-hoc "
             "inconsistency flags."
         ],
+        citation=(
+            "idtracker.ai's own internal segmentation-error counter "
+            "(number_of_error_frames), documented in its usage guide "
+            "rather than named as a metric in Romero-Ferrero et al. 2019"
+        ),
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -439,6 +461,8 @@ class FragmentLengthDistribution(Metric):
         assumptions=["Returns NaN values when Session.fragments is None."],
         warnings=["A very short median fragment length indicates frequent "
                    "crossings or occlusions relative to the tracked area."],
+        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
+        citation_doi="10.1038/s41592-018-0295-5",
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -527,6 +551,8 @@ class CrossingRate(Metric):
                    "the recording has animals in physical contact or "
                    "overlap, confounding distance/orientation-based group "
                    "metrics for that span."],
+        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
+        citation_doi="10.1038/s41592-018-0295-5",
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -614,6 +640,8 @@ class SwapOpportunityCount(Metric):
                    "with frequent crossings/occlusions where per-individual "
                    "trajectories should be reviewed rather than trusted "
                    "outright between boundaries."],
+        citation="Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",
+        citation_doi="10.1038/s41592-018-0295-5",
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
