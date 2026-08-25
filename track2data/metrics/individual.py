@@ -231,6 +231,17 @@ class CentreDistance(Metric):
             name="arena_radius", label="Arena radius", kind="float", derived=True, unit="px",
         ),
         MetricParameter(
+            name="centres", label="Arena centre per animal", kind="float", derived=True,
+            help=(
+                "With several main zones, each animal is measured from the arena "
+                "it occupies rather than from one shared centre."
+            ),
+        ),
+        MetricParameter(
+            name="arena_radii", label="Arena radius per animal", kind="float",
+            derived=True, unit="px",
+        ),
+        MetricParameter(
             name="inner_radius_fraction",
             label="Inner-radius fraction",
             kind="float",
@@ -253,10 +264,14 @@ class CentreDistance(Metric):
             A fully preprocessed session.
         cfg:
             Optional configuration dict.  Keys:
-            ``centre`` — [x, y] arena centre coordinates (pixels).
-            ``arena_radius`` — arena radius in pixels; enables ``time_in_centre_pct``.
-            ``inner_radius_fraction`` — fraction of arena_radius defining the
-            "inner" zone for ``time_in_centre_pct`` (default 0.5).
+            ``centres`` — one ``[x, y]`` arena centre per animal, so each
+            animal is measured from the arena it occupies (see
+            ``metrics/derived.py``). Takes precedence over ``centre``.
+            ``arena_radii`` — one radius per animal, likewise.
+            ``centre`` — a single ``[x, y]`` centre shared by every animal.
+            ``arena_radius`` — a single radius; enables ``time_in_centre_pct``.
+            ``inner_radius_fraction`` — fraction of the arena radius defining
+            the "inner" zone for ``time_in_centre_pct`` (default 0.5).
 
         Returns
         -------
@@ -283,12 +298,36 @@ class CentreDistance(Metric):
         if cfg is not None and "arena_radius" in cfg:
             arena_radius = float(cfg["arena_radius"])
 
+        # Per-animal geometry, when the session provides it. Under the
+        # exclusive_rois layout each animal lives in its own arena, so a
+        # single shared centre would sit in the gap between arenas and
+        # measure every distance from a point no animal ever occupies.
+        centres_per_animal = None
+        if cfg is not None and cfg.get("centres") is not None:
+            centres_per_animal = np.asarray(cfg["centres"], dtype=np.float64)
+
+        radii_per_animal = None
+        if cfg is not None and cfg.get("arena_radii") is not None:
+            radii_per_animal = [float(r) for r in cfg["arena_radii"]]
+
         inner_radius_fraction = 0.5
         if cfg is not None and "inner_radius_fraction" in cfg:
             inner_radius_fraction = float(cfg["inner_radius_fraction"])
 
         records: list[dict] = []
         for k in range(n_animals):
+            # This animal's own arena, falling back to the session-level
+            # centre/radius when no per-animal geometry was supplied.
+            if centres_per_animal is not None and k < len(centres_per_animal):
+                animal_centre = centres_per_animal[k]
+            else:
+                animal_centre = centre
+
+            if radii_per_animal is not None and k < len(radii_per_animal):
+                animal_radius: float | None = radii_per_animal[k]
+            else:
+                animal_radius = arena_radius
+
             traj = xy[:, k, :]  # (n_frames, 2)
             valid_mask = ~np.isnan(traj[:, 0])
             valid_traj = traj[valid_mask]
@@ -301,12 +340,12 @@ class CentreDistance(Metric):
                     "individual_id": k,
                     "mean_centre_distance_px": mean_dist,
                 }
-                if arena_radius is not None:
+                if animal_radius is not None:
                     row["time_in_centre_pct"] = np.nan
                 records.append(row)
                 continue
 
-            diffs = valid_traj - centre  # (n_valid, 2)
+            diffs = valid_traj - animal_centre  # (n_valid, 2)
             dists = np.sqrt((diffs**2).sum(axis=1))
             mean_dist = float(dists.mean())
 
@@ -317,8 +356,8 @@ class CentreDistance(Metric):
                 "mean_centre_distance_px": mean_dist,
             }
 
-            if arena_radius is not None:
-                inner_radius = arena_radius * inner_radius_fraction
+            if animal_radius is not None:
+                inner_radius = animal_radius * inner_radius_fraction
                 time_in_centre = float((dists < inner_radius).mean())
                 row["time_in_centre_pct"] = time_in_centre
 

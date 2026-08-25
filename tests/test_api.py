@@ -427,7 +427,11 @@ def test_derived_param_ignores_any_manifest_override_attempt(
 
     # No zones defined -> derive_metric_params falls back to the video
     # frame's own centre (1000x1000 in _make_session), not [1.0, 1.0].
-    assert received == [{"centre": [500.0, 500.0], "arena_radius": 500.0}]
+    assert received[0]["centre"] == [500.0, 500.0]
+    assert received[0]["arena_radius"] == 500.0
+    # The per-animal form is derived too, and equally unoverridable.
+    assert all(c == [500.0, 500.0] for c in received[0]["centres"])
+    assert all(r == 500.0 for r in received[0]["arena_radii"])
 
 
 # ── build_fish_by_frame: tracking_intervals frame/time offset ──────────────

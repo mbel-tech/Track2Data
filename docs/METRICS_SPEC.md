@@ -181,13 +181,35 @@ info-button modal (§6).
 | **Manuscript label** | Centre-distance |
 | **Level** | Individual; frame time-series, trial summary |
 | **Priority** | Optional |
-| **Inputs** | `Session.raw_xy`, arena centre (auto-computed as mean of all ROI vertices or user-supplied centre point) |
-| **Required preprocessing** | None |
-| **Formula** | `d[t, k] = ‖xy[t, k] − centre‖` |
-| **Output columns** | `individual_id`, `mean_centre_distance`, `time_in_centre_pct` (within radius `r = R/2` by default) |
+| **Inputs** | `Session.raw_xy`; arena centre and radius, both **derived per session** — never user-supplied (see below) |
+| **Required preprocessing** | Zone assignment, when zones are defined (supplies `main_zone`) |
+| **Formula** | `d[t, k] = ‖xy[t, k] − centre[k]‖` |
+| **Output columns** | `individual_id`, `mean_centre_distance`, `time_in_centre_pct` (within radius `r = R · inner_radius_fraction`, default 0.5) |
 | **Units** | px, cm, BL |
 | **Assumptions** | Arena is roughly circular or a centre point is meaningful |
 | **Warnings** | For non-circular arenas, "centre-distance" is interpretable only with a clearly defined origin |
+| **Parameters** | `inner_radius_fraction` (float, default 0.5). `centre` / `arena_radius` / `centres` / `arena_radii` are `derived=True` and cannot be overridden. |
+
+> **Where the centre comes from.** It is derived in
+> `track2data/metrics/derived.py`, not supplied by the user — a value
+> hand-set in `MetricSelection.config` for any of these keys is
+> discarded. The centre is the **bounding-box midpoint** of the
+> project's `main`-level zone; the radius is the **inscribed** half-
+> extent (`min` of the two half-extents, the largest circle fitting
+> inside the arena). With no zones defined, both fall back to the video
+> frame's own centre and half-shorter-dimension.
+>
+> **Each animal is measured from the arena it occupies.** Under the
+> `exclusive_rois` layout — several separate `main` arenas, which the
+> pipeline explicitly supports — one shared centre would sit in the
+> empty gap between arenas, so every distance would be measured from a
+> point no animal ever visits. `centres` / `arena_radii` therefore carry
+> one entry per animal, assigned from the *modal* arena in that animal's
+> own `main_zone` column (modal, so a few stray boundary frames can't
+> move it). An animal never seen inside any arena falls back to the
+> session-level `centre` / `arena_radius`, which is the largest arena.
+> With a single arena every entry is identical, so the common case has
+> no special path.
 | **Reference** | Schnörr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish); paradigm originates with Hall 1934's open-field test — DOI [10.1016/j.bbr.2011.12.016](https://doi.org/10.1016/j.bbr.2011.12.016) |
 
 #### IL-4 — Activity / freezing time fraction
