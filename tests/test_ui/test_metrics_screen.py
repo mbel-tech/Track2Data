@@ -29,10 +29,20 @@ def _make_store():
 
 
 def _row_for_id(table, metric_id: str) -> int:
+    """Resolve a row by the real identifier, stored as UserRole data on
+    the Include cell (column 0) -- not by any column's displayed text.
+    The Name column shows a pretty label, not the registry id, and
+    columns get reshuffled from time to time; this must survive that."""
     for row in range(table.rowCount()):
-        if table.item(row, 1).text() == metric_id:
+        if table.item(row, 0).data(Qt.ItemDataRole.UserRole) == metric_id:
             return row
     raise AssertionError(f"{metric_id} not found in table")
+
+
+def _ids_in_table(table) -> list[str]:
+    return [
+        table.item(row, 0).data(Qt.ItemDataRole.UserRole) for row in range(table.rowCount())
+    ]
 
 
 # ── registry-driven rows ──────────────────────────────────────────────────────
@@ -48,10 +58,7 @@ def test_individual_tab_has_one_row_per_registered_individual_metric(qtbot) -> N
         (m.id for m in metrics.list_for_level("individual")),
         key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
     )
-    actual_ids = [
-        screen._ind_table.item(row, 1).text() for row in range(screen._ind_table.rowCount())
-    ]
-    assert actual_ids == expected_ids
+    assert _ids_in_table(screen._ind_table) == expected_ids
 
 
 def test_name_column_shows_the_display_label_not_the_snake_case_name(qtbot) -> None:
@@ -68,7 +75,29 @@ def test_name_column_shows_the_display_label_not_the_snake_case_name(qtbot) -> N
     row = _row_for_id(screen._ind_table, "IL-1")
     metric_cls = metrics.get("IL-1")
     assert metric_cls.label != metric_cls.name  # otherwise this test proves nothing
-    assert screen._ind_table.item(row, 2).text() == metric_cls.label
+    assert screen._ind_table.item(row, 1).text() == metric_cls.label
+
+
+def test_id_and_snake_case_name_never_appear_anywhere_in_the_table(qtbot) -> None:
+    """Neither the registry id ("IL-1") nor the snake_case internal
+    name ("path_length") is user-facing text -- they must not appear
+    as the text of any cell (they still live as UserRole data, which
+    is never rendered)."""
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+
+    for table in (screen._ind_table, screen._grp_table, screen._zone_table):
+        for row in range(table.rowCount()):
+            metric_id = table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            metric_cls = metrics.get(metric_id)
+            for col in range(table.columnCount()):
+                item = table.item(row, col)
+                if item is None:
+                    continue
+                assert item.text() != metric_cls.id
+                assert item.text() != metric_cls.name
 
 
 def test_group_tab_has_one_row_per_registered_group_metric(qtbot) -> None:
@@ -81,10 +110,7 @@ def test_group_tab_has_one_row_per_registered_group_metric(qtbot) -> None:
         (m.id for m in metrics.list_for_level("group")),
         key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
     )
-    actual_ids = [
-        screen._grp_table.item(row, 1).text() for row in range(screen._grp_table.rowCount())
-    ]
-    assert actual_ids == expected_ids
+    assert _ids_in_table(screen._grp_table) == expected_ids
 
 
 def test_zone_tab_has_one_row_per_registered_zone_metric(qtbot) -> None:
@@ -97,10 +123,7 @@ def test_zone_tab_has_one_row_per_registered_zone_metric(qtbot) -> None:
         (m.id for m in metrics.list_for_level("zone")),
         key=lambda metric_id: (metric_id.rpartition("-")[0], int(metric_id.rpartition("-")[2])),
     )
-    actual_ids = [
-        screen._zone_table.item(row, 1).text() for row in range(screen._zone_table.rowCount())
-    ]
-    assert actual_ids == expected_ids
+    assert _ids_in_table(screen._zone_table) == expected_ids
 
 
 # ── checkbox selection round-trip ─────────────────────────────────────────────
@@ -153,7 +176,7 @@ def test_every_row_has_a_config_stub_button_that_shows_a_message(qtbot, monkeypa
     qtbot.addWidget(screen)
 
     row = _row_for_id(screen._ind_table, "IL-1")
-    screen._ind_table.cellWidget(row, 4).click()
+    screen._ind_table.cellWidget(row, 3).click()
 
     assert messages == ["Per-metric configuration isn't available yet."]
 
@@ -176,7 +199,7 @@ def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -
     qtbot.addWidget(screen)
 
     row = _row_for_id(screen._ind_table, "IL-1")
-    screen._ind_table.cellWidget(row, 3).click()
+    screen._ind_table.cellWidget(row, 2).click()
 
     assert opened == ["IL-1"]
 
@@ -184,7 +207,7 @@ def test_info_button_opens_metric_info_dialog_for_that_row(qtbot, monkeypatch) -
     # guards against a lambda-over-loop-variable bug where every row's
     # button would close over the same (last) metric_cls.
     other_row = _row_for_id(screen._ind_table, "IL-3")
-    screen._ind_table.cellWidget(other_row, 3).click()
+    screen._ind_table.cellWidget(other_row, 2).click()
 
     assert opened == ["IL-1", "IL-3"]
 
@@ -211,7 +234,7 @@ def test_info_button_is_absent_when_metric_has_no_formula_or_citation(qtbot, mon
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    assert screen._ind_table.cellWidget(0, 3) is None
+    assert screen._ind_table.cellWidget(0, 2) is None
 
 
 # ── identity-aware graying ────────────────────────────────────────────────────
@@ -391,8 +414,8 @@ def test_greyed_row_still_has_clickable_info_and_config_buttons(qtbot) -> None:
     include_item = screen._ind_table.item(row, 0)
     assert not (include_item.flags() & Qt.ItemFlag.ItemIsEnabled)  # confirm row is greyed
 
-    info_btn = screen._ind_table.cellWidget(row, 3)
-    config_btn = screen._ind_table.cellWidget(row, 4)
+    info_btn = screen._ind_table.cellWidget(row, 2)
+    config_btn = screen._ind_table.cellWidget(row, 3)
     assert info_btn is not None and info_btn.isEnabled()
     assert config_btn is not None and config_btn.isEnabled()
 
@@ -434,5 +457,4 @@ def test_table_builds_without_crashing_for_a_non_conforming_plugin_metric_id(
     screen = MetricsScreen()
     qtbot.addWidget(screen)
 
-    ids = [screen._ind_table.item(row, 1).text() for row in range(screen._ind_table.rowCount())]
-    assert "MyPluginMetric" in ids
+    assert "MyPluginMetric" in _ids_in_table(screen._ind_table)
