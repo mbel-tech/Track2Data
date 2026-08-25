@@ -209,6 +209,48 @@ class TestZoneTransitions:
         debounced_df = ZoneTransitions().compute(psess, cfg={"min_dwell_frames": 3})
         assert len(debounced_df) == 0
 
+    def test_min_dwell_frames_does_not_invent_a_transition_across_a_dropout(self) -> None:
+        """Regression: the debounce filtered short runs of the EMPTY-zone
+        sentinel too, splicing the zones either side of a tracking
+        dropout into adjacent sequence entries. A one-frame gap between
+        two non-adjacent zones was then reported as a direct crossing --
+        so raising min_dwell_frames INCREASED the transition count it is
+        documented to reduce."""
+        n_frames, n_animals = 21, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:10, 0] = "zone_A"
+        main_zone[10, 0] = ""  # one-frame tracking dropout
+        main_zone[11:21, 0] = "zone_B"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        # A->(nothing)->B is not a zone-to-zone transition: crossings via
+        # the empty zone are not counted (see Z-4's own compute()).
+        default_df = ZoneTransitions().compute(psess)
+        assert default_df["transition_count"].sum() == 0
+
+        # Raising the debounce must not manufacture one.
+        debounced_df = ZoneTransitions().compute(psess, cfg={"min_dwell_frames": 2})
+        assert debounced_df["transition_count"].sum() == 0
+
+    def test_min_dwell_frames_still_debounces_a_flicker_between_two_stays(self) -> None:
+        """The dropout fix must not disable the real debounce: a short
+        run of a NAMED zone is still dropped, merging the stays either
+        side of it."""
+        n_frames, n_animals = 21, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:10, 0] = "zone_A"
+        main_zone[10, 0] = "zone_B"  # one-frame flicker into a real zone
+        main_zone[11:21, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        assert ZoneTransitions().compute(psess)["transition_count"].sum() == 2
+        debounced_df = ZoneTransitions().compute(psess, cfg={"min_dwell_frames": 2})
+        assert len(debounced_df) == 0
+
     def test_min_dwell_frames_keeps_a_transition_that_meets_the_threshold(self) -> None:
         n_frames, n_animals = 20, 1
         main_zone = np.full((n_frames, n_animals), "", dtype=object)

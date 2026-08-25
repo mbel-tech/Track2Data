@@ -70,7 +70,16 @@ def _debounced_zone_sequence(col: np.ndarray, min_dwell_frames: int) -> list[str
     duplicate zone names that leaves behind into one entry -- e.g.
     A(9), B(2), A(9) with min_dwell_frames=3 drops the 2-frame B
     flicker and merges the two A runs either side of it into a single
-    "A", so it contributes zero transitions instead of two."""
+    "A", so it contributes zero transitions instead of two.
+
+    Runs of the empty-zone sentinel are never dropped, however short.
+    Dropping one splices the zones on either side of it into adjacent
+    entries, so a brief tracking dropout between two non-adjacent zones
+    would be reported as a direct crossing -- meaning a higher
+    min_dwell_frames could *raise* the transition count it exists to
+    lower. An empty run is a gap in knowledge, not a flicker to smooth
+    over, so it stays and keeps the two stays apart.
+    """
     runs: list[tuple[str, int]] = []
     for val in col:
         name = str(val)
@@ -79,7 +88,11 @@ def _debounced_zone_sequence(col: np.ndarray, min_dwell_frames: int) -> list[str
         else:
             runs.append((name, 1))
 
-    kept = [name for name, length in runs if length >= min_dwell_frames]
+    kept = [
+        name
+        for name, length in runs
+        if length >= min_dwell_frames or name == _EMPTY_ZONE_VALUE
+    ]
 
     sequence: list[str] = []
     for name in kept:

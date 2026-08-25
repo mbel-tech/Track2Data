@@ -284,6 +284,55 @@ def test_current_saved_value_for_an_optional_parameter_is_shown(qtbot) -> None:
     assert dlg.values() == {"threshold_px_s": pytest.approx(7.0)}
 
 
+def test_untouched_value_below_widget_precision_is_preserved(qtbot) -> None:
+    """Regression: values() returned widget.value() for every param,
+    touched or not, so the spin box's 6-decimal rounding became a silent
+    write-back. Opening ⚙ on a metric whose manifest carries a very
+    small threshold and clicking Save with no edits rewrote it to 0.0 --
+    a materially different exclusion rule the user never chose."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_ConfigurableMetric, {"threshold_px_s": 1e-9})
+    qtbot.addWidget(dlg)
+
+    assert dlg.values()["threshold_px_s"] == pytest.approx(1e-9)
+
+
+def test_untouched_value_above_widget_range_is_preserved(qtbot) -> None:
+    """Same defect via clamping rather than rounding: a saved value
+    above the widget's inferred maximum was silently clamped down."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_OptionalFloatParamMetric, {"threshold_px_s": 5e9})
+    qtbot.addWidget(dlg)
+
+    assert dlg.values()["threshold_px_s"] == pytest.approx(5e9)
+
+
+def test_editing_a_value_still_returns_the_edited_value(qtbot) -> None:
+    """The preservation must not shadow a real edit."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_ConfigurableMetric, {"threshold_px_s": 1e-9})
+    qtbot.addWidget(dlg)
+
+    dlg._widgets["threshold_px_s"].setValue(2.5)
+
+    assert dlg.values()["threshold_px_s"] == pytest.approx(2.5)
+
+
+def test_reset_overrides_a_preserved_value(qtbot) -> None:
+    """↺ is an explicit user action: it must win over preservation."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_ConfigurableMetric, {"threshold_px_s": 1e-9})
+    qtbot.addWidget(dlg)
+
+    dlg._reset_buttons["threshold_px_s"].click()
+
+    assert dlg.values()["threshold_px_s"] == pytest.approx(1.5)  # the declared default
+
+
 def test_reset_returns_an_optional_parameter_to_auto(qtbot) -> None:
     from ui.dialogs.metric_config_dialog import MetricConfigDialog
 

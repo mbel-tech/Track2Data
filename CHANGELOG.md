@@ -132,6 +132,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   **"session" calibration mode** for the same ratio, now with an explicit
   user confirmation step.
 
+### Fixed
+
+The following were found by a review of the metrics work above, before
+any of it shipped in a release. All six produced wrong numbers or
+discarded user input rather than failing visibly.
+
+- **Saving a metric's ⚙ configuration discarded any unapplied
+  selection.** Saving wrote straight to the project store, whose change
+  signal reloads the screen from the manifest -- so every metric ticked
+  but not yet applied, plus the quality threshold, silently reverted to
+  the last-applied state. The save now carries the on-screen state with
+  it, exactly as **Apply selection** does.
+- **Z-2 (Area-Corrected Occupancy) produced nothing for a
+  self-intersecting arena polygon.** `roi_area_px2` measured the raw
+  ring while `assign_zones` repaired it first, so a self-crossing
+  polygon -- 2 of 10 in a real idtracker.ai sample -- measured as zero
+  area, and Z-2 fell back to the empty output it was just fixed to
+  stop producing. A partially-cancelling ring was worse: a plausible
+  but wrong area, silently exported. Both now use the same repair.
+- **Raising Z-4's `min_dwell_frames` could *increase* the transition
+  count it exists to reduce.** The debounce also dropped short runs of
+  the "no zone" sentinel, splicing the zones either side of a brief
+  tracking dropout into a direct crossing that never happened. Empty
+  runs are now always kept: a gap in tracking is missing knowledge, not
+  a flicker to smooth over.
+- **IL-3's arena radius depended on whether a zone had been drawn.** The
+  zone path circumscribed (longer half-extent) while the video-frame
+  fallback inscribed (shorter), so the same physical arena gave a 2x
+  different radius. On a 2:1 arena the default `inner_radius_fraction`
+  boundary landed on the walls, scoring wall-hugging animals as
+  centre-dwelling and inverting the thigmotaxis reading. Both paths now
+  inscribe.
+- **IL-3's centre fell outside the arena when several "main" zones were
+  defined.** Pooling them into one bounding box centred it on the empty
+  gap between two arenas -- the `exclusive_rois` layout the pipeline
+  explicitly supports -- so every centre distance was measured from
+  dead space. It now uses the largest such zone and logs that a single
+  centre is ill-defined for a multi-arena layout.
+- **Opening a ⚙ dialog and pressing Save rewrote values the widget
+  couldn't represent.** Values were read back from the spin box even
+  for untouched rows, so a stored threshold finer than 6 decimals or
+  above the widget's inferred maximum was silently rounded or clamped.
+  Untouched rows now round-trip their stored value verbatim.
+
 ## [0.1.0] — 2026-08-24
 
 First public release: the engine, the wizard GUI, and the CLI, wired

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from shapely.geometry import Polygon
 
 from track2data.core.models import ROI, ZoneSet
 from track2data.zones.geometry import assign_zones, detect_overlaps, roi_area_px2
@@ -149,6 +150,34 @@ def test_roi_area_px2_rectangle() -> None:
 def test_roi_area_px2_triangle() -> None:
     roi = ROI(name="tri", level="main", vertices=[(0, 0), (10, 0), (5, 10)])
     assert roi_area_px2(roi) == pytest.approx(50.0)
+
+
+def test_roi_area_px2_repairs_a_self_intersecting_polygon() -> None:
+    """Real idtracker.ai roi_list polygons can be self-intersecting (2/10
+    in a real sample -- see _make_valid_polygon). Shapely returns the
+    *signed* shoelace value for an invalid ring, so a bowtie cancels to
+    0.0. assign_zones already repairs via buffer(0) and happily assigns
+    frames to such a zone; the area must agree, or Z-2 divides by a zero
+    area and silently exports nothing."""
+    bowtie = ROI(
+        name="arena", level="main", vertices=[(0, 0), (100, 100), (100, 0), (0, 100)]
+    )
+    assert not Polygon(bowtie.vertices).is_valid  # otherwise this proves nothing
+    assert Polygon(bowtie.vertices).area == 0.0  # the raw signed value that broke Z-2
+
+    # buffer(0) resolves a bowtie to a single lobe (2500), which is what
+    # assign_zones already treats as the zone -- the point is that the two
+    # agree, not the particular repair Shapely picks.
+    assert roi_area_px2(bowtie) == pytest.approx(2500.0)
+
+
+def test_roi_area_px2_of_a_repaired_polygon_is_never_negative() -> None:
+    """A partially-cancelling invalid ring is worse than a fully
+    cancelling one: it yields a plausible-looking but wrong area."""
+    roi = ROI(
+        name="z", level="main", vertices=[(0, 0), (10, 10), (10, 0), (0, 10), (0, 5)]
+    )
+    assert roi_area_px2(roi) > 0.0
 
 
 # ── detect_overlaps ───────────────────────────────────────────────────────────

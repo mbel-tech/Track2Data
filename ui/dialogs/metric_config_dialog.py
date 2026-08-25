@@ -59,6 +59,14 @@ class MetricConfigDialog(QDialog):
         # _build_editable_widget. Tracked here so values()/_reset_to_default
         # can tell "left on auto" apart from "user typed this exact number".
         self._auto_sentinel: dict[str, float] = {}
+        # A spin box rounds to its decimals and clamps to its range, so
+        # reading a widget back is lossy for a saved value finer or larger
+        # than the widget can represent. Keep the originals, and track
+        # which rows the user actually edited, so an untouched row round-
+        # trips its stored value verbatim instead of being silently
+        # rewritten by merely opening the dialog and pressing Save.
+        self._initial_values: dict[str, Any] = dict(current_values)
+        self._edited: set[str] = set()
 
         self.setWindowTitle(f"Configure — {metric_cls.label}")
         self.resize(440, 360)
@@ -105,6 +113,9 @@ class MetricConfigDialog(QDialog):
 
         widget = self._build_editable_widget(param, value)
         self._widgets[param.name] = widget
+        # Connect AFTER _build_editable_widget has set the initial value,
+        # so populating the form doesn't mark every row as user-edited.
+        self._connect_edited_signal(param, widget)
 
         row = QWidget()
         row_layout = QHBoxLayout(row)
@@ -120,6 +131,19 @@ class MetricConfigDialog(QDialog):
         self._reset_buttons[param.name] = reset_btn
 
         return row
+
+    def _connect_edited_signal(self, param: MetricParameter, widget: QWidget) -> None:
+        """Mark a row edited the first time its widget changes."""
+        mark = partial(self._mark_edited, param.name)
+        if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+            widget.valueChanged.connect(mark)
+        elif isinstance(widget, QComboBox):
+            widget.currentTextChanged.connect(mark)
+        elif isinstance(widget, QCheckBox):
+            widget.toggled.connect(mark)
+
+    def _mark_edited(self, name: str, *_args) -> None:
+        self._edited.add(name)
 
     def _build_editable_widget(self, param: MetricParameter, value: Any) -> QWidget:
         widget: QWidget
@@ -182,6 +206,10 @@ class MetricConfigDialog(QDialog):
         return widget
 
     def _reset_to_default(self, param: MetricParameter) -> None:
+        # ↺ is an explicit user action, so it counts as an edit even when
+        # the resulting widget value happens to match what was loaded --
+        # otherwise values() would keep returning the preserved original.
+        self._edited.add(param.name)
         widget = self._widgets[param.name]
         if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
             if param.default is None:
@@ -199,10 +227,18 @@ class MetricConfigDialog(QDialog):
         """Return the edited, non-derived parameter values -- what the
         caller should persist into ``MetricSelection.config[metric_id]``.
         Derived parameters are never included: they are recomputed per
-        session and must never be frozen into a saved override."""
+        session and must never be frozen into a saved override.
+
+        A row the user did not touch returns its stored value verbatim
+        rather than a widget read-back, so merely opening the dialog and
+        pressing Save cannot round or clamp a value the widget is too
+        coarse or too narrow to represent."""
         result: dict[str, Any] = {}
         for param in self._metric_cls.parameters:
             if param.derived:
+                continue
+            if param.name not in self._edited and param.name in self._initial_values:
+                result[param.name] = self._initial_values[param.name]
                 continue
             widget = self._widgets[param.name]
             if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
