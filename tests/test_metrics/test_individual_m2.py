@@ -108,6 +108,54 @@ class TestCentreDistance:
         row0 = df[df["individual_id"] == 0].iloc[0]
         assert row0["mean_centre_distance_px"] == pytest.approx(0.0, abs=1e-9)
 
+    def test_per_animal_centres_measure_each_animal_from_its_own_arena(self) -> None:
+        """Under the exclusive_rois layout each animal lives in its own
+        arena, so a single session centre measures both from a point in
+        the gap between them. cfg['centres'] gives one centre per
+        animal; both animals here sit at their own arena's centre, so
+        both distances are 0 -- with a single pooled centre they would
+        each be 600."""
+        n_frames, n_animals = 10, 2
+        xy = np.zeros((n_frames, n_animals, 2))
+        xy[:, 0, :] = [200.0, 200.0]
+        xy[:, 1, :] = [1400.0, 200.0]
+        psess = make_psess(xy=xy)
+
+        df = CentreDistance().compute(
+            psess, cfg={"centres": [[200.0, 200.0], [1400.0, 200.0]]}
+        )
+
+        assert df["mean_centre_distance_px"].tolist() == pytest.approx([0.0, 0.0], abs=1e-9)
+
+    def test_per_animal_radii_gate_time_in_centre_independently(self) -> None:
+        n_frames, n_animals = 10, 2
+        xy = np.zeros((n_frames, n_animals, 2))
+        xy[:, 0, :] = [200.0, 200.0]  # dead centre of its arena
+        xy[:, 1, :] = [1390.0, 200.0]  # 10px off its arena's centre
+        psess = make_psess(xy=xy)
+
+        df = CentreDistance().compute(
+            psess,
+            cfg={
+                "centres": [[200.0, 200.0], [1400.0, 200.0]],
+                "arena_radii": [200.0, 200.0],
+                "inner_radius_fraction": 0.5,
+            },
+        )
+
+        assert df["time_in_centre_pct"].tolist() == pytest.approx([1.0, 1.0])
+
+    def test_scalar_centre_still_honoured_when_no_per_animal_centres(self) -> None:
+        """cfg['centre'] is a documented key; the per-animal addition
+        must not break a caller passing the scalar form."""
+        n_frames, n_animals = 10, 1
+        xy = np.full((n_frames, n_animals, 2), [600.0, 500.0])
+        psess = make_psess(xy=xy)
+
+        df = CentreDistance().compute(psess, cfg={"centre": [500.0, 500.0]})
+
+        assert df.iloc[0]["mean_centre_distance_px"] == pytest.approx(100.0, rel=1e-6)
+
     def test_known_distance_from_explicit_centre(self) -> None:
         """Animal always at (600, 500) with centre (500, 500) → dist = 100."""
         n_frames, n_animals = 10, 1
@@ -205,9 +253,18 @@ class TestCentreDistance:
 
     def test_declares_configurable_parameters(self) -> None:
         names = {p.name for p in CentreDistance.parameters}
-        assert names == {"centre", "arena_radius", "inner_radius_fraction"}
+        assert names == {
+            "centre",
+            "arena_radius",
+            "centres",
+            "arena_radii",
+            "inner_radius_fraction",
+        }
         derived = {p.name for p in CentreDistance.parameters if p.derived}
-        assert derived == {"centre", "arena_radius"}
+        # Only inner_radius_fraction is a scientific choice; the arena
+        # geometry -- shared or per-animal -- is a property of the
+        # session and must never be user-settable.
+        assert derived == {"centre", "arena_radius", "centres", "arena_radii"}
 
 
 # ── IL-6: Acceleration ────────────────────────────────────────────────────────

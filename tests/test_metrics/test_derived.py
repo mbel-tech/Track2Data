@@ -23,9 +23,18 @@ from track2data.metrics.derived import derive_metric_params
 # ── shared fixtures ──────────────────────────────────────────────────────────
 
 
-def _make_psess(width_px: int = 1000, height_px: int = 800, tmp_path: Path | None = None):
+def _make_psess(
+    width_px: int = 1000,
+    height_px: int = 800,
+    tmp_path: Path | None = None,
+    xy: np.ndarray | None = None,
+    main_zone: np.ndarray | None = None,
+):
     n_frames, n_animals = 10, 2
-    xy = np.zeros((n_frames, n_animals, 2), dtype=np.float64)
+    if xy is not None:
+        n_frames, n_animals = xy.shape[0], xy.shape[1]
+    else:
+        xy = np.zeros((n_frames, n_animals, 2), dtype=np.float64)
     session = Session(
         session_id="s1",
         folder=tmp_path or Path("/tmp/s1"),
@@ -41,7 +50,25 @@ def _make_psess(width_px: int = 1000, height_px: int = 800, tmp_path: Path | Non
         accel_px_s2=np.zeros((n_frames, n_animals)),
         heading_rad=np.zeros((n_frames, n_animals)),
     )
-    return PreprocessedSession(session=session, xy=xy, kinematics=kine)
+    return PreprocessedSession(
+        session=session, xy=xy, kinematics=kine, main_zone=main_zone
+    )
+
+
+def _two_arena_zone_set() -> ZoneSet:
+    """The exclusive_rois layout: two separate main arenas, a wide gap
+    between them. Their pooled bounding-box midpoint (800, 200) is in
+    the gap and belongs to neither."""
+    return ZoneSet(
+        rois=[
+            ROI(name="left", level="main", vertices=[(0, 0), (400, 0), (400, 400), (0, 400)]),
+            ROI(
+                name="right",
+                level="main",
+                vertices=[(1200, 0), (1600, 0), (1600, 400), (1200, 400)],
+            ),
+        ]
+    )
 
 
 # ── dispatch: unknown / no-param metrics ─────────────────────────────────────
@@ -119,6 +146,90 @@ def test_il3_centre_stays_inside_an_arena_when_several_main_rois_exist() -> None
     in_right = 1200 <= cx <= 1600 and 0 <= cy <= 400
     assert in_left or in_right, f"centre {result['centre']} is in neither arena"
     assert result["arena_radius"] == pytest.approx(200.0)  # one arena, not the span
+
+
+# ── IL-3: per-animal centres under a multi-arena layout ──────────────────────
+
+
+def test_il3_derives_a_centre_per_animal_from_the_arena_it_occupies() -> None:
+    """With several separate main arenas, one session-level centre is
+    wrong for every animal. Each animal's centre is the arena it
+    actually occupies, read from the zone assignment the pipeline
+    already computed."""
+    n_frames = 10
+    xy = np.zeros((n_frames, 2, 2), dtype=np.float64)
+    xy[:, 0, :] = [200.0, 200.0]  # animal 0 sits in the left arena
+    xy[:, 1, :] = [1400.0, 200.0]  # animal 1 sits in the right arena
+    main_zone = np.empty((n_frames, 2), dtype=object)
+    main_zone[:, 0] = "left"
+    main_zone[:, 1] = "right"
+    psess = _make_psess(width_px=1600, height_px=800, xy=xy, main_zone=main_zone)
+
+    result = derive_metric_params("IL-3", psess, _two_arena_zone_set())
+
+    assert result["centres"][0] == pytest.approx([200.0, 200.0])
+    assert result["centres"][1] == pytest.approx([1400.0, 200.0])
+    assert result["arena_radii"] == pytest.approx([200.0, 200.0])
+
+
+def test_il3_per_animal_centres_are_uniform_for_a_single_arena() -> None:
+    """The common case must not become a special case: one arena means
+    every animal shares its centre, matching the session-level value."""
+    n_frames = 10
+    xy = np.full((n_frames, 2, 2), 100.0)
+    main_zone = np.full((n_frames, 2), "arena", dtype=object)
+    psess = _make_psess(xy=xy, main_zone=main_zone)
+    arena = ROI(name="arena", level="main", vertices=[(0, 0), (200, 0), (200, 200), (0, 200)])
+
+    result = derive_metric_params("IL-3", psess, ZoneSet(rois=[arena]))
+
+    assert np.allclose(result["centres"], [[100.0, 100.0], [100.0, 100.0]])
+    assert result["centres"][0] == pytest.approx(result["centre"])
+    assert result["arena_radii"][0] == pytest.approx(result["arena_radius"])
+
+
+def test_il3_falls_back_to_the_session_centre_for_an_animal_in_no_arena() -> None:
+    """An animal tracked entirely outside every main zone has no arena
+    of its own; it gets the session-level fallback rather than an
+    arbitrary one or a NaN."""
+    n_frames = 10
+    xy = np.zeros((n_frames, 2, 2), dtype=np.float64)
+    main_zone = np.empty((n_frames, 2), dtype=object)
+    main_zone[:, 0] = "left"
+    main_zone[:, 1] = ""  # never inside any main zone
+    psess = _make_psess(width_px=1600, height_px=800, xy=xy, main_zone=main_zone)
+
+    result = derive_metric_params("IL-3", psess, _two_arena_zone_set())
+
+    assert result["centres"][0] == pytest.approx([200.0, 200.0])
+    assert result["centres"][1] == pytest.approx(result["centre"])
+
+
+def test_il3_assigns_an_animal_to_the_arena_it_spent_most_time_in() -> None:
+    """A few stray frames on the wrong side of the arena boundary must
+    not move an animal's centre to the other arena."""
+    n_frames = 10
+    xy = np.zeros((n_frames, 2, 2), dtype=np.float64)
+    main_zone = np.empty((n_frames, 2), dtype=object)
+    main_zone[:, 0] = "right"
+    main_zone[0:2, 0] = "left"  # 2 stray frames out of 10
+    main_zone[:, 1] = "right"
+    psess = _make_psess(width_px=1600, height_px=800, xy=xy, main_zone=main_zone)
+
+    result = derive_metric_params("IL-3", psess, _two_arena_zone_set())
+
+    assert result["centres"][0] == pytest.approx([1400.0, 200.0])
+
+
+def test_il3_per_animal_centres_present_even_with_no_zones() -> None:
+    """No zones at all: every animal gets the video-frame centre, still
+    as a per-animal list so IL-3's compute() has one code path."""
+    psess = _make_psess(width_px=1000, height_px=800)
+
+    result = derive_metric_params("IL-3", psess, ZoneSet())
+
+    assert np.allclose(result["centres"], [[500.0, 400.0], [500.0, 400.0]])
+    assert result["arena_radii"] == pytest.approx([400.0, 400.0])
 
 
 def test_il3_ignores_secondary_level_rois_for_centre() -> None:

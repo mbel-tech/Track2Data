@@ -108,6 +108,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   been shipping with no section at all — the document described 29 of
   the 33 metrics that actually run, violating its own §6.6 rule that
   every metric must have one.
+- **IL-3 (Distance from Arena Centre) now measures each animal from the
+  arena it occupies.** With several `main`-level zones — the
+  `exclusive_rois` layout, where identities are physically partitioned
+  between separate arenas and the pipeline already refuses to compute
+  group metrics across them — IL-3 used a single session-wide centre.
+  That point sits in the empty gap between arenas, so every animal's
+  distance was measured from somewhere none of them ever swam. On a
+  two-arena session, an animal sitting dead centre of its own arena
+  scored `mean_centre_distance_px = 1196` and `time_in_centre_pct = 0`;
+  it now scores `36.5` and `1.0`.
+
+  Which arena an animal belongs to comes from the zone assignment the
+  pipeline already computes, taking the *modal* arena across its tracked
+  frames so a few stray boundary frames can't move it. An animal never
+  seen inside any arena falls back to the session-level centre. With a
+  single arena — the common case — every animal shares one centre
+  exactly as before, so those projects see **no change**.
+
+  `cfg` gained `centres` / `arena_radii` (one entry per animal,
+  `derived=True`, so never user-settable). The scalar `centre` /
+  `arena_radius` keys still work for anyone calling `compute()`
+  directly.
+
 - **IL-3 (Distance from Arena Centre)'s centre/radius fallback changed.**
   Previously, with no `cfg['centre']` supplied (which was always the
   case -- see above), IL-3 fell back to the centroid of every tracked
