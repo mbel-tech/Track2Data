@@ -28,6 +28,23 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
 METRIC_REQUEST = TEMPLATE_DIR / "metric_request.yml"
 
+
+def _extract_doi_regex(workflow_text: str) -> str | None:
+    """Pull the DOI pattern out of the workflow's JS regex literal.
+
+    The body must be a *valid* JS regex literal: every ``/`` inside it
+    escaped. A naive ``/(.+?)/`` reads straight across an unescaped
+    slash and happily returns a truncated pattern that still compiles in
+    Python -- so the test using it would pass while the workflow itself
+    threw a SyntaxError on every real submission. Matching only
+    escaped-or-non-slash characters makes that typo unextractable, which
+    is what the assertion at the call site then reports.
+    """
+    import re
+
+    match = re.search(r"const hasDoi = /((?:[^/\\\n]|\\.)+)/\.test\(body\);", workflow_text)
+    return match.group(1) if match else None
+
 # The block types GitHub's issue-form schema accepts.
 VALID_TYPES = {"markdown", "input", "textarea", "dropdown", "checkboxes"}
 
@@ -128,6 +145,26 @@ def test_blank_issues_stay_enabled() -> None:
         assert yaml.safe_load(fh)["blank_issues_enabled"] is True
 
 
+def test_the_doi_check_runs_when_an_issue_is_labelled_after_opening() -> None:
+    """`opened`/`edited` alone misses the triage path. Blank issues stay
+    enabled and CONTRIBUTING §9 routes people through them, so a metric
+    request often arrives as a plain issue that a maintainer then labels
+    `metric-request`. That fires a `labeled` event; without it in
+    `types`, the check never runs for exactly those requests -- the
+    `opened` run was already skipped, because the label wasn't there
+    yet."""
+    workflow = (REPO_ROOT / ".github" / "workflows" / "metric-request-check.yml").read_text(
+        encoding="utf-8"
+    )
+    # "on" is YAML 1.1 truthy, so safe_load gives the key back as True.
+    parsed = yaml.safe_load(workflow)
+    triggers = parsed[True]["issues"]["types"]
+
+    assert "labeled" in triggers, f"issue triggers are {triggers}"
+    assert "opened" in triggers
+    assert "edited" in triggers
+
+
 def test_the_doi_check_workflow_regex_accepts_and_rejects_the_right_things() -> None:
     """The workflow's DOI regex is the second layer behind the form's
     wording (issue forms can't validate a pattern). Pinned here because
@@ -138,10 +175,10 @@ def test_the_doi_check_workflow_regex_accepts_and_rejects_the_right_things() -> 
     workflow = (REPO_ROOT / ".github" / "workflows" / "metric-request-check.yml").read_text(
         encoding="utf-8"
     )
-    match = re.search(r"const hasDoi = /(.+?)/\.test\(body\);", workflow)
+    match = _extract_doi_regex(workflow)
     assert match is not None, "could not find the DOI regex in the workflow"
 
-    pattern = re.compile(match.group(1))
+    pattern = re.compile(match)
 
     assert pattern.search("10.1006/jtbi.2002.3065")
     assert pattern.search("The DOI is 10.1038/s41592-018-0295-5, thanks")
@@ -150,3 +187,17 @@ def test_the_doi_check_workflow_regex_accepts_and_rejects_the_right_things() -> 
     assert not pattern.search("no doi here")
     assert not pattern.search("Couzin et al. 2002, J. Theor. Biol.")
     assert not pattern.search("10.1006")  # no suffix
+
+
+def test_the_regex_extractor_rejects_an_unescaped_slash() -> None:
+    """The test above is only worth having if it can actually fail on
+    the typo it exists to catch. An unescaped `/` terminates the JS
+    regex literal early, so `github-script` throws a SyntaxError on
+    every metric request -- while the leftover text still compiles fine
+    as a Python pattern. A naive non-greedy extractor reads across the
+    break and reports success; this asserts ours does not."""
+    broken = r"            const hasDoi = /10\.\d{4,9}/\S+/.test(body);"
+    assert _extract_doi_regex(broken) is None
+
+    valid = r"            const hasDoi = /10\.\d{4,9}\/\S+/.test(body);"
+    assert _extract_doi_regex(valid) == r"10\.\d{4,9}\/\S+"

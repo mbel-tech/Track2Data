@@ -23,7 +23,13 @@ name: Metric request DOI check
 
 on:
   issues:
-    types: [opened, edited]
+    # `labeled` matters as much as the other two: blank issues stay
+    # enabled and CONTRIBUTING §9 routes people through them, so a metric
+    # request often arrives as a plain issue that a maintainer labels
+    # afterwards. Its `opened` event was skipped (no label yet), so
+    # without `labeled` the check would never run for exactly the
+    # requests that came in via triage.
+    types: [opened, edited, labeled]
 
 permissions:
   issues: write
@@ -54,10 +60,21 @@ jobs:
 
             if (hasDoi) {
               if (alreadyFlagged) {
-                await github.rest.issues.removeLabel({
-                  owner, repo, issue_number, name: LABEL,
-                });
-                core.info(`DOI found; removed the ${LABEL} label.`);
+                // `alreadyFlagged` comes from this event's payload
+                // snapshot, so a second run racing this one (or a
+                // maintainer removing the label by hand) can delete it
+                // first and make this DELETE 404. The label is gone
+                // either way -- that is the desired end state, not a
+                // failure worth reddening the Actions tab over.
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number, name: LABEL,
+                  });
+                  core.info(`DOI found; removed the ${LABEL} label.`);
+                } catch (err) {
+                  if (err.status !== 404) throw err;
+                  core.info(`DOI found; ${LABEL} was already removed.`);
+                }
               } else {
                 core.info("DOI found; nothing to do.");
               }

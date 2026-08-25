@@ -199,6 +199,28 @@ discarded user input rather than failing visibly.
   above the widget's inferred maximum was silently rounded or clamped.
   Untouched rows now round-trip their stored value verbatim.
 
+Three more from the same review, in the contributor-facing tooling
+rather than the app:
+
+- **The metric-request DOI check never ran on a triaged request.** It
+  fired on `opened` and `edited` only. A metric request that arrives as
+  a blank issue and is labelled `metric-request` afterwards emits
+  `labeled` — so the check silently skipped exactly the requests that
+  came in through triage. It now also runs on `labeled`, and tolerates
+  a concurrent label removal instead of failing the run.
+- **`scripts/generate_metric_references.py` could silently publish a
+  truncated reference list.** The registry imports each metric module
+  optionally, so on a venv without `scipy`/`shapely` it holds 23 of the
+  33 metrics — and the generator would rewrite the CSV with ten rows
+  deleted while printing a success line. It now refuses to write unless
+  every built-in metric module imported, and names the one that didn't.
+- **The test pinning the DOI regex couldn't fail on the typo it exists
+  to catch.** Its extractor read straight across an unescaped `/` — the
+  error that terminates the JavaScript regex literal early and would
+  throw on every metric request — and returned a truncated pattern that
+  still passed every assertion. It now only matches a well-formed
+  literal.
+
 ## [0.1.0] — 2026-08-24
 
 First public release: the engine, the wizard GUI, and the CLI, wired
