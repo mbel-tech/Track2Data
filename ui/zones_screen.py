@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -75,13 +76,13 @@ class ZonesScreen(QWidget):
     # ── build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(48, 36, 48, 36)
+        outer.setSpacing(16)
 
         title = QLabel("Zones")
         title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
-        root.addWidget(title)
+        outer.addWidget(title)
 
         subtitle = QLabel(
             "Load zone definitions from a CSV file, import them from an "
@@ -89,7 +90,21 @@ class ZonesScreen(QWidget):
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("font-size: 14px; color: #555;")
-        root.addWidget(subtitle)
+        outer.addWidget(subtitle)
+
+        # Everything else -- zone list, session import, landmarks, the
+        # canvas, and the save-zone controls -- stacks a lot taller than
+        # a wizard page's fixed height once the canvas is in the mix, so
+        # it needs to scroll rather than being force-compressed into
+        # whatever space is left (which used to squash the zone-name/
+        # level form rows down to unreadable single-pixel-high text).
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        inner = QWidget()
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(16)
 
         # ── list ──────────────────────────────────────────────────────────
         self._zone_list = QListWidget()
@@ -192,6 +207,8 @@ class ZonesScreen(QWidget):
         self._session_combo.currentTextChanged.connect(self._refresh_canvas)
 
         root.addStretch()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll, 1)
 
     # ── slots: CSV load/clear ────────────────────────────────────────────
 
