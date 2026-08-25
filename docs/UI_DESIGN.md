@@ -742,7 +742,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 ### 6.11 Screen 6.3 — Per-Metric Advanced Configuration (Aspirational — Not Yet Implemented)
 
-> **Status:** This screen does not exist in the shipped app — no config schema, no navigation target, nothing below is built. Kept as a design reference only; everything in this section is proposed, not current behavior. The "6.3" label is unchanged from before Preprocessing/Metrics became separate stages (§5.6) — it was never renumbered to "7.x", since resolving the Screen-X.Y numbering scheme for real needs its own pass, not a side effect of this one.
+> **Status:** This dedicated full-page screen (one table for every selected metric's parameters, plus a "Global parameters" section) does not exist in the shipped app and nothing below is built. What *did* ship, on the real Screen 6.2 (§6.10)'s ⚙ button, is smaller in scope: a per-metric modal `MetricConfigDialog` (`ui/dialogs/metric_config_dialog.py`), opened one metric at a time, mirroring `MetricInfoDialog`'s shape rather than this page's. It reuses this section's per-row ↺ reset-to-default idea but not the combined-table or global-parameters layout. Kept as a design reference for a possible future consolidated screen; everything else in this section is proposed, not current behavior. The "6.3" label is unchanged from before Preprocessing/Metrics became separate stages (§5.6) — it was never renumbered to "7.x", since resolving the Screen-X.Y numbering scheme for real needs its own pass, not a side effect of this one.
 
 **Stage:** Stage 7 (Metrics)  
 **Purpose:** Configure metric-specific parameters (e.g., activity threshold).

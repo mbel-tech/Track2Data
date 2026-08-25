@@ -54,6 +54,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   flicker when raised. IL-7's already-configurable `threshold_px_s`/
   `min_bout_frames` and GL-3's/GL-8's `stationary_threshold_px_s` are
   now formally declared in each metric's `parameters` schema too.
+- **The Metrics screen's ⚙ button now works.** It previously did
+  nothing but show a "not yet implemented" message. It now opens
+  `MetricConfigDialog`, rendering one widget per declared
+  `MetricParameter` (a spin box, combo box, or checkbox depending on
+  `kind`), with a per-row ↺ reset-to-default and Save/Cancel. It is
+  disabled, with an explanatory tooltip, for the 24 metrics that
+  declare no parameters. A `derived=True` parameter (IL-3's centre/
+  radius, Z-2's zone areas) renders read-only -- it is computed per
+  session and can never be saved as a user override. A parameter with
+  no declared default (IL-4's and IL-7's `threshold_px_s`, both
+  "auto-computed from data when unset") shows "Auto (data-driven)"
+  rather than defaulting the control to 0 -- 0 is a real, very
+  different threshold from "let the engine compute one" -- and leaving
+  it on Auto omits the key from the saved config entirely. Saved edits
+  persist into `MetricSelection.config[metric_id]`, round-tripping
+  through the project manifest like any other setting.
 
 ### Changed
 

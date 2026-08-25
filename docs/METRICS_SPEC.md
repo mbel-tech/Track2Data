@@ -795,7 +795,18 @@ exposed so future per-user opt-outs are non-breaking.
    also declared), GL-6's `cohesion_source` (`'nnd'`/`'iid'`, default
    `'nnd'` to preserve the historical NND-only behaviour), plus
    Z-3/Z-4/Z-5/Z-6's `min_visit_frames`/`min_dwell_frames` boundary-
-   flicker debounce. Still open: the GUI's ⚙ button remains a stub (no
-   `MetricConfigDialog` yet) -- the engine-side plumbing and the
-   parameters themselves are done; wiring them to the screen is tracked
-   separately.
+   flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
+   (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
+   `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
+   it is disabled with an explanatory tooltip for the 24 metrics with
+   none. A `derived=True` parameter (IL-3's centre/radius, Z-2's zone
+   areas) renders as a read-only "derived from this session's zones"
+   label -- it is never user-editable and Save never writes it into
+   `MetricSelection.config`. A parameter with no declared default (IL-4/
+   IL-7's `threshold_px_s`: "auto-computed from data when unset") shows
+   "Auto (data-driven)" rather than a numeric 0 -- 0 would be a real,
+   very different threshold, and leaving the control on "Auto" omits the
+   key entirely so `Engine._effective_cfg()`'s own auto-compute branch
+   still runs. Saved edits round-trip through
+   `MetricSelection.config[metric_id]`, the same manifest field the
+   engine already reads.

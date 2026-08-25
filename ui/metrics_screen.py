@@ -3,8 +3,9 @@ Stage 6b — Metric selection screen (registry-driven QTableWidget).
 
 QTabWidget with three tabs: Individual / Group / Zone. Each tab is a
 QTableWidget populated from track2data.metrics.list_for_level(level),
-columns: include (checkbox) / metric_name / info (ⓘ) / config (⚙,
-stub). Quality threshold QDoubleSpinBox + Apply button.
+columns: include (checkbox) / metric_name / info (ⓘ) / config (⚙ --
+opens MetricConfigDialog for metrics that declare `parameters`;
+disabled otherwise). Quality threshold QDoubleSpinBox + Apply button.
 
 The registry id ("IL-1") and the snake_case internal name
 ("path_length") are deliberately never shown -- they're engine/export
@@ -21,6 +22,7 @@ from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QHeaderView,
@@ -35,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
+from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
 _COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
@@ -152,7 +155,15 @@ class MetricsScreen(QWidget):
 
             config_btn = QPushButton("⚙")
             config_btn.setFixedWidth(28)
-            config_btn.clicked.connect(self._show_config_stub)
+            # getattr, not metric_cls.parameters, for the same reason as
+            # _natural_sort_key's fallback above -- a third-party plugin
+            # metric isn't required to define it and shouldn't crash the
+            # whole screen for not doing so.
+            if getattr(metric_cls, "parameters", []):
+                config_btn.clicked.connect(partial(self._show_metric_config, metric_cls))
+            else:
+                config_btn.setEnabled(False)
+                config_btn.setToolTip("This metric has no configurable parameters.")
             table.setCellWidget(row, _COL_CONFIG, config_btn)
 
         return table
@@ -161,10 +172,27 @@ class MetricsScreen(QWidget):
         dlg = MetricInfoDialog(metric_cls, self)
         dlg.exec()
 
-    def _show_config_stub(self) -> None:
-        QMessageBox.information(
-            self, "Not yet implemented", "Per-metric configuration isn't available yet."
+    def _show_metric_config(self, metric_cls) -> None:
+        current_values: dict = {}
+        if self._store is not None and self._store.manifest is not None:
+            current_values = self._store.manifest.metrics.config.get(metric_cls.id, {})
+
+        dlg = MetricConfigDialog(metric_cls, current_values, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if self._store is None or self._store.manifest is None:
+            QMessageBox.information(self, "Info", "No project open.")
+            return
+
+        current = self._store.manifest.metrics
+        sel = current.model_copy(
+            update={"config": {**current.config, metric_cls.id: dlg.values()}}
         )
+        try:
+            self._store.update_metrics(sel)
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to save metric configuration:\n{exc}")
 
     # ── slots ──────────────────────────────────────────────────────────────
 
