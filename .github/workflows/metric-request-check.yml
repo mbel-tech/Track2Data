@@ -9,6 +9,17 @@ name: Metric request DOI check
 # Deliberately non-blocking. It never closes an issue and never fails a
 # required check -- a good metric proposal from someone who pasted a URL
 # instead of a bare DOI should be fixable in one edit, not rejected.
+#
+# DEPENDS ON TWO REPOSITORY LABELS EXISTING: `metric-request` and
+# `needs-doi`. GitHub does NOT create a label an issue form declares --
+# if `metric-request` is missing, the form opens issues without it, this
+# workflow's `if:` never matches, and the DOI check silently stops
+# running with nothing failing to say so. Recreate them with:
+#
+#   gh label create metric-request --color 0E8A16 \
+#     --description "Proposal for a new behavioural metric"
+#   gh label create needs-doi --color FBCA04 \
+#     --description "Metric request is missing a DOI; set/cleared by this workflow"
 
 on:
   issues:
