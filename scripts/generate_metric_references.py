@@ -30,6 +30,43 @@ CSV_PATH = REPO_ROOT / "docs" / "METRIC_REFERENCES.csv"
 
 HEADER = ["metric_id", "level", "priority", "metric_name", "reference", "doi"]
 
+# Every module that registers built-in metrics. `metrics._load_builtins()`
+# imports each of these under `contextlib.suppress(ImportError)`, which is
+# right for the library (a user without scipy can still run the metrics
+# that don't need it) and wrong for this script: a partly-loaded registry
+# would publish a CSV that quietly omits whole levels.
+_BUILTIN_METRIC_MODULES = (
+    "track2data.metrics.diagnostic",
+    "track2data.metrics.individual",
+    "track2data.metrics.group",
+    "track2data.metrics.zone",
+)
+
+
+def assert_registry_is_complete() -> None:
+    """Exit with a diagnosis unless every built-in metric module imported.
+
+    Without this, running the script on a venv missing scipy or shapely
+    rewrites the published CSV with whole levels of metrics deleted --
+    and prints a success line while doing it. CI's drift test would fail
+    later, but by then the damage is committed and the cause is
+    invisible. Fail here, where the missing dependency can still be
+    named.
+    """
+    import importlib
+
+    for module_name in _BUILTIN_METRIC_MODULES:
+        try:
+            importlib.import_module(module_name)
+        except ImportError as exc:
+            raise SystemExit(
+                f"cannot regenerate {CSV_PATH.name}: {module_name} failed to import "
+                f"({exc}).\n"
+                "The metric registry would be incomplete and the CSV would silently "
+                "lose every metric from that module.\n"
+                "Install the full dev environment first:  pip install -e \".[dev]\""
+            ) from exc
+
 
 def render_csv() -> str:
     """Return the full CSV text for the current metric registry.
@@ -73,6 +110,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    assert_registry_is_complete()
     generated = render_csv()
 
     if args.check:

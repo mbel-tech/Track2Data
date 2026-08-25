@@ -22,6 +22,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
+
 from track2data import metrics
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -199,3 +201,52 @@ def test_no_doi_is_shared_by_metrics_citing_different_works() -> None:
     assert not conflicts, (
         f"the same DOI is attached to metrics whose citation texts differ: {conflicts}"
     )
+
+
+def test_generator_refuses_to_write_a_truncated_csv() -> None:
+    """`metrics._load_builtins()` wraps each submodule import in
+    `contextlib.suppress(ImportError)`, so on a venv missing scipy or
+    shapely the registry silently holds 23 metrics instead of 33 --
+    and the generator would cheerfully rewrite the published CSV with
+    ten rows deleted, printing a reassuring success line. CI catches
+    the drift afterwards, but the damage is done locally and the
+    contributor has no idea why.
+
+    The generator must therefore verify its own inputs are complete
+    before writing anything.
+    """
+    generator = _load_generator()
+
+    assert hasattr(generator, "assert_registry_is_complete"), (
+        "the generator must verify the registry is complete before writing"
+    )
+
+
+def test_generator_completeness_check_names_the_missing_module(monkeypatch) -> None:
+    """Simulates the minimal-venv case: shapely absent, so
+    track2data.metrics.zone won't import and every Z-* row would vanish
+    from the CSV."""
+    import importlib
+
+    generator = _load_generator()
+    real_import_module = importlib.import_module
+
+    def _fail_zone(name, *args, **kwargs):
+        if name == "track2data.metrics.zone":
+            raise ImportError("No module named 'shapely'")
+        return real_import_module(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", _fail_zone)
+
+    with pytest.raises(SystemExit) as excinfo:
+        generator.assert_registry_is_complete()
+
+    message = str(excinfo.value)
+    assert "track2data.metrics.zone" in message
+    assert "shapely" in message
+    assert "pip install" in message  # tells the contributor how to fix it
+
+
+def test_generator_completeness_check_passes_on_a_full_environment() -> None:
+    """The guard must not cry wolf in the environment CI actually uses."""
+    _load_generator().assert_registry_is_complete()

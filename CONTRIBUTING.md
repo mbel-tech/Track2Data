@@ -147,6 +147,11 @@ published reference list:
 python scripts/generate_metric_references.py
 ```
 
+Run this from the full dev environment (`pip install -e ".[dev]"`). The registry loads each metric
+module optionally, so on a venv missing `scipy` or `shapely` it would otherwise hold only a subset
+of the metrics and the regenerated CSV would quietly lose every row from the module that failed to
+import. The script refuses to write in that case and names the missing module.
+
 Commit the resulting `docs/METRIC_REFERENCES.csv` with your change.
 `tests/test_metric_references_consistency.py` fails otherwise — it also checks that every metric
 has a citation, that each DOI is a bare `10.xxxx/...` (not a URL), that the same DOI is never
