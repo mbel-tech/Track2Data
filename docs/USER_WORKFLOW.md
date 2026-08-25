@@ -563,18 +563,18 @@ preselected; Identity Switch Correction defaults **off**).
 │  Choose which behavioural metrics to extract.                              │
 │                                                                             │
 │  [ Individual ] [ Group ] [ Zone ]                                         │
-│  ┌────────┬────────┬─────────────────────────────────────┬──────┬────────┐ │
-│  │Include │  ID    │ Name                                │ Info │ Config │ │
-│  ├────────┼────────┼─────────────────────────────────────┼──────┼────────┤ │
-│  │  ☑     │ IL-1   │ Distance Travelled                  │  ⓘ   │   ⚙    │ │
-│  │  ☑     │ IL-2   │ Speed (mean / median / max)         │  ⓘ   │   ⚙    │ │
-│  │  ☐     │ IL-3   │ Distance from Arena Centre          │  ⓘ   │   ⚙    │ │
-│  │  ☑     │ IL-4   │ Activity / Freezing Fraction        │  ⓘ   │   ⚙    │ │
-│  │  ☐     │ IL-5   │ Tortuosity                          │  ⓘ   │   ⚙    │ │
-│  │  ☐     │ IL-6   │ Acceleration (mean abs / RMS / max) │  ⓘ   │   ⚙    │ │
-│  │  ☐     │ IL-7   │ Freezing-Bout Count & Duration      │  ⓘ   │   ⚙    │ │
-│  │  ☐     │ IL-8   │ Turn Rate (Heading Change)          │  ⓘ   │   ⚙    │ │
-│  └────────┴────────┴─────────────────────────────────────┴──────┴────────┘ │
+│  ┌────────┬──────────────────────────────────────────────┬──────┬────────┐ │
+│  │Include │Name                                          │ Info │ Config │ │
+│  ├────────┼──────────────────────────────────────────────┼──────┼────────┤ │
+│  │  ☑     │ Distance Travelled                           │  ⓘ   │   ⚙    │ │
+│  │  ☑     │ Speed (mean / median / max)                  │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ Distance from Arena Centre                   │  ⓘ   │   ⚙    │ │
+│  │  ☑     │ Activity / Freezing Fraction                 │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ Tortuosity                                   │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ Acceleration (mean abs / RMS / max)          │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ Freezing-Bout Count & Duration               │  ⓘ   │   ⚙    │ │
+│  │  ☐     │ Turn Rate (Heading Change)                   │  ⓘ   │   ⚙    │ │
+│  └────────┴──────────────────────────────────────────────┴──────┴────────┘ │
 │  (Greyed for a session with no stable identities.)                        │
 │                                                                             │
 │  Quality threshold  [ 0.00 ]                                              │

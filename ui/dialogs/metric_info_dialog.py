@@ -34,13 +34,17 @@ class MetricInfoDialog(QDialog):
     def __init__(self, metric_cls: type[Metric], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._metric_cls = metric_cls
-        self.setWindowTitle(f"Metric info — {metric_cls.id}")
+        # Neither the registry id ("IL-1") nor the snake_case internal
+        # name ("path_length") belongs here -- metrics_screen.py's Name
+        # column already made that call for the table; the dialog used
+        # to show both anyway, in the window title and the header.
+        self.setWindowTitle(f"Metric info — {metric_cls.label}")
         self.resize(480, 420)
         self.setModal(True)
 
         layout = QVBoxLayout(self)
 
-        header = QLabel(f"{metric_cls.id} — {metric_cls.name} ({metric_cls.label})")
+        header = QLabel(metric_cls.label)
         header.setStyleSheet("font-weight: bold; font-size: 14px;")
         header.setWordWrap(True)
         layout.addWidget(header)
