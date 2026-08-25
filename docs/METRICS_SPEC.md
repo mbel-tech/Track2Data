@@ -315,12 +315,12 @@ info-button modal (§6).
 | **Manuscript label** | Inter-zone transitions |
 | **Level** | Zone-pair; trial summary |
 | **Priority** | Primary |
-| **Inputs** | Z-1 zone-membership series |
+| **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (default 1) |
 | **Formula** | For each consecutive frame pair, increment `transitions[zone_a → zone_b]` if zone_a ≠ zone_b |
 | **Output columns** | `from_zone`, `to_zone`, `individual_id`, `transition_count` |
 | **Units** | count |
 | **Assumptions** | Single-zone-per-frame (resolve overlaps with priority list or longest-overlap) |
-| **Warnings** | Identity-free sessions: transitions are counted on NN-matched tracklets, not individuals |
+| **Warnings** | Identity-free sessions: transitions are counted on NN-matched tracklets, not individuals. Sensitive to flicker on zone boundaries; `min_dwell_frames` debounces a visit shorter than the threshold by merging the transitions either side of it into one continuous stay. |
 | **Reference** | Choice-experiment R script |
 
 #### Z-5 — Entry / exit timestamps
@@ -330,8 +330,8 @@ info-button modal (§6).
 | **Manuscript label** | Zone entry/exit times |
 | **Level** | Event log |
 | **Priority** | Optional |
-| **Inputs** | Z-1 zone-membership series |
-| **Formula** | Emit one row per edge transition with `t_s = frame / fps` |
+| **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (default 1) |
+| **Formula** | Emit one row per edge transition with `t_s = frame / fps`; a run inside a zone shorter than `min_dwell_frames` produces no enter/exit events at all |
 | **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame` |
 | **Units** | seconds |
 | **Reference** | Standard ethology |
@@ -343,8 +343,8 @@ info-button modal (§6).
 | **Manuscript label** | Latency to first zone entry |
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
-| **Inputs** | Z-5 event log |
-| **Formula** | Per zone, per individual: `t_s` of first "enter" event |
+| **Inputs** | Z-5 event log; forwards `min_dwell_frames` to Z-5 |
+| **Formula** | Per zone, per individual: `t_s` of first "enter" event (after Z-5's debounce) |
 | **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s` |
 | **Units** | seconds |
 | **Warnings** | NaN when the individual never enters; encode as `inf` for sortability |
@@ -435,13 +435,19 @@ info-button modal (§6).
 | **Manuscript label** | Group cohesion |
 | **Level** | Group (trial summary) |
 | **Priority** | Optional |
-| **Inputs** | GL-1 mean NND or GL-2 mean IID |
-| **Formula** | `cohesion = 1 / mean_iid_bl` (or `1 / mean_nnd_bl` if user selects) |
+| **Inputs** | GL-1 mean NND or GL-2 mean IID, selected via `cfg['cohesion_source']` |
+| **Formula** | `cohesion = 1 / mean_nnd` (`cohesion_source='nnd'`, **default**) or `1 / mean_iid` (`cohesion_source='iid'`) |
 | **Output columns** | `cohesion_index` |
 | **Units** | BL⁻¹ |
 | **Assumptions** | Calibration available (BL) |
 | **Warnings** | Without calibration, expressed in 1/px (interpretability low) |
 | **Reference** | Krause & Ruxton 2002 |
+
+> **Implementation note:** this metric was NND-only (not user-selectable)
+> before `cohesion_source` was added (§8 open question 3), so the default
+> is `'nnd'` -- preserving the historical value with zero change for any
+> project that doesn't touch the new parameter -- even though an earlier
+> draft of this table implied IID as the primary formula.
 
 #### GL-7 — NN-matched speed (identity-free)
 
@@ -779,7 +785,13 @@ exposed so future per-user opt-outs are non-breaking.
    the session's own tracked arena rather than a user choice (IL-3's
    centre-radius, Z-2's zone areas) are derived per session
    (`track2data/metrics/derived.py`) instead of stored in
-   `MetricSelection.config`. Still open: the GUI's ⚙ button remains a
-   stub (no `MetricConfigDialog` yet) -- the engine-side plumbing this
-   note originally asked for is done; wiring it to the screen is
-   tracked separately.
+   `MetricSelection.config`. Every parameter this question named is now
+   declared and implemented: IL-3's `inner_radius_fraction`, IL-4's
+   `threshold_multiplier`, IL-7's `min_bout_frames` (already read, now
+   also declared), GL-6's `cohesion_source` (`'nnd'`/`'iid'`, default
+   `'nnd'` to preserve the historical NND-only behaviour), plus
+   Z-3/Z-4/Z-5/Z-6's `min_visit_frames`/`min_dwell_frames` boundary-
+   flicker debounce. Still open: the GUI's ⚙ button remains a stub (no
+   `MetricConfigDialog` yet) -- the engine-side plumbing and the
+   parameters themselves are done; wiring them to the screen is tracked
+   separately.
