@@ -40,6 +40,20 @@ from PySide6.QtWidgets import (
 from track2data.metrics.base import Metric, MetricParameter
 
 
+def _as_bool(value: Any) -> bool:
+    """Interpret a stored config value as a checkbox state.
+
+    ``MetricSelection.config`` is ``dict[str, Any]`` loaded from JSON, so
+    a bool can arrive as the string ``"false"`` -- for which plain
+    ``bool()`` is ``True``, rendering the checkbox as the exact opposite
+    of what was stored. Recognise the JSON-ish spellings; fall back to
+    truthiness for anything else.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "false", "0", "no", "off"}
+    return bool(value)
+
+
 class MetricConfigDialog(QDialog):
     """Editable popup for one metric's ``parameters`` schema."""
 
@@ -192,11 +206,18 @@ class MetricConfigDialog(QDialog):
             combo = QComboBox()
             combo.addItems(param.choices or [])
             if value is not None:
+                # A non-editable combo silently ignores setCurrentText for
+                # an unknown value and stays on index 0, showing the user
+                # something they never chose. Offer the stored value
+                # instead, so a stale or hand-edited config is visible
+                # rather than quietly replaced.
+                if str(value) not in (param.choices or []):
+                    combo.addItem(str(value))
                 combo.setCurrentText(str(value))
             widget = combo
         elif param.kind == "bool":
             check = QCheckBox()
-            check.setChecked(bool(value))
+            check.setChecked(_as_bool(value))
             widget = check
         else:
             raise ValueError(f"Unknown MetricParameter.kind: {param.kind!r}")
@@ -229,16 +250,30 @@ class MetricConfigDialog(QDialog):
         Derived parameters are never included: they are recomputed per
         session and must never be frozen into a saved override.
 
-        A row the user did not touch returns its stored value verbatim
-        rather than a widget read-back, so merely opening the dialog and
-        pressing Save cannot round or clamp a value the widget is too
-        coarse or too narrow to represent."""
+        Only rows the user actually changed, plus rows that were already
+        configured, are returned:
+
+        * An **untouched, already-configured** row returns its stored
+          value verbatim rather than a widget read-back, so opening the
+          dialog and pressing Save cannot round or clamp a value the
+          widget is too coarse or too narrow to represent.
+        * An **untouched, never-configured** row is omitted entirely.
+          Writing the declared default would freeze it into the project
+          as though the user had chosen it, so a later change to that
+          metric's default would silently not reach them. Omitting is
+          equivalent in effect -- ``Engine._effective_cfg()`` layers the
+          schema default anyway -- and keeps "explicitly chosen" and
+          "never touched" distinguishable.
+
+        The ↺ button counts as a change, so resetting a row does write
+        the default explicitly."""
         result: dict[str, Any] = {}
         for param in self._metric_cls.parameters:
             if param.derived:
                 continue
-            if param.name not in self._edited and param.name in self._initial_values:
-                result[param.name] = self._initial_values[param.name]
+            if param.name not in self._edited:
+                if param.name in self._initial_values:
+                    result[param.name] = self._initial_values[param.name]
                 continue
             widget = self._widgets[param.name]
             if isinstance(widget, (QDoubleSpinBox, QSpinBox)):

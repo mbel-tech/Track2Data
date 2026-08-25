@@ -64,9 +64,17 @@ def test_the_csv_exists_and_has_the_documented_columns() -> None:
     assert header == EXPECTED_HEADER
 
 
-def test_regenerating_the_csv_is_byte_identical_to_the_committed_file() -> None:
+def test_regenerating_the_csv_matches_the_committed_file() -> None:
     """The drift guard. If this fails, the code and the published CSV
-    disagree -- regenerate rather than hand-editing the CSV."""
+    disagree -- regenerate rather than hand-editing the CSV.
+
+    Compares text, not bytes: `read_text` applies universal newlines, so
+    a CRLF working copy (this repo has `core.autocrlf=true` and no
+    `.gitattributes`, so the CSV really is CRLF on Windows) still
+    matches the generator's canonical LF output. That is deliberate --
+    a byte comparison would fail on Windows and pass in CI, which is
+    the worst of both.
+    """
     committed = CSV_PATH.read_text(encoding="utf-8")
     regenerated = _load_generator().render_csv()
 
@@ -149,7 +157,12 @@ def test_the_spec_reference_row_matches_the_code_citation() -> None:
         if metric_cls is None:
             continue
 
-        section = spec[match.end() : match.end() + 4000]
+        # Bounded at the next heading for the same reason as the
+        # Parameters check below: a fixed window can read into the next
+        # metric's section and report its row as this one's.
+        next_heading = heading.search(spec, match.end())
+        section = spec[match.end() : next_heading.start() if next_heading else len(spec)]
+
         row = re.search(r"^\| \*\*Reference\*\* \| (.*?) \|$", section, re.MULTILINE)
         if row is None:
             mismatches.append(f"{metric_id}: spec section has no Reference row")
@@ -250,3 +263,46 @@ def test_generator_completeness_check_names_the_missing_module(monkeypatch) -> N
 def test_generator_completeness_check_passes_on_a_full_environment() -> None:
     """The guard must not cry wolf in the environment CI actually uses."""
     _load_generator().assert_registry_is_complete()
+
+
+def test_the_spec_parameter_names_exist_in_the_code() -> None:
+    """METRICS_SPEC.md's per-metric **Parameters** row names the config
+    keys a reader will put in their manifest. IL-4's row named
+    `threshold_bl_per_s`, which no metric has ever read -- setting it
+    did nothing, silently, and the shared "0.1" with the real
+    `threshold_multiplier` made the mismatch easy to miss.
+    """
+    import re
+
+    spec = (REPO_ROOT / "docs" / "METRICS_SPEC.md").read_text(encoding="utf-8")
+    heading = re.compile(r"^#### ([A-Z]+-\d+)\s", re.MULTILINE)
+    problems: list[str] = []
+
+    for match in heading.finditer(spec):
+        metric_id = match.group(1)
+        metric_cls = metrics.get(metric_id)
+        if metric_cls is None:
+            continue
+
+        # Bound at the next metric heading, not a fixed character
+        # count: a short section would otherwise read the NEXT metric's
+        # rows and report its parameters as this one's.
+        next_heading = heading.search(spec, match.end())
+        section = spec[match.end() : next_heading.start() if next_heading else len(spec)]
+
+        row = re.search(r"^\| \*\*Parameters\*\* \| (.*?) \|$", section, re.MULTILINE)
+        if row is None:
+            continue  # a Parameters row is optional; a wrong one is not
+
+        declared = {p.name for p in metric_cls.parameters}
+        named = set(re.findall(r"`([a-z_][a-z0-9_]*)`", row.group(1)))
+        unknown = {n for n in named if n not in declared}
+        if unknown:
+            problems.append(
+                f"{metric_id}: spec names {sorted(unknown)}, "
+                f"but the metric declares {sorted(declared)}"
+            )
+
+    assert not problems, "METRICS_SPEC.md documents parameters that don't exist:\n" + "\n".join(
+        problems
+    )

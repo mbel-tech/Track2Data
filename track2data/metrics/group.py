@@ -19,6 +19,11 @@ from scipy.spatial.distance import pdist
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 
+# GL-6's two cohesion definitions. Kept beside the metric's own
+# `choices` declaration so the schema the ⚙ dialog offers and the values
+# compute() accepts cannot drift apart.
+_COHESION_SOURCES = ("nnd", "iid")
+
 # ── GL-1: NearestNeighbourDistance ────────────────────────────────────────────
 
 
@@ -713,7 +718,7 @@ class GroupCohesion(Metric):
             label="Cohesion source",
             kind="choice",
             default="nnd",
-            choices=["nnd", "iid"],
+            choices=list(_COHESION_SOURCES),
             help=(
                 "Which pairwise-distance measure cohesion is derived from: "
                 "nearest-neighbour distance (nnd) or mean inter-individual "
@@ -745,6 +750,15 @@ class GroupCohesion(Metric):
         cohesion_source = "nnd"
         if cfg is not None and "cohesion_source" in cfg:
             cohesion_source = cfg["cohesion_source"]
+            # Validate rather than falling through to the nnd branch: a
+            # typo ("IID", "iid ") would otherwise export NND numbers
+            # while the project file records the user choosing IID --
+            # a wrong result wearing the appearance of a correct one.
+            if cohesion_source not in _COHESION_SOURCES:
+                raise ValueError(
+                    f"cohesion_source must be one of "
+                    f"{', '.join(sorted(_COHESION_SOURCES))}; got {cohesion_source!r}"
+                )
 
         if n_animals < 2:
             return pd.DataFrame(

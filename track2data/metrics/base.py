@@ -67,7 +67,7 @@ class Metric(ABC):
     requires_identity: bool
     output_columns: list[str]
     documentation: MetricDocumentation
-    # Most metrics (24/33 today) take no configuration at all -- an
+    # Most metrics take no configuration at all -- an
     # empty default, not a required field, so every existing metric
     # class stays valid without declaring it.
     parameters: ClassVar[list[MetricParameter]] = []

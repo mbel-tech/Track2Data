@@ -219,11 +219,12 @@ info-button modal (§6).
 | **Manuscript label** | Time active vs. inactive |
 | **Level** | Individual; trial summary |
 | **Priority** | Primary |
-| **Inputs** | IL-2 speed series, `threshold_bl_per_s` (default 0.1 BL/s) |
+| **Inputs** | IL-2 speed series; `threshold_px_s`, auto-computed when unset |
 | **Required preprocessing** | Smoothing required (raw speed is noisy → false activity) |
 | **Formula** | `active[t, k] = 1 if v[t, k] > threshold else 0`; `active_fraction = mean(active[:, k])`; `freezing_fraction = 1 − active_fraction` |
-| **Output columns** | `individual_id`, `active_fraction`, `freezing_fraction`, `threshold_bl_per_s` |
-| **Units** | dimensionless (fraction); threshold in BL/s |
+| **Output columns** | `individual_id`, `active_fraction`, `freezing_fraction`, `threshold_px_s` |
+| **Units** | dimensionless (fraction); threshold in px/s |
+| **Parameters** | `threshold_px_s` (float, px/s, **no default** — when unset the threshold is `mean(speed) * threshold_multiplier`, computed from this session's own data); `threshold_multiplier` (float, dimensionless, default 0.1) |
 | **Assumptions** | Speed < threshold ≈ true immobility, not tracking gap |
 | **Warnings** | NaN frames are excluded from denominator; high NaN rates make this unreliable (see D-1) |
 | **Reference** | Stewart et al. 2012, Neuropharmacology 62(1):135-143 (speed-threshold immobility in zebrafish anxiety assays) — DOI [10.1016/j.neuropharm.2011.07.037](https://doi.org/10.1016/j.neuropharm.2011.07.037) |
@@ -348,7 +349,7 @@ info-button modal (§6).
 | **Level** | Zone-pair; trial summary |
 | **Priority** | Primary |
 | **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (default 1) |
-| **Formula** | For each consecutive frame pair, increment `transitions[zone_a → zone_b]` if zone_a ≠ zone_b |
+| **Formula** | Run-length encode the per-frame zone column; drop runs shorter than `min_dwell_frames` (runs of the empty "no zone" sentinel are always kept, so a tracking dropout cannot be spliced into a crossing); collapse consecutive duplicates; then for each adjacent pair in the resulting sequence increment `transitions[zone_a → zone_b]`. Pairs involving the empty zone are not counted. |
 | **Output columns** | `from_zone`, `to_zone`, `individual_id`, `transition_count` |
 | **Units** | count |
 | **Assumptions** | Single-zone-per-frame (resolve overlaps with priority list or longest-overlap) |
@@ -896,7 +897,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 24 metrics with
+   it is disabled with an explanatory tooltip for those that declare
    none. A `derived=True` parameter (IL-3's centre/radius, Z-2's zone
    areas) renders as a read-only "derived from this session's zones"
    label -- it is never user-editable and Save never writes it into

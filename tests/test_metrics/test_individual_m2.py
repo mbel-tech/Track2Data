@@ -377,7 +377,31 @@ class TestFreezingBouts:
 
     def test_declares_configurable_parameters(self) -> None:
         names = {p.name for p in FreezingBouts.parameters}
-        assert names == {"threshold_px_s", "min_bout_frames"}
+        assert names == {"threshold_px_s", "threshold_multiplier", "min_bout_frames"}
+
+    def test_threshold_multiplier_matches_il4s_rule(self) -> None:
+        """IL-7 documented itself as using "the same threshold rule as
+        IL-4" but hardcoded the 0.1 multiplier IL-4 had made
+        configurable -- so raising IL-4's left active_fraction and
+        freezing_bout_count measured against different thresholds in the
+        same export, with nothing saying so."""
+        n_frames, n_animals = 20, 1
+        speed = np.full((n_frames, n_animals), 100.0)
+        speed[5:10, 0] = 1.0  # a slow stretch, well under any threshold
+        psess = make_psess(speed=speed)
+
+        # mean speed ~ 75; at 0.1 the threshold is ~7.5, so the slow run
+        # is a bout. At 0.001 the threshold is ~0.075 and it is not.
+        assert (
+            FreezingBouts().compute(psess, cfg={"threshold_multiplier": 0.1})
+            .iloc[0]["freezing_bout_count"]
+            == 1
+        )
+        assert (
+            FreezingBouts().compute(psess, cfg={"threshold_multiplier": 0.001})
+            .iloc[0]["freezing_bout_count"]
+            == 0
+        )
 
     def test_output_columns_present(self) -> None:
         psess = make_psess()
