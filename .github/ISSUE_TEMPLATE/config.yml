@@ -1,0 +1,4 @@
+# Adding the metric-request form must not take away the plain "open a
+# blank issue" path -- bug reports and questions still go through it
+# (CONTRIBUTING.md §9 tells people to open one).
+blank_issues_enabled: true

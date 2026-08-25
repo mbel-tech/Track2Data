@@ -1,0 +1,83 @@
+name: Metric request DOI check
+
+# GitHub issue forms support only `validations: required: true` -- there
+# is no regex validation, so "must be a DOI" cannot be enforced at
+# submission time by metric_request.yml alone. This is the second layer:
+# it labels a request whose body carries no DOI and says why, and clears
+# the label as soon as the author edits one in.
+#
+# Deliberately non-blocking. It never closes an issue and never fails a
+# required check -- a good metric proposal from someone who pasted a URL
+# instead of a bare DOI should be fixable in one edit, not rejected.
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  check-doi:
+    name: Check for a DOI
+    # Only metric requests. Every other issue -- bug reports, questions --
+    # is untouched by this workflow.
+    if: contains(github.event.issue.labels.*.name, 'metric-request')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || "";
+            // A bare DOI: "10." + registrant code + "/" + suffix. Also
+            // matches one embedded in a doi.org URL, which is close
+            // enough to be worth accepting rather than nagging over.
+            const hasDoi = /10\.\d{4,9}\/\S+/.test(body);
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+            const LABEL = "needs-doi";
+
+            const labels = context.payload.issue.labels.map(l => l.name);
+            const alreadyFlagged = labels.includes(LABEL);
+
+            if (hasDoi) {
+              if (alreadyFlagged) {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number, name: LABEL,
+                });
+                core.info(`DOI found; removed the ${LABEL} label.`);
+              } else {
+                core.info("DOI found; nothing to do.");
+              }
+              return;
+            }
+
+            if (alreadyFlagged) {
+              // Already asked. Don't comment again on every edit.
+              core.info(`Still no DOI, but ${LABEL} is already set.`);
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner, repo, issue_number, labels: [LABEL],
+            });
+            await github.rest.issues.createComment({
+              owner, repo, issue_number,
+              body: [
+                "Thanks for the proposal. I couldn't find a DOI in this request.",
+                "",
+                "Every metric Track2Data ships carries a scientific reference,",
+                "published in [`docs/METRIC_REFERENCES.csv`](../blob/main/docs/METRIC_REFERENCES.csv)",
+                "and shown in the app's ⓘ dialog, so a DOI is what lets this",
+                "proposal become one of those rows.",
+                "",
+                "Please edit the issue to include the DOI of the paper defining",
+                "this metric — a bare DOI like `10.1006/jtbi.2002.3065`, not a",
+                "URL or a full citation. This label clears itself once you do.",
+                "",
+                "If the measure is genuinely standard with no single originating",
+                "paper, say so in a comment and we'll take it from there.",
+              ].join("\n"),
+            });
+            core.info(`No DOI found; added ${LABEL} and commented.`);

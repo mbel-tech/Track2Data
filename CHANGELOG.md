@@ -70,9 +70,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it on Auto omits the key from the saved config entirely. Saved edits
   persist into `MetricSelection.config[metric_id]`, round-tripping
   through the project manifest like any other setting.
+- **`docs/METRIC_REFERENCES.csv`** — the scientific reference behind
+  every metric, in one citable, machine-readable table (`metric_id`,
+  `level`, `priority`, `metric_name`, `reference`, `doi`). Generated
+  from the code by `scripts/generate_metric_references.py` and pinned
+  by `tests/test_metric_references_consistency.py`, which fails if the
+  committed file, the code, and `METRICS_SPEC.md` ever disagree — so
+  adding a metric without regenerating is caught in CI rather than
+  silently publishing a stale list.
+- **A "Request a metric" issue form**
+  (`.github/ISSUE_TEMPLATE/metric_request.yml`), the repository's
+  first. Collects the metric's level (the four `Metric.level` values,
+  so a request maps onto the engine's own vocabulary), its name, and a
+  DOI. GitHub issue forms have no regex validation, so a companion
+  workflow labels a DOI-less request `needs-doi` with an explanatory
+  comment and clears the label once the author edits one in.
 
 ### Changed
 
+- **Metric citations corrected and completed.** All 33 metrics now
+  carry a reference; 15 previously had none at all (every zone metric
+  and every diagnostic). The code and `METRICS_SPEC.md` disagreed on
+  14 metrics and have been reconciled, with the code as the single
+  source of truth. Three substantive corrections:
+  **GL-1** (Nearest-Neighbour Distance) cited Couzin et al. 2002 and
+  carried its DOI — copy-pasted from GL-3/GL-8. Couzin 2002 is about
+  collective memory and spatial sorting, not nearest-neighbour
+  distance; GL-1 now cites Pitcher 1973, as the spec had said all
+  along. **GL-4** (Convex Hull Area) attributed convex-hull area to
+  Buhl et al. 2006, which characterises order via alignment and
+  density rather than hull area; replaced with an honest generic
+  description and no DOI. **GL-8** named two papers but carried one
+  DOI, making it read as covering both; reduced to the single work the
+  DOI belongs to. Where no specific work applies, citations now say so
+  plainly instead of borrowing an unrelated one.
+- **`METRICS_SPEC.md` now documents D-6, D-7, D-8 and D-9**, which had
+  been shipping with no section at all — the document described 29 of
+  the 33 metrics that actually run, violating its own §6.6 rule that
+  every metric must have one.
 - **IL-3 (Distance from Arena Centre)'s centre/radius fallback changed.**
   Previously, with no `cfg['centre']` supplied (which was always the
   case -- see above), IL-3 fell back to the centroid of every tracked

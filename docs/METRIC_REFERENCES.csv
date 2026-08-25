@@ -1,0 +1,34 @@
+metric_id,level,priority,metric_name,reference,doi
+D-1,diagnostic,diagnostic,Tracking Coverage,Tracking-pipeline convention (fraction of frames with a successfully assigned position); no single originating work,
+D-2,diagnostic,diagnostic,Tracking Accuracy,"Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",10.1038/s41592-018-0295-5
+D-3,diagnostic,diagnostic,ID-Probability Distribution,"Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",10.1038/s41592-018-0295-5
+D-4,diagnostic,diagnostic,Inconsistent-Frame Count,Track2Data's own bounding-box post-processing pipeline; no external work defines this counter,
+D-5,diagnostic,diagnostic,Identity Stability Flag,"Track2Data engineering threshold on idtracker.ai's own fraction_identified (PRD §5.2, FR-IMP-3); not an external scientific result",
+D-6,diagnostic,diagnostic,Segmentation Error Frames,"idtracker.ai's own internal segmentation-error counter (number_of_error_frames), documented in its usage guide rather than named as a metric in Romero-Ferrero et al. 2019",
+D-7,diagnostic,diagnostic,Fragment Length Distribution,"Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",10.1038/s41592-018-0295-5
+D-8,diagnostic,diagnostic,Crossing Rate,"Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",10.1038/s41592-018-0295-5
+D-9,diagnostic,diagnostic,Identity Swap Opportunity Count,"Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai)",10.1038/s41592-018-0295-5
+GL-1,group,primary,Nearest-Neighbour Distance,"Pitcher 1973, Anim. Behav. 21:673-686 (three-dimensional structure of minnow schools); see also Krause & Ruxton 2002, Living in Groups",10.1016/S0003-3472(73)80091-0
+GL-2,group,primary,Inter-Individual Distance,"Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
+GL-3,group,primary,Polarisation,"Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",10.1006/jtbi.2002.3065
+GL-4,group,primary,Convex Hull Area,Standard spatial-cohesion measure; convex-hull area is widely used as a group-spread metric in collective-behaviour studies,
+GL-5,group,primary,Centroid Speed,"Standard kinematics applied to the group centroid; no single originating work. Used as a group descriptor in e.g. Tunstrøm et al. 2013, PLoS Comput. Biol. 9(2):e1002915",
+GL-6,group,primary,Group Cohesion,"Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
+GL-7,group,primary,NN-Matched Speed,Frame-to-frame point matching is a standard multi-object-tracking technique (assignment problem); no animal-behaviour-specific originating work,
+GL-8,group,optional,Rotational Order,"Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",10.1006/jtbi.2002.3065
+GL-9,group,primary,Group Centroid Position,Standard kinematics (arithmetic mean position); no single originating work,
+GL-10,group,primary,Group Spread,Standard spatial-dispersion measure; complements GL-4 (convex-hull area). No single originating work,
+IL-1,individual,primary,Distance Travelled,Standard kinematics,
+IL-2,individual,primary,Speed (mean / median / max),Standard kinematics,
+IL-3,individual,primary,Distance from Arena Centre,"Schnörr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish); paradigm originates with Hall 1934's open-field test",10.1016/j.bbr.2011.12.016
+IL-4,individual,primary,Activity / Freezing Fraction,"Stewart et al. 2012, Neuropharmacology 62(1):135-143 (speed-threshold immobility in zebrafish anxiety assays)",10.1016/j.neuropharm.2011.07.037
+IL-5,individual,primary,Tortuosity,"Benhamou 2004, J. Theor. Biol. 229(2):209-220 (how to reliably estimate path tortuosity); underlying circular statistics: Batschelet 1981, Circular Statistics in Biology",10.1016/j.jtbi.2004.03.016
+IL-6,individual,primary,Acceleration (mean abs / RMS / max),Standard kinematics,
+IL-7,individual,optional,Freezing-Bout Count & Duration,Speed-threshold bout detection; e.g. Cachat et al. 2010,
+IL-8,individual,advanced,Turn Rate (Heading Change),"Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",10.1006/jtbi.2002.3065
+Z-1,zone,primary,Time in zone,"Walsh & Cummins 1976, Psychol. Bull. 83(3):482-504 (the open-field test, whose central measure is time spent in defined sub-regions)",10.1037/0033-2909.83.3.482
+Z-2,zone,primary,Area-Corrected Occupancy,"Area-normalised occupancy (observed time in a zone relative to that zone's share of the arena), the standard correction for comparing unequal-area regions of interest. No single originating work",
+Z-3,zone,primary,Zone visit count,"Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) -- frequency counting of discrete behavioural events",
+Z-4,zone,primary,Zone Transitions,"Fagen & Young 1978, 'Temporal patterns of behaviors', in Colgan (ed.) Quantitative Ethology, pp. 79-114 (Wiley) -- sequence and transition analysis of behavioural states",
+Z-5,zone,optional,Zone Entry/Exit Events,"Boundary-crossing event extraction underlying the event/state distinction in Martin & Bateson 2007, Measuring Behaviour, 3rd ed. (Cambridge University Press)",
+Z-6,zone,optional,Latency to First Entry,"Bourin & Hascoët 2003, Eur. J. Pharmacol. 463(1-3):55-65 -- latency to first entry as a standard exploration/anxiety readout in the light/dark box test",10.1016/S0014-2999(03)01274-3

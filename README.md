@@ -75,3 +75,21 @@ python -m app.main
 Opens the full import → calibrate → zones → metadata → metrics →
 process → preview → export wizard, wired end to end to the
 `track2data` engine.
+
+## Requesting a metric
+
+Track2Data computes 33 built-in metrics — individual, group, zone, and
+tracking-quality diagnostics. Every one carries a scientific reference,
+published in [`docs/METRIC_REFERENCES.csv`](docs/METRIC_REFERENCES.csv)
+and shown in the app's ⓘ info dialog.
+
+If a measure you need is missing,
+[open a metric request](../../issues/new?template=metric_request.yml).
+The form asks for three things: the metric's level (individual, group,
+zone, or diagnostic), its name, and **a DOI** for the paper defining it.
+The DOI is required because it becomes that metric's row in the
+references list — a proposal with no citable source can't become one.
+
+For the full definition of every existing metric, see
+[`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md); for how to add one, see
+[`CONTRIBUTING.md` §7](CONTRIBUTING.md).
