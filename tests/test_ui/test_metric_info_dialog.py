@@ -101,7 +101,8 @@ def test_dialog_shows_formula_latex_source_when_present(qtbot) -> None:
     text = _dialog_text(dlg)
 
     assert r"\text{coverage}_k" in text
-    # D-1 has no citation -- make sure that doesn't leak a literal "None".
+    # D-1 has no DOI (its reference is an honest "no single originating
+    # work") -- make sure that doesn't leak a literal "None".
     assert "None" not in text
 
 
@@ -109,9 +110,27 @@ def test_dialog_shows_formula_latex_source_when_present(qtbot) -> None:
 
 
 def test_copy_citation_button_disabled_when_no_citation(qtbot) -> None:
+    """Every built-in metric now declares a citation
+    (tests/test_metric_references_consistency.py enforces that), so this
+    uses a stub rather than a registered metric -- the guard still
+    matters for third-party plugin metrics, which have no such
+    requirement."""
+    from track2data.metrics.base import MetricDocumentation
     from ui.dialogs.metric_info_dialog import MetricInfoDialog
 
-    dlg = MetricInfoDialog(metrics.get("D-1"))  # no citation
+    class _UncitedMetric:
+        id = "X-1"
+        name = "uncited"
+        label = "Uncited Metric"
+        level = "individual"
+        priority = "diagnostic"
+        requires_identity = False
+        output_columns: list[str] = []
+        documentation = MetricDocumentation(
+            definition="d", formula_plain="f", inputs=[], assumptions=[], warnings=[],
+        )
+
+    dlg = MetricInfoDialog(_UncitedMetric)
     qtbot.addWidget(dlg)
 
     assert dlg._copy_citation_btn.isEnabled() is False

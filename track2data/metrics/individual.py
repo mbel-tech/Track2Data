@@ -215,7 +215,12 @@ class CentreDistance(Metric):
             "otherwise computed as the mean of all non-NaN positions"
         ],
         warnings=["arena_radius must be provided in cfg to compute time_in_centre_pct"],
-        citation="Standard spatial analysis",
+        citation=(
+            "Schnörr et al. 2012, Behav. Brain Res. 228(2):367-374 "
+            "(thigmotaxis in larval zebrafish); paradigm originates with "
+            "Hall 1934's open-field test"
+        ),
+        citation_doi="10.1016/j.bbr.2011.12.016",
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -357,7 +362,11 @@ class Activity(Metric):
             "otherwise estimated as mean(speed) * 0.1 pooled across all animals"
         ],
         warnings=["Threshold choice strongly affects classification"],
-        citation="Standard ethology",
+        citation=(
+            "Stewart et al. 2012, Neuropharmacology 62(1):135-143 "
+            "(speed-threshold immobility in zebrafish anxiety assays)"
+        ),
+        citation_doi="10.1016/j.neuropharm.2011.07.037",
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -464,7 +473,12 @@ class Tortuosity(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["NaN frames are excluded when computing path length and end-points"],
         warnings=["Very short paths or static animals give unreliable tortuosity"],
-        citation="Batschelet 1981; standard movement ecology",
+        citation=(
+            "Benhamou 2004, J. Theor. Biol. 229(2):209-220 (how to reliably "
+            "estimate path tortuosity); underlying circular statistics: "
+            "Batschelet 1981, Circular Statistics in Biology"
+        ),
+        citation_doi="10.1016/j.jtbi.2004.03.016",
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -783,7 +797,8 @@ class TurnRate(Metric):
         inputs=["PreprocessedSession.kinematics.heading_rad"],
         assumptions=["Heading is well-defined (i.e. speed > small ε)"],
         warnings=["Stationary frames produce undefined heading; these are skipped"],
-        citation="Couzin et al. 2002",
+        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
+        citation_doi="10.1006/jtbi.2002.3065",
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:

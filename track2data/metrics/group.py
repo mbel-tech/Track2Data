@@ -52,8 +52,17 @@ class NearestNeighbourDistance(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped-frame count is reported; high counts may bias the metric"],
-        citation="Couzin et al. 2002, J. Theor. Biol.",
-        citation_doi="10.1006/jtbi.2002.3065",
+        # Not Couzin et al. 2002 -- that citation and its DOI were
+        # copy-pasted here from GL-3/GL-8, which genuinely do trace to
+        # it. Couzin 2002 is about collective memory and spatial
+        # sorting; nearest-neighbour distance as a shoaling measure
+        # comes from Pitcher's school-structure work.
+        citation=(
+            "Pitcher 1973, Anim. Behav. 21:673-686 (three-dimensional "
+            "structure of minnow schools); see also Krause & Ruxton 2002, "
+            "Living in Groups"
+        ),
+        citation_doi="10.1016/S0003-3472(73)80091-0",
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -174,7 +183,7 @@ class Polarisation(Metric):
             "Frames with fewer than 2 valid headings are skipped",
         ],
         warnings=["Results may be biased when many animals are stationary"],
-        citation="Couzin et al. 2002, J. Theor. Biol.",
+        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
         citation_doi="10.1006/jtbi.2002.3065",
     )
 
@@ -284,7 +293,11 @@ class CentroidSpeed(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["NaN animal positions are excluded from the centroid computation"],
         warnings=["Highly variable valid-animal counts across frames may bias the metric"],
-        citation="Standard collective motion",
+        citation=(
+            "Standard kinematics applied to the group centroid; no single "
+            "originating work. Used as a group descriptor in e.g. Tunstrøm "
+            "et al. 2013, PLoS Comput. Biol. 9(2):e1002915"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -371,7 +384,11 @@ class NNMatchedSpeed(Metric):
             "Greedy assignment; not globally optimal",
         ],
         warnings=["Greedy assignment may be biased in crowded scenes"],
-        citation="Identity-free tracking analysis — standard method",
+        citation=(
+            "Frame-to-frame point matching is a standard multi-object-"
+            "tracking technique (assignment problem); no animal-behaviour-"
+            "specific originating work"
+        ),
     )
 
     @staticmethod
@@ -488,7 +505,7 @@ class InterIndividualDistance(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped NaN frames may bias the metric"],
-        citation="Standard collective behaviour",
+        citation="Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -583,7 +600,14 @@ class ConvexHullArea(Metric):
             "Requires ≥3 animals for a valid convex hull",
         ],
         warnings=["Returns NaN when fewer than 3 animals are present"],
-        citation="Standard spatial analysis",
+        # An earlier draft of METRICS_SPEC.md attributed this to Buhl et
+        # al. 2006 (marching locusts); that paper characterises order via
+        # alignment and density, not convex-hull area, so the
+        # attribution was dropped rather than carried into the code.
+        citation=(
+            "Standard spatial-cohesion measure; convex-hull area is widely "
+            "used as a group-spread metric in collective-behaviour studies"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -681,7 +705,7 @@ class GroupCohesion(Metric):
             "cohesion_source='iid' uses the same mean-pairwise-distance computation as GL-2"
         ],
         warnings=["Undefined (NaN) when the mean distance = 0 or when fewer than 2 animals"],
-        citation="Standard collective behaviour",
+        citation="Krause & Ruxton 2002, Living in Groups (Oxford University Press)",
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -816,7 +840,13 @@ class RotationalOrder(Metric):
             "Same heading-stability caveat as GL-3: results may be biased when "
             "many animals are stationary or headings are noisy"
         ],
-        citation="Couzin et al. 2002, J. Theor. Biol.; Tunstrøm et al. 2013, PLoS Comp Bio",
+        # Single-work citation with the DOI that matches it. The
+        # compound "Couzin ...; Tunstrøm ..." this used to carry made
+        # the one DOI read as though it covered both papers. Tunstrøm
+        # et al. 2013 (10.1371/journal.pcbi.1002915) applies the same
+        # order parameter to schooling fish -- see the assumptions above
+        # rather than the citation field, which is one work per metric.
+        citation="Couzin et al. 2002, J. Theor. Biol. 218(1):1-11",
         citation_doi="10.1006/jtbi.2002.3065",
     )
 
@@ -948,7 +978,10 @@ class GroupCentroidPosition(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["NaN animal positions are excluded per frame"],
         warnings=["Frames where all animals are NaN are skipped"],
-        citation="Standard collective motion",
+        citation=(
+            "Standard kinematics (arithmetic mean position); no single "
+            "originating work"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
@@ -1025,7 +1058,10 @@ class GroupSpread(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=["Frames where any animal has NaN position are skipped"],
         warnings=["Skipped frames may bias the metric"],
-        citation="Standard collective motion",
+        citation=(
+            "Standard spatial-dispersion measure; complements GL-4 "
+            "(convex-hull area). No single originating work"
+        ),
     )
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:

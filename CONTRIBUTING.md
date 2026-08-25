@@ -132,11 +132,33 @@ For other contributors: the synthetic `tiny_v5` fixture (in `tests/conftest.py`)
 ## 7. Documentation
 
 Every change to a metric, error code, or user-visible message must update the corresponding spec:
-- New metric → add a row to `docs/METRICS_SPEC.md` §4
+- New metric → add a `#### <ID> — <name>` section to `docs/METRICS_SPEC.md` §4
 - New error code → add a row to `docs/USER_WORKFLOW.md` §6
 - New UI screen → add a section to `docs/UI_DESIGN.md` §6
 
 The spec is the contract; code that diverges from spec is a bug.
+
+### Metric references
+
+Adding a metric, or changing any metric's `citation` / `citation_doi`, also means regenerating the
+published reference list:
+
+```bash
+python scripts/generate_metric_references.py
+```
+
+Commit the resulting `docs/METRIC_REFERENCES.csv` with your change.
+`tests/test_metric_references_consistency.py` fails otherwise — it also checks that every metric
+has a citation, that each DOI is a bare `10.xxxx/...` (not a URL), that the same DOI is never
+attached to metrics whose citation texts differ, and that `METRICS_SPEC.md`'s inline **Reference**
+row matches the code.
+
+`Metric.documentation` in the code is the single source of truth. Never hand-edit the CSV, and
+never edit a spec **Reference** row without making the same change in the metric class.
+
+A citation must name a real, findable work. If no specific work applies, say so plainly
+("Standard kinematics; no single originating work") and leave `citation_doi=None` — an honest
+generic reference is correct, an invented DOI is not.
 
 ## 8. Commit message style
 

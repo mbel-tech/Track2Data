@@ -121,6 +121,7 @@ Zone              Occupancy                Z-1, Z-2
                   Flow / crossings         Z-4
 Diagnostic        Coverage                 D-1
                   idtracker.ai quality     D-2, D-3, D-4, D-5
+                  Segmentation / identity  D-6, D-7, D-8, D-9
 ```
 
 ---
@@ -129,6 +130,15 @@ Diagnostic        Coverage                 D-1
 
 Every entry below has **the same field layout**, suitable for the
 info-button modal (§6).
+
+> Each entry's **Reference** row is generated from that metric's
+> `MetricDocumentation.citation` / `.citation_doi` in the code, which is
+> the single source of truth. The same data is published as a
+> machine-readable table in
+> [`METRIC_REFERENCES.csv`](./METRIC_REFERENCES.csv), regenerated with
+> `python scripts/generate_metric_references.py`.
+> `tests/test_metric_references_consistency.py` fails if the code, this
+> document, and that CSV ever disagree.
 
 ### 4.1 Individual locomotion
 
@@ -146,7 +156,7 @@ info-button modal (§6).
 | **Units** | px / cm / BL |
 | **Assumptions** | Inter-frame displacement reflects real movement (not jump artefacts) |
 | **Warnings** | Under-smoothed data inflates path length; NaN gaps are skipped (not interpolated for this metric) |
-| **Reference** | Standard kinematics; e.g. Romero-Ferrero et al. 2019 (idtracker.ai paper) |
+| **Reference** | Standard kinematics |
 
 #### IL-2 — Speed (mean / median / max)
 
@@ -178,7 +188,7 @@ info-button modal (§6).
 | **Units** | px, cm, BL |
 | **Assumptions** | Arena is roughly circular or a centre point is meaningful |
 | **Warnings** | For non-circular arenas, "centre-distance" is interpretable only with a clearly defined origin |
-| **Reference** | Open-field test paradigm (Hall 1934) |
+| **Reference** | Schnörr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish); paradigm originates with Hall 1934's open-field test — DOI [10.1016/j.bbr.2011.12.016](https://doi.org/10.1016/j.bbr.2011.12.016) |
 
 #### IL-4 — Activity / freezing time fraction
 
@@ -194,7 +204,7 @@ info-button modal (§6).
 | **Units** | dimensionless (fraction); threshold in BL/s |
 | **Assumptions** | Speed < threshold ≈ true immobility, not tracking gap |
 | **Warnings** | NaN frames are excluded from denominator; high NaN rates make this unreliable (see D-1) |
-| **Reference** | Speed-threshold immobility is standard in zebrafish freezing assays; e.g. Stewart et al. 2012 |
+| **Reference** | Stewart et al. 2012, Neuropharmacology 62(1):135-143 (speed-threshold immobility in zebrafish anxiety assays) — DOI [10.1016/j.neuropharm.2011.07.037](https://doi.org/10.1016/j.neuropharm.2011.07.037) |
 
 #### IL-5 — Tortuosity (path length / displacement)
 
@@ -210,7 +220,7 @@ info-button modal (§6).
 | **Units** | dimensionless |
 | **Assumptions** | Straight-line displacement is a meaningful baseline |
 | **Warnings** | Undefined when start == end; cap at 1e6 or report `inf` |
-| **Reference** | Benhamou 2004, *J. Theor. Biol.* |
+| **Reference** | Benhamou 2004, J. Theor. Biol. 229(2):209-220 (how to reliably estimate path tortuosity); underlying circular statistics: Batschelet 1981, Circular Statistics in Biology — DOI [10.1016/j.jtbi.2004.03.016](https://doi.org/10.1016/j.jtbi.2004.03.016) |
 
 #### IL-6 — Acceleration
 
@@ -258,7 +268,7 @@ info-button modal (§6).
 | **Units** | rad/s, or deg/s on demand |
 | **Assumptions** | Heading is well-defined (i.e. speed > small ε) |
 | **Warnings** | Stationary frames produce undefined heading; skip them |
-| **Reference** | Couzin et al. 2002 |
+| **Reference** | Couzin et al. 2002, J. Theor. Biol. 218(1):1-11 — DOI [10.1006/jtbi.2002.3065](https://doi.org/10.1006/jtbi.2002.3065) |
 
 ### 4.2 Zone metrics
 
@@ -276,7 +286,7 @@ info-button modal (§6).
 | **Units** | s, % |
 | **Assumptions** | ROIs are non-overlapping (warning if they overlap) |
 | **Warnings** | Point-in-polygon for NaN frames returns False (frames are dropped from numerator and denominator) |
-| **Reference** | Standard ethology |
+| **Reference** | Walsh & Cummins 1976, Psychol. Bull. 83(3):482-504 (the open-field test, whose central measure is time spent in defined sub-regions) — DOI [10.1037/0033-2909.83.3.482](https://doi.org/10.1037/0033-2909.83.3.482) |
 
 #### Z-2 — Area-corrected occupancy
 
@@ -291,7 +301,7 @@ info-button modal (§6).
 | **Units** | dimensionless ratio |
 | **Assumptions** | Arena bounding polygon is defined or inferred from union of zones |
 | **Warnings** | If no arena polygon, normalise by union-of-zones area + warn |
-| **Reference** | Choice-experiment R script provenance |
+| **Reference** | Area-normalised occupancy (observed time in a zone relative to that zone's share of the arena), the standard correction for comparing unequal-area regions of interest. No single originating work |
 
 #### Z-3 — Zone visit count
 
@@ -306,7 +316,7 @@ info-button modal (§6).
 | **Units** | count |
 | **Assumptions** | A "visit" is any zero-or-more-frame stay; configurable `min_visit_frames` (default 1) |
 | **Warnings** | Sensitive to flicker on zone boundaries; smoothing or `min_visit_frames` mitigates |
-| **Reference** | Standard ethology |
+| **Reference** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) -- frequency counting of discrete behavioural events |
 
 #### Z-4 — Zone transitions
 
@@ -321,7 +331,7 @@ info-button modal (§6).
 | **Units** | count |
 | **Assumptions** | Single-zone-per-frame (resolve overlaps with priority list or longest-overlap) |
 | **Warnings** | Identity-free sessions: transitions are counted on NN-matched tracklets, not individuals. Sensitive to flicker on zone boundaries; `min_dwell_frames` debounces a visit shorter than the threshold by merging the transitions either side of it into one continuous stay. |
-| **Reference** | Choice-experiment R script |
+| **Reference** | Fagen & Young 1978, 'Temporal patterns of behaviors', in Colgan (ed.) Quantitative Ethology, pp. 79-114 (Wiley) -- sequence and transition analysis of behavioural states |
 
 #### Z-5 — Entry / exit timestamps
 
@@ -334,7 +344,7 @@ info-button modal (§6).
 | **Formula** | Emit one row per edge transition with `t_s = frame / fps`; a run inside a zone shorter than `min_dwell_frames` produces no enter/exit events at all |
 | **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame` |
 | **Units** | seconds |
-| **Reference** | Standard ethology |
+| **Reference** | Boundary-crossing event extraction underlying the event/state distinction in Martin & Bateson 2007, Measuring Behaviour, 3rd ed. (Cambridge University Press) |
 
 #### Z-6 — Latency to first entry
 
@@ -348,7 +358,7 @@ info-button modal (§6).
 | **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s` |
 | **Units** | seconds |
 | **Warnings** | NaN when the individual never enters; encode as `inf` for sortability |
-| **Reference** | Standard ethology |
+| **Reference** | Bourin & Hascoët 2003, Eur. J. Pharmacol. 463(1-3):55-65 -- latency to first entry as a standard exploration/anxiety readout in the light/dark box test — DOI [10.1016/S0014-2999(03)01274-3](https://doi.org/10.1016/S0014-2999(03)01274-3) |
 
 ### 4.3 Social spacing
 
@@ -366,7 +376,7 @@ info-button modal (§6).
 | **Units** | px, cm, BL |
 | **Assumptions** | All `N_animals` are present in the frame (NaN-bearing frames are skipped) |
 | **Warnings** | With NaN ≥ 1 in a frame, frame is excluded; report % skipped |
-| **Reference** | Pitcher 1973; Krause & Ruxton 2002, *Living in Groups* |
+| **Reference** | Pitcher 1973, Anim. Behav. 21:673-686 (three-dimensional structure of minnow schools); see also Krause & Ruxton 2002, Living in Groups — DOI [10.1016/S0003-3472(73)80091-0](https://doi.org/10.1016/S0003-3472(73)80091-0) |
 
 #### GL-2 — Inter-individual distance (IID)
 
@@ -379,7 +389,7 @@ info-button modal (§6).
 | **Formula** | `iid[t] = mean(pdist(xy[t, :, :]))`, computed via `scipy.spatial.distance.pdist` |
 | **Output columns** | `mean_iid_px`, `mean_iid_cm`, `mean_iid_bl` |
 | **Units** | px, cm, BL |
-| **Reference** | Krause & Ruxton 2002 |
+| **Reference** | Krause & Ruxton 2002, Living in Groups (Oxford University Press) |
 
 ### 4.4 Cohesion & collective motion
 
@@ -397,7 +407,7 @@ info-button modal (§6).
 | **Units** | dimensionless ∈ [0, 1] |
 | **Assumptions** | All N animals present and moving (heading is undefined for stationary fish — they're excluded from the sum) |
 | **Warnings** | Mostly stationary group → polarisation is unreliable; report N(effective) per frame |
-| **Reference** | Couzin et al. 2002, *J. Theor. Biol.* 218, 1–11; Vicsek et al. 1995 |
+| **Reference** | Couzin et al. 2002, J. Theor. Biol. 218(1):1-11 — DOI [10.1006/jtbi.2002.3065](https://doi.org/10.1006/jtbi.2002.3065) |
 
 #### GL-4 — Convex hull area (school area)
 
@@ -412,7 +422,7 @@ info-button modal (§6).
 | **Units** | px², cm² |
 | **Assumptions** | N ≥ 3 (hull undefined for fewer points) |
 | **Warnings** | Hull collapses to a line / point when fish are colinear; emit warning if degenerate ≥ 5% of frames |
-| **Reference** | Buhl et al. 2006, *Science* |
+| **Reference** | Standard spatial-cohesion measure; convex-hull area is widely used as a group-spread metric in collective-behaviour studies |
 
 #### GL-5 — Centroid speed / school speed
 
@@ -426,7 +436,7 @@ info-button modal (§6).
 | **Output columns** | `centroid_x`, `centroid_y` (frame-level); `mean_centroid_speed`, `median_centroid_speed` (summary) |
 | **Units** | px, cm, BL; speed in px/s, cm/s, BL/s |
 | **Assumptions** | Fewer-than-N animals → centroid is over the available `M(t)`, emit warning if `M(t) < N` ≥ 5% |
-| **Reference** | Standard kinematics; e.g. Tunstrøm et al. 2013, *PLoS Comp Bio* |
+| **Reference** | Standard kinematics applied to the group centroid; no single originating work. Used as a group descriptor in e.g. Tunstrøm et al. 2013, PLoS Comput. Biol. 9(2):e1002915 |
 
 #### GL-6 — Group cohesion index
 
@@ -441,7 +451,7 @@ info-button modal (§6).
 | **Units** | BL⁻¹ |
 | **Assumptions** | Calibration available (BL) |
 | **Warnings** | Without calibration, expressed in 1/px (interpretability low) |
-| **Reference** | Krause & Ruxton 2002 |
+| **Reference** | Krause & Ruxton 2002, Living in Groups (Oxford University Press) |
 
 > **Implementation note:** this metric was NND-only (not user-selectable)
 > before `cohesion_source` was added (§8 open question 3), so the default
@@ -462,7 +472,7 @@ info-button modal (§6).
 | **Units** | px/s, cm/s, BL/s |
 | **Assumptions** | Animals do not swap positions faster than 1 frame; large jumps degrade matching |
 | **Warnings** | Always emits a "matched, not identity-stable" note in the manifest |
-| **Reference** | Standard tracking-fallback approach |
+| **Reference** | Frame-to-frame point matching is a standard multi-object-tracking technique (assignment problem); no animal-behaviour-specific originating work |
 
 #### GL-8 — Angular momentum / rotational order
 
@@ -478,7 +488,7 @@ info-button modal (§6).
 | **Units** | dimensionless ∈ [0, 1] |
 | **Assumptions** | Distinguishes milling (M high, Φ low) from polarised motion (Φ high, M low) |
 | **Warnings** | Same heading-stability caveat as GL-3 |
-| **Reference** | Couzin et al. 2002, *J. Theor. Biol.*; Tunstrøm et al. 2013, *PLoS Comp Bio* |
+| **Reference** | Couzin et al. 2002, J. Theor. Biol. 218(1):1-11 — DOI [10.1006/jtbi.2002.3065](https://doi.org/10.1006/jtbi.2002.3065) |
 
 #### GL-9 — Group centroid position
 
@@ -491,7 +501,7 @@ info-button modal (§6).
 | **Formula** | `C[t] = (1/N) Σ_k xy[t, k]` (the centroid is also a GL-5 by-product; this metric exposes it as a primary output rather than a side column) |
 | **Output columns** | `t_s`, `centroid_x`, `centroid_y` (with unit-suffixed copies) |
 | **Units** | px, cm, BL |
-| **Reference** | Standard kinematics |
+| **Reference** | Standard kinematics (arithmetic mean position); no single originating work |
 
 #### GL-10 — Group expansion
 
@@ -505,7 +515,7 @@ info-button modal (§6).
 | **Output columns** | `mean_group_spread_px`, `mean_group_spread_cm`, `mean_group_spread_bl` |
 | **Units** | px, cm, BL |
 | **Assumptions** | Complement to GL-4 (hull); easier to compute and tolerates N < 3 |
-| **Reference** | Tunstrøm et al. 2013 |
+| **Reference** | Standard spatial-dispersion measure; complements GL-4 (convex-hull area). No single originating work |
 
 ### 4.5 Identity-free variants
 
@@ -538,7 +548,7 @@ selection, and exported alongside the metrics CSV in a separate
 | **Formula** | `coverage[k] = mean(~isnan(raw_xy[:, k, 0]))`; `session_coverage = mean(coverage)` |
 | **Output columns** | `individual_id`, `coverage_fraction`, `nan_frames_count` |
 | **Units** | dimensionless ∈ [0, 1] |
-| **Reference** | Tracking-pipeline convention |
+| **Reference** | Tracking-pipeline convention (fraction of frames with a successfully assigned position); no single originating work |
 
 #### D-2 — Tracking accuracy
 
@@ -551,7 +561,7 @@ selection, and exported alongside the metrics CSV in a separate
 | **Formula** | Pass-through |
 | **Output columns** | `estimated_accuracy`, `fraction_identified` |
 | **Units** | dimensionless |
-| **Reference** | Romero-Ferrero et al. 2019, *Nat. Methods* (idtracker.ai) |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
 
 #### D-3 — ID-probability distribution
 
@@ -565,7 +575,7 @@ selection, and exported alongside the metrics CSV in a separate
 | **Output columns** | `individual_id`, `id_prob_median`, `id_prob_p10`, `id_prob_p90`, `id_prob_frac_above_0p9` |
 | **Units** | probability ∈ [0, 1] |
 | **Warnings** | When `id_probabilities` is None (older version), emit `IDT_DICT_MISSING_KEY` and set columns to NaN |
-| **Reference** | idtracker.ai docs |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
 
 #### D-4 — Inconsistent-frame count
 
@@ -578,7 +588,7 @@ selection, and exported alongside the metrics CSV in a separate
 | **Formula** | `n_inconsistent = len(inconsistent_frames)`; `frac_inconsistent = n_inconsistent / n_frames` |
 | **Output columns** | `inconsistent_frame_count`, `inconsistent_frame_fraction` |
 | **Units** | count, fraction |
-| **Reference** | Custom post-processing pipeline (`*_bboxes.csv` parser) |
+| **Reference** | Track2Data's own bounding-box post-processing pipeline; no external work defines this counter |
 
 #### D-5 — Identity stability flag
 
@@ -590,7 +600,63 @@ selection, and exported alongside the metrics CSV in a separate
 | **Inputs** | `Session.has_stable_identities`, `Session.quality["fraction_identified"]` |
 | **Formula** | Pass-through + categorical (`stable`, `weak`, `identity_free`) |
 | **Output columns** | `identity_stability_status` |
-| **Reference** | PRD §5.2 (FR-IMP-3); fraction-identified threshold |
+| **Reference** | Track2Data engineering threshold on idtracker.ai's own fraction_identified (PRD §5.2, FR-IMP-3); not an external scientific result |
+
+#### D-6 — Segmentation error frames
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Segmentation error frames |
+| **Level** | Session summary |
+| **Priority** | Diagnostic |
+| **Inputs** | `Session.number_of_error_frames` (idtracker.ai's own counter), `Session.n_frames` |
+| **Formula** | `error_frame_fraction = number_of_error_frames / n_frames` |
+| **Output columns** | `number_of_error_frames`, `error_frame_fraction` |
+| **Units** | count, fraction ∈ [0, 1] |
+| **Warnings** | Distinct from D-4: this is idtracker.ai's own count of frames with more blobs than animals (shadows, reflections, dust), not Track2Data's post-hoc bounding-box check. It is the only place this surfaces when the tracking run had `check_segmentation` disabled, which silences it in idtracker.ai's own log. |
+| **Reference** | idtracker.ai's own internal segmentation-error counter (number_of_error_frames), documented in its usage guide rather than named as a metric in Romero-Ferrero et al. 2019 |
+
+#### D-7 — Fragment length distribution
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Fragment length distribution |
+| **Level** | Session summary |
+| **Priority** | Diagnostic |
+| **Inputs** | `Session.fragments` (`preprocessing/list_of_fragments.json`) |
+| **Formula** | Over individual fragments only: median, p10, p90, max of fragment length in frames; plus `n_individual_fragments` |
+| **Output columns** | `n_individual_fragments`, `fragment_length_median`, `fragment_length_p10`, `fragment_length_p90`, `fragment_length_max` |
+| **Units** | frames |
+| **Warnings** | A short median means identity is re-established constantly, which bounds how far any per-individual metric can be trusted across fragment breaks. Measured on a real corpus session: median 3 frames (p90 118, max 3409) — a fact invisible without this metric. |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
+#### D-8 — Crossing rate
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Crossing rate |
+| **Level** | Session summary |
+| **Priority** | Diagnostic |
+| **Inputs** | `Session.fragments` (both individual and crossing fragments) |
+| **Formula** | `crossing_fragment_fraction = n_crossing_fragments / n_fragments`; `crossing_frame_fraction = sum(len of crossing fragments) / sum(len of all fragments)` |
+| **Output columns** | `crossing_fragment_fraction`, `crossing_frame_fraction` |
+| **Units** | fraction ∈ [0, 1] |
+| **Warnings** | Directly quantifies a confound for every GL-* metric: animals inside a crossing fragment are by definition touching or overlapping for that whole span, so distance- and orientation-based group metrics are unreliable there. The frame-weighted fraction is the one to read — crossing and individual fragments have very different typical lengths. |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
+#### D-9 — Identity swap opportunity count
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Identity swap opportunities |
+| **Level** | Session summary |
+| **Priority** | Diagnostic |
+| **Inputs** | `Session.fragments`, `Session.n_frames` |
+| **Formula** | `boundaries = {f.end_frame for f in individual_fragments if not f.identity_is_fixed}`; `swap_opportunity_count = len(boundaries)`; `swap_opportunity_fraction = count / n_frames` |
+| **Output columns** | `swap_opportunity_count`, `swap_opportunity_fraction` |
+| **Units** | count, fraction ∈ [0, 1] |
+| **Warnings** | Deliberately a **declarative** diagnostic, not a corrector. It reports the exact bounded set of frames where a swap is physically possible and leaves the judgement to the researcher, rather than silently re-permuting trajectories — see `preprocess/identity_switch.py`, off by default for exactly that reason (CHANGELOG v0.1.0). |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
 
 ---
 
@@ -775,8 +841,18 @@ exposed so future per-user opt-outs are non-breaking.
 
 ## 8. Open questions
 
-1. **Citations** — `MetricDocumentation.citation_doi` is the place to
-   add DOI links once collected. Initial draft uses author/year only.
+1. **Citations** — resolved. Every one of the 33 metrics now carries a
+   citation, and 11 carry a verified DOI. Previously all six zone
+   metrics and all nine diagnostics had none at all, this document and
+   the code disagreed on 14 metrics, and one DOI (Couzin et al. 2002)
+   had been copy-pasted onto GL-1, whose citation named a different
+   paper entirely. The list is published as
+   [`METRIC_REFERENCES.csv`](./METRIC_REFERENCES.csv) and pinned by
+   `tests/test_metric_references_consistency.py`; see
+   [`../CONTRIBUTING.md` §7](../CONTRIBUTING.md) for the
+   regenerate-on-change rule. Where no specific work applies, the
+   citation says so plainly rather than borrowing an unrelated one —
+   `citation_doi` stays `None` in those cases, by design.
 2. **Zone overlap policy** — default "longest-overlap-wins"; settable
    per project. To be confirmed during Stage 4 implementation.
 3. **Per-metric config** — resolved at the engine level: metrics

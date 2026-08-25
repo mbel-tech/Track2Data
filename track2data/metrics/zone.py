@@ -119,6 +119,12 @@ class TimeInZone(Metric):
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=["Empty-string values are treated as 'not in any zone'."],
+        citation=(
+            "Walsh & Cummins 1976, Psychol. Bull. 83(3):482-504 (the "
+            "open-field test, whose central measure is time spent in "
+            "defined sub-regions)"
+        ),
+        citation_doi="10.1037/0033-2909.83.3.482",
     )
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
@@ -211,6 +217,11 @@ class ZoneVisitCount(Metric):
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=["A single continuous stay counts as one visit regardless of duration."],
+        citation=(
+            "Martin & Bateson 2007, Measuring Behaviour: An Introductory "
+            "Guide, 3rd ed. (Cambridge University Press) -- frequency "
+            "counting of discrete behavioural events"
+        ),
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -330,6 +341,12 @@ class AreaCorrectedOccupancy(Metric):
             "roi_areas and total_arena_area must be provided in cfg",
         ],
         warnings=["Returns empty DataFrame when cfg is missing or incomplete"],
+        citation=(
+            "Area-normalised occupancy (observed time in a zone relative to "
+            "that zone's share of the arena), the standard correction for "
+            "comparing unequal-area regions of interest. No single "
+            "originating work"
+        ),
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -456,6 +473,11 @@ class ZoneTransitions(Metric):
             "Only named zone-to-zone transitions are counted; "
             "entering/leaving no-zone is ignored"
         ],
+        citation=(
+            "Fagen & Young 1978, 'Temporal patterns of behaviors', in "
+            "Colgan (ed.) Quantitative Ethology, pp. 79-114 (Wiley) -- "
+            "sequence and transition analysis of behavioural states"
+        ),
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -577,6 +599,11 @@ class Z5EntryExitEvents(Metric):
             "An animal still inside a zone at the final frame gets an 'enter' "
             "event with no matching 'exit' event.",
         ],
+        citation=(
+            "Boundary-crossing event extraction underlying the event/state "
+            "distinction in Martin & Bateson 2007, Measuring Behaviour, "
+            "3rd ed. (Cambridge University Press)"
+        ),
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -698,6 +725,12 @@ class Z6LatencyToFirstEntry(Metric):
             "NaN when the individual never enters the zone is encoded as inf "
             "(rather than NaN) so results sort as 'latest possible'."
         ],
+        citation=(
+            "Bourin & Hascoët 2003, Eur. J. Pharmacol. 463(1-3):55-65 -- "
+            "latency to first entry as a standard exploration/anxiety "
+            "readout in the light/dark box test"
+        ),
+        citation_doi="10.1016/S0014-2999(03)01274-3",
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
