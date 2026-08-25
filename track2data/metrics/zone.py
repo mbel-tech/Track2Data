@@ -403,7 +403,12 @@ class AreaCorrectedOccupancy(Metric):
         roi_areas: dict[str, float] | None = cfg.get("roi_areas")
         total_arena_area: float | None = cfg.get("total_arena_area")
 
-        if roi_areas is None or total_arena_area is None or total_arena_area == 0:
+        # `<= 0`, not `== 0`. roi_areas holds SIGNED areas ("-" exclusion
+        # polygons subtract), so a zone set whose exclusions outweigh
+        # their parent yields a negative total -- which sailed past an
+        # equality check and exported negative occupancy fractions that
+        # look like real measurements.
+        if roi_areas is None or total_arena_area is None or total_arena_area <= 0:
             return empty_df
 
         session_id: str = session.session_id  # type: ignore[attr-defined]

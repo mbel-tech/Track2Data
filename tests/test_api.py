@@ -1436,3 +1436,30 @@ def test_run_all_is_a_thin_wrapper_returning_run_written(tmp_path: Path) -> None
     written = engine.run_all(tmp_path, exporters=["csv_long"])
     assert isinstance(written, list)
     assert len(written) > 0
+
+
+def test_a_null_override_does_not_silently_drop_the_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_effective_cfg` skips a `None` *default* so the key stays absent
+    and the metric's auto-compute branch runs -- but it copied a `None`
+    *override* straight through. A hand-edited or externally-generated
+    manifest carrying `{"IL-4": {"threshold_px_s": null}}` therefore put
+    the key IN cfg with value None; `float(None)` raised, compute_metrics
+    swallowed it, and IL-4 vanished from the export with only a log line.
+    The guard must be symmetric."""
+    from track2data.api import Engine
+    from track2data.metrics.base import MetricParameter
+
+    received = _register_recording_metric(
+        monkeypatch,
+        "X-1",
+        [MetricParameter(name="threshold_px_s", label="T", kind="float")],
+    )
+    manifest = _make_manifest(
+        metrics=MetricSelection(individual=["X-1"], config={"X-1": {"threshold_px_s": None}})
+    )
+
+    Engine(manifest).compute_metrics(_make_psess(_make_session(n_frames=5)))
+
+    assert received == [{}], "a null override must be dropped, not passed through as None"

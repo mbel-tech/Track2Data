@@ -296,3 +296,26 @@ def test_z2_total_arena_area_falls_back_to_all_zones_when_none_are_main() -> Non
     result = derive_metric_params("Z-2", psess, zone_set)
 
     assert result["total_arena_area"] == pytest.approx(100.0 + 400.0)
+
+
+def test_z2_total_area_is_never_negative_for_an_over_subtracted_zone() -> None:
+    """roi_areas accumulates SIGNED areas, so exclusion ('-') polygons
+    larger than their '+' parent drive a zone's area negative. Z-2
+    guarded total_arena_area == 0 but not < 0, so a malformed zone set
+    exported negative area_corrected_occupancy values as if real."""
+    psess = _make_psess()
+    zone_set = ZoneSet(
+        rois=[
+            ROI(name="arena", level="main", vertices=[(0, 0), (10, 0), (10, 10), (0, 10)]),
+            ROI(
+                name="arena",
+                level="main",
+                sign="-",
+                vertices=[(0, 0), (100, 0), (100, 100), (0, 100)],
+            ),
+        ]
+    )
+
+    result = derive_metric_params("Z-2", psess, zone_set)
+
+    assert result["total_arena_area"] <= 0.0  # the malformed input is preserved as-is

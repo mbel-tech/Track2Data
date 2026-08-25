@@ -191,19 +191,30 @@ def test_derived_parameter_renders_read_only_and_is_not_in_widgets(qtbot) -> Non
 
 
 def test_values_returns_only_non_derived_parameters(qtbot) -> None:
+    """Edit every editable row, then check the derived one is still
+    absent. Editing is what makes this meaningful: an untouched row is
+    omitted regardless of whether it's derived (see
+    test_opening_and_saving_without_edits_writes_nothing), so a dialog
+    with no edits would satisfy this assertion vacuously."""
     from ui.dialogs.metric_config_dialog import MetricConfigDialog
 
     dlg = MetricConfigDialog(_ConfigurableMetric, {})
     qtbot.addWidget(dlg)
 
+    dlg._widgets["threshold_px_s"].setValue(2.0)
+    dlg._widgets["min_bout_frames"].setValue(7)
+    dlg._widgets["cohesion_source"].setCurrentText("iid")
+    dlg._widgets["use_smoothing"].setChecked(False)
+
     values = dlg.values()
 
     assert values == {
-        "threshold_px_s": 1.5,
-        "min_bout_frames": 5,
-        "cohesion_source": "nnd",
-        "use_smoothing": True,
+        "threshold_px_s": 2.0,
+        "min_bout_frames": 7,
+        "cohesion_source": "iid",
+        "use_smoothing": False,
     }
+    assert "centre" not in values  # derived, never returned
 
 
 def test_values_reflects_edited_widgets(qtbot) -> None:
@@ -340,5 +351,79 @@ def test_reset_returns_an_optional_parameter_to_auto(qtbot) -> None:
     qtbot.addWidget(dlg)
 
     dlg._reset_buttons["threshold_px_s"].click()
+
+    assert dlg.values() == {}
+
+
+# ── robustness against values the widget can't faithfully show ───────────────
+
+
+def test_a_saved_choice_outside_the_declared_choices_is_preserved(qtbot) -> None:
+    """A non-editable combo silently ignores setCurrentText for an
+    unknown value and sits on index 0, so a stale or hand-edited
+    cohesion_source would be shown as -- and saved as -- something the
+    user never chose."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_ConfigurableMetric, {"cohesion_source": "bogus"})
+    qtbot.addWidget(dlg)
+
+    assert dlg._widgets["cohesion_source"].currentText() == "bogus"
+    assert dlg.values()["cohesion_source"] == "bogus"
+
+
+def test_a_saved_bool_written_as_a_json_string_is_not_inverted(qtbot) -> None:
+    """`bool("false")` is True, so a config carrying the string "false"
+    rendered the checkbox CHECKED -- displaying the exact opposite of
+    what was stored."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_ConfigurableMetric, {"use_smoothing": "false"})
+    qtbot.addWidget(dlg)
+
+    assert dlg._widgets["use_smoothing"].isChecked() is False
+
+
+def test_opening_and_saving_without_edits_writes_nothing(qtbot) -> None:
+    """Opening ⚙ and pressing Save used to freeze every declared default
+    into the manifest as though the user had chosen it, so a later
+    change to a metric's default would silently not reach that project.
+    An untouched, never-configured row is simply omitted -- the engine
+    layers the schema default anyway, so the result is identical."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_ConfigurableMetric, {})
+    qtbot.addWidget(dlg)
+
+    assert dlg.values() == {}
+
+
+def test_an_unset_choice_with_no_default_is_omitted(qtbot) -> None:
+    """The 'auto' sentinel exists for float/int; choice and bool had no
+    equivalent, so a param with no declared default silently reported
+    choices[0] / False as if the user had picked it."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    class _NoDefaultChoice(Metric):
+        id = "X-3"
+        name = "no_default_choice"
+        label = "No Default Choice"
+        level = "individual"
+        priority = "primary"
+        requires_identity = False
+        output_columns: list[str] = []
+        documentation = MetricDocumentation(
+            definition="d", formula_plain="f", inputs=[], assumptions=[], warnings=[],
+        )
+        parameters = [
+            MetricParameter(name="mode", label="Mode", kind="choice", choices=["a", "b"]),
+            MetricParameter(name="flag", label="Flag", kind="bool"),
+        ]
+
+        def compute(self, session, cfg=None):
+            return None
+
+    dlg = MetricConfigDialog(_NoDefaultChoice, {})
+    qtbot.addWidget(dlg)
 
     assert dlg.values() == {}

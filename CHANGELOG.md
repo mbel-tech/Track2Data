@@ -59,8 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `MetricConfigDialog`, rendering one widget per declared
   `MetricParameter` (a spin box, combo box, or checkbox depending on
   `kind`), with a per-row ↺ reset-to-default and Save/Cancel. It is
-  disabled, with an explanatory tooltip, for the 24 metrics that
-  declare no parameters. A `derived=True` parameter (IL-3's centre/
+  disabled, with an explanatory tooltip, for metrics that declare
+  no parameters. A `derived=True` parameter (IL-3's centre/
   radius, Z-2's zone areas) renders read-only -- it is computed per
   session and can never be saved as a user override. A parameter with
   no declared default (IL-4's and IL-7's `threshold_px_s`, both
@@ -158,7 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 The following were found by a review of the metrics work above, before
-any of it shipped in a release. All six produced wrong numbers or
+any of it shipped in a release. The first six produced wrong numbers or
 discarded user input rather than failing visibly.
 
 - **Saving a metric's ⚙ configuration discarded any unapplied
@@ -220,6 +220,49 @@ rather than the app:
   throw on every metric request — and returned a truncated pattern that
   still passed every assertion. It now only matches a well-formed
   literal.
+
+And the remaining low-severity items from that review, mostly
+robustness against inputs the code accepted but couldn't represent:
+
+- **A `null` in a saved config silently dropped the whole metric.**
+  `Engine._effective_cfg()` skipped a `None` *default* so the key stayed
+  absent, but copied a `None` *override* straight through — a metric
+  then passed its `"key" in cfg` check, failed the conversion, and was
+  logged and dropped, leaving the export quietly missing it. The guard
+  is now symmetric: a null means "unset".
+- **A typo'd `cohesion_source` silently produced NND numbers.** GL-6
+  fell through to its default branch for any unrecognised value, so
+  `"IID"` or `"iid "` exported nearest-neighbour cohesion while the
+  project file recorded the user choosing inter-individual. It now
+  raises.
+- **Z-2 guarded a zero total arena area but not a negative one.** Zone
+  areas are signed, so exclusion polygons outweighing their parent gave
+  a negative total that sailed past the check and exported negative
+  occupancy fractions that look like real measurements.
+- **IL-7 didn't honour the IL-4 threshold rule it claimed to share.**
+  IL-4 gained a configurable `threshold_multiplier`; IL-7 kept a
+  hardcoded 0.1 while its help text said "same threshold rule as IL-4",
+  so raising IL-4's left `active_fraction` and `freezing_bout_count`
+  measured against different thresholds in one export. IL-7 now declares
+  the same parameter — set independently, which the help text now says.
+- **The ⚙ dialog mis-rendered values it couldn't represent.** A saved
+  choice outside the declared options was silently replaced by the first
+  one; a bool stored as the JSON string `"false"` rendered *checked*,
+  the exact opposite of what was stored. Both are now shown faithfully.
+- **Opening ⚙ and saving without editing no longer writes anything.**
+  It used to freeze every declared default into the project as though
+  chosen, so a later change to a metric's default would silently not
+  reach it. Untouched, never-configured rows are omitted; the engine
+  layers the schema default anyway, so results are unchanged.
+- **`METRICS_SPEC.md` documented parameters that don't exist.** IL-4's
+  row named `threshold_bl_per_s` (in BL/s) where the code has
+  `threshold_px_s` (px/s, auto) and `threshold_multiplier` — setting the
+  documented key did nothing, silently, and the shared `0.1` made it
+  easy to miss. Z-4's formula row still described the pre-debounce
+  implementation. A new test now fails if the spec names a parameter no
+  metric declares. Also corrected a metric count stated wrongly in three
+  places, and IL-3's `output_columns`, which omitted a column it always
+  emits.
 
 ## [0.1.0] — 2026-08-24
 

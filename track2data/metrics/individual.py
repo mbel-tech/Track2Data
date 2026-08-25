@@ -197,24 +197,34 @@ class CentreDistance(Metric):
         "metric_id",
         "individual_id",
         "mean_centre_distance_px",
+        # Emitted whenever an arena radius is known, which -- since the
+        # radius became a derived parameter -- is every run.
+        "time_in_centre_pct",
     ]
     documentation = MetricDocumentation(
         definition=(
-            "Mean Euclidean distance of each individual from the arena centre over "
-            "the session.  Optionally reports the fraction of time spent within the "
-            "inner half of the arena (radius = arena_radius/2)."
+            "Mean Euclidean distance of each individual from the centre of the "
+            "arena it occupies, over the session.  Also reports the fraction of "
+            "time spent within the inner part of that arena (radius = "
+            "arena_radius * inner_radius_fraction, default half)."
         ),
         formula_plain=(
-            "d[t,k] = ||xy[t,k] - centre||; "
+            "d[t,k] = ||xy[t,k] - centre[k]||; "
             "mean_centre_distance_px = mean over non-NaN frames; "
-            "time_in_centre_pct = fraction of non-NaN frames with d[t,k] < arena_radius/2"
+            "time_in_centre_pct = fraction of non-NaN frames with "
+            "d[t,k] < arena_radius[k] * inner_radius_fraction"
         ),
-        inputs=["PreprocessedSession.xy"],
+        inputs=["PreprocessedSession.xy", "PreprocessedSession.main_zone"],
         assumptions=[
-            "centre is taken from cfg['centre'] if provided, "
-            "otherwise computed as the mean of all non-NaN positions"
+            "The centre and radius are derived per session from the project's "
+            "own main-level zone geometry, or the video frame when no zones are "
+            "defined; with several main arenas each animal is measured from the "
+            "one it occupies"
         ],
-        warnings=["arena_radius must be provided in cfg to compute time_in_centre_pct"],
+        warnings=[
+            "For a non-circular arena, centre-distance is interpretable only "
+            "with a clearly defined origin"
+        ],
         citation=(
             "Schnörr et al. 2012, Behav. Brain Res. 228(2):367-374 "
             "(thigmotaxis in larval zebrafish); paradigm originates with "
@@ -723,7 +733,22 @@ class FreezingBouts(Metric):
             label="Freezing threshold",
             kind="float",
             unit="px/s",
-            help="Same threshold rule as IL-4; auto-computed when unset.",
+            help=(
+                "Speed at or below which an animal counts as inactive. "
+                "Auto-computed from this session's own data when unset."
+            ),
+        ),
+        MetricParameter(
+            name="threshold_multiplier",
+            label="Auto-threshold multiplier",
+            kind="float",
+            default=0.1,
+            minimum=0.0,
+            help=(
+                "Only used when threshold_px_s is unset: the auto threshold is "
+                "mean(speed) * threshold_multiplier. Same rule as IL-4, but set "
+                "independently -- changing IL-4's does not change this one."
+            ),
         ),
         MetricParameter(
             name="min_bout_frames",
@@ -757,12 +782,23 @@ class FreezingBouts(Metric):
         """
         speed = session.kinematics.speed_px_s  # (n_frames, n_animals)
 
-        # Threshold: identical rule to IL-4 Activity so the two stay consistent.
+        # Threshold: the same rule as IL-4 Activity, including its
+        # configurable multiplier. IL-7 used to hardcode 0.1 while
+        # claiming parity, so raising IL-4's multiplier left
+        # active_fraction and freezing_bout_count measured against
+        # different thresholds in the same export, with nothing saying so.
+        # The two are set independently -- one metric's config never
+        # reaches another's cfg -- so both must be changed together.
         if cfg is not None and "threshold_px_s" in cfg:
             threshold = float(cfg["threshold_px_s"])
         else:
+            threshold_multiplier = 0.1
+            if cfg is not None and "threshold_multiplier" in cfg:
+                threshold_multiplier = float(cfg["threshold_multiplier"])
             all_valid = speed[~np.isnan(speed)]
-            threshold = float(np.mean(all_valid) * 0.1) if len(all_valid) > 0 else 0.0
+            threshold = (
+                float(np.mean(all_valid) * threshold_multiplier) if len(all_valid) > 0 else 0.0
+            )
 
         min_bout_frames = 5
         if cfg is not None and "min_bout_frames" in cfg:

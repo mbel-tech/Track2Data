@@ -624,3 +624,24 @@ class TestZ6LatencyToFirstEntry:
         # animal 0 never entered zone_B -> inf
         row = df[(df["zone_name"] == "zone_B") & (df["individual_id"] == 0)]
         assert row["first_entry_t_s"].values[0] == float("inf")
+
+
+class TestZ2NonPositiveArea:
+    def test_negative_total_arena_area_produces_no_rows_rather_than_negative_occupancy(
+        self,
+    ) -> None:
+        """Z-2 guarded `== 0` but not `< 0`. A signed-area zone set whose
+        exclusion polygons outweigh their parent gave a negative total,
+        which sailed past the guard and exported negative occupancy
+        fractions that look like real measurements."""
+        n_frames, n_animals = 10, 1
+        main_zone = np.full((n_frames, n_animals), "arena", dtype=object)
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        df = AreaCorrectedOccupancy().compute(
+            psess, cfg={"roi_areas": {"arena": -50.0}, "total_arena_area": -50.0}
+        )
+
+        assert len(df) == 0

@@ -308,7 +308,13 @@ class Engine:
 
         overrides = self._manifest.metrics.config.get(metric_cls.id, {})
         for key, value in overrides.items():
-            if key not in derived_names:
+            # `is not None` on both layers, not just the defaults one. A
+            # metric tests `"key" in cfg` before reading, so a None here
+            # passes that check and then fails the conversion -- and
+            # compute_metrics() logs and drops the metric, so the export
+            # is silently missing it. Absent means "unset", which is what
+            # a null in the manifest is trying to say.
+            if key not in derived_names and value is not None:
                 cfg[key] = value
 
         cfg.update(derive_metric_params(metric_cls.id, psess, self._manifest.zones))

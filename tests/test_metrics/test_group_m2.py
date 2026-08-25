@@ -586,3 +586,28 @@ class TestRotationalOrder:
         psess = make_psess(xy=xy, heading=heading, speed=speed)
         df = RotationalOrder().compute(psess, cfg={"stationary_threshold_px_s": 10.0})
         assert np.isnan(df["mean_rotational_order"].values[0])
+
+
+def _line_of_three():
+    xy = np.zeros((5, 3, 2))
+    xy[:, 1, :] = [10.0, 0.0]
+    xy[:, 2, :] = [100.0, 0.0]
+    return make_psess(xy=xy)
+
+
+class TestCohesionSourceValidation:
+    def test_unrecognised_cohesion_source_raises_instead_of_silently_using_nnd(self) -> None:
+        """A typo'd manifest value ('IID', 'iid ', 'iid_mean') fell
+        through to the NND branch, so the export carried NND numbers
+        while the project file said the user chose IID -- a wrong result
+        that looks like a correct one. Fail loudly instead."""
+        psess = _line_of_three()
+
+        with pytest.raises(ValueError, match="cohesion_source"):
+            GroupCohesion().compute(psess, cfg={"cohesion_source": "IID"})
+
+    def test_both_documented_values_are_still_accepted(self) -> None:
+        psess = _line_of_three()
+        for value in ("nnd", "iid"):
+            df = GroupCohesion().compute(psess, cfg={"cohesion_source": value})
+            assert len(df) > 0
