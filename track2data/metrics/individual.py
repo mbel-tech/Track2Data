@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from track2data.core.models import PreprocessedSession
-from track2data.metrics.base import Metric, MetricDocumentation
+from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 
 # ── IL-1: PathLength ──────────────────────────────────────────────────────────
 
@@ -217,6 +217,27 @@ class CentreDistance(Metric):
         warnings=["arena_radius must be provided in cfg to compute time_in_centre_pct"],
         citation="Standard spatial analysis",
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="centre", label="Arena centre", kind="float", derived=True,
+            help="Derived from the project's main zone, or the video frame centre.",
+        ),
+        MetricParameter(
+            name="arena_radius", label="Arena radius", kind="float", derived=True, unit="px",
+        ),
+        MetricParameter(
+            name="inner_radius_fraction",
+            label="Inner-radius fraction",
+            kind="float",
+            default=0.5,
+            minimum=0.0,
+            maximum=1.0,
+            help=(
+                "Fraction of arena_radius defining the 'inner' zone for "
+                "time_in_centre_pct (0.5 = inner half)."
+            ),
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute centre-distance statistics for every individual in *session*.
@@ -229,6 +250,8 @@ class CentreDistance(Metric):
             Optional configuration dict.  Keys:
             ``centre`` — [x, y] arena centre coordinates (pixels).
             ``arena_radius`` — arena radius in pixels; enables ``time_in_centre_pct``.
+            ``inner_radius_fraction`` — fraction of arena_radius defining the
+            "inner" zone for ``time_in_centre_pct`` (default 0.5).
 
         Returns
         -------
@@ -254,6 +277,10 @@ class CentreDistance(Metric):
         arena_radius: float | None = None
         if cfg is not None and "arena_radius" in cfg:
             arena_radius = float(cfg["arena_radius"])
+
+        inner_radius_fraction = 0.5
+        if cfg is not None and "inner_radius_fraction" in cfg:
+            inner_radius_fraction = float(cfg["inner_radius_fraction"])
 
         records: list[dict] = []
         for k in range(n_animals):
@@ -286,7 +313,7 @@ class CentreDistance(Metric):
             }
 
             if arena_radius is not None:
-                inner_radius = arena_radius / 2.0
+                inner_radius = arena_radius * inner_radius_fraction
                 time_in_centre = float((dists < inner_radius).mean())
                 row["time_in_centre_pct"] = time_in_centre
 
@@ -332,6 +359,26 @@ class Activity(Metric):
         warnings=["Threshold choice strongly affects classification"],
         citation="Standard ethology",
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="threshold_px_s",
+            label="Activity threshold",
+            kind="float",
+            unit="px/s",
+            help="Speed above which an animal counts as active. Auto-computed when unset.",
+        ),
+        MetricParameter(
+            name="threshold_multiplier",
+            label="Auto-threshold multiplier",
+            kind="float",
+            default=0.1,
+            minimum=0.0,
+            help=(
+                "Only used when threshold_px_s is unset: the auto threshold "
+                "is mean(speed) * threshold_multiplier."
+            ),
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute activity / freezing fractions for every individual.
@@ -343,7 +390,8 @@ class Activity(Metric):
         cfg:
             Optional dict.  If ``cfg['threshold_px_s']`` is present it is used
             as the activity threshold; otherwise a data-driven threshold is
-            computed as ``mean(speed_px_s) * 0.1``.
+            computed as ``mean(speed_px_s) * cfg['threshold_multiplier']``
+            (default multiplier 0.1).
 
         Returns
         -------
@@ -356,9 +404,13 @@ class Activity(Metric):
         if cfg is not None and "threshold_px_s" in cfg:
             threshold = float(cfg["threshold_px_s"])
         else:
-            # Mean BL-speed * 0.1, falling back to overall mean speed * 0.1
+            threshold_multiplier = 0.1
+            if cfg is not None and "threshold_multiplier" in cfg:
+                threshold_multiplier = float(cfg["threshold_multiplier"])
             all_valid = speed[~np.isnan(speed)]
-            threshold = float(np.mean(all_valid) * 0.1) if len(all_valid) > 0 else 0.0
+            threshold = (
+                float(np.mean(all_valid) * threshold_multiplier) if len(all_valid) > 0 else 0.0
+            )
 
         n_animals = session.n_animals
         records: list[dict] = []
@@ -612,6 +664,24 @@ class FreezingBouts(Metric):
         warnings=["Discards short pauses; min duration is study-specific"],
         citation="Speed-threshold bout detection; e.g. Cachat et al. 2010",
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="threshold_px_s",
+            label="Freezing threshold",
+            kind="float",
+            unit="px/s",
+            help="Same threshold rule as IL-4; auto-computed when unset.",
+        ),
+        MetricParameter(
+            name="min_bout_frames",
+            label="Minimum bout length",
+            kind="int",
+            default=5,
+            minimum=1,
+            unit="frames",
+            help="Runs of consecutive inactive frames shorter than this are not a bout.",
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute freezing-bout statistics for every individual in *session*.

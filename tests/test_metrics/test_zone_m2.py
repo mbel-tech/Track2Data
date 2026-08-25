@@ -84,6 +84,11 @@ class TestAreaCorrectedOccupancy:
     def test_metric_id(self) -> None:
         assert AreaCorrectedOccupancy.id == "Z-2"
 
+    def test_declares_derived_parameters(self) -> None:
+        params = {p.name: p for p in AreaCorrectedOccupancy.parameters}
+        assert params.keys() == {"roi_areas", "total_arena_area"}
+        assert all(p.derived for p in params.values())
+
     def test_output_columns_present(self) -> None:
         psess = make_psess_with_zones()
         df = AreaCorrectedOccupancy().compute(psess)
@@ -177,6 +182,51 @@ class TestAreaCorrectedOccupancy:
 class TestZoneTransitions:
     def test_metric_id(self) -> None:
         assert ZoneTransitions.id == "Z-4"
+
+    def test_declares_configurable_parameters(self) -> None:
+        params = {p.name: p for p in ZoneTransitions.parameters}
+        assert params.keys() == {"min_dwell_frames"}
+        assert params["min_dwell_frames"].default == 1
+
+    def test_min_dwell_frames_debounces_a_brief_flicker(self) -> None:
+        """A (9 frames) -> B (2-frame flicker) -> A (9 frames). With the
+        default min_dwell_frames=1 this is 2 transitions (A->B, B->A).
+        With min_dwell_frames=3 the 2-frame B run is too short to count
+        as a real visit, so the two A runs either side of it collapse
+        into one continuous stay -- 0 transitions, not 2."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:9, 0] = "zone_A"
+        main_zone[9:11, 0] = "zone_B"
+        main_zone[11:20, 0] = "zone_A"
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        default_df = ZoneTransitions().compute(psess)
+        assert default_df["transition_count"].sum() == 2
+
+        debounced_df = ZoneTransitions().compute(psess, cfg={"min_dwell_frames": 3})
+        assert len(debounced_df) == 0
+
+    def test_min_dwell_frames_keeps_a_transition_that_meets_the_threshold(self) -> None:
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[0:9, 0] = "zone_A"
+        main_zone[9:15, 0] = "zone_B"  # 6-frame dwell -- meets the threshold
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        df = ZoneTransitions().compute(psess, cfg={"min_dwell_frames": 3})
+
+        row = df[
+            (df["from_zone"] == "zone_A")
+            & (df["to_zone"] == "zone_B")
+            & (df["individual_id"] == 0)
+        ]
+        assert len(row) == 1
+        assert row["transition_count"].values[0] == 1
 
     def test_output_columns_present(self) -> None:
         psess = make_psess_with_zones()
@@ -296,6 +346,41 @@ class TestZ5EntryExitEvents:
     def test_metric_id(self) -> None:
         assert Z5EntryExitEvents.id == "Z-5"
 
+    def test_declares_configurable_parameters(self) -> None:
+        params = {p.name: p for p in Z5EntryExitEvents.parameters}
+        assert params.keys() == {"min_dwell_frames"}
+        assert params["min_dwell_frames"].default == 1
+
+    def test_min_dwell_frames_drops_a_brief_flicker_entirely(self) -> None:
+        """A 2-frame flicker into zone_A produces no enter/exit events
+        at all once it's shorter than min_dwell_frames -- the animal is
+        treated as never having visited."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[10:12, 0] = "zone_A"  # 2-frame flicker
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        df = Z5EntryExitEvents().compute(psess, cfg={"min_dwell_frames": 3})
+
+        assert len(df) == 0
+
+    def test_min_dwell_frames_keeps_a_run_meeting_the_threshold(self) -> None:
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[10:16, 0] = "zone_A"  # 6-frame dwell
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        df = Z5EntryExitEvents().compute(psess, cfg={"min_dwell_frames": 3})
+
+        enters = df[df["event"] == "enter"]
+        exits = df[df["event"] == "exit"]
+        assert enters["frame"].values[0] == 10
+        assert exits["frame"].values[0] == 16
+
     def test_output_columns_present(self) -> None:
         psess = make_psess_with_zones()
         df = Z5EntryExitEvents().compute(psess)
@@ -409,6 +494,30 @@ class TestZ5EntryExitEvents:
 class TestZ6LatencyToFirstEntry:
     def test_metric_id(self) -> None:
         assert Z6LatencyToFirstEntry.id == "Z-6"
+
+    def test_declares_configurable_parameters(self) -> None:
+        params = {p.name: p for p in Z6LatencyToFirstEntry.parameters}
+        assert params.keys() == {"min_dwell_frames"}
+        assert params["min_dwell_frames"].default == 1
+
+    def test_min_dwell_frames_forwards_to_z5_and_skips_a_brief_flicker(self) -> None:
+        """Z-6 is defined purely in terms of Z-5's 'enter' events
+        (see its own docstring) and already forwards cfg to
+        Z5EntryExitEvents.compute() -- a 2-frame flicker into zone_A
+        debounced away by Z-5 must mean Z-6 reports the *later*, real
+        6-frame entry as the first one, not the flicker."""
+        n_frames, n_animals = 20, 1
+        main_zone = np.full((n_frames, n_animals), "", dtype=object)
+        main_zone[2:4, 0] = "zone_A"  # 2-frame flicker, debounced away
+        main_zone[10:16, 0] = "zone_A"  # 6-frame real entry
+        psess = make_psess_with_zones(
+            zone_pattern=main_zone, n_frames=n_frames, n_animals=n_animals
+        )
+
+        df = Z6LatencyToFirstEntry().compute(psess, cfg={"min_dwell_frames": 3})
+
+        row = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)]
+        assert row["first_entry_t_s"].values[0] == pytest.approx(1.0)  # 10 / fps=10.0
 
     def test_output_columns_present(self) -> None:
         psess = make_psess_with_zones()

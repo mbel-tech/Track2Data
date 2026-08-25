@@ -181,6 +181,10 @@ class TestNearestNeighbourDistance:
 
 
 class TestPolarisation:
+    def test_declares_configurable_parameters(self) -> None:
+        names = {p.name for p in Polarisation.parameters}
+        assert names == {"stationary_threshold_px_s"}
+
     def test_perfectly_aligned(self) -> None:
         """All animals heading right (0 rad) → polarisation = 1.0."""
         n_frames, n_animals = 100, 4

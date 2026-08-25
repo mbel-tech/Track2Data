@@ -301,6 +301,35 @@ class TestActivity:
         assert "threshold_px_s" in df.columns
         assert df["threshold_px_s"].notna().all()
 
+    def test_auto_threshold_multiplier_defaults_to_0_1(self) -> None:
+        """The data-driven fallback is mean(speed) * threshold_multiplier
+        -- 0.1 is the historical hardcoded value, preserved as the
+        default rather than changed silently."""
+        speed = np.full((100, 2), 100.0)
+        psess = make_psess(speed=speed)
+        df = Activity().compute(psess)
+        assert df["threshold_px_s"].values[0] == pytest.approx(10.0)  # 100 * 0.1
+
+    def test_threshold_multiplier_is_configurable(self) -> None:
+        """cfg['threshold_multiplier'] scales the auto threshold when no
+        explicit threshold_px_s is given."""
+        speed = np.full((100, 2), 100.0)
+        psess = make_psess(speed=speed)
+        df = Activity().compute(psess, cfg={"threshold_multiplier": 0.2})
+        assert df["threshold_px_s"].values[0] == pytest.approx(20.0)  # 100 * 0.2
+
+    def test_threshold_multiplier_ignored_when_explicit_threshold_given(self) -> None:
+        speed = np.full((100, 2), 100.0)
+        psess = make_psess(speed=speed)
+        df = Activity().compute(
+            psess, cfg={"threshold_px_s": 5.0, "threshold_multiplier": 0.2}
+        )
+        assert df["threshold_px_s"].values[0] == pytest.approx(5.0)
+
+    def test_declares_configurable_parameters(self) -> None:
+        names = {p.name for p in Activity.parameters}
+        assert names == {"threshold_px_s", "threshold_multiplier"}
+
     def test_output_columns_present(self) -> None:
         psess = make_psess()
         df = Activity().compute(psess, cfg={"threshold_px_s": 10.0})

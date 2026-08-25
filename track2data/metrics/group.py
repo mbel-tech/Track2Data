@@ -17,7 +17,7 @@ from scipy.spatial import ConvexHull, QhullError, cKDTree
 from scipy.spatial.distance import pdist
 
 from track2data.core.models import PreprocessedSession
-from track2data.metrics.base import Metric, MetricDocumentation
+from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 
 # ── GL-1: NearestNeighbourDistance ────────────────────────────────────────────
 
@@ -179,6 +179,17 @@ class Polarisation(Metric):
     )
 
     _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="stationary_threshold_px_s",
+            label="Stationary threshold",
+            kind="float",
+            default=1e-6,
+            minimum=0.0,
+            unit="px/s",
+            help="Animals slower than this are excluded from each frame's heading average.",
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute group polarisation for *session*.
@@ -659,12 +670,33 @@ class GroupCohesion(Metric):
             "Group cohesion defined as the reciprocal of the mean nearest-neighbour "
             "distance.  Higher values indicate a more cohesive (closer) group."
         ),
-        formula_plain="cohesion_index = 1 / mean_NND",
+        formula_plain=(
+            "cohesion_index = 1 / mean_NND (cohesion_source='nnd', default), "
+            "or 1 / mean_IID (cohesion_source='iid') -- see METRICS_SPEC.md §8 "
+            "open question 3"
+        ),
         inputs=["PreprocessedSession.xy"],
-        assumptions=["Uses the same NND computation as GL-1"],
-        warnings=["Undefined (NaN) when mean_NND = 0 or when fewer than 2 animals"],
+        assumptions=[
+            "cohesion_source='nnd' (default) uses the same NND computation as GL-1; "
+            "cohesion_source='iid' uses the same mean-pairwise-distance computation as GL-2"
+        ],
+        warnings=["Undefined (NaN) when the mean distance = 0 or when fewer than 2 animals"],
         citation="Standard collective behaviour",
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="cohesion_source",
+            label="Cohesion source",
+            kind="choice",
+            default="nnd",
+            choices=["nnd", "iid"],
+            help=(
+                "Which pairwise-distance measure cohesion is derived from: "
+                "nearest-neighbour distance (nnd) or mean inter-individual "
+                "distance (iid)."
+            ),
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute group cohesion for *session*.
@@ -674,7 +706,9 @@ class GroupCohesion(Metric):
         session:
             A fully preprocessed session.
         cfg:
-            Optional configuration dict (unused).
+            Optional configuration dict. ``cfg['cohesion_source']`` selects
+            ``'nnd'`` (default, same computation as GL-1) or ``'iid'`` (same
+            computation as GL-2).
 
         Returns
         -------
@@ -683,6 +717,10 @@ class GroupCohesion(Metric):
         """
         xy = session.xy  # (n_frames, n_animals, 2)
         n_frames, n_animals = xy.shape[0], xy.shape[1]
+
+        cohesion_source = "nnd"
+        if cfg is not None and "cohesion_source" in cfg:
+            cohesion_source = cfg["cohesion_source"]
 
         if n_animals < 2:
             return pd.DataFrame(
@@ -695,20 +733,23 @@ class GroupCohesion(Metric):
                 ]
             )
 
-        frame_nnds: list[float] = []
+        frame_dists: list[float] = []
         for t in range(n_frames):
             positions = xy[t]
             if np.isnan(positions).any():
                 continue
-            tree = cKDTree(positions)
-            dists, _ = tree.query(positions, k=2)
-            frame_nnds.append(float(dists[:, 1].mean()))
+            if cohesion_source == "iid":
+                frame_dists.append(float(pdist(positions).mean()))
+            else:
+                tree = cKDTree(positions)
+                dists, _ = tree.query(positions, k=2)
+                frame_dists.append(float(dists[:, 1].mean()))
 
-        if len(frame_nnds) == 0:
+        if len(frame_dists) == 0:
             cohesion = np.nan
         else:
-            mean_nnd = float(np.mean(frame_nnds))
-            cohesion = 1.0 / mean_nnd if mean_nnd != 0 else np.nan
+            mean_dist = float(np.mean(frame_dists))
+            cohesion = 1.0 / mean_dist if mean_dist != 0 else np.nan
 
         return pd.DataFrame(
             [
@@ -781,6 +822,17 @@ class RotationalOrder(Metric):
 
     _STATIONARY_THRESHOLD = 1e-6  # px/s — animals slower than this are excluded
     _ZERO_RADIUS_EPS = 1e-9  # px — animals this close to the centroid are excluded
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="stationary_threshold_px_s",
+            label="Stationary threshold",
+            kind="float",
+            default=1e-6,
+            minimum=0.0,
+            unit="px/s",
+            help="Animals slower than this are excluded from each frame's rotation term.",
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute group rotational order (milling) for *session*.

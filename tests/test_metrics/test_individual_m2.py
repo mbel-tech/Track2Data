@@ -177,6 +177,38 @@ class TestCentreDistance:
         df = CentreDistance().compute(psess)
         assert (df["metric_id"] == "IL-3").all()
 
+    def test_inner_radius_fraction_defaults_to_half(self) -> None:
+        """Without cfg['inner_radius_fraction'], the inner-radius cutoff
+        is arena_radius/2 -- the historical hardcoded behaviour,
+        preserved as the default rather than changed silently."""
+        n_frames, n_animals = 20, 1
+        xy = np.full((n_frames, n_animals, 2), [700.0, 500.0])  # dist 200 from centre
+        psess = make_psess(xy=xy)
+        df = CentreDistance().compute(
+            psess, cfg={"centre": [500.0, 500.0], "arena_radius": 400.0}
+        )
+        # inner radius = 400/2 = 200; dist=200 is not < 200 -> outside
+        assert df.iloc[0]["time_in_centre_pct"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_inner_radius_fraction_is_configurable(self) -> None:
+        """cfg['inner_radius_fraction'] overrides the default 0.5 --
+        e.g. 0.75 widens the "inner" zone to 3/4 of the arena radius."""
+        n_frames, n_animals = 20, 1
+        xy = np.full((n_frames, n_animals, 2), [700.0, 500.0])  # dist 200 from centre
+        psess = make_psess(xy=xy)
+        df = CentreDistance().compute(
+            psess,
+            cfg={"centre": [500.0, 500.0], "arena_radius": 400.0, "inner_radius_fraction": 0.75},
+        )
+        # inner radius = 400*0.75 = 300; dist=200 < 300 -> inside
+        assert df.iloc[0]["time_in_centre_pct"] == pytest.approx(1.0, abs=1e-6)
+
+    def test_declares_configurable_parameters(self) -> None:
+        names = {p.name for p in CentreDistance.parameters}
+        assert names == {"centre", "arena_radius", "inner_radius_fraction"}
+        derived = {p.name for p in CentreDistance.parameters if p.derived}
+        assert derived == {"centre", "arena_radius"}
+
 
 # ── IL-6: Acceleration ────────────────────────────────────────────────────────
 
@@ -285,6 +317,10 @@ class TestAcceleration:
 class TestFreezingBouts:
     def test_metric_id(self) -> None:
         assert FreezingBouts.id == "IL-7"
+
+    def test_declares_configurable_parameters(self) -> None:
+        names = {p.name for p in FreezingBouts.parameters}
+        assert names == {"threshold_px_s", "min_bout_frames"}
 
     def test_output_columns_present(self) -> None:
         psess = make_psess()

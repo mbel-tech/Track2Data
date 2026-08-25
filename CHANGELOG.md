@@ -41,6 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   supplied them. With zones defined, these are now derived automatically
   via `zones.geometry.roi_area_px2` (also previously fully tested but
   never called in production).
+- **New configurable parameters** across 9 metrics, settable via
+  `MetricSelection.config` (GUI wiring for the ⚙ dialog itself is
+  tracked separately): IL-3's `inner_radius_fraction` (default 0.5,
+  the historical hardcoded value); IL-4's `threshold_multiplier`
+  (default 0.1, the historical hardcoded value); GL-6's
+  `cohesion_source` (`'nnd'`/`'iid'`, default `'nnd'`, matching this
+  metric's prior NND-only behaviour -- see `METRICS_SPEC.md` §8 open
+  question 3); Z-3's `min_visit_frames`, Z-4's and Z-5's (and, by
+  forwarding, Z-6's) `min_dwell_frames` -- all default to 1 (every
+  run counts, matching prior behaviour) and debounce brief boundary
+  flicker when raised. IL-7's already-configurable `threshold_px_s`/
+  `min_bout_frames` and GL-3's/GL-8's `stationary_threshold_px_s` are
+  now formally declared in each metric's `parameters` schema too.
 
 ### Changed
 
