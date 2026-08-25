@@ -160,6 +160,34 @@ def test_load_from_store_checks_rows_matching_the_manifest_selection(qtbot) -> N
     assert screen._ind_table.item(row, 0).checkState() == Qt.CheckState.Checked
 
 
+def test_apply_preserves_fields_the_table_has_no_widgets_for(qtbot) -> None:
+    """Regression: _apply() used to build a fresh MetricSelection(...)
+    from only the four fields the screen's own widgets show, silently
+    resetting `diagnostic` and `config` -- which nothing on this
+    screen edits -- to their defaults on every Apply click."""
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "metrics": MetricSelection(
+                diagnostic=["D-1", "D-2"],
+                config={"IL-4": {"threshold_px_s": 2.5}},
+            )
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+    screen._apply()
+
+    assert store.manifest.metrics.individual == ["IL-1"]
+    assert store.manifest.metrics.diagnostic == ["D-1", "D-2"]
+    assert store.manifest.metrics.config == {"IL-4": {"threshold_px_s": 2.5}}
+
+
 # ── per-row ⓘ / ⚙ buttons ─────────────────────────────────────────────────────
 
 

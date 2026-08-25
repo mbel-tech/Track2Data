@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from track2data.metrics.base import Metric, MetricDocumentation
+from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 
 
 class TestMetricDocumentation:
@@ -123,3 +123,107 @@ class TestMetricBase:
         m = Diag()
         assert m.level == "diagnostic"
         assert m.priority == "diagnostic"
+
+    def test_parameters_defaults_to_empty_list(self) -> None:
+        """Most metrics (24/33) take no configuration at all -- the gear
+        button must disable itself for these rather than open an empty
+        dialog, so an empty default (not a required field) matters."""
+        import pandas as pd
+
+        class NoParams(Metric):
+            id = "X-1"
+            name = "x"
+            label = "X"
+            level = "individual"
+            priority = "primary"
+            requires_identity = False
+            output_columns: list[str] = ["v"]
+            documentation = MetricDocumentation(
+                definition="d", formula_plain="f", inputs=[],
+                assumptions=[], warnings=[],
+            )
+
+            def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+                return pd.DataFrame()
+
+        assert NoParams.parameters == []
+
+
+class TestMetricParameter:
+    def test_minimal_construction(self) -> None:
+        p = MetricParameter(name="threshold_px_s", label="Activity threshold", kind="float")
+        assert p.name == "threshold_px_s"
+        assert p.kind == "float"
+        assert p.default is None
+        assert p.derived is False
+
+    def test_choice_kind_carries_choices(self) -> None:
+        p = MetricParameter(
+            name="cohesion_source",
+            label="Cohesion source",
+            kind="choice",
+            default="nnd",
+            choices=["nnd", "iid"],
+            help="Which pairwise-distance measure group cohesion is derived from.",
+        )
+        assert p.choices == ["nnd", "iid"]
+        assert p.default == "nnd"
+
+    def test_derived_parameter_has_no_user_default_semantics(self) -> None:
+        """derived=True marks a parameter as computed per-session (e.g.
+        IL-3's arena centre from that session's own zones) -- the GUI
+        renders it read-only rather than as an editable default."""
+        p = MetricParameter(
+            name="centre", label="Arena centre", kind="float", derived=True,
+        )
+        assert p.derived is True
+
+    def test_bounds_and_unit(self) -> None:
+        p = MetricParameter(
+            name="min_bout_frames",
+            label="Minimum bout length",
+            kind="int",
+            default=5,
+            minimum=1,
+            maximum=1000,
+            unit="frames",
+        )
+        assert p.minimum == 1
+        assert p.maximum == 1000
+        assert p.unit == "frames"
+
+    def test_round_trip_json(self) -> None:
+        p = MetricParameter(
+            name="threshold_px_s", label="Activity threshold", kind="float",
+            default=1.5, minimum=0.0, maximum=None, unit="px/s",
+            help="Speed above which an animal counts as active.",
+        )
+        restored = MetricParameter.model_validate_json(p.model_dump_json())
+        assert restored == p
+
+    def test_metric_can_declare_parameters(self) -> None:
+        import pandas as pd
+
+        class Configurable(Metric):
+            id = "X-2"
+            name = "x2"
+            label = "X2"
+            level = "individual"
+            priority = "primary"
+            requires_identity = False
+            output_columns: list[str] = ["v"]
+            documentation = MetricDocumentation(
+                definition="d", formula_plain="f", inputs=[],
+                assumptions=[], warnings=[],
+            )
+            parameters = [
+                MetricParameter(
+                    name="threshold_px_s", label="Threshold", kind="float", default=1.0,
+                ),
+            ]
+
+            def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+                return pd.DataFrame()
+
+        assert len(Configurable.parameters) == 1
+        assert Configurable.parameters[0].name == "threshold_px_s"

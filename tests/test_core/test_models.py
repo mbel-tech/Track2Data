@@ -209,6 +209,44 @@ class TestMetricSelection:
         restored = MetricSelection.model_validate_json(m.model_dump_json())
         assert restored == m
 
+    def test_config_defaults_empty(self) -> None:
+        m = MetricSelection()
+        assert m.config == {}
+
+    def test_config_stores_per_metric_param_dicts(self) -> None:
+        """Keyed metric_id -> {param_name: value} -- see
+        track2data/metrics/base.py's MetricParameter and
+        UI_DESIGN.md:763's proposed shape."""
+        m = MetricSelection(
+            config={
+                "IL-4": {"threshold_px_s": 2.5},
+                "IL-7": {"threshold_px_s": 2.5, "min_bout_frames": 10},
+            }
+        )
+        assert m.config["IL-4"]["threshold_px_s"] == pytest.approx(2.5)
+        assert m.config["IL-7"]["min_bout_frames"] == 10
+
+    def test_config_round_trips_through_json(self) -> None:
+        m = MetricSelection(config={"GL-6": {"cohesion_source": "iid"}})
+        restored = MetricSelection.model_validate_json(m.model_dump_json())
+        assert restored == m
+
+    def test_config_is_part_of_project_hash(self, tmp_path) -> None:
+        """MetricSelection.config joins the reproducibility hash for
+        free -- ProjectManifest.project_hash() dumps the whole
+        manifest (minus timestamps), so a config-only difference must
+        still change the hash."""
+        from datetime import UTC, datetime
+
+        from track2data.core.models import ProjectManifest
+
+        now = datetime.now(tz=UTC)
+        base = ProjectManifest(project_name="p", created_at=now, updated_at=now)
+        configured = base.model_copy(
+            update={"metrics": MetricSelection(config={"IL-4": {"threshold_px_s": 2.5}})}
+        )
+        assert base.project_hash() != configured.project_hash()
+
 
 # ── ProjectManifest ────────────────────────────────────────────────────────────
 
