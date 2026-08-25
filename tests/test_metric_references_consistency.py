@@ -306,3 +306,71 @@ def test_the_spec_parameter_names_exist_in_the_code() -> None:
     assert not problems, "METRICS_SPEC.md documents parameters that don't exist:\n" + "\n".join(
         problems
     )
+
+
+def test_metric_counts_stated_in_the_docs_match_the_registry() -> None:
+    """Prose that counts metrics rots silently the moment one gains a
+    parameter -- "24 of 33 take no configuration" was wrong in three
+    places at once, and 24 turned out to be the number of NON-diagnostic
+    metrics, not the number without parameters. Any such figure must be
+    pinned to the registry that produces it.
+
+    `CHANGELOG.md` is deliberately excluded and states no figure. It is
+    a historical record: once an entry ships it describes what was true
+    at that release, and a test forcing it to track today's registry
+    would be rewriting history rather than preventing drift.
+    """
+    import re
+
+    ids = metrics.all_ids()
+    screen_ids = [mid for mid in ids if metrics.get(mid).level != "diagnostic"]
+
+    counts = {
+        # Every registered metric.
+        "total": len(ids),
+        "without_params": sum(1 for mid in ids if not metrics.get(mid).parameters),
+        # What the Metrics screen actually lists: Individual / Group /
+        # Zone tabs. Diagnostics always run and are not selectable there,
+        # so a claim about the ⚙ column must count only these.
+        "screen_total": len(screen_ids),
+        "screen_without_params": sum(
+            1 for mid in screen_ids if not metrics.get(mid).parameters
+        ),
+    }
+
+    claims = [
+        (
+            "track2data/metrics/base.py",
+            r"Most metrics \((\d+) of (\d+) today\) take no configuration",
+            ("without_params", "total"),
+        ),
+        (
+            "docs/METRICS_SPEC.md",
+            r"disabled with an explanatory tooltip for the (\d+) of the (\d+) metrics",
+            ("screen_without_params", "screen_total"),
+        ),
+    ]
+
+    problems: list[str] = []
+    for rel_path, pattern, keys in claims:
+        # Collapse whitespace so a claim that wraps across lines (both of
+        # these do) still matches one flat regex.
+        text = re.sub(r"\s+", " ", (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        match = re.search(pattern, text)
+        if match is None:
+            problems.append(
+                f"{rel_path}: could not find the metric-count claim. If you reworded "
+                f"it, update the pattern here so the figure stays pinned: {pattern!r}"
+            )
+            continue
+
+        for group, key in enumerate(keys, start=1):
+            stated, actual = int(match.group(group)), counts[key]
+            if stated != actual:
+                problems.append(f"{rel_path}: says {stated} for {key}, registry has {actual}")
+
+    assert not problems, (
+        "metric counts in prose no longer match the registry:\n  "
+        + "\n  ".join(problems)
+        + f"\n\nCurrent counts: {counts}"
+    )

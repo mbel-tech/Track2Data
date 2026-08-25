@@ -897,8 +897,11 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for those that declare
-   none. A `derived=True` parameter (IL-3's centre/radius, Z-2's zone
+   it is disabled with an explanatory tooltip for the 13 of the 24
+   metrics it lists that declare none (diagnostics always run and
+   aren't selectable there, so they don't count towards either
+   figure; both are pinned by
+   `tests/test_metric_references_consistency.py`). A `derived=True` parameter (IL-3's centre/radius, Z-2's zone
    areas) renders as a read-only "derived from this session's zones"
    label -- it is never user-editable and Save never writes it into
    `MetricSelection.config`. A parameter with no declared default (IL-4/
