@@ -140,8 +140,17 @@ The spec is the contract; code that diverges from spec is a bug.
 
 ### Metric references
 
-Adding a metric, or changing any metric's `citation` / `citation_doi`, also means regenerating the
-published reference list:
+Every specific, findable work a metric cites lives in exactly one place: `track2data/metrics/references.py`,
+as a module-level `Reference` constant (`CACHAT_2010`, `ROMERO_FERRERO_2019`, ...). A metric class points
+`documentation.primary_reference` at one of these (which fills `citation`/`citation_doi` automatically) and,
+optionally, `documentation.supporting_references` at a list of more. Two metrics citing the same work import
+the *same* `Reference` object, so their citation text is byte-identical by construction — never retype a
+citation string into a second metric class, even if it looks like the same text. A metric with no specific
+originating work still sets `citation` directly, as free text ("Standard kinematics; no single originating
+work") — inventing a `Reference` for a generic convention would misrepresent it as having one paper behind it.
+
+Adding a metric, or changing any metric's `citation` / `citation_doi` / `primary_reference` /
+`supporting_references`, also means regenerating the published reference list and bibliography:
 
 ```bash
 python scripts/generate_metric_references.py
@@ -152,14 +161,16 @@ module optionally, so on a venv missing `scipy` or `shapely` it would otherwise 
 of the metrics and the regenerated CSV would quietly lose every row from the module that failed to
 import. The script refuses to write in that case and names the missing module.
 
-Commit the resulting `docs/METRIC_REFERENCES.csv` with your change.
-`tests/test_metric_references_consistency.py` fails otherwise — it also checks that every metric
-has a citation, that each DOI is a bare `10.xxxx/...` (not a URL), that the same DOI is never
-attached to metrics whose citation texts differ, and that `METRICS_SPEC.md`'s inline **Reference**
-row matches the code.
+Commit the resulting `docs/METRIC_REFERENCES.csv` (now with a `supporting_references` column) and
+`docs/references.bib` with your change. `tests/test_metric_references_consistency.py` fails otherwise
+— it also checks that every metric has a citation, that each DOI is a bare `10.xxxx/...` (not a URL),
+that the same DOI is never attached to metrics whose citation texts differ, that every `Reference` a
+metric uses is the canonical object from `references.py` (not a free-floating duplicate with the same
+key), and that `METRICS_SPEC.md`'s inline **Reference** / **Supporting references** rows match the code.
 
-`Metric.documentation` in the code is the single source of truth. Never hand-edit the CSV, and
-never edit a spec **Reference** row without making the same change in the metric class.
+`Metric.documentation` in the code is the single source of truth. Never hand-edit the CSV or the
+`.bib`, and never edit a spec **Reference** / **Supporting references** row without making the same
+change in the metric class.
 
 A citation must name a real, findable work. If no specific work applies, say so plainly
 ("Standard kinematics; no single originating work") and leave `citation_doi=None` — an honest

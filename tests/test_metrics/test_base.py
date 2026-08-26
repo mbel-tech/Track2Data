@@ -54,6 +54,35 @@ class TestMetricDocumentation:
         restored = MetricDocumentation.model_validate_json(doc.model_dump_json())
         assert restored == doc
 
+    def test_primary_reference_fills_citation_and_doi(self) -> None:
+        from track2data.metrics.references import CACHAT_2010
+
+        doc = MetricDocumentation(
+            definition="d", formula_plain="f", inputs=[],
+            assumptions=[], warnings=[],
+            primary_reference=CACHAT_2010,
+        )
+        assert doc.citation == CACHAT_2010.text
+        assert doc.citation_doi == CACHAT_2010.doi
+
+    def test_primary_reference_and_citation_together_raises(self) -> None:
+        from track2data.metrics.references import CACHAT_2010
+
+        with pytest.raises(ValueError):
+            MetricDocumentation(
+                definition="d", formula_plain="f", inputs=[],
+                assumptions=[], warnings=[],
+                primary_reference=CACHAT_2010,
+                citation="Some other text",
+            )
+
+    def test_supporting_references_default_empty(self) -> None:
+        doc = MetricDocumentation(
+            definition="d", formula_plain="f", inputs=[],
+            assumptions=[], warnings=[],
+        )
+        assert doc.supporting_references == []
+
 
 class TestMetricBase:
     def test_is_abstract(self) -> None:
@@ -99,6 +128,31 @@ class TestMetricBase:
         m = Concrete()
         assert m.id == "X-1"
         assert m.documentation.definition == "d"
+
+    def test_superseded_by_defaults_to_none(self) -> None:
+        class Concrete(Metric):
+            id = "X-1"
+            name = "x"
+            label = "X"
+            level = "individual"
+            priority = "primary"
+            requires_identity = False
+            output_columns: list[str] = ["v"]
+            documentation = MetricDocumentation(
+                definition="d", formula_plain="f", inputs=[],
+                assumptions=[], warnings=[],
+            )
+
+            def compute(self, session: object, cfg: dict | None = None):
+                import pandas as pd
+                return pd.DataFrame({"v": []})
+
+        assert Concrete.superseded_by is None
+
+    def test_z2_declares_superseded_by_z8(self) -> None:
+        from track2data import metrics
+
+        assert metrics.get("Z-2").superseded_by == "Z-8"
 
     def test_level_includes_diagnostic(self) -> None:
         """Level must accept 'diagnostic' (new) in addition to the original three."""

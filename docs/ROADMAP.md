@@ -15,7 +15,7 @@ The engine, the GUI, and the packaging pipeline are all built and green.
 | Full error hierarchy (`core/errors.py`) | ✅ Implemented |
 | Manifest read/write + migration (`core/manifest.py`) | ✅ Implemented |
 | Unified idtracker.ai reader (`readers/idtrackerai/`) — h5 / npy / csv | ✅ Implemented; 70/70 real corpus sessions import |
-| Behavioural metrics | ✅ 33 registered (IL-1..8, GL-1..10, Z-1..6, D-1..9) |
+| Behavioural metrics | ✅ 44 registered (IL-1..11, IL-14, GL-1..11, GL-13, GL-15, Z-1..9, D-1..10) |
 | Exporters | ✅ 5 (`csv_long`, `csv_wide`, `excel`, `feather`, `readme`) |
 | Metadata join wired into `Engine` | ✅ Implemented |
 | Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |
@@ -55,7 +55,7 @@ metadata/{loader,mapping,join,schema}
 preprocess/{kinematics,gap_fill,jump_detect,identity_switch,smoothing,validate}
 preprocess/pipeline               ← orchestrates the above
         ↓
-metrics/{individual,group,zone,identity_free,diagnostic}
+metrics/{individual,group,zone,diagnostic}        ← GL-7 (identity-free) lives in group.py
         ↓
 exporters/{csv_long,csv_wide,excel,feather,readme}
 cache/store
@@ -104,7 +104,7 @@ in M2; it sits well above that in practice.
 | 18 | `metrics/individual.py` | IL-1 path length, IL-2 speed first; others incremental |
 | 19 | `metrics/group.py` | GL-1 NND, GL-3 polarisation, GL-5 centroid speed |
 | 20 | `metrics/zone.py` | Z-1 time in zone, Z-3 visits |
-| 21 | `metrics/identity_free.py` | GL-7 NN-matched speed |
+| 21 | `metrics/group.py` (GL-7) | GL-7 NN-matched speed -- built here, not a separate `identity_free.py` module |
 | 22 | `metrics/diagnostic.py` | D-1..D-5 always-on diagnostics |
 | 23 | `exporters/csv_long.py` | Primary long-format CSV |
 | 24 | `exporters/readme.py` | Human-readable run README |
@@ -201,6 +201,26 @@ implementation.
 | GPU acceleration | No user requirement yet |
 | Telemetry | Explicitly opted out (no telemetry policy) |
 | R runtime integration | Engine is pure-Python by design |
+
+### Reserved metric IDs (proposed, not built)
+
+The 2026-08 reference audit proposed 20 new metrics; 11 shipped
+(IL-9, IL-10, IL-11, IL-14, GL-11, GL-13, GL-15, Z-7, Z-8, Z-9,
+D-10 -- see `docs/METRICS_SPEC.md`). These IDs are reserved against the
+proposals below and MUST NOT be reused for something else without
+re-reading why each was deferred:
+
+| ID(s) | Proposal | Why deferred |
+|---|---|---|
+| Z-10 | Vertical-position / novel-tank depth metrics | Assumes side-view video; nothing in the data model records camera view, so on top-down data it would compute "depth" from a meaningless y-axis. Needs a project-level `camera_view` declaration first. |
+| GL-17 | Individual consistency / repeatability of social position | Needs repeated trials. `Metric.compute(session, cfg)` is per-session with no cross-session concept -- an architectural change, not a metric. |
+| D-11 | Effective sample size / autocorrelation-adjusted N | Viable, medium effort, no blocker -- deferred on scope alone this round. |
+| D-12 | Interpolation & gap provenance per metric | `PreprocessedSession.was_interpolated` already exists, but *per-metric* provenance requires every metric to report which frames fed it -- a change to the `Metric` contract, not one new class. |
+| IL-12 | Speed autocorrelation / persistence time | Viable, medium effort, no blocker -- deferred on scope alone this round. |
+| IL-13 | Bout / kinematic-state segmentation | The proposal's source (Marques et al. 2018) segmented bouts from **tail shape at ~700 fps**; citing it for a centroid-based segmenter would repeat the exact over-claim the audit flagged on IL-5's tortuosity estimator. |
+| GL-12 | Neighbour angular distribution / density map | Viable, but its natural output is a 2-D histogram, which doesn't fit the long-format `session_id \| individual_id \| metric_id \| value` schema -- needs summary scalars designed first. |
+| GL-14 | Directional correlation delay / leadership ranking | D-7 measured a **median individual-fragment length of 3 frames** on a real corpus session; lag correlation needs identity to hold across seconds, which this corpus does not support. |
+| GL-16 | Group spatial correlation length | Cavagna's method is validated on flocks of hundreds; on shoals of 5-20 animals the correlation length is not estimable. |
 
 ---
 

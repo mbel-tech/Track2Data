@@ -14,6 +14,7 @@ from track2data.metrics.diagnostic import (
     IdentityStability,
     IdProbabilityStats,
     InconsistentFrameCount,
+    PhysicalPlausibilityViolations,
     SegmentationErrorFrames,
     SwapOpportunityCount,
     TrackingAccuracy,
@@ -484,15 +485,91 @@ class TestIdentityStability:
         assert m.level == "diagnostic"
 
 
+# ── D-10: Physical-Plausibility Violation Rate ──────────────────────────────
+
+
+class TestPhysicalPlausibilityViolations:
+    def test_metric_id(self) -> None:
+        assert PhysicalPlausibilityViolations.id == "D-10"
+
+    def test_output_columns_present(self) -> None:
+        sess = make_session()
+        df = PhysicalPlausibilityViolations().compute(sess)
+        for col in (
+            "session_id",
+            "individual_id",
+            "violation_fraction",
+            "teleport_jump_count",
+            "speed_limit_px_s",
+        ):
+            assert col in df.columns
+
+    def test_smooth_trajectory_has_no_violations_with_explicit_limit(self) -> None:
+        n_frames = 50
+        xy = np.zeros((n_frames, 1, 2))
+        xy[:, 0, 0] = np.arange(n_frames) * 1.0  # constant 1 px/frame = 25 px/s at fps 25
+        sess = make_session(n_animals=1, raw_xy=xy)
+        df = PhysicalPlausibilityViolations().compute(sess, cfg={"speed_limit_px_s": 1000.0})
+        assert df.iloc[0]["violation_fraction"] == pytest.approx(0.0)
+        assert df.iloc[0]["teleport_jump_count"] == 0
+
+    def test_injected_teleport_jump_is_detected(self) -> None:
+        n_frames = 50
+        xy = np.zeros((n_frames, 1, 2))
+        xy[:, 0, 0] = np.arange(n_frames) * 1.0
+        xy[25, 0, 0] += 10_000.0  # one enormous single-frame jump
+        sess = make_session(n_animals=1, raw_xy=xy)
+        df = PhysicalPlausibilityViolations().compute(sess, cfg={"speed_limit_px_s": 1000.0})
+        assert df.iloc[0]["teleport_jump_count"] >= 1
+
+    def test_auto_speed_limit_is_data_driven_when_unset(self) -> None:
+        rng = np.random.default_rng(4)
+        n_frames = 200
+        xy = np.zeros((n_frames, 1, 2))
+        xy[:, 0, :] = np.cumsum(rng.normal(0, 1, size=(n_frames, 2)), axis=0)
+        sess = make_session(n_animals=1, raw_xy=xy)
+        df = PhysicalPlausibilityViolations().compute(sess)
+        assert not np.isnan(df.iloc[0]["speed_limit_px_s"])
+        assert df.iloc[0]["speed_limit_px_s"] > 0
+
+    def test_speed_limit_percentile_is_configurable(self) -> None:
+        rng = np.random.default_rng(5)
+        n_frames = 200
+        xy = np.zeros((n_frames, 1, 2))
+        xy[:, 0, :] = np.cumsum(rng.normal(0, 1, size=(n_frames, 2)), axis=0)
+        sess = make_session(n_animals=1, raw_xy=xy)
+        low = PhysicalPlausibilityViolations().compute(
+            sess, cfg={"speed_limit_percentile": 50.0}
+        ).iloc[0]["speed_limit_px_s"]
+        high = PhysicalPlausibilityViolations().compute(
+            sess, cfg={"speed_limit_percentile": 99.9}
+        ).iloc[0]["speed_limit_px_s"]
+        assert high > low
+
+    def test_teleport_multiplier_is_configurable(self) -> None:
+        n_frames = 50
+        xy = np.zeros((n_frames, 1, 2))
+        xy[:, 0, 0] = np.arange(n_frames) * 1.0
+        xy[25, 0, 0] += 500.0
+        sess = make_session(n_animals=1, raw_xy=xy)
+        loose = PhysicalPlausibilityViolations().compute(
+            sess, cfg={"speed_limit_px_s": 100.0, "teleport_multiplier": 2.0}
+        ).iloc[0]["teleport_jump_count"]
+        strict = PhysicalPlausibilityViolations().compute(
+            sess, cfg={"speed_limit_px_s": 100.0, "teleport_multiplier": 50.0}
+        ).iloc[0]["teleport_jump_count"]
+        assert loose >= strict
+
+
 # ── compute_all_diagnostics ────────────────────────────────────────────────────
 
 
 class TestComputeAllDiagnostics:
-    def test_returns_nine_keys(self) -> None:
+    def test_returns_ten_keys(self) -> None:
         sess = make_session()
         result = compute_all_diagnostics(sess)
         assert set(result.keys()) == {
-            "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9",
+            "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9", "D-10",
         }
 
     def test_values_are_dataframes(self) -> None:

@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 
-from track2data.core.models import PreprocessedSession, ZoneSet
+from track2data.core.models import ROI, PreprocessedSession, ZoneSet
 from track2data.zones.geometry import roi_area_px2
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,12 @@ def derive_metric_params(
     """
     if metric_id == "IL-3":
         return _derive_il3(psess, zone_set)
-    if metric_id == "Z-2":
+    if metric_id == "IL-14":
+        return _derive_il14(psess, zone_set)
+    if metric_id in ("Z-2", "Z-8"):
+        # Z-8 (Jacobs' D) reuses Z-2's zone-area derivation verbatim --
+        # both need the same roi_areas/total_arena_area, just fed into
+        # a different formula downstream.
         return _derive_z2(zone_set)
     return {}
 
@@ -165,6 +170,52 @@ def _derive_il3(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]
         "arena_radius": radius,
         "centres": centres,
         "arena_radii": radii,
+    }
+
+
+def _derive_il14(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]:
+    """IL-14 (wall_distance_thigmotaxis)'s arena boundary, per animal.
+
+    Same "each animal is measured from the arena it occupies" rule as
+    IL-3, but keeps the pooled polygon vertices themselves (for a
+    boundary-distance test) rather than collapsing them to a bbox
+    centre/radius -- wall distance needs the actual boundary shape, not
+    a circle approximation. Only additive ("+") main-level polygons
+    contribute; subtractive exclusion holes are not treated as
+    "walls" for this metric.
+    """
+    main_rois = [roi for roi in zone_set.rois if roi.level == "main" and roi.sign == "+"]
+    n_animals = psess.session.n_animals
+
+    if main_rois:
+        vertices_by_name: dict[str, list[tuple[float, float]]] = {}
+        for roi in main_rois:
+            vertices_by_name.setdefault(roi.name, []).extend(roi.vertices)
+        areas_by_name = {
+            name: roi_area_px2(ROI(name=name, vertices=v)) for name, v in vertices_by_name.items()
+        }
+        largest = max(areas_by_name, key=lambda n: areas_by_name[n])
+        session_vertices = vertices_by_name[largest]
+    else:
+        video = psess.session.video
+        vertices_by_name = {}
+        session_vertices = [
+            (0.0, 0.0),
+            (video.width_px, 0.0),
+            (video.width_px, video.height_px),
+            (0.0, video.height_px),
+        ]
+
+    assigned = _dominant_zone_per_animal(psess.main_zone, n_animals, set(vertices_by_name))
+
+    polygons: list[list[tuple[float, float]]] = []
+    for name in assigned:
+        vertices = vertices_by_name[name] if name is not None else session_vertices
+        polygons.append(list(vertices))
+
+    return {
+        "arena_polygon_vertices": session_vertices,
+        "arena_polygon_vertices_per_animal": polygons,
     }
 
 

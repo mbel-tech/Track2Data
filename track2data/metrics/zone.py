@@ -9,6 +9,16 @@ import numpy as np
 import pandas as pd
 
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
+from track2data.metrics.references import (
+    BAKEMAN_GOTTMAN_1997,
+    BOURIN_HASCOET_2003,
+    HALL_1934,
+    JACOBS_1974,
+    KRAUSE_RUXTON_2002,
+    MARTIN_BATESON_2007,
+    SIBLY_1990,
+    WALSH_CUMMINS_1976,
+)
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -132,12 +142,8 @@ class TimeInZone(Metric):
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=["Empty-string values are treated as 'not in any zone'."],
-        citation=(
-            "Walsh & Cummins 1976, Psychol. Bull. 83(3):482-504 (the "
-            "open-field test, whose central measure is time spent in "
-            "defined sub-regions)"
-        ),
-        citation_doi="10.1037/0033-2909.83.3.482",
+        primary_reference=WALSH_CUMMINS_1976,
+        supporting_references=[HALL_1934],
     )
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
@@ -230,11 +236,8 @@ class ZoneVisitCount(Metric):
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=["A single continuous stay counts as one visit regardless of duration."],
-        citation=(
-            "Martin & Bateson 2007, Measuring Behaviour: An Introductory "
-            "Guide, 3rd ed. (Cambridge University Press) -- frequency "
-            "counting of discrete behavioural events"
-        ),
+        primary_reference=MARTIN_BATESON_2007,
+        supporting_references=[BAKEMAN_GOTTMAN_1997],
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -330,6 +333,13 @@ class AreaCorrectedOccupancy(Metric):
     level = "zone"
     priority = "primary"
     requires_identity = False
+    # Z-8 (Jacobs' D) is a bias-corrected, bounded [-1, +1] form of the
+    # same use-vs-availability idea; this raw ratio stays unbounded and
+    # asymmetric, so it can't be meaningfully averaged across animals or
+    # compared across arena designs. Z-2 keeps computing exactly what it
+    # always has -- no existing project's numbers move -- but the tool
+    # now says which statistic is the better one. See METRICS_SPEC.md.
+    superseded_by: ClassVar[str | None] = "Z-8"
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",
@@ -353,13 +363,21 @@ class AreaCorrectedOccupancy(Metric):
             "Zone arrays are pre-assigned object arrays of zone-name strings",
             "roi_areas and total_arena_area must be provided in cfg",
         ],
-        warnings=["Returns empty DataFrame when cfg is missing or incomplete"],
+        warnings=[
+            "Returns empty DataFrame when cfg is missing or incomplete",
+            "This ratio is unbounded and asymmetric (over- and "
+            "under-representation are not on comparable scales), so it "
+            "cannot be meaningfully averaged across animals or compared "
+            "across arena designs -- see Z-8 (Jacobs' D) for a bounded "
+            "[-1, +1] alternative built on the same zone-area data",
+        ],
         citation=(
             "Area-normalised occupancy (observed time in a zone relative to "
             "that zone's share of the arena), the standard correction for "
             "comparing unequal-area regions of interest. No single "
             "originating work"
         ),
+        supporting_references=[JACOBS_1974, KRAUSE_RUXTON_2002],
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -489,13 +507,19 @@ class ZoneTransitions(Metric):
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings"],
         warnings=[
             "Only named zone-to-zone transitions are counted; "
-            "entering/leaving no-zone is ignored"
+            "entering/leaving no-zone is ignored",
+            "Collapses the full transition sequence to a scalar count per "
+            "zone pair; see Z-7 for the full transition matrix and "
+            "sequence entropy computed from this same run-length-encoded "
+            "data",
         ],
-        citation=(
-            "Fagen & Young 1978, 'Temporal patterns of behaviors', in "
-            "Colgan (ed.) Quantitative Ethology, pp. 79-114 (Wiley) -- "
-            "sequence and transition analysis of behavioural states"
-        ),
+        # Not Fagen & Young 1978 ('Temporal patterns of behaviors', in
+        # Colgan ed., Quantitative Ethology, Wiley) -- real work, but with
+        # no Crossref record or DOI, so a reader of this citation cannot
+        # resolve it. Bakeman & Gottman 1997 covers transition-matrix and
+        # sequential analysis directly and is DOI-bearing.
+        primary_reference=BAKEMAN_GOTTMAN_1997,
+        supporting_references=[MARTIN_BATESON_2007],
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -617,11 +641,8 @@ class Z5EntryExitEvents(Metric):
             "An animal still inside a zone at the final frame gets an 'enter' "
             "event with no matching 'exit' event.",
         ],
-        citation=(
-            "Boundary-crossing event extraction underlying the event/state "
-            "distinction in Martin & Bateson 2007, Measuring Behaviour, "
-            "3rd ed. (Cambridge University Press)"
-        ),
+        primary_reference=MARTIN_BATESON_2007,
+        supporting_references=[SIBLY_1990],
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -741,14 +762,14 @@ class Z6LatencyToFirstEntry(Metric):
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=[
             "NaN when the individual never enters the zone is encoded as inf "
-            "(rather than NaN) so results sort as 'latest possible'."
+            "(rather than NaN) so results sort as 'latest possible'.",
+            "The source paradigm is rodent (mouse light/dark box) and gives "
+            "no censoring convention of its own for a never-entering animal; "
+            "the inf encoding above is this tool's own deliberate choice, "
+            "not something the citation specifies.",
         ],
-        citation=(
-            "Bourin & Hascoët 2003, Eur. J. Pharmacol. 463(1-3):55-65 -- "
-            "latency to first entry as a standard exploration/anxiety "
-            "readout in the light/dark box test"
-        ),
-        citation_doi="10.1016/S0014-2999(03)01274-3",
+        primary_reference=BOURIN_HASCOET_2003,
+        supporting_references=[MARTIN_BATESON_2007],
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
@@ -822,6 +843,412 @@ class Z6LatencyToFirstEntry(Metric):
         return pd.DataFrame(rows, columns=empty_cols)
 
 
+# ── Z-7: Zone transition matrix & sequence entropy ───────────────────────────
+
+
+class ZoneTransitionMatrix(Metric):
+    """Z-7 — Full zone-to-zone transition-probability matrix and the
+    Shannon entropy of the transition sequence, per individual.
+
+    Same run-length-encoded, debounced zone sequence Z-4 already
+    builds; where Z-4 collapses it to one scalar count per zone pair,
+    this exposes the full matrix (row-normalised into conditional
+    probabilities) plus a single entropy value per individual.
+    """
+
+    id = "Z-7"
+    name = "zone_transition_matrix"
+    label = "Zone Transition Matrix & Sequence Entropy"
+    level = "zone"
+    priority = "primary"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "individual_id",
+        "from_zone",
+        "to_zone",
+        "transition_count",
+        "transition_probability",
+        "sequence_entropy_bits",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Full zone-to-zone transition-probability matrix per individual "
+            "(same debounced zone sequence as Z-4), plus the Shannon entropy "
+            "of that individual's transition distribution -- a single number "
+            "summarising how predictable the zone-to-zone sequence is. Z-4's "
+            "scalar transition count is one cell of this same matrix."
+        ),
+        formula_plain=(
+            "Same debounced zone sequence as Z-4; "
+            "transition_probability[a,b] = count(a->b) / sum_b' count(a->b') "
+            "(row-normalised, i.e. P(next=b | current=a)); "
+            "sequence_entropy_bits = -sum(p_ij * log2(p_ij)) over all observed "
+            "transitions (a,b), p_ij = count(a,b) / total_transitions -- the "
+            "joint distribution's entropy, not the row-normalised one, so it "
+            "reflects both how many distinct transitions occur and how evenly "
+            "used they are"
+        ),
+        inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
+        assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings"],
+        warnings=[
+            "Only named zone-to-zone transitions are counted; entering/leaving "
+            "no-zone is ignored, same as Z-4",
+            "sequence_entropy_bits is repeated on every row for a given "
+            "individual (it is one scalar per individual, broadcast across "
+            "the matrix rows for long-format consistency)",
+            "Undefined (NaN) for an individual with zero qualifying transitions",
+        ],
+        primary_reference=BAKEMAN_GOTTMAN_1997,
+        supporting_references=[MARTIN_BATESON_2007],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_dwell_frames",
+            label="Minimum dwell length",
+            kind="int",
+            default=1,
+            minimum=1,
+            unit="frames",
+            help=(
+                "Debounces boundary flicker: a zone visit shorter than this is "
+                "dropped, merging the transitions either side of it into one "
+                "continuous stay rather than two flicker transitions. Same "
+                "parameter as Z-4."
+            ),
+        ),
+    ]
+
+    def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute the zone transition matrix and sequence entropy for
+        every individual.
+
+        Parameters
+        ----------
+        session:
+            A ``PreprocessedSession`` instance.
+        cfg:
+            Optional dict. ``cfg['min_dwell_frames']`` (default 1), same as Z-4.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (individual_id, from_zone, to_zone) with
+            transition_count, transition_probability, and
+            sequence_entropy_bits. Empty when no zone arrays are present
+            or no individual has any qualifying transition.
+        """
+        zone_arrays = _collect_zone_arrays(session)
+        empty_cols = self.output_columns
+        if not zone_arrays:
+            return pd.DataFrame(columns=empty_cols)
+
+        min_dwell_frames = 1
+        if cfg is not None and "min_dwell_frames" in cfg:
+            min_dwell_frames = int(cfg["min_dwell_frames"])
+
+        session_id: str = session.session_id  # type: ignore[attr-defined]
+        n_animals: int = session.n_animals  # type: ignore[attr-defined]
+
+        rows: list[dict] = []
+        for arr in zone_arrays:
+            for k in range(n_animals):
+                col = arr[:, k]
+                sequence = _debounced_zone_sequence(col, min_dwell_frames)
+
+                trans_counts: dict[tuple[str, str], int] = {}
+                for from_z, to_z in pairwise(sequence):
+                    if from_z != _EMPTY_ZONE_VALUE and to_z != _EMPTY_ZONE_VALUE:
+                        key = (from_z, to_z)
+                        trans_counts[key] = trans_counts.get(key, 0) + 1
+
+                if not trans_counts:
+                    continue
+
+                totals_by_from: dict[str, int] = {}
+                for (from_z, _to_z), count in trans_counts.items():
+                    totals_by_from[from_z] = totals_by_from.get(from_z, 0) + count
+
+                total_transitions = sum(trans_counts.values())
+                entropy_bits = -sum(
+                    (count / total_transitions) * np.log2(count / total_transitions)
+                    for count in trans_counts.values()
+                )
+
+                for (from_z, to_z), count in trans_counts.items():
+                    rows.append(
+                        {
+                            "session_id": session_id,
+                            "individual_id": k,
+                            "from_zone": from_z,
+                            "to_zone": to_z,
+                            "transition_count": count,
+                            "transition_probability": count / totals_by_from[from_z],
+                            "sequence_entropy_bits": float(entropy_bits),
+                        }
+                    )
+
+        if not rows:
+            return pd.DataFrame(columns=empty_cols)
+
+        return pd.DataFrame(rows, columns=empty_cols)
+
+
+# ── Z-8: Zone preference index (Jacobs' D) ────────────────────────────────────
+
+
+class ZonePreferenceIndex(Metric):
+    """Z-8 — Availability-corrected zone preference index (Jacobs' D).
+
+    Bounded [-1, +1] replacement for Z-2's unbounded area-corrected
+    ratio. Z-2 is kept (see its ``superseded_by``) for output
+    compatibility with existing projects; this is the better statistic
+    for new analyses -- it is bias-corrected and can be meaningfully
+    averaged across animals or compared across arena designs, which
+    Z-2's raw ratio cannot.
+    """
+
+    id = "Z-8"
+    name = "zone_preference_index"
+    label = "Zone Preference Index (Jacobs' D)"
+    level = "zone"
+    priority = "primary"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "zone_name",
+        "individual_id",
+        "jacobs_d",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Availability-corrected preference index for each zone: how much "
+            "more (or less) time an animal spends in a zone than expected from "
+            "that zone's share of the total arena area, on a bounded [-1, +1] "
+            "scale. 0 = time matches area share exactly; +1 = maximal "
+            "preference; -1 = maximal avoidance."
+        ),
+        formula_plain=(
+            "r = observed time_pct in the zone (same computation as Z-1); "
+            "p = roi_area / total_arena_area (same derivation as Z-2); "
+            "jacobs_d = (r - p) / (r + p - 2*r*p), or 0 when r == p == 0"
+        ),
+        inputs=[
+            "PreprocessedSession.main_zone",
+            "PreprocessedSession.sec_zone",
+            "cfg['roi_areas'] (derived per session, see metrics/derived.py)",
+            "cfg['total_arena_area'] (derived per session)",
+        ],
+        assumptions=[
+            "Zone arrays are pre-assigned object arrays of zone-name strings",
+            "roi_areas and total_arena_area are supplied in cfg (derived, "
+            "same as Z-2 -- never user-typed)",
+        ],
+        warnings=["Returns empty DataFrame when cfg is missing or incomplete"],
+        primary_reference=JACOBS_1974,
+        supporting_references=[KRAUSE_RUXTON_2002],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="roi_areas", label="Zone areas", kind="float", derived=True,
+            help="Derived per session from the project's own zone geometry (shared with Z-2).",
+        ),
+        MetricParameter(
+            name="total_arena_area", label="Total arena area", kind="float",
+            derived=True, unit="px²",
+        ),
+    ]
+
+    def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute Jacobs' D for every (zone, animal) pair.
+
+        Parameters
+        ----------
+        session:
+            A ``PreprocessedSession`` instance.
+        cfg:
+            Must contain ``roi_areas`` (dict zone_name -> float) and
+            ``total_arena_area`` (float), both derived per session --
+            identical inputs to Z-2.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (zone_name, individual_id) with jacobs_d.
+            Empty DataFrame when cfg is missing/incomplete or no zone
+            arrays are present.
+        """
+        empty_cols = self.output_columns
+        if not cfg or "roi_areas" not in cfg or "total_arena_area" not in cfg:
+            return pd.DataFrame(columns=empty_cols)
+
+        roi_areas: dict[str, float] = cfg["roi_areas"]
+        total_arena_area: float = cfg["total_arena_area"]
+        if not roi_areas or total_arena_area <= 0:
+            return pd.DataFrame(columns=empty_cols)
+
+        zone_arrays = _collect_zone_arrays(session)
+        if not zone_arrays:
+            return pd.DataFrame(columns=empty_cols)
+
+        session_id: str = session.session_id  # type: ignore[attr-defined]
+        n_frames: int = session.n_frames  # type: ignore[attr-defined]
+        n_animals: int = session.n_animals  # type: ignore[attr-defined]
+        total_duration_frames = n_frames
+
+        counts: dict[tuple[str, int], int] = {}
+        for arr in zone_arrays:
+            for k in range(n_animals):
+                col = arr[:, k]
+                for zone_name in np.unique(col):
+                    if zone_name == _EMPTY_ZONE_VALUE or zone_name not in roi_areas:
+                        continue
+                    n = int(np.sum(col == zone_name))
+                    key = (str(zone_name), k)
+                    counts[key] = counts.get(key, 0) + n
+
+        if not counts:
+            return pd.DataFrame(columns=empty_cols)
+
+        rows = []
+        for (zone_name, animal_idx), frame_count in counts.items():
+            r = frame_count / total_duration_frames
+            p = roi_areas[zone_name] / total_arena_area
+            denom = r + p - 2 * r * p
+            jacobs_d = 0.0 if denom == 0 else (r - p) / denom
+            rows.append(
+                {
+                    "session_id": session_id,
+                    "zone_name": zone_name,
+                    "individual_id": animal_idx,
+                    "jacobs_d": jacobs_d,
+                }
+            )
+
+        return pd.DataFrame(rows, columns=empty_cols)
+
+
+# ── Z-9: Zone dwell-time distribution ─────────────────────────────────────────
+
+
+class ZoneDwellTimeDistribution(Metric):
+    """Z-9 — Distribution of individual visit durations per zone.
+
+    Z-1 (total time) and Z-3 (visit count) cannot separate "one long
+    visit" from "many brief ones" -- a distinction that carries most
+    of the anxiety-phenotype signal in light/dark and novel-tank
+    assays. Pairs Z-5's enter/exit events into visits and summarises
+    their durations.
+    """
+
+    id = "Z-9"
+    name = "zone_dwell_time_distribution"
+    label = "Zone Dwell-Time Distribution"
+    level = "zone"
+    priority = "optional"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "zone_name",
+        "individual_id",
+        "n_visits",
+        "mean_dwell_s",
+        "median_dwell_s",
+        "max_dwell_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Mean, median, and maximum duration of each animal's visits to "
+            "each named zone, from the same enter/exit event log as Z-5."
+        ),
+        formula_plain=(
+            "Pair each 'enter' event with its next 'exit' event (same zone, "
+            "individual) from the Z-5 event log; dwell_s = exit.t_s - enter.t_s; "
+            "mean/median/max computed over all paired visits. A visit still "
+            "open at the final frame (Z-5's unmatched 'enter') is excluded, "
+            "not counted as an open-ended visit."
+        ),
+        inputs=["Z-5 event log"],
+        assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
+        warnings=[
+            "An animal's final, still-open visit at session end is excluded "
+            "from these statistics (its true duration is unknown)",
+            "Undefined (no row) for a (zone, animal) pair with zero completed visits",
+        ],
+        primary_reference=SIBLY_1990,
+        supporting_references=[BOURIN_HASCOET_2003],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_dwell_frames",
+            label="Minimum dwell length",
+            kind="int",
+            default=1,
+            minimum=1,
+            unit="frames",
+            help="Forwarded to Z-5: debounces boundary flicker, same as Z-5/Z-6.",
+        ),
+    ]
+
+    def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute dwell-time distribution statistics for every (zone, animal) pair.
+
+        Parameters
+        ----------
+        session:
+            A ``PreprocessedSession`` instance.
+        cfg:
+            Optional dict. ``cfg['min_dwell_frames']`` (default 1), forwarded to Z-5.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per (zone_name, individual_id) with n_visits,
+            mean_dwell_s, median_dwell_s, max_dwell_s. Empty DataFrame
+            when no zone arrays are present or no visit completes.
+        """
+        empty_cols = self.output_columns
+        events_df = Z5EntryExitEvents().compute(session, cfg)
+        if events_df.empty:
+            return pd.DataFrame(columns=empty_cols)
+
+        rows = []
+        grouped = events_df.groupby(["zone_name", "individual_id"], sort=False)
+        for (zone_name, animal_idx), group in grouped:
+            group = group.sort_values("frame")
+            durations: list[float] = []
+            pending_enter_t: float | None = None
+            for _, event_row in group.iterrows():
+                if event_row["event"] == "enter":
+                    pending_enter_t = float(event_row["t_s"])
+                elif event_row["event"] == "exit" and pending_enter_t is not None:
+                    durations.append(float(event_row["t_s"]) - pending_enter_t)
+                    pending_enter_t = None
+            # A trailing pending_enter_t (visit still open at session end) is
+            # deliberately dropped -- its true duration is unknown.
+
+            if not durations:
+                continue
+
+            arr = np.asarray(durations, dtype=np.float64)
+            rows.append(
+                {
+                    "session_id": session.session_id,  # type: ignore[attr-defined]
+                    "zone_name": zone_name,
+                    "individual_id": animal_idx,
+                    "n_visits": len(durations),
+                    "mean_dwell_s": float(arr.mean()),
+                    "median_dwell_s": float(np.median(arr)),
+                    "max_dwell_s": float(arr.max()),
+                }
+            )
+
+        if not rows:
+            return pd.DataFrame(columns=empty_cols)
+
+        return pd.DataFrame(rows, columns=empty_cols)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -832,3 +1259,6 @@ _register(ZoneVisitCount)
 _register(ZoneTransitions)
 _register(Z5EntryExitEvents)
 _register(Z6LatencyToFirstEntry)
+_register(ZoneTransitionMatrix)
+_register(ZonePreferenceIndex)
+_register(ZoneDwellTimeDistribution)

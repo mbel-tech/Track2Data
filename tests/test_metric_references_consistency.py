@@ -28,9 +28,18 @@ from track2data import metrics
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = REPO_ROOT / "docs" / "METRIC_REFERENCES.csv"
+BIB_PATH = REPO_ROOT / "docs" / "references.bib"
 GENERATOR_PATH = REPO_ROOT / "scripts" / "generate_metric_references.py"
 
-EXPECTED_HEADER = ["metric_id", "level", "priority", "metric_name", "reference", "doi"]
+EXPECTED_HEADER = [
+    "metric_id",
+    "level",
+    "priority",
+    "metric_name",
+    "reference",
+    "doi",
+    "supporting_references",
+]
 
 
 def _load_generator():
@@ -178,6 +187,29 @@ def test_the_spec_reference_row_matches_the_code_citation() -> None:
                 f"{metric_id}:\n  spec: {row.group(1)}\n  code: {expected}"
             )
 
+        supporting_row = re.search(
+            r"^\| \*\*Supporting references\*\* \| (.*?) \|$", section, re.MULTILINE
+        )
+        if doc.supporting_references:
+            from track2data.metrics.references import format_supporting_references
+
+            expected_supporting = format_supporting_references(doc.supporting_references)
+            if supporting_row is None:
+                mismatches.append(
+                    f"{metric_id}: has supporting_references in code but no "
+                    "'Supporting references' row in the spec"
+                )
+            elif supporting_row.group(1) != expected_supporting:
+                mismatches.append(
+                    f"{metric_id} (supporting):\n  spec: {supporting_row.group(1)}\n"
+                    f"  code: {expected_supporting}"
+                )
+        elif supporting_row is not None:
+            mismatches.append(
+                f"{metric_id}: spec has a 'Supporting references' row but the code "
+                "declares no supporting_references"
+            )
+
     assert not mismatches, "METRICS_SPEC.md disagrees with the code:\n" + "\n".join(mismatches)
 
 
@@ -213,6 +245,57 @@ def test_no_doi_is_shared_by_metrics_citing_different_works() -> None:
 
     assert not conflicts, (
         f"the same DOI is attached to metrics whose citation texts differ: {conflicts}"
+    )
+
+
+def test_every_reference_used_by_a_metric_comes_from_the_canonical_bibliography() -> None:
+    """Every ``primary_reference`` / ``supporting_references`` a metric
+    carries must be one of the singleton ``Reference`` objects declared
+    in ``track2data/metrics/references.py`` -- checked by identity
+    (``is``), not by matching text. A contributor who writes a new,
+    free-floating ``Reference(...)`` inline (rather than importing the
+    canonical one) would still pass every other test here as long as the
+    text happens to match today, but the moment either copy is edited
+    the two silently diverge -- exactly the failure this bibliography
+    module exists to make structurally impossible.
+    """
+    from track2data.metrics import references as refs_module
+
+    canonical = {
+        obj.key: obj
+        for obj in vars(refs_module).values()
+        if isinstance(obj, refs_module.Reference)
+    }
+
+    problems: list[str] = []
+    for mid in metrics.all_ids():
+        doc = metrics.get(mid).documentation
+        candidates = list(doc.supporting_references)
+        if doc.primary_reference is not None:
+            candidates.append(doc.primary_reference)
+        for ref in candidates:
+            canonical_obj = canonical.get(ref.key)
+            if canonical_obj is None:
+                problems.append(f"{mid}: Reference key {ref.key!r} not found in references.py")
+            elif canonical_obj is not ref:
+                problems.append(
+                    f"{mid}: Reference {ref.key!r} is not the canonical object from "
+                    "references.py -- import and reuse the module-level constant "
+                    "instead of constructing a new Reference with the same key"
+                )
+
+    assert not problems, "\n".join(problems)
+
+
+def test_references_bib_matches_regeneration() -> None:
+    """The drift guard for ``docs/references.bib``, parallel to the CSV's
+    own ``test_regenerating_the_csv_matches_the_committed_file``."""
+    committed = BIB_PATH.read_text(encoding="utf-8") if BIB_PATH.exists() else ""
+    regenerated = _load_generator().render_bib()
+
+    assert regenerated == committed, (
+        "docs/references.bib is out of date with the metric registry. "
+        "Run: python scripts/generate_metric_references.py"
     )
 
 
@@ -313,7 +396,10 @@ def test_metric_counts_stated_in_the_docs_match_the_registry() -> None:
     parameter -- "24 of 33 take no configuration" was wrong in three
     places at once, and 24 turned out to be the number of NON-diagnostic
     metrics, not the number without parameters. Any such figure must be
-    pinned to the registry that produces it.
+    pinned to the registry that produces it. README.md's "N built-in
+    metrics" and ROADMAP.md's "N registered" headline totals are exactly
+    how a count silently rots in prose no one thinks of as generated, so
+    both are pinned here too, alongside base.py and METRICS_SPEC.md.
 
     `CHANGELOG.md` is deliberately excluded and states no figure. It is
     a historical record: once an entry ships it describes what was true
@@ -348,6 +434,16 @@ def test_metric_counts_stated_in_the_docs_match_the_registry() -> None:
             "docs/METRICS_SPEC.md",
             r"disabled with an explanatory tooltip for the (\d+) of the (\d+) metrics",
             ("screen_without_params", "screen_total"),
+        ),
+        (
+            "README.md",
+            r"Track2Data computes (\d+) built-in metrics",
+            ("total",),
+        ),
+        (
+            "docs/ROADMAP.md",
+            r"Behavioural metrics \| ✅ (\d+) registered",
+            ("total",),
         ),
     ]
 

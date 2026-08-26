@@ -49,6 +49,17 @@ class MetricInfoDialog(QDialog):
         header.setWordWrap(True)
         layout.addWidget(header)
 
+        superseded_by = getattr(metric_cls, "superseded_by", None)
+        if superseded_by:
+            notice = QLabel(
+                f"Superseded by {superseded_by} -- kept for output "
+                "compatibility with existing projects; computes exactly "
+                "what it always has."
+            )
+            notice.setStyleSheet("color: #b06a00; font-size: 12px;")
+            notice.setWordWrap(True)
+            layout.addWidget(notice)
+
         body = QTextEdit()
         body.setReadOnly(True)
         body.setPlainText(self._format_documentation(metric_cls))
@@ -123,5 +134,11 @@ class MetricInfoDialog(QDialog):
             if doc.citation_doi:
                 citation_line += f" (DOI: {doc.citation_doi})"
             lines += ["", "Citation:", citation_line]
+
+        if doc.supporting_references:
+            from track2data.metrics.references import format_reference
+
+            lines += ["", "Supporting references:"]
+            lines += [f"- {format_reference(ref)}" for ref in doc.supporting_references]
 
         return "\n".join(lines)

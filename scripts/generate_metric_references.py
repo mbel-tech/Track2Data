@@ -25,10 +25,21 @@ import io
 import sys
 from pathlib import Path
 
+from track2data.metrics.references import Reference
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = REPO_ROOT / "docs" / "METRIC_REFERENCES.csv"
+BIB_PATH = REPO_ROOT / "docs" / "references.bib"
 
-HEADER = ["metric_id", "level", "priority", "metric_name", "reference", "doi"]
+HEADER = [
+    "metric_id",
+    "level",
+    "priority",
+    "metric_name",
+    "reference",
+    "doi",
+    "supporting_references",
+]
 
 # Every module that registers built-in metrics. `metrics._load_builtins()`
 # imports each of these under `contextlib.suppress(ImportError)`, which is
@@ -84,9 +95,12 @@ def render_csv() -> str:
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(HEADER)
 
+    from track2data.metrics.references import format_supporting_references
+
     for metric_id in metrics.all_ids():
         metric_cls = metrics.get(metric_id)
         doc = metric_cls.documentation
+        supporting = format_supporting_references(doc.supporting_references)
         writer.writerow(
             [
                 metric_cls.id,
@@ -95,10 +109,53 @@ def render_csv() -> str:
                 metric_cls.label,
                 doc.citation or "",
                 doc.citation_doi or "",
+                supporting,
             ]
         )
 
     return buffer.getvalue()
+
+
+def _bibtex_entry(ref: Reference) -> str:
+    """Render one ``Reference`` as a BibTeX entry."""
+    fields = [("author", ref.author), ("title", ref.title), ("year", str(ref.year))]
+    if ref.journal:
+        fields.append(("journal", ref.journal))
+    if ref.volume:
+        fields.append(("volume", ref.volume))
+    if ref.pages:
+        fields.append(("pages", ref.pages))
+    if ref.publisher:
+        fields.append(("publisher", ref.publisher))
+    if ref.doi:
+        fields.append(("doi", ref.doi))
+
+    body = ",\n".join(f"  {name} = {{{value}}}" for name, value in fields)
+    return f"@{ref.entry_type}{{{ref.key},\n{body}\n}}"
+
+
+def render_bib() -> str:
+    """Return the full BibTeX text for every ``Reference`` reachable from
+    the current metric registry -- primary and supporting alike.
+
+    Walking the registry (rather than importing ``references.py`` and
+    dumping every module-level ``Reference``) means an unused entry in
+    that module -- e.g. one whose metric assignment was reverted --
+    quietly drops out of the published bibliography instead of being
+    published as though something still cited it.
+    """
+    from track2data import metrics
+
+    seen: dict[str, object] = {}
+    for metric_id in metrics.all_ids():
+        doc = metrics.get(metric_id).documentation
+        for ref in ([doc.primary_reference] if doc.primary_reference else []) + list(
+            doc.supporting_references
+        ):
+            seen[ref.key] = ref
+
+    entries = [_bibtex_entry(seen[key]) for key in sorted(seen)]
+    return "\n\n".join(entries) + "\n" if entries else ""
 
 
 def main() -> int:
@@ -111,19 +168,32 @@ def main() -> int:
     args = parser.parse_args()
 
     assert_registry_is_complete()
-    generated = render_csv()
+    generated_csv = render_csv()
+    generated_bib = render_bib()
 
     if args.check:
-        current = CSV_PATH.read_text(encoding="utf-8") if CSV_PATH.exists() else ""
-        if current != generated:
-            print(f"{CSV_PATH.relative_to(REPO_ROOT)} is out of date; re-run without --check")
+        stale = []
+        current_csv = CSV_PATH.read_text(encoding="utf-8") if CSV_PATH.exists() else ""
+        if current_csv != generated_csv:
+            stale.append(CSV_PATH.relative_to(REPO_ROOT))
+        current_bib = BIB_PATH.read_text(encoding="utf-8") if BIB_PATH.exists() else ""
+        if current_bib != generated_bib:
+            stale.append(BIB_PATH.relative_to(REPO_ROOT))
+        if stale:
+            names = ", ".join(str(p) for p in stale)
+            print(f"{names} out of date; re-run without --check")
             return 1
-        print(f"{CSV_PATH.relative_to(REPO_ROOT)} is up to date")
+        print(
+            f"{CSV_PATH.relative_to(REPO_ROOT)} and "
+            f"{BIB_PATH.relative_to(REPO_ROOT)} are up to date"
+        )
         return 0
 
-    CSV_PATH.write_text(generated, encoding="utf-8", newline="")
-    row_count = generated.count("\n") - 1
+    CSV_PATH.write_text(generated_csv, encoding="utf-8", newline="")
+    BIB_PATH.write_text(generated_bib, encoding="utf-8", newline="")
+    row_count = generated_csv.count("\n") - 1
     print(f"wrote {CSV_PATH.relative_to(REPO_ROOT)} ({row_count} metrics)")
+    print(f"wrote {BIB_PATH.relative_to(REPO_ROOT)}")
     return 0
 
 
