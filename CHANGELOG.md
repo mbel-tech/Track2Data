@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Opt-in data-derived bout/visit/dwell thresholds (Sibly et al. 1990
+  log-survivorship bout-criterion interval).** New module
+  `track2data/metrics/bouts.py` fits a two-segment ("broken-stick") line
+  to the log-survivorship curve of a session's own pooled run-length
+  distribution and takes the segments' crossover as the threshold
+  separating short, spurious runs (tracking flicker, brief pauses) from
+  genuine ones. Wired to a new per-metric `derive_bout_criterion`
+  switch on **IL-7** (`min_bout_frames`), **Z-3** (`min_visit_frames`)
+  and **Z-4**/**Z-5** (`min_dwell_frames`, inherited by **Z-6**/**Z-9**),
+  exposed as a checkbox in the ⚙ config dialog on the Metrics screen.
+
+  **The switch defaults to off, so no existing project's numbers
+  change.** Turning it on is a deliberate, per-metric choice, because it
+  moves results substantially. Measured on a synthetic 6-minute,
+  4-animal fixture built for this feature (the embargoed real
+  idtracker.ai corpus was not available in this environment — these are
+  not corpus numbers, but they show the actual magnitude, not just the
+  direction): IL-7 freezing-bout counts fell 6–28% per animal (e.g. 18
+  bouts → 13) as the fitted threshold (28 frames) absorbed brief speed
+  dips the fixed default of 5 had counted as freezing; Z-3 zone-visit
+  counts fell 90–94% per animal (e.g. 204 → 12), because the fixed
+  default of 1 frame counts every single-frame boundary flicker as a
+  distinct visit while the fitted threshold (29 frames) does not; Z-9's
+  mean dwell time rose correspondingly (e.g. 0.20 s → 1.83 s).
+
+  Every affected metric now emits two extra columns —
+  `min_bout_frames_used`/`min_visit_frames_used`/`min_dwell_frames_used`
+  and `bout_criterion_effective` (`fixed`, `log_survivorship`, or
+  `fixed_fallback` when the switch was on but the fit did not
+  converge) — so the threshold actually applied, and any fallback, is
+  visible in the exported data rather than only in the docs. The switch
+  takes precedence over an explicit threshold in
+  `MetricSelection.config` -- ticking it means "let the data decide",
+  which a typed number would contradict -- but preserves that value
+  rather than clearing it, so unticking restores it. The ⚙ dialog greys
+  the threshold row out while the switch is on, so a control the metric
+  will not read does not look editable.
+- **`MetricParameter.disabled_by`**, which greys out a config row whose
+  value another (boolean) parameter overrides -- so the ⚙ dialog cannot
+  offer an editable control the metric will ignore.
+- **`MetricParameter.auto_label`**, so a parameter left unset can say
+  what that actually means. The generic "Auto (data-driven)" is right
+  for IL-4's `threshold_px_s` but would be wrong for a threshold whose
+  unset behaviour depends on another parameter, so IL-7's
+  `min_bout_frames` shows "Default (5, or fitted)" instead.
 - **11 new metrics from the 2026-08 reference audit's proposals**,
   taking the catalogue from 33 to 44: **IL-9** Home-Base Occupancy,
   **IL-10** Roaming Entropy, **IL-11** Circular Statistics of Heading,
@@ -31,7 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   gained a `supporting_references` column) by
   `scripts/generate_metric_references.py`, and both are pinned by
   `tests/test_metric_references_consistency.py`.
-
 - **New "session" calibration mode** (`CalibrationConfig.mode = "session"`).
   Uses each session's own `length_unit` -- idtracker.ai's px-to-real-unit
   ratio from the validator's Length Calibration tool -- so different

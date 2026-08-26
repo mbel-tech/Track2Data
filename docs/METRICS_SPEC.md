@@ -274,13 +274,14 @@ info-button modal (§6).
 | **Manuscript label** | Freezing-bout count and duration |
 | **Level** | Individual; trial summary |
 | **Priority** | Optional |
-| **Inputs** | IL-4 active/inactive boolean series, `min_bout_frames` (default 5) |
+| **Inputs** | IL-4 active/inactive boolean series, `min_bout_frames` (fixed 5, or fitted when `derive_bout_criterion` is on) |
 | **Required preprocessing** | Smoothing required |
-| **Formula** | Run-length encode `inactive`; keep runs ≥ `min_bout_frames` |
-| **Output columns** | `individual_id`, `freezing_bout_count`, `mean_freezing_duration_s`, `total_freezing_duration_s` |
-| **Units** | count; seconds |
+| **Formula** | Run-length encode `inactive`; keep runs ≥ `min_bout_frames`. `min_bout_frames` defaults to a fixed **5 frames**. Switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`) to this session's own pooled inactive-run lengths across every individual, still falling back to the fixed 5 when that fit does not converge. The switch **overrides** an explicit `min_bout_frames`, which applies only while the switch is off. |
+| **Output columns** | `individual_id`, `freezing_bout_count`, `mean_freezing_duration_s`, `total_freezing_duration_s`, `min_bout_frames_used`, `bout_criterion_effective` |
+| **Units** | count; seconds; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
 | **Assumptions** | Same as IL-4 |
-| **Warnings** | Discards short pauses; min duration is study-specific |
+| **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_bout_frames` (int, frames, no declared default — resolved per the switch) |
+| **Warnings** | Discards short pauses; min duration is study-specific. `min_bout_frames_used`/`bout_criterion_effective` report the threshold actually applied and how it was derived (`fixed`, `log_survivorship`, or `fixed_fallback` when a requested fit did not converge). With the switch **on** the threshold is fit per session and can differ session to session — check `min_bout_frames_used` before comparing freezing-bout counts across sessions. |
 | **Reference** | Cachat et al. 2010, Nat. Protoc. 5(11):1786-1799 (measuring behavioral and endocrine responses to novelty stress in adult zebrafish) — DOI [10.1038/nprot.2010.140](https://doi.org/10.1038/nprot.2010.140) |
 | **Supporting references** | Sibly et al. 1990, Anim. Behav. 39(1):63-69 (splitting behaviour into bouts) (DOI: 10.1016/S0003-3472(05)80726-2) |
 
@@ -416,13 +417,14 @@ info-button modal (§6).
 | **Level** | Zone; trial summary |
 | **Priority** | Primary |
 | **Inputs** | Z-1 in/out boolean series |
-| **Formula** | Count rising edges (False → True) in zone-membership series |
-| **Output columns** | `zone_name`, `individual_id`, `visit_count` |
-| **Units** | count |
-| **Assumptions** | A "visit" is any zero-or-more-frame stay; configurable `min_visit_frames` (default 1) |
-| **Warnings** | Sensitive to flicker on zone boundaries; smoothing or `min_visit_frames` mitigates |
+| **Formula** | Count rising edges (False → True) in zone-membership series, after debouncing runs shorter than `min_visit_frames`. `min_visit_frames` defaults to a fixed **1 frame**. Switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`, shared with Z-4/Z-5) to this session's own pooled in-zone run lengths, still falling back to the fixed 1 when that fit does not converge. The switch **overrides** an explicit `min_visit_frames`, which applies only while the switch is off. |
+| **Output columns** | `zone_name`, `individual_id`, `visit_count`, `min_visit_frames_used`, `bout_criterion_effective` |
+| **Units** | count; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
+| **Assumptions** | A "visit" is any zero-or-more-frame stay; configurable `min_visit_frames` (fixed 1, or fitted when `derive_bout_criterion` is on) |
+| **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_visit_frames` (int, frames, no declared default — resolved per the switch) |
+| **Warnings** | Sensitive to flicker on zone boundaries; smoothing or `min_visit_frames` mitigates. `min_visit_frames_used`/`bout_criterion_effective` report the threshold actually applied. At the default 1-frame threshold every single-frame boundary flicker counts as a distinct visit — switching `derive_bout_criterion` on typically reduces visit counts sharply on flickery data. |
 | **Reference** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) — DOI [10.1017/CBO9780511810893](https://doi.org/10.1017/CBO9780511810893) |
-| **Supporting references** | Bakeman & Gottman 1997, Observing Interaction: An Introduction to Sequential Analysis, 2nd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511527685) |
+| **Supporting references** | Bakeman & Gottman 1997, Observing Interaction: An Introduction to Sequential Analysis, 2nd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511527685); Sibly et al. 1990, Anim. Behav. 39(1):63-69 (splitting behaviour into bouts) (DOI: 10.1016/S0003-3472(05)80726-2) |
 
 #### Z-4 — Zone transitions
 
@@ -431,14 +433,15 @@ info-button modal (§6).
 | **Manuscript label** | Inter-zone transitions |
 | **Level** | Zone-pair; trial summary |
 | **Priority** | Primary |
-| **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (default 1) |
-| **Formula** | Run-length encode the per-frame zone column; drop runs shorter than `min_dwell_frames` (runs of the empty "no zone" sentinel are always kept, so a tracking dropout cannot be spliced into a crossing); collapse consecutive duplicates; then for each adjacent pair in the resulting sequence increment `transitions[zone_a → zone_b]`. Pairs involving the empty zone are not counted. |
-| **Output columns** | `from_zone`, `to_zone`, `individual_id`, `transition_count` |
-| **Units** | count |
+| **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (fixed 1, or fitted when `derive_bout_criterion` is on) |
+| **Formula** | Run-length encode the per-frame zone column; drop runs shorter than `min_dwell_frames` (runs of the empty "no zone" sentinel are always kept, so a tracking dropout cannot be spliced into a crossing); collapse consecutive duplicates; then for each adjacent pair in the resulting sequence increment `transitions[zone_a → zone_b]`. Pairs involving the empty zone are not counted. `min_dwell_frames` defaults to a fixed **1 frame**; switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`, shared with Z-3/Z-5) to this session's own pooled in-zone run lengths, still falling back to the fixed 1 when that fit does not converge. The switch **overrides** an explicit `min_dwell_frames`, which applies only while the switch is off. |
+| **Output columns** | `from_zone`, `to_zone`, `individual_id`, `transition_count`, `min_dwell_frames_used`, `bout_criterion_effective` |
+| **Units** | count; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
 | **Assumptions** | Single-zone-per-frame (resolve overlaps with priority list or longest-overlap) |
-| **Warnings** | Identity-free sessions: transitions are counted on NN-matched tracklets, not individuals. Sensitive to flicker on zone boundaries; `min_dwell_frames` debounces a visit shorter than the threshold by merging the transitions either side of it into one continuous stay. Collapses the full transition sequence to a scalar count per zone pair — see **Z-7** for the full transition matrix and sequence entropy computed from this same run-length-encoded data. |
+| **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_dwell_frames` (int, frames, no declared default — resolved per the switch) |
+| **Warnings** | Identity-free sessions: transitions are counted on NN-matched tracklets, not individuals. Sensitive to flicker on zone boundaries; `min_dwell_frames` debounces a visit shorter than the threshold by merging the transitions either side of it into one continuous stay. Collapses the full transition sequence to a scalar count per zone pair — see **Z-7** for the full transition matrix and sequence entropy computed from this same run-length-encoded data. `min_dwell_frames_used`/`bout_criterion_effective` report the threshold actually applied. |
 | **Reference** | Bakeman & Gottman 1997, Observing Interaction: An Introduction to Sequential Analysis, 2nd ed. (Cambridge University Press) — DOI [10.1017/CBO9780511527685](https://doi.org/10.1017/CBO9780511527685) |
-| **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
+| **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893); Sibly et al. 1990, Anim. Behav. 39(1):63-69 (splitting behaviour into bouts) (DOI: 10.1016/S0003-3472(05)80726-2) |
 
 #### Z-5 — Entry / exit timestamps
 
@@ -447,10 +450,12 @@ info-button modal (§6).
 | **Manuscript label** | Zone entry/exit times |
 | **Level** | Event log |
 | **Priority** | Optional |
-| **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (default 1) |
-| **Formula** | Emit one row per edge transition with `t_s = frame / fps`; a run inside a zone shorter than `min_dwell_frames` produces no enter/exit events at all |
-| **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame` |
-| **Units** | seconds |
+| **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (fixed 1, or fitted when `derive_bout_criterion` is on) |
+| **Formula** | Emit one row per edge transition with `t_s = frame / fps`; a run inside a zone shorter than `min_dwell_frames` produces no enter/exit events at all. `min_dwell_frames` defaults to a fixed **1 frame**; switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`, shared with Z-3/Z-4) to this session's own pooled in-zone run lengths, still falling back to the fixed 1 when that fit does not converge. The switch **overrides** an explicit `min_dwell_frames`, which applies only while the switch is off. |
+| **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame`, `min_dwell_frames_used`, `bout_criterion_effective` |
+| **Units** | seconds; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
+| **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_dwell_frames` (int, frames, no declared default — resolved per the switch) |
+| **Warnings** | `min_dwell_frames_used`/`bout_criterion_effective` report the threshold actually applied and how it was derived; Z-6 and Z-9 inherit whichever was used here, since both forward their own cfg into this compute() unchanged. |
 | **Reference** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) — DOI [10.1017/CBO9780511810893](https://doi.org/10.1017/CBO9780511810893) |
 | **Supporting references** | Sibly et al. 1990, Anim. Behav. 39(1):63-69 (splitting behaviour into bouts) (DOI: 10.1016/S0003-3472(05)80726-2) |
 
@@ -461,11 +466,12 @@ info-button modal (§6).
 | **Manuscript label** | Latency to first zone entry |
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
-| **Inputs** | Z-5 event log; forwards `min_dwell_frames` to Z-5 |
+| **Inputs** | Z-5 event log; forwards `min_dwell_frames`/`derive_bout_criterion` to Z-5 |
 | **Formula** | Per zone, per individual: `t_s` of first "enter" event (after Z-5's debounce) |
 | **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s` |
 | **Units** | seconds |
-| **Warnings** | NaN when the individual never enters; encode as `inf` for sortability. The source paradigm (mouse light/dark box) gives no censoring convention of its own for a never-entering animal — the `inf` encoding is this tool's own deliberate choice, not something the citation specifies. |
+| **Parameters** | `derive_bout_criterion` (bool, **default `False`**), `min_dwell_frames` (int, frames, no declared default); both forwarded to Z-5 unchanged |
+| **Warnings** | NaN when the individual never enters; encode as `inf` for sortability. The source paradigm (mouse light/dark box) gives no censoring convention of its own for a never-entering animal — the `inf` encoding is this tool's own deliberate choice, not something the citation specifies. Inherits Z-5's `derive_bout_criterion` switch: with it on, a brief flicker no longer counts as the first entry. |
 | **Reference** | Bourin & Hascoet 2003, Eur. J. Pharmacol. 463(1-3):55-65 (the mouse light/dark box test) — DOI [10.1016/S0014-2999(03)01274-3](https://doi.org/10.1016/S0014-2999(03)01274-3) |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
@@ -518,13 +524,13 @@ info-button modal (§6).
 | **Manuscript label** | Zone dwell-time distribution |
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
-| **Inputs** | Z-5 event log |
+| **Inputs** | Z-5 event log; forwards `min_dwell_frames`/`derive_bout_criterion` to Z-5 |
 | **Formula** | Pair each "enter" event with its next "exit" event (same zone, individual) from the Z-5 event log; `dwell_s = exit.t_s − enter.t_s`; mean/median/max computed over all paired visits. A visit still open at the final frame (Z-5's unmatched "enter") is excluded, not counted as an open-ended visit. |
 | **Output columns** | `zone_name`, `individual_id`, `n_visits`, `mean_dwell_s`, `median_dwell_s`, `max_dwell_s` |
 | **Units** | count; seconds |
 | **Assumptions** | Zone arrays are pre-assigned object arrays of zone-name strings |
-| **Warnings** | An animal's final, still-open visit at session end is excluded from these statistics (its true duration is unknown). Undefined (no row) for a (zone, animal) pair with zero completed visits. |
-| **Parameters** | `min_dwell_frames` (int, frames, default 1) — forwarded to Z-5, same as Z-6 |
+| **Warnings** | An animal's final, still-open visit at session end is excluded from these statistics (its true duration is unknown). Undefined (no row) for a (zone, animal) pair with zero completed visits. Inherits Z-5's `derive_bout_criterion` switch: with it on, brief flickers drop out of the dwell-time distribution, typically raising the mean. |
+| **Parameters** | `derive_bout_criterion` (bool, **default `False`**), `min_dwell_frames` (int, frames, no declared default) — both forwarded to Z-5, same as Z-6 |
 | **Reference** | Sibly et al. 1990, Anim. Behav. 39(1):63-69 (splitting behaviour into bouts) — DOI [10.1016/S0003-3472(05)80726-2](https://doi.org/10.1016/S0003-3472(05)80726-2) |
 | **Supporting references** | Bourin & Hascoet 2003, Eur. J. Pharmacol. 463(1-3):55-65 (the mouse light/dark box test) (DOI: 10.1016/S0014-2999(03)01274-3) |
 
@@ -1204,3 +1210,37 @@ exposed so future per-user opt-outs are non-breaking.
    this codebase (rather than taken at face value) and 11 were built —
    see §3/§4 above and `docs/ROADMAP.md`'s "Reserved metric IDs" table
    for the 9 that were not, and why.
+5. **Bout-criterion thresholds (2026-08)** — resolved, as an **opt-in**.
+   IL-7's `min_bout_frames`, Z-3's `min_visit_frames`, and Z-4/Z-5's
+   `min_dwell_frames` (inherited by Z-6/Z-9 via cfg forwarding) are
+   fixed, hand-picked round numbers — defensible as defaults, but
+   arbitrary. New module `track2data/metrics/bouts.py` implements the
+   Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion
+   interval: fit a two-segment line to the log-survivorship curve of
+   this session's own pooled run-length distribution and take the
+   segments' crossover as the threshold.
+
+   It is wired to a per-metric `derive_bout_criterion` switch that
+   **defaults to `False`**, so every existing project keeps the numbers
+   it already had; a researcher who wants the data-derived threshold
+   turns it on per metric via the ⚙ dialog on the Metrics screen. Making
+   it the default was considered and rejected: it changes freezing-bout
+   and zone-visit numbers substantially (see CHANGELOG.md for measured
+   deltas), and a change of that size to an existing project's results
+   should be a decision the researcher makes deliberately, not one a
+   version bump makes for them.
+
+   Every affected metric reports which criterion actually took effect
+   (`bout_criterion_effective`: `fixed`, `log_survivorship`, or
+   `fixed_fallback` when a requested fit did not converge) and the
+   threshold actually applied
+   (`min_bout_frames_used`/`min_visit_frames_used`/`min_dwell_frames_used`),
+   so neither the switch's state nor a fallback is ever silent.
+
+   The switch takes precedence over an explicit threshold in
+   `MetricSelection.config`: ticking it means "let the data decide",
+   which a typed number would contradict. The typed value is preserved
+   rather than cleared, and applies again the moment the switch goes
+   off. The ⚙ dialog greys the threshold row out while the switch is on
+   (`MetricParameter.disabled_by`) so a control the metric will not read
+   does not look editable.

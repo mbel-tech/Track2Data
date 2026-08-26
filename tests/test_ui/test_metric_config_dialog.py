@@ -427,3 +427,166 @@ def test_an_unset_choice_with_no_default_is_omitted(qtbot) -> None:
     qtbot.addWidget(dlg)
 
     assert dlg.values() == {}
+
+
+# ── auto_label: per-parameter "unset" text ────────────────────────────────────
+
+
+def test_unset_numeric_row_shows_the_generic_auto_text_by_default(qtbot) -> None:
+    """A parameter with no `auto_label` keeps the generic wording, which
+    is right for IL-4's threshold_px_s: blank really does mean the
+    metric derives one from the data."""
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_OptionalFloatParamMetric, {})
+    qtbot.addWidget(dlg)
+
+    assert dlg._widgets["threshold_px_s"].specialValueText() == "Auto (data-driven)"
+
+
+def test_auto_label_overrides_the_unset_text(qtbot) -> None:
+    """"Auto (data-driven)" would be a lie for a threshold whose unset
+    behaviour depends on another parameter -- IL-7's min_bout_frames
+    resolves to a fixed 5 unless derive_bout_criterion is switched on,
+    so it says so instead."""
+
+    class _AutoLabelMetric(Metric):
+        id = "X-4"
+        name = "auto_label_metric"
+        label = "Auto Label Metric"
+        level = "individual"
+        priority = "primary"
+        requires_identity = False
+        output_columns: list[str] = []
+        documentation = MetricDocumentation(
+            definition="d", formula_plain="f", inputs=[], assumptions=[], warnings=[],
+        )
+        parameters = [
+            MetricParameter(
+                name="min_bout_frames", label="Minimum bout length", kind="int",
+                minimum=1, unit="frames", auto_label="Default (5, or fitted)",
+            ),
+        ]
+
+        def compute(self, session, cfg=None):
+            return None
+
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(_AutoLabelMetric, {})
+    qtbot.addWidget(dlg)
+
+    assert dlg._widgets["min_bout_frames"].specialValueText() == "Default (5, or fitted)"
+
+
+def test_real_il7_and_z3_rows_carry_their_own_auto_label(qtbot) -> None:
+    """Guards the wiring end to end against the real registry, not just
+    a fixture -- the dialog must not quietly fall back to the generic
+    text for the metrics this feature exists for."""
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    il7 = MetricConfigDialog(metrics.get("IL-7"), {})
+    qtbot.addWidget(il7)
+    assert il7._widgets["min_bout_frames"].specialValueText() == "Default (5, or fitted)"
+
+    z3 = MetricConfigDialog(metrics.get("Z-3"), {})
+    qtbot.addWidget(z3)
+    assert z3._widgets["min_visit_frames"].specialValueText() == "Default (1, or fitted)"
+
+
+def test_derive_bout_criterion_renders_as_an_unchecked_checkbox(qtbot) -> None:
+    """The opt-in switch: a real checkbox, off by default, so a user who
+    never opens this dialog keeps the historical numbers."""
+    from PySide6.QtWidgets import QCheckBox
+
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(metrics.get("IL-7"), {})
+    qtbot.addWidget(dlg)
+
+    switch = dlg._widgets["derive_bout_criterion"]
+    assert isinstance(switch, QCheckBox)
+    assert switch.isChecked() is False
+
+
+# ── disabled_by: a control the metric will ignore looks ignored ───────────────
+
+
+def test_dependent_row_starts_disabled_when_its_switch_is_already_on(qtbot) -> None:
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(metrics.get("IL-7"), {"derive_bout_criterion": True})
+    qtbot.addWidget(dlg)
+
+    assert dlg._rows["min_bout_frames"].isEnabled() is False
+
+
+def test_dependent_row_starts_enabled_when_its_switch_is_off(qtbot) -> None:
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(metrics.get("IL-7"), {})
+    qtbot.addWidget(dlg)
+
+    assert dlg._rows["min_bout_frames"].isEnabled() is True
+
+
+def test_toggling_the_switch_greys_the_dependent_row_live(qtbot) -> None:
+    """The switch overrides min_bout_frames, so leaving that spin box
+    live would invite the user to type a threshold the metric never
+    reads."""
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(metrics.get("IL-7"), {})
+    qtbot.addWidget(dlg)
+    row = dlg._rows["min_bout_frames"]
+    switch = dlg._widgets["derive_bout_criterion"]
+
+    switch.setChecked(True)
+    assert row.isEnabled() is False
+
+    switch.setChecked(False)
+    assert row.isEnabled() is True
+
+
+def test_greying_a_row_preserves_its_stored_value(qtbot) -> None:
+    """Disabling is a display concern only -- unticking the switch must
+    bring the user's own threshold back, not make them retype it."""
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    dlg = MetricConfigDialog(
+        metrics.get("IL-7"), {"min_bout_frames": 9, "derive_bout_criterion": True}
+    )
+    qtbot.addWidget(dlg)
+
+    assert dlg._rows["min_bout_frames"].isEnabled() is False
+    assert dlg._widgets["min_bout_frames"].value() == 9
+    assert dlg.values()["min_bout_frames"] == 9
+
+    dlg._widgets["derive_bout_criterion"].setChecked(False)
+    assert dlg._rows["min_bout_frames"].isEnabled() is True
+    assert dlg._widgets["min_bout_frames"].value() == 9
+
+
+def test_every_bout_criterion_metric_wires_its_dependent_row(qtbot) -> None:
+    """Guards the wiring across the whole family, not just IL-7."""
+    from track2data import metrics
+    from ui.dialogs.metric_config_dialog import MetricConfigDialog
+
+    expected = {
+        "IL-7": "min_bout_frames",
+        "Z-3": "min_visit_frames",
+        "Z-4": "min_dwell_frames",
+        "Z-5": "min_dwell_frames",
+        "Z-6": "min_dwell_frames",
+        "Z-9": "min_dwell_frames",
+    }
+    for metric_id, param_name in expected.items():
+        dlg = MetricConfigDialog(metrics.get(metric_id), {"derive_bout_criterion": True})
+        qtbot.addWidget(dlg)
+        assert dlg._rows[param_name].isEnabled() is False, metric_id

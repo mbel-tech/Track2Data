@@ -185,8 +185,13 @@ class TestZoneTransitions:
 
     def test_declares_configurable_parameters(self) -> None:
         params = {p.name: p for p in ZoneTransitions.parameters}
-        assert params.keys() == {"min_dwell_frames"}
-        assert params["min_dwell_frames"].default == 1
+        assert params.keys() == {"derive_bout_criterion", "min_dwell_frames"}
+        # No declared default -- resolved per the derive_bout_criterion
+        # switch (fixed 1 when off, fitted when on), same "unset means
+        # auto" convention as IL-4's threshold_px_s.
+        assert params["min_dwell_frames"].default is None
+        # Opt-in: off by default, so numbers match earlier releases.
+        assert params["derive_bout_criterion"].default is False
 
     def test_min_dwell_frames_debounces_a_brief_flicker(self) -> None:
         """A (9 frames) -> B (2-frame flicker) -> A (9 frames). With the
@@ -390,8 +395,13 @@ class TestZ5EntryExitEvents:
 
     def test_declares_configurable_parameters(self) -> None:
         params = {p.name: p for p in Z5EntryExitEvents.parameters}
-        assert params.keys() == {"min_dwell_frames"}
-        assert params["min_dwell_frames"].default == 1
+        assert params.keys() == {"derive_bout_criterion", "min_dwell_frames"}
+        # No declared default -- resolved per the derive_bout_criterion
+        # switch (fixed 1 when off, fitted when on), same "unset means
+        # auto" convention as IL-4's threshold_px_s.
+        assert params["min_dwell_frames"].default is None
+        # Opt-in: off by default, so numbers match earlier releases.
+        assert params["derive_bout_criterion"].default is False
 
     def test_min_dwell_frames_drops_a_brief_flicker_entirely(self) -> None:
         """A 2-frame flicker into zone_A produces no enter/exit events
@@ -539,8 +549,13 @@ class TestZ6LatencyToFirstEntry:
 
     def test_declares_configurable_parameters(self) -> None:
         params = {p.name: p for p in Z6LatencyToFirstEntry.parameters}
-        assert params.keys() == {"min_dwell_frames"}
-        assert params["min_dwell_frames"].default == 1
+        assert params.keys() == {"derive_bout_criterion", "min_dwell_frames"}
+        # No declared default -- resolved per the derive_bout_criterion
+        # switch (fixed 1 when off, fitted when on), same "unset means
+        # auto" convention as IL-4's threshold_px_s.
+        assert params["min_dwell_frames"].default is None
+        # Opt-in: off by default, so numbers match earlier releases.
+        assert params["derive_bout_criterion"].default is False
 
     def test_min_dwell_frames_forwards_to_z5_and_skips_a_brief_flicker(self) -> None:
         """Z-6 is defined purely in terms of Z-5's 'enter' events
