@@ -172,6 +172,20 @@ key), and that `METRICS_SPEC.md`'s inline **Reference** / **Supporting reference
 `.bib`, and never edit a spec **Reference** / **Supporting references** row without making the same
 change in the metric class.
 
+When you add or change a `Reference`, confirm its DOI really points at the work you named:
+
+```bash
+pytest tests/test_references_resolve.py -m network
+```
+
+That asks Crossref what each DOI actually resolves to and fails if the first-author surname or the
+year disagrees with the bibliography. It is marked `network` and excluded from CI — an outage at
+Crossref is not a defect in this repository, and thirty-five requests per matrix cell on every push
+would be impolite to a free public API — so it only runs when you run it. The same file's offline
+guards (bare-DOI shape, unique keys, no DOI shared by two different works) are unmarked and do run
+in CI. Note that no automated check can tell you a real paper by the right author actually
+*supports* the metric; that judgement is still yours.
+
 A citation must name a real, findable work. If no specific work applies, say so plainly
 ("Standard kinematics; no single originating work") and leave `citation_doi=None` — an honest
 generic reference is correct, an invented DOI is not.

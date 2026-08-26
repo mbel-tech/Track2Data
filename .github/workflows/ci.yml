@@ -73,12 +73,20 @@ jobs:
           sudo apt-get install -y libegl1 libxkbcommon-x11-0 libgl1
       - name: Install package + dev deps
         run: pip install -e ".[dev]"
-      - name: Run unit tests (excluding r_parity)
+      - name: Run unit tests (excluding r_parity and network)
         # 80% per docs/TECHNICAL_SPEC.md §11 and pyproject.toml's
         # [tool.coverage.report] fail_under (M2 restored this from the
         # temporary 70% floor used during M1; actual coverage is ~94%).
+        #
+        # `network` covers tests/test_references_resolve.py, which asks
+        # Crossref to confirm every DOI in the bibliography resolves to
+        # the work claimed. Thirty-five HTTP requests per matrix cell on
+        # every push would be slow and impolite to a free public API, and
+        # a Crossref outage would redden CI without anything here being
+        # broken. Run it deliberately when adding or editing a reference:
+        #   pytest tests/test_references_resolve.py -m network
         run: >
-          pytest tests/ -v -m "not r_parity"
+          pytest tests/ -v -m "not r_parity and not network"
           --cov=track2data --cov-report=term --cov-fail-under=80
 
   r_parity:
