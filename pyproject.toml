@@ -116,6 +116,7 @@ markers = [
     "r_parity_local: marks tests requiring embargoed local R-pipeline fixtures (skip in CI)",
     "slow: marks tests that are expected to be slow",
     "corpus_local: marks tests requiring the embargoed 70-session real idtracker.ai corpus (skip in CI; skips automatically when the corpus directory is absent)",
+    "network: marks tests that call a third-party API (Crossref DOI resolution); excluded in CI, since an outage there is not a defect here. Run with: pytest -m network",
 ]
 
 [tool.coverage.run]
