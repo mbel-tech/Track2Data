@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
+from track2data.metrics.bouts import compute_bout_criterion_interval
 from track2data.metrics.references import (
     BAKEMAN_GOTTMAN_1997,
     BOURIN_HASCOET_2003,
@@ -109,6 +110,65 @@ def _debounced_zone_sequence(col: np.ndarray, min_dwell_frames: int) -> list[str
         if not sequence or sequence[-1] != name:
             sequence.append(name)
     return sequence
+
+
+def _pooled_zone_run_lengths(zone_arrays: list[np.ndarray], n_animals: int) -> list[int]:
+    """Every named (non-empty) zone-membership run length, pooled across
+    every zone name, animal, and zone array (main/sec) in the session --
+    the shared input to the Sibly bout-criterion fit for Z-3's
+    min_visit_frames and Z-4/Z-5's min_dwell_frames. Both parameters
+    debounce the exact same kind of signal (how long a continuous
+    in-zone run must last to be real), so they share this one pooled
+    distribution rather than each deriving their own."""
+    pooled: list[int] = []
+    for arr in zone_arrays:
+        for k in range(n_animals):
+            col = arr[:, k]
+            for zone_name in np.unique(col):
+                if zone_name == _EMPTY_ZONE_VALUE:
+                    continue
+                in_zone = col == zone_name
+                pooled.extend(_run_lengths(in_zone))
+    return pooled
+
+
+def _effective_debounce_threshold(
+    zone_arrays: list[np.ndarray],
+    n_animals: int,
+    cfg: dict | None,
+    param_name: str,
+    fixed_default: int,
+) -> tuple[int, str]:
+    """Resolve the effective min_visit_frames/min_dwell_frames threshold
+    for one compute() call. The opt-in cfg['derive_bout_criterion']
+    switch (bool, off by default) wins outright: when on, a
+    Sibly-et-al.-1990 bout-criterion-interval fit to this session's own
+    pooled zone-run-length distribution replaces any explicit threshold
+    in cfg. When off, an explicit threshold applies, else the fixed
+    historical default. Returns (threshold, criterion_effective label) --
+    the label is one of 'fixed' (switch off), 'log_survivorship' (switch
+    on, fit converged), or 'fixed_fallback' (switch on but the fit
+    didn't converge, so the fixed default was used instead).
+
+    Shared by Z-3, Z-4, and Z-5; Z-6 and Z-9 inherit it by forwarding
+    their own cfg to Z-5's compute() unchanged.
+    """
+    derive = bool(cfg.get("derive_bout_criterion", False)) if cfg is not None else False
+
+    if derive:
+        # The switch wins over an explicit threshold: ticking it means
+        # "let the data decide", which a typed number would contradict.
+        # The typed value is not discarded -- it is still stored, and
+        # applies again the moment the switch goes off.
+        pooled = _pooled_zone_run_lengths(zone_arrays, n_animals)
+        result = compute_bout_criterion_interval(pooled)
+        if result.converged:
+            return result.threshold_frames, "log_survivorship"
+        return fixed_default, "fixed_fallback"
+
+    if cfg is not None and cfg.get(param_name) is not None:
+        return int(cfg[param_name]), "fixed"
+    return fixed_default, "fixed"
 
 
 # ── Z-1: Time in each zone ────────────────────────────────────────────────────
@@ -223,6 +283,8 @@ class ZoneVisitCount(Metric):
         "zone_name",
         "individual_id",
         "visit_count",
+        "min_visit_frames_used",
+        "bout_criterion_effective",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -231,25 +293,60 @@ class ZoneVisitCount(Metric):
         ),
         formula_plain=(
             "visit_count[k, z] = number of rising-edge transitions "
-            "(False→True) in the boolean mask [zone[t, k] == z]"
+            "(False→True) in the boolean mask [zone[t, k] == z]; "
+            "min_visit_frames defaults to a fixed 1 frame, or -- when "
+            "derive_bout_criterion is switched on -- to the Sibly et al. 1990 "
+            "log-survivorship bout-criterion interval (see metrics/bouts.py) "
+            "fit to this session's own pooled in-zone run lengths across "
+            "every zone and individual, still falling back to the fixed 1 "
+            "when that fit does not converge"
         ),
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
-        warnings=["A single continuous stay counts as one visit regardless of duration."],
+        warnings=[
+            "A single continuous stay counts as one visit regardless of duration.",
+            "min_visit_frames_used and bout_criterion_effective report the "
+            "threshold actually applied and which criterion produced it "
+            "('fixed', 'log_survivorship', or 'fixed_fallback').",
+            "At the default 1-frame threshold every single-frame boundary "
+            "flicker counts as a distinct visit; switching "
+            "derive_bout_criterion on typically reduces visit counts sharply "
+            "on flickery data.",
+        ],
         primary_reference=MARTIN_BATESON_2007,
-        supporting_references=[BAKEMAN_GOTTMAN_1997],
+        supporting_references=[BAKEMAN_GOTTMAN_1997, SIBLY_1990],
     )
+    _FIXED_DEFAULT_MIN_VISIT_FRAMES = 1
     parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="derive_bout_criterion",
+            label="Derive visit length from data",
+            kind="bool",
+            default=False,
+            help=(
+                "Off (default): any 1+ frame stay counts as a visit. "
+                "On: fit the Sibly et al. 1990 log-survivorship "
+                "bout-criterion interval to this session's own in-zone run "
+                "lengths and use that instead, so boundary flicker is "
+                "separated from genuine visits by the data rather than by a "
+                "round number. Falls back to 1 frame if the fit does not "
+                "converge. Overrides Minimum visit length while it is on."
+            ),
+        ),
         MetricParameter(
             name="min_visit_frames",
             label="Minimum visit length",
             kind="int",
-            default=1,
             minimum=1,
             unit="frames",
+            auto_label="Default (1, or fitted)",
+            disabled_by="derive_bout_criterion",
             help=(
                 "Debounces boundary flicker: a run of consecutive frames inside "
-                "a zone shorter than this doesn't count as a visit."
+                "a zone shorter than this doesn't count as a visit. Ignored "
+                "while 'Derive visit length from data' is on, which supplies "
+                "the threshold instead; the value is kept and applies again "
+                "when that switch is turned off."
             ),
         ),
     ]
@@ -267,15 +364,18 @@ class ZoneVisitCount(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Optional dict. ``cfg['min_visit_frames']`` (default 1) sets the
-            minimum run length that counts as a visit -- shorter runs are
-            debounced away rather than counted.
+            Optional dict. ``cfg['min_visit_frames']``, when given, is used
+            verbatim. Otherwise ``cfg['derive_bout_criterion']`` (bool,
+            default ``False``) decides: off keeps the fixed default of 1
+            frame, on fits the log-survivorship bout-criterion interval to
+            this session's own data.
 
         Returns
         -------
         pd.DataFrame
             One row per (zone_name, individual_id) with columns:
-            session_id, zone_name, individual_id, visit_count.
+            session_id, zone_name, individual_id, visit_count,
+            min_visit_frames_used, bout_criterion_effective.
             Empty DataFrame when no zone arrays are present.
         """
         zone_arrays = _collect_zone_arrays(session)
@@ -283,12 +383,16 @@ class ZoneVisitCount(Metric):
         if not zone_arrays:
             return pd.DataFrame(columns=empty_cols)
 
-        min_visit_frames = 1
-        if cfg is not None and "min_visit_frames" in cfg:
-            min_visit_frames = int(cfg["min_visit_frames"])
-
         session_id: str = session.session_id  # type: ignore[attr-defined]
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
+
+        min_visit_frames, criterion_effective = _effective_debounce_threshold(
+            zone_arrays,
+            n_animals,
+            cfg,
+            "min_visit_frames",
+            self._FIXED_DEFAULT_MIN_VISIT_FRAMES,
+        )
 
         # Accumulate visit counts per (zone, animal) across all zone arrays.
         # We sum qualifying-run counts; if the same zone appears in both main
@@ -315,6 +419,8 @@ class ZoneVisitCount(Metric):
                 "zone_name": zone_name,
                 "individual_id": animal_idx,
                 "visit_count": count,
+                "min_visit_frames_used": min_visit_frames,
+                "bout_criterion_effective": criterion_effective,
             }
             for (zone_name, animal_idx), count in visit_counts.items()
         ]
@@ -493,6 +599,8 @@ class ZoneTransitions(Metric):
         "to_zone",
         "individual_id",
         "transition_count",
+        "min_dwell_frames_used",
+        "bout_criterion_effective",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -501,7 +609,13 @@ class ZoneTransitions(Metric):
         ),
         formula_plain=(
             "for each consecutive frame pair (t, t+1): if zone[t,k] != zone[t+1,k] "
-            "and both are non-empty, count += 1 for (from=zone[t,k], to=zone[t+1,k])"
+            "and both are non-empty, count += 1 for (from=zone[t,k], to=zone[t+1,k]); "
+            "min_dwell_frames defaults to a fixed 1 frame, or -- when "
+            "derive_bout_criterion is switched on -- to the Sibly et al. 1990 "
+            "log-survivorship bout-criterion interval (see metrics/bouts.py, "
+            "shared with Z-3/Z-5) fit to this session's own pooled in-zone run "
+            "lengths, still falling back to the fixed 1 when that fit does "
+            "not converge"
         ),
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings"],
@@ -512,6 +626,9 @@ class ZoneTransitions(Metric):
             "zone pair; see Z-7 for the full transition matrix and "
             "sequence entropy computed from this same run-length-encoded "
             "data",
+            "min_dwell_frames_used and bout_criterion_effective report the "
+            "threshold actually applied and which criterion produced it "
+            "('fixed', 'log_survivorship', or 'fixed_fallback').",
         ],
         # Not Fagen & Young 1978 ('Temporal patterns of behaviors', in
         # Colgan ed., Quantitative Ethology, Wiley) -- real work, but with
@@ -519,20 +636,38 @@ class ZoneTransitions(Metric):
         # resolve it. Bakeman & Gottman 1997 covers transition-matrix and
         # sequential analysis directly and is DOI-bearing.
         primary_reference=BAKEMAN_GOTTMAN_1997,
-        supporting_references=[MARTIN_BATESON_2007],
+        supporting_references=[MARTIN_BATESON_2007, SIBLY_1990],
     )
+    _FIXED_DEFAULT_MIN_DWELL_FRAMES = 1
     parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="derive_bout_criterion",
+            label="Derive dwell length from data",
+            kind="bool",
+            default=False,
+            help=(
+                "Off (default): any 1+ frame stay counts, so every boundary "
+                "flicker registers as two transitions. On: fit the Sibly et "
+                "al. 1990 log-survivorship bout-criterion interval to this "
+                "session's own in-zone run lengths and debounce with that "
+                "instead. Falls back to 1 frame if the fit does not converge. "
+                "Overrides Minimum dwell length while it is on."
+            ),
+        ),
         MetricParameter(
             name="min_dwell_frames",
             label="Minimum dwell length",
             kind="int",
-            default=1,
             minimum=1,
             unit="frames",
+            auto_label="Default (1, or fitted)",
+            disabled_by="derive_bout_criterion",
             help=(
                 "Debounces boundary flicker: a zone visit shorter than this is "
                 "dropped, merging the transitions either side of it into one "
-                "continuous stay rather than two flicker transitions."
+                "continuous stay rather than two flicker transitions. Ignored "
+                "while 'Derive dwell length from data' is on, which supplies "
+                "the threshold instead."
             ),
         ),
     ]
@@ -545,16 +680,19 @@ class ZoneTransitions(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Optional dict. ``cfg['min_dwell_frames']`` (default 1) sets the
-            minimum run length a zone visit must last to count -- shorter
-            visits are debounced away before transitions are counted, so a
-            brief flicker into a zone and back out doesn't register as two
-            transitions.
+            Optional dict. ``cfg['min_dwell_frames']``, when given, is used
+            verbatim -- shorter visits are debounced away before transitions
+            are counted, so a brief flicker into a zone and back out doesn't
+            register as two transitions. Otherwise
+            ``cfg['derive_bout_criterion']`` (bool, default ``False``)
+            decides: off keeps the fixed default of 1 frame, on fits the
+            log-survivorship bout-criterion interval to this session's data.
 
         Returns
         -------
         pd.DataFrame
-            One row per (from_zone, to_zone, individual_id) with transition_count.
+            One row per (from_zone, to_zone, individual_id) with
+            transition_count, min_dwell_frames_used, bout_criterion_effective.
             Empty DataFrame when no zone arrays are present or no transitions occur.
         """
         zone_arrays = _collect_zone_arrays(session)
@@ -562,12 +700,16 @@ class ZoneTransitions(Metric):
         if not zone_arrays:
             return pd.DataFrame(columns=empty_cols)
 
-        min_dwell_frames = 1
-        if cfg is not None and "min_dwell_frames" in cfg:
-            min_dwell_frames = int(cfg["min_dwell_frames"])
-
         session_id: str = session.session_id  # type: ignore[attr-defined]
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
+
+        min_dwell_frames, criterion_effective = _effective_debounce_threshold(
+            zone_arrays,
+            n_animals,
+            cfg,
+            "min_dwell_frames",
+            self._FIXED_DEFAULT_MIN_DWELL_FRAMES,
+        )
 
         # Accumulate transition counts: {(from_zone, to_zone, animal_idx): count}
         trans_counts: dict[tuple[str, str, int], int] = {}
@@ -592,6 +734,8 @@ class ZoneTransitions(Metric):
                 "to_zone": to_z,
                 "individual_id": animal_idx,
                 "transition_count": count,
+                "min_dwell_frames_used": min_dwell_frames,
+                "bout_criterion_effective": criterion_effective,
             }
             for (from_z, to_z, animal_idx), count in trans_counts.items()
         ]
@@ -623,6 +767,8 @@ class Z5EntryExitEvents(Metric):
         "event",
         "t_s",
         "frame",
+        "min_dwell_frames_used",
+        "bout_criterion_effective",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -631,7 +777,13 @@ class Z5EntryExitEvents(Metric):
         ),
         formula_plain=(
             "enter at frame t when in_zone[t] and (t == 0 or not in_zone[t-1]); "
-            "exit at frame t when not in_zone[t] and in_zone[t-1]; t_s = frame / fps"
+            "exit at frame t when not in_zone[t] and in_zone[t-1]; t_s = frame / fps; "
+            "min_dwell_frames defaults to a fixed 1 frame, or -- when "
+            "derive_bout_criterion is switched on -- to the Sibly et al. 1990 "
+            "log-survivorship bout-criterion interval (see metrics/bouts.py, "
+            "shared with Z-3/Z-4) fit to this session's own pooled in-zone run "
+            "lengths, still falling back to the fixed 1 when that fit does "
+            "not converge"
         ),
         inputs=["Z-1 zone-membership series"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
@@ -640,21 +792,44 @@ class Z5EntryExitEvents(Metric):
             "frame 0 with no preceding 'exit'.",
             "An animal still inside a zone at the final frame gets an 'enter' "
             "event with no matching 'exit' event.",
+            "min_dwell_frames_used and bout_criterion_effective report the "
+            "threshold actually applied and which criterion produced it "
+            "('fixed', 'log_survivorship', or 'fixed_fallback') -- Z-6 and "
+            "Z-9 inherit whichever was used here, since both forward their "
+            "own cfg into this compute() unchanged.",
         ],
         primary_reference=MARTIN_BATESON_2007,
         supporting_references=[SIBLY_1990],
     )
+    _FIXED_DEFAULT_MIN_DWELL_FRAMES = 1
     parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="derive_bout_criterion",
+            label="Derive dwell length from data",
+            kind="bool",
+            default=False,
+            help=(
+                "Off (default): any 1+ frame stay produces an enter/exit "
+                "pair. On: fit the Sibly et al. 1990 log-survivorship "
+                "bout-criterion interval to this session's own in-zone run "
+                "lengths and debounce with that instead. Falls back to 1 "
+                "frame if the fit does not converge. Overrides Minimum dwell "
+                "length while it is on."
+            ),
+        ),
         MetricParameter(
             name="min_dwell_frames",
             label="Minimum dwell length",
             kind="int",
-            default=1,
             minimum=1,
             unit="frames",
+            auto_label="Default (1, or fitted)",
+            disabled_by="derive_bout_criterion",
             help=(
                 "Debounces boundary flicker: a run inside a zone shorter than "
-                "this produces no enter/exit events at all."
+                "this produces no enter/exit events at all. Ignored while "
+                "'Derive dwell length from data' is on, which supplies the "
+                "threshold instead."
             ),
         ),
     ]
@@ -667,16 +842,20 @@ class Z5EntryExitEvents(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Optional dict. ``cfg['min_dwell_frames']`` (default 1) is the
+            Optional dict. ``cfg['min_dwell_frames']``, when given, is the
             minimum run length inside a zone that produces an enter/exit
             pair -- a shorter run is debounced away entirely, as if the
-            animal never entered.
+            animal never entered. Otherwise ``cfg['derive_bout_criterion']``
+            (bool, default ``False``) decides: off keeps the fixed default
+            of 1 frame, on fits the log-survivorship bout-criterion interval
+            to this session's own data.
 
         Returns
         -------
         pd.DataFrame
             One row per event with columns: session_id, zone_name,
-            individual_id, event ("enter"/"exit"), t_s, frame.
+            individual_id, event ("enter"/"exit"), t_s, frame,
+            min_dwell_frames_used, bout_criterion_effective.
             Empty DataFrame when no zone arrays are present.
         """
         zone_arrays = _collect_zone_arrays(session)
@@ -684,13 +863,17 @@ class Z5EntryExitEvents(Metric):
         if not zone_arrays:
             return pd.DataFrame(columns=empty_cols)
 
-        min_dwell_frames = 1
-        if cfg is not None and "min_dwell_frames" in cfg:
-            min_dwell_frames = int(cfg["min_dwell_frames"])
-
         session_id: str = session.session_id  # type: ignore[attr-defined]
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
         fps: float = session.fps  # type: ignore[attr-defined]
+
+        min_dwell_frames, criterion_effective = _effective_debounce_threshold(
+            zone_arrays,
+            n_animals,
+            cfg,
+            "min_dwell_frames",
+            self._FIXED_DEFAULT_MIN_DWELL_FRAMES,
+        )
 
         rows: list[dict[str, object]] = []
         for arr in zone_arrays:
@@ -713,6 +896,8 @@ class Z5EntryExitEvents(Metric):
                                 "event": "enter",
                                 "t_s": frame / fps,
                                 "frame": frame,
+                                "min_dwell_frames_used": min_dwell_frames,
+                                "bout_criterion_effective": criterion_effective,
                             }
                         )
                     for frame in exit_frames:
@@ -724,6 +909,8 @@ class Z5EntryExitEvents(Metric):
                                 "event": "exit",
                                 "t_s": frame / fps,
                                 "frame": frame,
+                                "min_dwell_frames_used": min_dwell_frames,
+                                "bout_criterion_effective": criterion_effective,
                             }
                         )
 
@@ -773,16 +960,25 @@ class Z6LatencyToFirstEntry(Metric):
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
+            name="derive_bout_criterion",
+            label="Derive dwell length from data",
+            kind="bool",
+            default=False,
+            help="Forwarded to Z-5 unchanged -- see Z-5's own parameter of the same name.",
+        ),
+        MetricParameter(
             name="min_dwell_frames",
             label="Minimum dwell length",
             kind="int",
-            default=1,
             minimum=1,
             unit="frames",
+            auto_label="Default (1, or fitted)",
+            disabled_by="derive_bout_criterion",
             help=(
                 "Forwarded to Z-5: debounces boundary flicker so a run "
                 "inside a zone shorter than this doesn't count as the "
-                "first entry."
+                "first entry. Ignored while 'Derive dwell length from data' "
+                "is on."
             ),
         ),
     ]
@@ -799,7 +995,8 @@ class Z6LatencyToFirstEntry(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Unused; reserved for future configuration.
+            Forwarded to ``Z5EntryExitEvents.compute()`` unchanged -- see its
+            ``min_dwell_frames``/``derive_bout_criterion``.
 
         Returns
         -------
@@ -1180,13 +1377,24 @@ class ZoneDwellTimeDistribution(Metric):
     )
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
+            name="derive_bout_criterion",
+            label="Derive dwell length from data",
+            kind="bool",
+            default=False,
+            help="Forwarded to Z-5 unchanged -- see Z-5's own parameter of the same name.",
+        ),
+        MetricParameter(
             name="min_dwell_frames",
             label="Minimum dwell length",
             kind="int",
-            default=1,
             minimum=1,
             unit="frames",
-            help="Forwarded to Z-5: debounces boundary flicker, same as Z-5/Z-6.",
+            auto_label="Default (1, or fitted)",
+            disabled_by="derive_bout_criterion",
+            help=(
+                "Forwarded to Z-5: debounces boundary flicker, same as Z-5/Z-6. "
+                "Ignored while 'Derive dwell length from data' is on."
+            ),
         ),
     ]
 
@@ -1198,7 +1406,8 @@ class ZoneDwellTimeDistribution(Metric):
         session:
             A ``PreprocessedSession`` instance.
         cfg:
-            Optional dict. ``cfg['min_dwell_frames']`` (default 1), forwarded to Z-5.
+            Forwarded to ``Z5EntryExitEvents.compute()`` unchanged -- see its
+            ``min_dwell_frames``/``derive_bout_criterion``.
 
         Returns
         -------

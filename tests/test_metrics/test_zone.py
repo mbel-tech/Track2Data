@@ -172,8 +172,13 @@ class TestZoneVisitCount:
 
     def test_declares_configurable_parameters(self) -> None:
         params = {p.name: p for p in ZoneVisitCount.parameters}
-        assert params.keys() == {"min_visit_frames"}
-        assert params["min_visit_frames"].default == 1
+        assert params.keys() == {"derive_bout_criterion", "min_visit_frames"}
+        # No declared default -- resolved per the derive_bout_criterion
+        # switch (fixed 1 when off, fitted when on), same "unset means
+        # auto" convention as IL-4's threshold_px_s.
+        assert params["min_visit_frames"].default is None
+        # Opt-in: off by default, so numbers match earlier releases.
+        assert params["derive_bout_criterion"].default is False
 
     def test_columns(self) -> None:
         psess = make_psess_with_zones()

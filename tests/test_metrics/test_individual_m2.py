@@ -377,7 +377,12 @@ class TestFreezingBouts:
 
     def test_declares_configurable_parameters(self) -> None:
         names = {p.name for p in FreezingBouts.parameters}
-        assert names == {"threshold_px_s", "threshold_multiplier", "min_bout_frames"}
+        assert names == {
+            "threshold_px_s",
+            "threshold_multiplier",
+            "derive_bout_criterion",
+            "min_bout_frames",
+        }
 
     def test_threshold_multiplier_matches_il4s_rule(self) -> None:
         """IL-7 documented itself as using "the same threshold rule as
@@ -517,6 +522,152 @@ class TestFreezingBouts:
         row = df.iloc[0]
         assert row["freezing_bout_count"] == 1
         assert row["total_freezing_duration_s"] == pytest.approx(5 / 25.0)
+
+    # ── derive_bout_criterion (opt-in Sibly log-survivorship BCI) ───────────
+
+    def _bimodal_speed(self, rng, n_frames=3000, n_animals=1, n_short=40, n_long=15):
+        """Inactive-run lengths split into a short/noise population and a
+        long/genuine population, so the log-survivorship fit has a real
+        break point to find."""
+        speed = np.full((n_frames, n_animals), 100.0)
+        for k in range(n_animals):
+            t = 0
+            for _ in range(n_short):
+                length = int(rng.integers(1, 4))
+                speed[t : t + length, k] = 0.0
+                t += length + int(rng.integers(5, 15))
+            for _ in range(n_long):
+                length = int(rng.integers(25, 40))
+                speed[t : t + length, k] = 0.0
+                t += length + int(rng.integers(20, 40))
+        return speed
+
+    def test_switch_is_off_by_default(self) -> None:
+        """The opt-in switch must default off, so an untouched project
+        keeps the freezing-bout numbers it had before this feature."""
+        params = {p.name: p for p in FreezingBouts.parameters}
+        assert params["derive_bout_criterion"].default is False
+
+    def test_default_run_uses_the_fixed_threshold_and_says_so(self) -> None:
+        """Switch off (the default) on data the fit *could* have used:
+        the fixed 5 must still win, and be reported as 'fixed' -- not
+        'fixed_fallback', which would wrongly imply a fit was tried."""
+        speed = self._bimodal_speed(np.random.default_rng(0))
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        row = df.iloc[0]
+        assert "min_bout_frames_used" in df.columns
+        assert "bout_criterion_effective" in df.columns
+        assert row["min_bout_frames_used"] == 5
+        assert row["bout_criterion_effective"] == "fixed"
+
+    def test_explicit_min_bout_frames_reports_fixed(self) -> None:
+        n_frames, n_animals = 10, 1
+        speed = np.full((n_frames, n_animals), 100.0)
+        speed[:3, 0] = 0.0
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(
+            psess, cfg={"threshold_px_s": 10.0, "min_bout_frames": 3}
+        )
+        assert df.iloc[0]["bout_criterion_effective"] == "fixed"
+        assert df.iloc[0]["min_bout_frames_used"] == 3
+
+    def test_switch_overrides_an_explicit_min_bout_frames(self) -> None:
+        """Ticking the switch means "let the data decide", which a typed
+        threshold would contradict -- so the switch wins and the fitted
+        value is used, not the 3."""
+        speed = self._bimodal_speed(np.random.default_rng(0))
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(
+            psess,
+            cfg={
+                "threshold_px_s": 10.0,
+                "derive_bout_criterion": True,
+                "min_bout_frames": 3,
+            },
+        )
+        assert df.iloc[0]["min_bout_frames_used"] != 3
+        assert df.iloc[0]["bout_criterion_effective"] == "log_survivorship"
+
+    def test_explicit_min_bout_frames_applies_again_once_the_switch_is_off(self) -> None:
+        """The switch overrides the typed threshold but must not destroy
+        it -- the same config with the switch off uses the 3 again."""
+        speed = self._bimodal_speed(np.random.default_rng(0))
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(
+            psess,
+            cfg={
+                "threshold_px_s": 10.0,
+                "derive_bout_criterion": False,
+                "min_bout_frames": 3,
+            },
+        )
+        assert df.iloc[0]["min_bout_frames_used"] == 3
+        assert df.iloc[0]["bout_criterion_effective"] == "fixed"
+
+    def test_switch_on_converges_on_a_genuinely_bimodal_session(self) -> None:
+        """With the switch on, enough inactive runs split into a
+        short/noise and a long/genuine population for the Sibly
+        log-survivorship fit to converge and override the fixed 5."""
+        speed = self._bimodal_speed(np.random.default_rng(0))
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(
+            psess, cfg={"threshold_px_s": 10.0, "derive_bout_criterion": True}
+        )
+        row = df.iloc[0]
+        assert row["bout_criterion_effective"] == "log_survivorship"
+        # The fitted threshold should separate the two populations, not
+        # sit at either extreme.
+        assert 3 <= row["min_bout_frames_used"] <= 25
+        # Only the long bouts should qualify once the fit is applied.
+        assert row["freezing_bout_count"] == 15
+
+    def test_switch_on_falls_back_when_the_fit_cannot_converge(self) -> None:
+        """Too little data to fit: the switch is on, so a fit was
+        attempted, and the distinct 'fixed_fallback' label records that
+        it was tried and failed rather than never attempted."""
+        n_frames, n_animals = 10, 1
+        speed = np.full((n_frames, n_animals), 100.0)
+        speed[:3, 0] = 0.0
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(
+            psess, cfg={"threshold_px_s": 10.0, "derive_bout_criterion": True}
+        )
+        assert df.iloc[0]["min_bout_frames_used"] == 5
+        assert df.iloc[0]["bout_criterion_effective"] == "fixed_fallback"
+
+    def test_switch_off_reproduces_historical_behaviour(self) -> None:
+        """The whole reason this is a switch rather than a new default:
+        with it off, IL-7 must produce exactly what it produced before
+        the feature existed. "Before" is pinned as the explicit
+        historical threshold of 5, so this catches the fit being
+        attempted anyway, or the fixed default drifting."""
+        speed = self._bimodal_speed(np.random.default_rng(42))
+        psess = make_psess(speed=speed)
+        off = FreezingBouts().compute(psess, cfg={"threshold_px_s": 10.0})
+        historical = FreezingBouts().compute(
+            psess, cfg={"threshold_px_s": 10.0, "min_bout_frames": 5}
+        )
+        for col in (
+            "freezing_bout_count",
+            "mean_freezing_duration_s",
+            "total_freezing_duration_s",
+        ):
+            assert off[col].equals(historical[col]), col
+
+    def test_switch_on_pools_the_fit_across_individuals(self) -> None:
+        """The BCI is fit once from every animal's pooled inactive runs,
+        not per animal -- so all individuals in one compute() call get
+        the same min_bout_frames_used."""
+        speed = self._bimodal_speed(
+            np.random.default_rng(1), n_animals=3, n_short=15, n_long=6
+        )
+        psess = make_psess(speed=speed)
+        df = FreezingBouts().compute(
+            psess, cfg={"threshold_px_s": 10.0, "derive_bout_criterion": True}
+        )
+        assert df["min_bout_frames_used"].nunique() == 1
+        assert (df["bout_criterion_effective"] == "log_survivorship").all()
 
 
 # ── IL-8: TurnRate ────────────────────────────────────────────────────────────

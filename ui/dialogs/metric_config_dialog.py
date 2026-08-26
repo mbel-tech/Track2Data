@@ -66,6 +66,7 @@ class MetricConfigDialog(QDialog):
         super().__init__(parent)
         self._metric_cls = metric_cls
         self._widgets: dict[str, QWidget] = {}
+        self._rows: dict[str, QWidget] = {}
         self._reset_buttons: dict[str, QPushButton] = {}
         # For a numeric parameter with no declared default (e.g. IL-4/IL-7's
         # threshold_px_s: "auto-computed from data when unset") the spin
@@ -98,6 +99,9 @@ class MetricConfigDialog(QDialog):
             value = current_values.get(param.name, param.default)
             form.addRow(f"{param.label}:", self._build_field(param, value))
         layout.addLayout(form)
+        # After every widget exists, so a row can be wired to a switch
+        # declared later in the schema than itself.
+        self._apply_parameter_dependencies()
         layout.addStretch()
 
         footer = QHBoxLayout()
@@ -144,7 +148,31 @@ class MetricConfigDialog(QDialog):
         row_layout.addWidget(reset_btn)
         self._reset_buttons[param.name] = reset_btn
 
+        self._rows[param.name] = row
         return row
+
+    def _apply_parameter_dependencies(self) -> None:
+        """Grey out each row whose ``disabled_by`` switch is on, and keep
+        it in sync as that switch is toggled.
+
+        A control the metric will ignore should look ignored: IL-7 reads
+        the fitted bout-criterion interval when ``derive_bout_criterion``
+        is on and never looks at ``min_bout_frames``, so leaving that spin
+        box live would invite the user to type a threshold that silently
+        does nothing. The value itself is left untouched, so unticking the
+        switch restores it rather than making the user retype it.
+        """
+        for param in self._metric_cls.parameters:
+            controller = self._widgets.get(param.disabled_by or "")
+            row = self._rows.get(param.name)
+            if row is None or not isinstance(controller, QCheckBox):
+                continue
+            sync = partial(self._sync_dependent_row, param.name, controller)
+            controller.toggled.connect(sync)
+            sync()
+
+    def _sync_dependent_row(self, name: str, controller: QCheckBox, *_args) -> None:
+        self._rows[name].setEnabled(not controller.isChecked())
 
     def _connect_edited_signal(self, param: MetricParameter, widget: QWidget) -> None:
         """Mark a row edited the first time its widget changes."""
@@ -177,7 +205,7 @@ class MetricConfigDialog(QDialog):
                 sentinel = (param.minimum if param.minimum is not None else 0.0) - 1
                 self._auto_sentinel[param.name] = sentinel
                 spin.setRange(sentinel, upper)
-                spin.setSpecialValueText("Auto (data-driven)")
+                spin.setSpecialValueText(param.auto_label or "Auto (data-driven)")
                 spin.setValue(float(value) if value is not None else sentinel)
             else:
                 spin.setRange(param.minimum if param.minimum is not None else -1e9, upper)
@@ -192,7 +220,7 @@ class MetricConfigDialog(QDialog):
                 sentinel_i = int(param.minimum if param.minimum is not None else 0) - 1
                 self._auto_sentinel[param.name] = sentinel_i
                 int_spin.setRange(sentinel_i, upper_i)
-                int_spin.setSpecialValueText("Auto (data-driven)")
+                int_spin.setSpecialValueText(param.auto_label or "Auto (data-driven)")
                 int_spin.setValue(int(value) if value is not None else sentinel_i)
             else:
                 int_spin.setRange(

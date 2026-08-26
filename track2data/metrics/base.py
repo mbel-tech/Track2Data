@@ -82,6 +82,23 @@ class MetricParameter(BaseModel):
     arena centre, computed per session from that session's own zones
     (track2data/metrics/derived.py) -- so the config dialog renders it
     read-only instead of an editable default.
+
+    ``auto_label`` overrides the text the config dialog shows for a
+    numeric parameter left unset (``default=None``). The generic
+    "Auto (data-driven)" is right for IL-4's ``threshold_px_s``, which
+    really is computed from the data whenever it is blank -- but wrong
+    for a threshold whose unset behaviour depends on another parameter
+    (IL-7's ``min_bout_frames`` resolves to a fixed 5 unless
+    ``derive_bout_criterion`` is switched on), where claiming
+    "data-driven" would describe behaviour the user has not enabled.
+
+    ``disabled_by`` names another (boolean) parameter that overrides
+    this one: when it is on, this parameter's value is ignored, so the
+    config dialog greys the row out. Without it a user could type a
+    threshold into a control the metric will not read -- e.g. IL-7's
+    ``min_bout_frames`` while ``derive_bout_criterion`` is switched on.
+    The stored value is preserved, not cleared, so unticking the
+    controlling switch brings it back into effect.
     """
 
     name: str
@@ -94,6 +111,8 @@ class MetricParameter(BaseModel):
     help: str | None = None
     choices: list[str] | None = None
     derived: bool = False
+    auto_label: str | None = None
+    disabled_by: str | None = None
 
 
 class Metric(ABC):

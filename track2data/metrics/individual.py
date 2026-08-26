@@ -15,6 +15,7 @@ import pandas as pd
 
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
+from track2data.metrics.bouts import compute_bout_criterion_interval
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -732,6 +733,8 @@ class FreezingBouts(Metric):
         "freezing_bout_count",
         "mean_freezing_duration_s",
         "total_freezing_duration_s",
+        "min_bout_frames_used",
+        "bout_criterion_effective",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -745,17 +748,35 @@ class FreezingBouts(Metric):
             "run-length encode inactive; keep runs >= min_bout_frames; "
             "freezing_bout_count = number of qualifying runs; "
             "total_freezing_duration_s = sum(qualifying run lengths) / fps; "
-            "mean_freezing_duration_s = total_freezing_duration_s / freezing_bout_count"
+            "mean_freezing_duration_s = total_freezing_duration_s / freezing_bout_count; "
+            "min_bout_frames defaults to a fixed 5 frames, or -- when "
+            "derive_bout_criterion is switched on -- to the Sibly et al. 1990 "
+            "log-survivorship bout-criterion interval (see metrics/bouts.py) "
+            "fit to this session's own pooled inactive-run lengths across all "
+            "individuals, still falling back to the fixed 5 when that fit "
+            "does not converge"
         ),
         inputs=[
             "PreprocessedSession.kinematics.speed_px_s",
-            "cfg['min_bout_frames'] (default 5)",
+            "cfg['min_bout_frames'] (explicit override; else per derive_bout_criterion)",
+            "cfg['derive_bout_criterion'] (bool, default False)",
         ],
         assumptions=["Same as IL-4"],
-        warnings=["Discards short pauses; min duration is study-specific"],
+        warnings=[
+            "Discards short pauses; min duration is study-specific",
+            "min_bout_frames_used and bout_criterion_effective report the "
+            "threshold actually applied and which criterion produced it "
+            "('fixed', 'log_survivorship', or 'fixed_fallback' when a "
+            "requested log-survivorship fit did not converge)",
+            "With derive_bout_criterion switched on the threshold is fit "
+            "per session, so it can differ session to session -- check "
+            "min_bout_frames_used before comparing freezing-bout counts "
+            "across sessions",
+        ],
         primary_reference=CACHAT_2010,
         supporting_references=[SIBLY_1990],
     )
+    _FIXED_DEFAULT_MIN_BOUT_FRAMES = 5
     parameters: ClassVar[list[MetricParameter]] = [
         MetricParameter(
             name="threshold_px_s",
@@ -780,13 +801,34 @@ class FreezingBouts(Metric):
             ),
         ),
         MetricParameter(
+            name="derive_bout_criterion",
+            label="Derive bout length from data",
+            kind="bool",
+            default=False,
+            help=(
+                "Off (default): a bout is any run of 5+ inactive frames. "
+                "On: fit the Sibly et al. 1990 log-survivorship "
+                "bout-criterion interval to this session's own inactive-run "
+                "lengths and use that instead, so brief tracking dips are "
+                "separated from genuine freezing by the data rather than by "
+                "a round number. Falls back to 5 frames if the fit does not "
+                "converge. Overrides Minimum bout length while it is on."
+            ),
+        ),
+        MetricParameter(
             name="min_bout_frames",
             label="Minimum bout length",
             kind="int",
-            default=5,
             minimum=1,
             unit="frames",
-            help="Runs of consecutive inactive frames shorter than this are not a bout.",
+            auto_label="Default (5, or fitted)",
+            disabled_by="derive_bout_criterion",
+            help=(
+                "Runs of consecutive inactive frames shorter than this are not "
+                "a bout. Ignored while 'Derive bout length from data' is on, "
+                "which supplies the threshold instead; the value is kept and "
+                "applies again when that switch is turned off."
+            ),
         ),
     ]
 
@@ -800,9 +842,11 @@ class FreezingBouts(Metric):
         cfg:
             Optional dict.  ``cfg['threshold_px_s']`` overrides the IL-4-style
             activity threshold (default: data-driven ``mean(speed) * 0.1``).
-            ``cfg['min_bout_frames']`` overrides the minimum run length, in
-            frames, required for a run of inactivity to count as a freezing
-            bout (default 5).
+            ``cfg['min_bout_frames']``, when given, is used verbatim and no
+            fit is attempted. Otherwise ``cfg['derive_bout_criterion']``
+            (bool, default ``False``) decides: off keeps the fixed default
+            of 5 frames, on fits the log-survivorship bout-criterion
+            interval to this session's own data.
 
         Returns
         -------
@@ -829,21 +873,50 @@ class FreezingBouts(Metric):
                 float(np.mean(all_valid) * threshold_multiplier) if len(all_valid) > 0 else 0.0
             )
 
-        min_bout_frames = 5
-        if cfg is not None and "min_bout_frames" in cfg:
-            min_bout_frames = int(cfg["min_bout_frames"])
-
         fps = session.fps
         n_animals = session.n_animals
 
-        records: list[dict] = []
+        # Inactive runs are needed both to pool the bout-criterion fit
+        # (across every individual, for a session-wide threshold that
+        # doesn't depend on which animal happens to have more freezing
+        # bouts) and to apply it per individual below, so compute them
+        # once up front rather than twice.
+        inactive_per_animal = []
         for k in range(n_animals):
             s = speed[:, k]
             # NaN frames count as neither active nor inactive: excluding them
             # here also means they break, rather than merge, adjacent runs.
-            inactive = (s <= threshold) & ~np.isnan(s)
+            inactive_per_animal.append((s <= threshold) & ~np.isnan(s))
 
-            run_lengths = _true_run_lengths(inactive)
+        derive = bool(cfg.get("derive_bout_criterion", False)) if cfg is not None else False
+
+        if derive:
+            # The switch wins over an explicit min_bout_frames: ticking it
+            # means "let the data decide", which a typed threshold would
+            # contradict. The typed value is not discarded -- it is still
+            # stored, and applies again the moment the switch goes off.
+            pooled_runs = [
+                length
+                for inactive in inactive_per_animal
+                for length in _true_run_lengths(inactive)
+            ]
+            bci = compute_bout_criterion_interval(pooled_runs)
+            if bci.converged:
+                min_bout_frames = bci.threshold_frames
+                bout_criterion_effective = "log_survivorship"
+            else:
+                min_bout_frames = self._FIXED_DEFAULT_MIN_BOUT_FRAMES
+                bout_criterion_effective = "fixed_fallback"
+        elif cfg is not None and cfg.get("min_bout_frames") is not None:
+            min_bout_frames = int(cfg["min_bout_frames"])
+            bout_criterion_effective = "fixed"
+        else:
+            min_bout_frames = self._FIXED_DEFAULT_MIN_BOUT_FRAMES
+            bout_criterion_effective = "fixed"
+
+        records: list[dict] = []
+        for k in range(n_animals):
+            run_lengths = _true_run_lengths(inactive_per_animal[k])
             qualifying = [n for n in run_lengths if n >= min_bout_frames]
 
             bout_count = len(qualifying)
@@ -862,6 +935,8 @@ class FreezingBouts(Metric):
                     "freezing_bout_count": bout_count,
                     "mean_freezing_duration_s": mean_duration,
                     "total_freezing_duration_s": total_duration,
+                    "min_bout_frames_used": min_bout_frames,
+                    "bout_criterion_effective": bout_criterion_effective,
                 }
             )
 
