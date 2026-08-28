@@ -201,6 +201,78 @@ def test_compute_metrics_selected_metrics_present(tiny_real_session: Path) -> No
         assert mid in results, f"{mid} not in metric results: {sorted(results.keys())}"
 
 
+def test_identity_free_session_reads_the_flag_and_skips_identity_metrics(
+    tiny_identity_free_session: Path,
+) -> None:
+    """The whole chain on a realistic session folder: session.json's
+    track_wo_identities reaches Session, gates compute_metrics, and lands in
+    the export payload. The fixture is byte-identical to tiny_real_session
+    apart from that one key -- full coverage, fraction_identified 0.822 --
+    so nothing else can explain the difference."""
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_identity_free_session)
+    manifest = manifest.model_copy(
+        update={
+            "sessions": [
+                manifest.sessions[0].model_copy(update={"track_wo_identities": True})
+            ]
+        }
+    )
+    engine = Engine(manifest)
+
+    session = engine.import_session(tiny_identity_free_session)
+    assert session.track_wo_identities is True
+    assert session.has_stable_identities is False
+
+    psess = engine.preprocess(session)
+    results = engine.compute_metrics(psess)
+
+    assert "IL-1" not in results and "IL-2" not in results  # requires_identity
+    assert "GL-1" in results                                # genuinely identity-free
+    assert "D-1" in results                                 # diagnostics survive
+
+    payload = engine.build_payload(psess, results)
+    assert set(payload.skipped_metrics) == {"IL-1", "IL-2"}
+    assert payload.provenance.identity_free_effective is True
+
+
+def test_ordinary_session_reads_the_flag_as_false_and_skips_nothing(
+    tiny_real_session: Path,
+) -> None:
+    """The inert case, which is what the 70-session GOT corpus looks like:
+    track_wo_identities is present and false in all of them."""
+    from track2data.api import Engine
+
+    engine = Engine(_minimal_manifest(tiny_real_session))
+    session = engine.import_session(tiny_real_session)
+    assert session.track_wo_identities is False
+
+    psess = engine.preprocess(session)
+    results = engine.compute_metrics(psess)
+
+    for mid in ("IL-1", "IL-2", "GL-1"):
+        assert mid in results
+    assert engine.build_payload(psess, results).skipped_metrics == {}
+
+
+def test_identity_free_run_reports_the_skips_in_the_readme(
+    tiny_identity_free_session: Path, tmp_path: Path
+) -> None:
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_identity_free_session)
+    engine = Engine(manifest)
+    engine.run(tmp_path, exporters=["csv_long", "readme"])
+
+    readmes = list(tmp_path.rglob("README.md"))
+    assert readmes, "run wrote no README"
+    text = readmes[0].read_text(encoding="utf-8")
+    assert "## Metrics skipped" in text
+    assert "IL-1" in text
+    assert "| Tracked without identification | True |" in text
+
+
 def test_compute_metrics_every_registered_metric_runs_without_crashing(
     tiny_real_session: Path,
 ) -> None:

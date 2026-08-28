@@ -44,6 +44,12 @@ class SessionFacts:
     width_px: int
     height_px: int
     has_stable_identities: bool
+    # What the tracker itself declared (Session.track_wo_identities), as
+    # opposed to has_stable_identities, which also folds in coverage
+    # heuristics. None = the source didn't report it. The *user's* override
+    # of this lives on SessionRef, not here: it is authored state, not a
+    # fact re-readable from the folder.
+    track_wo_identities: bool | None
     idtrackerai_version: str | None
     # idtracker.ai's px-to-real-unit ratio (from the validator's
     # length-calibration tool); None means this session was never
@@ -74,6 +80,7 @@ class SessionFacts:
             width_px=session.video.width_px,
             height_px=session.video.height_px,
             has_stable_identities=session.has_stable_identities,
+            track_wo_identities=session.track_wo_identities,
             idtrackerai_version=session.idtrackerai_version,
             length_unit=session.length_unit,
             setup_points=session.setup_points,

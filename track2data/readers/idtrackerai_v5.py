@@ -108,7 +108,15 @@ class IDTrackerAiV5Reader(SessionReader):
         traj_path, variant = self._find_trajectory(folder)
         raw_xy = self._load_trajectory(traj_path, n_frames_hint=n_frames_hint)
         video_info = self._load_video_info(folder, raw_xy, video_obj=video_obj)
-        has_stable = self._check_stability(raw_xy)
+        # The v5 session json was already being loaded elsewhere in this
+        # reader but track_wo_identities was never looked at, so a legacy
+        # session tracked without identification came out "stable"
+        # whenever its coverage happened to be good -- the same bug the
+        # unified reader's _check_stability was written to fix.
+        track_wo_identities = self._parse_track_wo_identities(
+            self._load_session_json(folder)
+        )
+        has_stable = self._check_stability(raw_xy, track_wo_identities)
 
         return Session(
             session_id=folder.name,
@@ -118,6 +126,7 @@ class IDTrackerAiV5Reader(SessionReader):
             n_animals=int(raw_xy.shape[1]),
             trajectory_variant=variant,
             has_stable_identities=has_stable,
+            track_wo_identities=track_wo_identities,
             raw_xy=raw_xy,
             body_length_px=None,  # ASSUMPTION 5
         )
@@ -276,7 +285,31 @@ class IDTrackerAiV5Reader(SessionReader):
         return None
 
     @staticmethod
-    def _check_stability(raw_xy: np.ndarray) -> bool:
-        """True iff every animal has ≥ STABILITY_THRESHOLD non-NaN frames."""
+    def _parse_track_wo_identities(session_meta: dict | None) -> bool | None:
+        """Tri-state read of ``track_wo_identities``; None = not reported.
+
+        Mirrors the unified reader's Normaliser._parse_track_wo_identities
+        (readers/idtrackerai/normaliser.py) -- kept as a small duplicate
+        rather than a shared import because this legacy reader is
+        deliberately standalone and parses its own session json.
+        """
+        raw = (session_meta or {}).get("track_wo_identities")
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            lowered = raw.strip().lower()
+            if lowered in ("true", "1"):
+                return True
+            if lowered in ("false", "0"):
+                return False
+        return None
+
+    @staticmethod
+    def _check_stability(raw_xy: np.ndarray, track_wo_identities: bool | None) -> bool:
+        """True iff identities are usable: not tracked without
+        identification, and every animal has ≥ STABILITY_THRESHOLD non-NaN
+        frames."""
+        if track_wo_identities is True:
+            return False
         valid_frac = (~np.isnan(raw_xy[:, :, 0])).mean(axis=0)  # (n_animals,)
         return bool(np.all(valid_frac >= STABILITY_THRESHOLD))

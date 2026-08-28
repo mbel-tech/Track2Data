@@ -222,6 +222,25 @@ re-reading why each was deferred:
 | GL-14 | Directional correlation delay / leadership ranking | D-7 measured a **median individual-fragment length of 3 frames** on a real corpus session; lag correlation needs identity to hold across seconds, which this corpus does not support. |
 | GL-16 | Group spatial correlation length | Cavagna's method is validated on flocks of hundreds; on shoals of 5-20 animals the correlation length is not estimable. |
 
+### Deferred: identity-free zone metrics
+
+`Engine.compute_metrics` refuses every `requires_identity` metric for a
+session tracked without identification, and `docs/METRICS_SPEC.md` §4.5
+carries the full classification. One inconsistency is knowingly left
+open: all nine Z-* metrics declare `requires_identity = False` and so
+still run on such a session, yet every one emits an `individual_id`
+column and indexes by animal slot `k`.
+
+| Z-4, Z-6, Z-7 | Transitions, latency to first entry, transition matrix / sequence entropy | Genuinely need the animal to be the same throughout; no valid reading on an identity-free session. |
+| Z-1, Z-2, Z-3, Z-5, Z-8, Z-9 | Occupancy-style | Correct once summed over individuals, meaningless per row. |
+
+The fix is not to flip the flags -- that would make *all* zone analysis
+unavailable for an identity-free session, which is worse than the status
+quo. It is to emit pooled rows instead of per-individual rows in that
+case, changing the output shape of six metrics. Same family of problem as
+GL-14 and GL-17 above: identity is assumed by the output schema, not just
+by the arithmetic.
+
 ---
 
 ## Repository visibility

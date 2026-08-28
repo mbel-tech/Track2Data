@@ -585,10 +585,15 @@ preselected; Identity Switch Correction defaults **off**).
 **Required inputs:** at least one metric selected.
 
 **Decisions / branches:**
-- **Identity-free fallback** — when *every* session in the project is
-  identity-free, `requires_identity` metric rows are greyed out with
-  a tooltip. A session with unknown status (not yet probed) does not
-  trigger this.
+- **Identity-free fallback** — a session counts as identity-free when
+  idtracker.ai declared `track_wo_identities` in its `session.json`, or
+  when you ticked the Identity-free box for it on Stage 2. When *every*
+  session is identity-free, `requires_identity` metric rows are greyed
+  out with a tooltip. When only some are, the rows stay selectable and
+  the tooltip names the affected sessions — the engine skips those
+  metrics for exactly those sessions and lists them under "Metrics
+  skipped" in the run README. A session whose probe has not landed does
+  not trigger either state.
 - **No zones defined** → the Zone tab is disabled.
 - **Metric info ⓘ icon** — opens a `MetricInfoDialog` with the
   metric's definition, formula, inputs, assumptions, and reference

@@ -170,7 +170,13 @@ class Polarisation(Metric):
     label = "Polarisation"
     level = "group"
     priority = "primary"
-    requires_identity = False
+    # Polarisation is built from heading vectors, and a heading is
+    # arctan2 of xy[t+1] - xy[t] at a *fixed row index*
+    # (preprocess/kinematics.py). On an identity-free session that
+    # difference is between two unrelated animals, so the alignment it
+    # reports is noise. METRICS_SPEC.md section 4.5 has always listed
+    # GL-3 as not identity-free derivable; the flag now says so too.
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "metric_id",
@@ -830,7 +836,10 @@ class RotationalOrder(Metric):
     label = "Rotational Order"
     level = "group"
     priority = "optional"
-    requires_identity = False
+    # Rotational order needs the same per-individual headings as GL-3, so
+    # it inherits GL-3's identity dependence. Also listed as not
+    # identity-free derivable in METRICS_SPEC.md section 4.5.
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "metric_id",
@@ -1161,7 +1170,10 @@ class OrderStateClassification(Metric):
     label = "Order-State Classification"
     level = "group"
     priority = "primary"
-    requires_identity = False
+    # Order-state classification thresholds GL-3's polarisation against
+    # GL-8's rotational order, so it is identity-dependent for both of
+    # their reasons.
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "metric_id",

@@ -753,17 +753,85 @@ info-button modal (§6).
 
 ### 4.5 Identity-free variants
 
+`Metric.requires_identity` is not documentation: `Engine.compute_metrics`
+refuses to compute a ❌ metric for a session that was tracked without
+identification (`session.json`'s `track_wo_identities`) or that the user
+marked identity-free on the Sessions screen. On such a session the row
+index is a per-frame detection slot rather than a persistent animal, so
+anything following an individual across frames is noise.
+
+The criterion, applied to what `compute()` actually reads: **does it
+consume a value derived from more than one frame at a fixed row index?**
+(`kinematics.speed_px_s`, `kinematics.heading_rad`, any `xy[t] → xy[t+1]`
+pairing at matching indices.) GL-7 shows the criterion is about *how*,
+not *what*: it reports a speed but re-matches detections between each
+frame pair by nearest neighbour instead of trusting the row index.
+
+The classification is pinned by
+`tests/test_metrics/test_identity_classification.py` and published as the
+`requires_identity` column of `docs/METRIC_REFERENCES.csv`; change all
+three together.
+
 | Metric | Identity-free derivable? | Note |
 |---|---|---|
-| GL-1 NND | ✅ | Unordered point set per frame |
-| GL-2 IID | ✅ | Unordered point set per frame |
+| IL-1 Distance Travelled | ❌ | Per-animal time series |
+| IL-2 Speed (mean / median / max) | ❌ | Per-animal time series |
+| IL-3 Distance from Arena Centre | ❌ | Per-animal time series |
+| IL-4 Activity / Freezing Fraction | ❌ | Per-animal time series |
+| IL-5 Tortuosity | ❌ | Per-animal time series |
+| IL-6 Acceleration (mean abs / RMS / max) | ❌ | Per-animal time series |
+| IL-7 Freezing-Bout Count & Duration | ❌ | Per-animal time series |
+| IL-8 Turn Rate (Heading Change) | ❌ | Per-animal time series |
+| IL-9 Home-Base Occupancy | ❌ | Per-animal time series |
+| IL-10 Roaming Entropy | ❌ | Per-animal time series |
+| IL-11 Circular Statistics of Heading | ❌ | Per-animal time series |
+| IL-14 Wall-Distance Thigmotaxis | ❌ | Per-animal time series |
+| GL-1 Nearest-Neighbour Distance | ✅ | Unordered point set per frame |
+| GL-2 Inter-Individual Distance | ✅ | Unordered point set per frame |
 | GL-3 Polarisation | ❌ | Heading requires per-individual tracklets |
-| GL-4 Hull area | ✅ | Frame-by-frame point set |
-| GL-5 Centroid speed | ✅ | Frame-by-frame centroid |
-| GL-7 NN-matched speed | ✅ | Designed for identity-free sessions |
-| GL-8 Rotational order | ❌ | Requires headings |
-| GL-9 Centroid position | ✅ | Frame-by-frame centroid |
-| GL-10 Group spread | ✅ | Frame-by-frame centroid |
+| GL-4 Convex Hull Area | ✅ | Frame-by-frame point set |
+| GL-5 Centroid Speed | ✅ | Frame-by-frame centroid |
+| GL-6 Group Cohesion | ✅ | Frame-by-frame point set |
+| GL-7 NN-Matched Speed | ✅ | Designed for identity-free sessions: re-matches per frame pair |
+| GL-8 Rotational Order | ❌ | Requires headings |
+| GL-9 Group Centroid Position | ✅ | Frame-by-frame centroid |
+| GL-10 Group Spread | ✅ | Frame-by-frame centroid |
+| GL-11 Order-State Classification | ❌ | Thresholds GL-3 against GL-8; inherits both |
+| GL-13 Topological k-NN Counts | ✅ | Per-frame k-nearest-neighbour counts |
+| GL-15 Group Elongation / Anisotropy | ✅ | Per-frame covariance of the point set |
+| Z-1 Time in zone | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-2 Area-Corrected Occupancy | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-3 Zone visit count | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-4 Zone Transitions | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-5 Zone Entry/Exit Events | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-6 Latency to First Entry | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-7 Zone Transition Matrix & Sequence Entropy | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-8 Zone Preference Index (Jacobs' D) | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-9 Zone Dwell-Time Distribution | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| D-1 Tracking Coverage | ✅ | Per-slot non-NaN fraction |
+| D-2 Tracking Accuracy | ✅ | Per-frame / session-level only |
+| D-3 ID-Probability Distribution | ❌ | Reports idtracker.ai's per-identity id_probabilities |
+| D-4 Inconsistent-Frame Count | ✅ | Per-frame / session-level only |
+| D-5 Identity Stability Flag | ✅ | Reports the identity-free status itself |
+| D-6 Segmentation Error Frames | ✅ | Per-frame / session-level only |
+| D-7 Fragment Length Distribution | ✅ | Reads idtracker.ai's own fragment records |
+| D-8 Crossing Rate | ✅ | Per-frame / session-level only |
+| D-9 Identity Swap Opportunity Count | ✅ | Reads fragment boundaries, not trajectories |
+| D-10 Physical-Plausibility Violation Rate | ✅ | Assumes a fixed row index *by design* — it measures how badly that assumption fails, so it must keep running on identity-free sessions |
+
+**Known gap — zone metrics.** All nine Z-* metrics are listed ✅ above and
+are therefore still computed for an identity-free session, yet every one
+emits an `individual_id` column and indexes by animal slot `k`. The
+occupancy-style ones (Z-1, Z-2, Z-3, Z-5, Z-8, Z-9) remain correct once
+summed over individuals; Z-4 (transitions), Z-6 (latency to first entry)
+and Z-7 (transition matrix / sequence entropy) need the animal to be the
+same throughout and have no such reading. They are left ungated
+deliberately, not by oversight: correcting them means emitting pooled rows
+instead of per-individual rows on identity-free sessions, which changes
+the output shape of six metrics. Do not "fix" this by flipping the flags
+alone — that would simply make all zone analysis unavailable for such a
+session. See `track2data/metrics/zone.py`'s module docstring and
+`docs/ROADMAP.md`.
 
 ### 4.6 Tracking-quality diagnostics
 
