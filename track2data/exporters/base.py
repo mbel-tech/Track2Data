@@ -34,6 +34,18 @@ class SessionProvenance:
     n_animals: int = 0
     has_stable_identities: bool = False
 
+    # Identity-free tracking. has_stable_identities alone cannot carry this:
+    # it is a 3-way OR (tracked without identification, OR
+    # fraction_identified < 0.5, OR the NaN-coverage fallback failed), so a
+    # False there does not tell a reader whether per-individual metrics were
+    # refused on principle or merely looked poor. These three do.
+    #   track_wo_identities     -- what the tracker declared; None = unreported
+    #   identity_free_effective -- what Track2Data actually acted on
+    #   identity_free_source    -- "tracker" | "user override" | "not reported"
+    track_wo_identities: bool | None = None
+    identity_free_effective: bool = False
+    identity_free_source: str = "not reported"
+
     # From Session.tracking_log (see readers/idtrackerai/log.py)
     tracking_status: str | None = None
     tracking_failure_summary: str = ""
@@ -85,6 +97,12 @@ class ExportPayload:
     preprocess_report: PreprocessReport = field(default_factory=PreprocessReport)
     manifest_json: str = "{}"   # JSON string of the project manifest
     provenance: SessionProvenance = field(default_factory=SessionProvenance)
+    # metric_id -> human-readable reason, for metrics that were selected but
+    # deliberately not computed for this session (see
+    # Engine.compute_metrics). An export has to be able to say what was NOT
+    # computed, or a Methods section written from it silently overstates
+    # what the analysis covered.
+    skipped_metrics: dict[str, str] = field(default_factory=dict)
 
 
 class Exporter(ABC):

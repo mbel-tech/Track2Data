@@ -320,28 +320,120 @@ class Engine:
         cfg.update(derive_metric_params(metric_cls.id, psess, self._manifest.zones))
         return cfg
 
-    def compute_metrics(self, psess: PreprocessedSession) -> dict[str, Any]:
+    def identity_free_for(
+        self, session: Session, explicit: bool | None = None
+    ) -> bool:
+        """Whether *session* must be treated as identity-free.
+
+        Precedence: an explicit answer from the caller, else the user's
+        override for that session, else the session file's own
+        ``track_wo_identities``.
+
+        The session file -- not ``SessionRef.track_wo_identities`` -- is the
+        fallback on purpose. That field is a *cache* of this same value,
+        filled by the GUI's background probe, and it stays None on any path
+        that has no probe: a hand-edited manifest, ``track2data init``, or
+        any CLI run. Resolving from the cache would mean the CLI silently
+        ignored a session that idtracker.ai had declared identity-free,
+        which is precisely the case this gate exists for. Only the override
+        is genuinely manifest-only state, because only a human can author it.
+
+        ``SessionRef.is_identity_free()`` is the matching predicate for
+        callers with no Session in hand (the metrics screen, ``validate()``),
+        where the cache is all there is.
+        """
+        if explicit is not None:
+            return explicit
+        for ref in self._manifest.sessions:
+            if (
+                ref.session_id == session.session_id
+                and ref.identity_free_override is not None
+            ):
+                return ref.identity_free_override
+        return session.track_wo_identities is True
+
+    def identity_skipped_metrics(self, identity_free: bool) -> dict[str, str]:
+        """Selected metric ids that an identity-free session must not run,
+        mapped to the reason, for the export record.
+
+        Empty when *identity_free* is False, so the normal path costs
+        nothing. Diagnostics are deliberately absent: they are the evidence
+        for *why* these were skipped and are always computed.
+        """
+        if not identity_free:
+            return {}
+        from track2data.metrics import get
+
+        reason = (
+            "session is identity-free (tracked without identification, or "
+            "marked identity-free by the user): the row index is a per-frame "
+            "detection slot, not a persistent animal"
+        )
+        selected = [
+            *self._manifest.metrics.individual,
+            *self._manifest.metrics.group,
+            *self._manifest.metrics.zone,
+        ]
+        skipped: dict[str, str] = {}
+        for mid in selected:
+            cls = get(mid)
+            if cls is not None and cls.requires_identity:
+                skipped[mid] = reason
+        return skipped
+
+    def compute_metrics(
+        self, psess: PreprocessedSession, *, identity_free: bool | None = None
+    ) -> dict[str, Any]:
         """
         Compute all selected metrics for *psess*.
 
         Returns a dict mapping metric_id to a ``pd.DataFrame``.
         Diagnostic metrics (D-1..D-6) are always computed.
-        Group metrics are skipped (with a warning) when
-        ``Session.exclusive_rois`` is True -- see the guard below.
+
+        Two guards drop selected metrics for a session:
+
+        * ``Session.exclusive_rois`` is True -> group metrics (see below).
+        * the session is identity-free -> every metric whose
+          ``requires_identity`` is True. On such a session the row index is
+          a per-frame detection slot rather than a persistent animal, so
+          any metric that follows an individual across frames returns a
+          number that looks publishable and means nothing. The GUI has
+          promised this skip in a tooltip since the metrics screen was
+          written; this is where it actually happens.
+
+        *identity_free* forces the verdict for callers that already know it
+        (``_run_one_session`` passes the user's override, which may itself
+        be None); None resolves it via ``identity_free_for()``.
         """
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
 
         results: dict[str, Any] = {}
 
-        # Always-on diagnostics.
+        # Always-on diagnostics. Computed even for an identity-free session:
+        # D-5 IdentityStability is precisely the record of that fact, so
+        # suppressing the diagnostics would remove the evidence for the
+        # skips below.
         results.update(compute_all_diagnostics(psess.session))
 
         sel = self._manifest.metrics
 
+        is_identity_free = self.identity_free_for(psess.session, identity_free)
+        skipped = self.identity_skipped_metrics(is_identity_free)
+        if skipped:
+            logger.warning(
+                "Skipping identity-dependent metrics (%s) for session %s: "
+                "the session is identity-free, so per-individual results "
+                "would not correspond to individual animals.",
+                ", ".join(sorted(skipped)),
+                psess.session_id,
+            )
+
         def _run(metric_ids: list[str]) -> None:
             from track2data.metrics import get
             for mid in metric_ids:
+                if mid in skipped:
+                    continue
                 cls = get(mid)
                 if cls is None:
                     logger.warning("Metric %s not registered; skipping.", mid)
@@ -510,12 +602,21 @@ class Engine:
     # ── payload / export ──────────────────────────────────────────────────
 
     def build_payload(
-        self, psess: PreprocessedSession, metric_results: dict[str, Any]
+        self,
+        psess: PreprocessedSession,
+        metric_results: dict[str, Any],
+        *,
+        identity_free: bool | None = None,
     ) -> Any:
         """
         Assemble an ``ExportPayload`` from a preprocessed session and its
         computed metric results, bucketing results by level (IL-*/GL-*/
         Z-*/D-*) and building the master per-frame table.
+
+        *identity_free* must match whatever was passed to
+        ``compute_metrics`` for this session, so the payload's
+        ``skipped_metrics`` record agrees with what was actually skipped;
+        None resolves it the same way ``compute_metrics`` does.
         """
         from track2data.exporters.base import ExportPayload, SessionProvenance
 
@@ -533,6 +634,21 @@ class Engine:
         session = psess.session
         quality = session.quality or {}
         tracking_log = session.tracking_log or {}
+
+        is_identity_free = self.identity_free_for(session, identity_free)
+        # Which of the two inputs actually produced the verdict, so a
+        # reader of the export can tell "idtracker.ai said so" from "a human
+        # overruled idtracker.ai" -- they warrant different scrutiny.
+        ref = next(
+            (r for r in self._manifest.sessions if r.session_id == session.session_id),
+            None,
+        )
+        if ref is not None and ref.identity_free_override is not None:
+            identity_free_source = "user override"
+        elif session.track_wo_identities is not None:
+            identity_free_source = "tracker"
+        else:
+            identity_free_source = "not reported"
         provenance = SessionProvenance(
             reader=session.reader,
             idtrackerai_version=session.idtrackerai_version,
@@ -541,6 +657,9 @@ class Engine:
             n_frames=session.n_frames,
             n_animals=session.n_animals,
             has_stable_identities=session.has_stable_identities,
+            track_wo_identities=session.track_wo_identities,
+            identity_free_effective=is_identity_free,
+            identity_free_source=identity_free_source,
             tracking_status=tracking_log.get("status"),
             tracking_failure_summary=tracking_log.get("failure_summary", ""),
             tracking_warnings_count=len(tracking_log.get("warnings", [])),
@@ -568,6 +687,7 @@ class Engine:
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
+            skipped_metrics=self.identity_skipped_metrics(is_identity_free),
         )
 
     def export(
@@ -741,6 +861,13 @@ class Engine:
         psess = None
         try:
             session = self.import_session(ref.folder)
+            # The override only, not ref.is_identity_free(): this method is
+            # keyed by ref.session_id (see the docstring) because a
+            # reader-derived id may differ, so the lookup inside
+            # identity_free_for() cannot be trusted here -- but None must
+            # still fall through to the session file's own declaration
+            # rather than being resolved to False.
+            identity_free = ref.identity_free_override
             emit(
                 progress,
                 ProgressEvent(
@@ -756,8 +883,10 @@ class Engine:
                     session_id=ref.session_id, message="Preprocessing complete",
                 ),
             )
-            metric_results = self.compute_metrics(psess)
-            payload = self.build_payload(psess, metric_results)
+            metric_results = self.compute_metrics(psess, identity_free=identity_free)
+            payload = self.build_payload(
+                psess, metric_results, identity_free=identity_free
+            )
             emit(
                 progress,
                 ProgressEvent(
@@ -839,7 +968,46 @@ class Engine:
         sel = self._manifest.metrics
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
+        issues.extend(self._identity_selection_issues())
         return issues
+
+    def _identity_selection_issues(self) -> list[str]:
+        """Warn when the identity gate would empty the whole run.
+
+        Selecting only identity-dependent metrics on a project where every
+        session is identity-free is not an error -- compute_metrics skips
+        them and the diagnostics still export -- but the run produces no
+        metric output at all, which is worth saying before it starts
+        rather than leaving the user to notice the empty CSVs.
+
+        Reads the manifest's cached flags rather than opening every session
+        the way _session_calibration_issues() does, so on a CLI project
+        (where nothing populates that cache) this stays silent and the run
+        proceeds. That is the intended trade: the gate itself resolves from
+        the session file and still fires, and the export's "Metrics skipped"
+        section records it -- this is only the early warning, not the
+        safeguard, and it isn't worth reading 70 session folders for.
+        """
+        sessions = self._manifest.sessions
+        if not sessions or not all(ref.is_identity_free() for ref in sessions):
+            return []
+        selected = [
+            *self._manifest.metrics.individual,
+            *self._manifest.metrics.group,
+            *self._manifest.metrics.zone,
+        ]
+        if not selected:
+            return []
+        skipped = self.identity_skipped_metrics(True)
+        if len(skipped) < len(set(selected)):
+            return []
+        return [
+            "Every session is identity-free and every selected metric "
+            f"({', '.join(sorted(skipped))}) requires identity, so the run "
+            "would produce diagnostics only. Select identity-independent "
+            "metrics, or untick 'Identity-free' for the sessions that do "
+            "preserve identities."
+        ]
 
     def _session_calibration_issues(self) -> list[str]:
         """Fail loudly, name the sessions: for 'session' calibration

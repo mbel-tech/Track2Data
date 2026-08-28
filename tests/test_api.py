@@ -238,6 +238,262 @@ def test_group_metrics_computed_when_exclusive_rois_false_or_none() -> None:
     assert "GL-1" in results
 
 
+# ── compute_metrics: identity gate ─────────────────────────────────────────
+#
+# On an identity-free session the row index is a per-frame detection slot,
+# not a persistent animal, so any metric that follows an individual across
+# frames returns a publishable-looking number that means nothing. The GUI
+# had promised this skip in a tooltip since the metrics screen was written;
+# nothing enforced it until compute_metrics grew this guard.
+
+
+def _identity_free_ref(session_id: str = "s1", **kwargs) -> SessionRef:
+    return SessionRef(
+        session_id=session_id,
+        folder=Path("/tmp") / session_id,
+        sha256="",
+        **kwargs,
+    )
+
+
+def test_identity_requiring_metrics_skipped_for_an_identity_free_session(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": True}
+    )
+    psess = _make_psess(session)
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=True)],
+        metrics=MetricSelection(individual=["IL-1"], group=["GL-1"]),
+    )
+    with caplog.at_level("WARNING"):
+        results = Engine(manifest).compute_metrics(psess)
+
+    assert "IL-1" not in results          # requires_identity
+    assert "GL-1" in results              # genuinely identity-free
+    assert any("identity-free" in rec.message for rec in caplog.records)
+
+
+def test_identity_requiring_metrics_computed_for_a_normal_session() -> None:
+    from track2data.api import Engine
+
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=False)],
+        metrics=MetricSelection(individual=["IL-1"], group=["GL-1"]),
+    )
+    results = Engine(manifest).compute_metrics(psess)
+
+    assert "IL-1" in results
+    assert "GL-1" in results
+
+
+def test_low_coverage_alone_does_not_trigger_the_identity_gate() -> None:
+    """has_stable_identities is a 3-way OR; only the tracked-without-
+    identification arm gates. A poorly covered session still computes."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"has_stable_identities": False, "track_wo_identities": False}
+    )
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(has_stable_identities=False, track_wo_identities=False)],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    assert "IL-1" in Engine(manifest).compute_metrics(_make_psess(session))
+
+
+def test_user_override_gates_a_session_the_tracker_called_identified() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": False}
+    )
+    manifest = _make_manifest(
+        sessions=[
+            _identity_free_ref(track_wo_identities=False, identity_free_override=True)
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    assert "IL-1" not in Engine(manifest).compute_metrics(_make_psess(session))
+
+
+def test_user_override_ungates_a_session_tracked_without_identities() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": True}
+    )
+    manifest = _make_manifest(
+        sessions=[
+            _identity_free_ref(track_wo_identities=True, identity_free_override=False)
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    assert "IL-1" in Engine(manifest).compute_metrics(_make_psess(session))
+
+
+def test_explicit_identity_free_argument_wins_over_the_manifest() -> None:
+    """_run_one_session passes the answer it already holds, since it is
+    keyed by ref.session_id and a reader-derived id may differ."""
+    from track2data.api import Engine
+
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=False)],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    results = Engine(manifest).compute_metrics(psess, identity_free=True)
+    assert "IL-1" not in results
+
+
+def test_manifest_without_a_cached_flag_still_honours_the_session_file() -> None:
+    """The CLI path: `track2data init` and hand-edited manifests never run
+    the GUI's background probe, so SessionRef.track_wo_identities stays
+    None. Resolving from that cache would mean a CLI run silently ignored a
+    session idtracker.ai had declared identity-free."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": True}
+    )
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref()],  # nothing cached, no override
+        metrics=MetricSelection(individual=["IL-1"], group=["GL-1"]),
+    )
+    results = Engine(manifest).compute_metrics(_make_psess(session))
+
+    assert "IL-1" not in results
+    assert "GL-1" in results
+
+
+def test_unlisted_session_falls_back_to_its_own_tracker_flag() -> None:
+    """run_single() and direct API use can hand the engine a Session that
+    was never listed in the manifest."""
+    from track2data.api import Engine
+
+    session = _make_session(session_id="unlisted", n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": True}
+    )
+    manifest = _make_manifest(metrics=MetricSelection(individual=["IL-1"]))
+    assert "IL-1" not in Engine(manifest).compute_metrics(_make_psess(session))
+
+
+def test_diagnostics_still_computed_for_an_identity_free_session() -> None:
+    """The diagnostics are the evidence for why metrics were skipped, so
+    they must survive the gate -- including D-3, whose requires_identity is
+    True but which reports idtracker.ai's own id_probabilities array."""
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": True}
+    )
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=True)],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    results = Engine(manifest).compute_metrics(_make_psess(session))
+    assert any(k.startswith("D-") for k in results)
+
+
+def test_skipped_metrics_reach_the_export_payload() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": True}
+    )
+    psess = _make_psess(session)
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=True)],
+        metrics=MetricSelection(individual=["IL-1"], group=["GL-1"]),
+    )
+    engine = Engine(manifest)
+    payload = engine.build_payload(psess, engine.compute_metrics(psess))
+
+    assert set(payload.skipped_metrics) == {"IL-1"}
+    assert payload.provenance.identity_free_effective is True
+    assert payload.provenance.identity_free_source == "tracker"
+    assert payload.provenance.track_wo_identities is True
+
+
+def test_provenance_records_a_user_override_as_its_source() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=10, n_animals=2).model_copy(
+        update={"track_wo_identities": False}
+    )
+    psess = _make_psess(session)
+    manifest = _make_manifest(
+        sessions=[
+            _identity_free_ref(track_wo_identities=False, identity_free_override=True)
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    payload = engine.build_payload(psess, engine.compute_metrics(psess))
+
+    assert payload.provenance.identity_free_source == "user override"
+    assert payload.provenance.identity_free_effective is True
+
+
+def test_provenance_says_not_reported_when_the_format_carries_no_flag() -> None:
+    from track2data.api import Engine
+
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))  # flag defaults to None
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref()],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    payload = engine.build_payload(psess, engine.compute_metrics(psess))
+
+    assert payload.provenance.identity_free_source == "not reported"
+    assert payload.provenance.identity_free_effective is False
+    assert payload.skipped_metrics == {}
+
+
+# ── validate: identity gate would empty the run ────────────────────────────
+
+
+def test_validate_warns_when_the_identity_gate_would_skip_everything() -> None:
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=True)],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    issues = Engine(manifest).validate()
+    assert any("identity-free" in issue for issue in issues)
+
+
+def test_validate_silent_when_some_selected_metrics_survive_the_gate() -> None:
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[_identity_free_ref(track_wo_identities=True)],
+        metrics=MetricSelection(individual=["IL-1"], group=["GL-1"]),
+    )
+    issues = Engine(manifest).validate()
+    assert not any("identity-free" in issue for issue in issues)
+
+
+def test_validate_silent_when_one_session_still_preserves_identity() -> None:
+    from track2data.api import Engine
+
+    manifest = _make_manifest(
+        sessions=[
+            _identity_free_ref("s1", track_wo_identities=True),
+            _identity_free_ref("s2", track_wo_identities=False),
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    issues = Engine(manifest).validate()
+    assert not any("identity-free" in issue for issue in issues)
+
+
 # ── compute_metrics: unregistered metric / metric exception ────────────────────
 
 
@@ -1285,7 +1541,7 @@ def test_run_keeps_preprocess_report_when_a_later_stage_fails(tmp_path: Path) ->
 
     expected_report = engine.preprocess(session).report
 
-    def failing_compute_metrics(_psess):
+    def failing_compute_metrics(_psess, **_kwargs):
         raise RuntimeError("metrics exploded")
 
     engine.compute_metrics = failing_compute_metrics  # type: ignore[method-assign]

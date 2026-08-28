@@ -4,8 +4,8 @@ Stage 2 — Session import screen (M3 real widgets).
 Widgets:
   • session_table  QTableWidget, one row per imported session
                     (session_id | reader | fps | frames | animals |
-                    identity), ExtendedSelection so multiple rows can
-                    be removed at once
+                    identity | identity-free), ExtendedSelection so
+                    multiple rows can be removed at once
   • add_btn        QPushButton → multi-select folder dialog
   • remove_btn     QPushButton → remove every selected row
   • status_label   QLabel  "{n} sessions imported"
@@ -17,6 +17,15 @@ Reader/fps/frames/animals/identity are populated from
 ProjectStore.session_facts(), a cache built off the same background
 read_session() probe add_session() already submits (see
 ui/store/session_facts.py) -- they show as "—" until that probe lands.
+
+The Identity-free column is the one editable cell on this screen. It
+starts from what idtracker.ai declared (session.json's
+``track_wo_identities``) and the user can overrule it, because the
+tracker only knows whether it was *asked* to assign identities -- not
+whether the identities it produced are trustworthy enough to build
+per-individual metrics on. Ticking it makes Engine.compute_metrics
+refuse every metric whose ``requires_identity`` is True for that session,
+and greys those rows on the Metrics screen.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QListView,
     QMessageBox,
@@ -39,8 +49,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-_COLUMN_HEADERS = ["Session ID", "Reader", "FPS", "Frames", "Animals", "Identity"]
-_COL_SESSION_ID, _COL_READER, _COL_FPS, _COL_FRAMES, _COL_ANIMALS, _COL_IDENTITY = range(6)
+_COLUMN_HEADERS = [
+    "Session ID", "Reader", "FPS", "Frames", "Animals", "Identity", "Identity-free",
+]
+(
+    _COL_SESSION_ID,
+    _COL_READER,
+    _COL_FPS,
+    _COL_FRAMES,
+    _COL_ANIMALS,
+    _COL_IDENTITY,
+    _COL_IDENTITY_FREE,
+) = range(7)
 _ROLE_SESSION_ID = Qt.ItemDataRole.UserRole
 _PLACEHOLDER = "—"
 
@@ -61,6 +81,11 @@ class ImportScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        # Guards the Identity-free checkbox against its own refresh:
+        # _refresh_table() sets check states, which emits itemChanged,
+        # which would write the value straight back to the store and
+        # re-enter the refresh.
+        self._refreshing = False
         self._build_ui()
         self.setAcceptDrops(True)
         if store is not None:
@@ -99,7 +124,14 @@ class ImportScreen(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self._table.horizontalHeader().setStretchLastSection(True)
+        header = self._table.horizontalHeader()
+        # Session ID stretches rather than the last column: the last column
+        # is now the Identity-free checkbox, which needs no more than its
+        # header width, while session ids ("session_trial10_Segment1") were
+        # being elided to fit a fixed slice.
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(_COL_SESSION_ID, QHeaderView.ResizeMode.Stretch)
+        self._table.itemChanged.connect(self._on_item_changed)
         root.addWidget(self._table)
 
         # ── buttons ───────────────────────────────────────────────────────
@@ -210,7 +242,60 @@ class ImportScreen(QWidget):
             ]
             self._store.update_sessions(sessions)
 
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """Write an Identity-free toggle back to the store.
+
+        Sets an explicit override in both directions, including one that
+        agrees with the tracker: an explicit "no, this session is fine"
+        is a different statement from "never asked", and re-probing must
+        not silently discard it.
+        """
+        if self._refreshing or item.column() != _COL_IDENTITY_FREE:
+            return
+        if self._store is None:
+            return
+        session_id = item.data(_ROLE_SESSION_ID)
+        if session_id is None:
+            return
+        self._store.set_session_identity_free(
+            session_id, item.checkState() == Qt.CheckState.Checked
+        )
+
+    @staticmethod
+    def _identity_free_tooltip(ref, facts) -> str:
+        if facts is None:
+            return "Reading the session folder…"
+        declared = facts.track_wo_identities
+        if declared is True:
+            detected = "idtracker.ai tracked this session without identification."
+        elif declared is False:
+            detected = "idtracker.ai tracked this session with identification."
+        else:
+            detected = "This session's format does not report how it was tracked."
+
+        if ref.identity_free_override is None:
+            return (
+                f"{detected} Tick this to treat the session as identity-free anyway "
+                "— identity-dependent metrics will then be skipped for it."
+            )
+        if ref.identity_free_override:
+            return (
+                f"{detected} You have marked it identity-free: identity-dependent "
+                "metrics will be skipped for this session."
+            )
+        return (
+            f"{detected} You have marked it identity-preserving: identity-dependent "
+            "metrics will be computed for this session."
+        )
+
     def _refresh_table(self) -> None:
+        self._refreshing = True
+        try:
+            self._populate_table()
+        finally:
+            self._refreshing = False
+
+    def _populate_table(self) -> None:
         self._table.setRowCount(0)
         if self._store is None or self._store.manifest is None:
             self._status_label.setText("0 sessions imported")
@@ -238,5 +323,28 @@ class ImportScreen(QWidget):
                 strict=True,
             ):
                 self._table.setItem(row, col, QTableWidgetItem(value))
+
+            free_item = QTableWidgetItem()
+            free_item.setData(_ROLE_SESSION_ID, ref.session_id)
+            # setCheckState() before setFlags(): Qt turns ItemIsUserCheckable
+            # back on as a side effect of setting a check state, so clearing
+            # it first would be silently undone.
+            free_item.setCheckState(
+                Qt.CheckState.Checked
+                if ref.is_identity_free()
+                else Qt.CheckState.Unchecked
+            )
+            flags = free_item.flags() & ~Qt.ItemFlag.ItemIsEditable
+            # Not checkable until the probe has landed: before that the box
+            # would show unchecked for a genuinely identity-free session,
+            # and a user who ticked it would be overriding a value they have
+            # not been shown yet.
+            if facts is None:
+                flags &= ~(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+            else:
+                flags |= Qt.ItemFlag.ItemIsUserCheckable
+            free_item.setFlags(flags)
+            free_item.setToolTip(self._identity_free_tooltip(ref, facts))
+            self._table.setItem(row, _COL_IDENTITY_FREE, free_item)
         n = len(sessions)
         self._status_label.setText(f"{n} session{'s' if n != 1 else ''} imported")

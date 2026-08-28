@@ -80,6 +80,19 @@ class ReadmeExporter(Exporter):
         else:
             readme_lines.append("*(none)*")
 
+        # A Methods section written from this report alone has to be able to
+        # state what was selected but deliberately NOT computed -- listing
+        # only the successes silently overstates the analysis.
+        skipped = getattr(p, "skipped_metrics", None) or {}
+        if skipped:
+            readme_lines += [
+                "",
+                "## Metrics skipped",
+                "",
+            ]
+            for mid, reason in sorted(skipped.items()):
+                readme_lines.append(f"- **{mid}**: {reason}")
+
         preprocess_steps = p.preprocess_report.steps
         readme_lines += [
             "",
@@ -140,6 +153,9 @@ class ReadmeExporter(Exporter):
         """
         from track2data.exporters.base import SessionProvenance
 
+        def _tri(v: bool | None) -> str:
+            return "*(not reported)*" if v is None else str(v)
+
         p: SessionProvenance = prov  # type: ignore[assignment]
         lines = [
             "## idtracker.ai provenance",
@@ -152,6 +168,9 @@ class ReadmeExporter(Exporter):
             f"| Trajectory variant | {p.trajectory_variant or '*(unknown)*'} |",
             f"| Frames / animals | {p.n_frames} / {p.n_animals} |",
             f"| Stable identities | {p.has_stable_identities} |",
+            f"| Tracked without identification | {_tri(p.track_wo_identities)} |",
+            f"| Treated as identity-free | {p.identity_free_effective} "
+            f"({p.identity_free_source}) |",
             f"| Tracking run status | {p.tracking_status or '*(unknown)*'} |",
         ]
         if p.tracking_status == "Failed" and p.tracking_failure_summary:

@@ -44,6 +44,7 @@ def _add_session_with_facts(store, session_id: str, tmp_path: Path, **facts_kwar
         width_px=1000,
         height_px=800,
         has_stable_identities=True,
+        track_wo_identities=False,
         idtrackerai_version=None,
         length_unit=None,
         setup_points=None,

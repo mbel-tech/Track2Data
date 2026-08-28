@@ -46,6 +46,19 @@ _ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
 _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
 
 
+def _summarise_ids(session_ids: list[str], limit: int = 3) -> str:
+    """Name the first few sessions, then count the rest.
+
+    A project can hold 70 sessions (the GOT corpus does); a tooltip that
+    listed every one would be unreadable, and one that listed none would
+    leave the user guessing which sessions it meant.
+    """
+    if len(session_ids) <= limit:
+        return ", ".join(session_ids)
+    shown = ", ".join(session_ids[:limit])
+    return f"{shown} and {len(session_ids) - limit} more"
+
+
 def _natural_sort_key(metric_cls):
     """Sort metrics naturally: GL-1, GL-2, GL-10 (not GL-1, GL-10, GL-2).
 
@@ -261,13 +274,43 @@ class MetricsScreen(QWidget):
         self._update_zone_tab_enabled()
 
     def _update_identity_graying(self) -> None:
+        """Reflect each session's identity-free status onto the rows.
+
+        Keyed on SessionRef.is_identity_free() rather than
+        has_stable_identities, which also folds in coverage heuristics and
+        so used to grey rows the engine would happily have computed (and
+        vice versa). That predicate reads the manifest's cached
+        track_wo_identities plus the user's override; the engine re-reads
+        the flag from the session file itself, but the background probe
+        fills that cache from the same value, so the two agree for every
+        session this screen can see. Three cases:
+
+        * every session identity-free -> disable the row; nothing it could
+          produce would be meaningful.
+        * some sessions identity-free -> leave it selectable but say, by
+          name, which sessions it will be skipped for. Metric selection is
+          one global list, so refusing the tick outright would make those
+          metrics unavailable for the sessions that *can* support them.
+        * none -> clear.
+        """
         if self._store is None or self._store.manifest is None:
             return
         sessions = self._store.manifest.sessions
-        probed = [
-            s.has_stable_identities for s in sessions if s.has_stable_identities is not None
-        ]
-        all_identity_free = bool(probed) and all(not v for v in probed)
+        free_ids = [s.session_id for s in sessions if s.is_identity_free()]
+        all_identity_free = bool(sessions) and len(free_ids) == len(sessions)
+        some_identity_free = bool(free_ids) and not all_identity_free
+
+        if all_identity_free:
+            blocked_tooltip = (
+                "Every session in this project is identity-free, so this "
+                "metric will be skipped for all of them."
+            )
+        else:
+            blocked_tooltip = (
+                f"Will be skipped for {len(free_ids)} of {len(sessions)} "
+                f"identity-free session{'s' if len(free_ids) != 1 else ''}: "
+                f"{_summarise_ids(free_ids)}."
+            )
 
         for table in (self._ind_table, self._grp_table, self._zone_table):
             for row in range(table.rowCount()):
@@ -279,12 +322,12 @@ class MetricsScreen(QWidget):
                 flags = include_item.flags()
                 if requires_identity and all_identity_free:
                     include_item.setFlags(flags & ~Qt.ItemFlag.ItemIsEnabled)
-                    tooltip = (
-                        "No session in this project has stable identities; "
-                        "this metric will be skipped for every session."
-                    )
-                    include_item.setToolTip(tooltip)
-                    name_item.setToolTip(tooltip)
+                    include_item.setToolTip(blocked_tooltip)
+                    name_item.setToolTip(blocked_tooltip)
+                elif requires_identity and some_identity_free:
+                    include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
+                    include_item.setToolTip(blocked_tooltip)
+                    name_item.setToolTip(blocked_tooltip)
                 else:
                     include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
                     include_item.setToolTip("")

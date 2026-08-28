@@ -35,6 +35,11 @@ HEADER = [
     "metric_id",
     "level",
     "priority",
+    # Whether the metric is refused for a session tracked without
+    # identification (Engine.compute_metrics). Published here because the
+    # CLI/manifest-editing path has no metric-selection UI, so this file is
+    # where a non-GUI user reads the classification.
+    "requires_identity",
     "metric_name",
     "reference",
     "doi",
@@ -106,6 +111,7 @@ def render_csv() -> str:
                 metric_cls.id,
                 metric_cls.level,
                 metric_cls.priority,
+                str(metric_cls.requires_identity).lower(),
                 metric_cls.label,
                 doc.citation or "",
                 doc.citation_doi or "",
