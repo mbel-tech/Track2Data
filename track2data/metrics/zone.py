@@ -1,4 +1,23 @@
-"""Zone metrics (Z-1 Time-in-zone, Z-3 Zone-visit-count)."""
+"""Zone metrics (Z-1 Time-in-zone, Z-3 Zone-visit-count).
+
+KNOWN GAP -- every metric in this module declares
+``requires_identity = False``, yet all nine emit an ``individual_id``
+column and index by animal slot ``k``. On an identity-free session that
+slot is a per-frame detection index rather than an animal, so the
+per-individual breakdown does not mean what the column name says. The
+occupancy-style metrics (Z-1, Z-2, Z-3, Z-5, Z-8, Z-9) at least stay
+correct once summed over individuals; Z-4 (transitions), Z-6 (latency to
+first entry) and Z-7 (transition matrix / sequence entropy) need the
+animal to be the same throughout and have no such reading.
+
+They are left ungated on purpose, as a scoped decision rather than an
+oversight: correcting them properly means emitting pooled rows instead of
+per-individual rows on identity-free sessions, which changes the output
+shape of six metrics. Tracked in docs/ROADMAP.md and
+docs/METRICS_SPEC.md section 4.5; do not "fix" this by flipping the flags
+alone, which would simply make all zone analysis unavailable for such a
+session.
+"""
 
 from __future__ import annotations
 

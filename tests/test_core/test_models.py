@@ -453,3 +453,57 @@ class TestSessionRunResult:
         report = PreprocessReport()
         result = SessionRunResult(session_id="s1", preprocess_report=report)
         assert result.preprocess_report is report
+
+
+# ── SessionRef.is_identity_free ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("declared", "override", "expected"),
+    [
+        (None, None, False),   # unprobed -- absence of evidence, not evidence
+        (False, None, False),
+        (True, None, True),
+        (None, True, True),    # user answers before the probe lands
+        (False, True, True),   # user overrules "tracked with identities"
+        (True, False, False),  # user vouches for a wo-identities session
+        (False, False, False),
+        (True, True, True),
+    ],
+)
+def test_session_ref_is_identity_free_truth_table(declared, override, expected) -> None:
+    from track2data.core.models import SessionRef
+
+    ref = SessionRef(
+        session_id="s",
+        folder=Path("s"),
+        sha256="",
+        track_wo_identities=declared,
+        identity_free_override=override,
+    )
+    assert ref.is_identity_free() is expected
+
+
+def test_manifest_written_before_identity_fields_still_loads() -> None:
+    """Both fields are optional with defaults, so schema_version stays 1 and
+    an existing .t2d.json keeps opening."""
+    import json
+
+    from track2data.core.models import ProjectManifest
+
+    legacy = {
+        "schema_version": 1,
+        "project_name": "p",
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+        "sessions": [
+            {"session_id": "s1", "folder": "s1", "sha256": "",
+             "has_stable_identities": True}
+        ],
+    }
+    manifest = ProjectManifest.model_validate(json.loads(json.dumps(legacy)))
+
+    ref = manifest.sessions[0]
+    assert ref.track_wo_identities is None
+    assert ref.identity_free_override is None
+    assert ref.is_identity_free() is False

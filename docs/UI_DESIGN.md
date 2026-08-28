@@ -202,11 +202,14 @@ id ("IL-1") and the snake_case internal name ("path_length") are
 never shown — they're engine/export identifiers, not something a
 researcher reads to pick a metric; the id still drives selection
 state internally as row user-data.
-Identity-aware metrics (`Metric.requires_identity`) greyed-out when
-every *probed* session in the project has `has_stable_identities is
-False` — sessions not yet probed (or whose probe failed) don't count
-toward that "every", so an all-unprobed project greys nothing — with
-an explanatory tooltip. Zone tab disabled when no zones are defined.
+Identity-aware metrics (`Metric.requires_identity`) react to
+`SessionRef.is_identity_free()` — the same predicate the engine gates
+on — in three states: greyed out with a tooltip when *every* session is
+identity-free; still selectable but tooltipped with the affected session
+names when only some are; untouched otherwise. A session is
+identity-free when idtracker.ai declared `track_wo_identities`, or when
+the user ticked the Identity-free box for it on Stage 2. Zone tab
+disabled when no zones are defined.
 
 **Footer (aspirational — not built on either screen today):**
 "Timepoint binning" spinbox (minutes; 0 = whole session). Note this
@@ -713,7 +716,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 - QTableWidget: `metric_list`
   - Columns: `include` (checkbox), `metric_name` (the display label, e.g. "Distance Travelled" — never the registry id or the snake_case internal name), `info` (ⓘ icon), `config` (⚙ icon — **stub in v1**: shows "Not yet implemented"; no Screen 6.3 or config schema exists yet)
   - Rows: auto-populated from `metrics.list_for_level(level)`
-  - Greyed rows: metrics where `Metric.requires_identity` is `True`, when every session in the project has `has_stable_identities is False` (with tooltip). Sessions with `has_stable_identities is None` (not yet probed, or probe failed) are treated as unknown, not identity-free — they don't trigger greying.
+  - Greyed rows: metrics where `Metric.requires_identity` is `True`, when every session in the project satisfies `SessionRef.is_identity_free()` (with tooltip). When only *some* sessions do, the row stays selectable and the tooltip names them ("Will be skipped for 3 of 12 identity-free sessions: …") — metric selection is one global list, so refusing the tick outright would make those metrics unavailable for the sessions that can support them. Sessions whose probe has not landed are unknown, not identity-free, and don't trigger either state.
   - Disabled Zone tab if no zones defined on Stage 4
 
 **MetricInfoDialog (Modal):**
@@ -724,11 +727,13 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 **Data Bindings:**
 - Checkboxes ↔ `ProjectStore.metrics.individual` / `.group` / `.zone`
-- `SessionRef.has_stable_identities` ↔ populated by a background probe (`read_session` via `TaskRunner`) when a session is added in Stage 2
+- `SessionRef.has_stable_identities` and `SessionRef.track_wo_identities` ↔ populated by a background probe (`read_session` via `TaskRunner`) when a session is added in Stage 2
+- `SessionRef.identity_free_override` ↔ the Identity-free checkbox on Stage 2; `None` means "follow the tracker", and a re-probe never clears it
 
 **Validation Rules:**
 - ≥1 metric selected across all tabs (required)
-- Identity-free sessions → rows for `requires_identity` metrics greyed when *every* session lacks stable identities (still count if checked; engine skips per-session)
+- Identity-free sessions → rows for `requires_identity` metrics greyed when *every* session is identity-free; tooltipped-but-selectable when only some are. A checked metric still persists in the manifest either way — `Engine.compute_metrics` skips it per session and records the skip in the export's `skipped_metrics` and the run README.
+- `Engine.validate()` warns when every session is identity-free *and* every selected metric requires identity, since the run would then produce diagnostics only
 - No zones → Z-* tab disabled
 
 **Error Messages:**

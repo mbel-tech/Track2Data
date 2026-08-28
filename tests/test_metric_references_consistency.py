@@ -35,6 +35,7 @@ EXPECTED_HEADER = [
     "metric_id",
     "level",
     "priority",
+    "requires_identity",
     "metric_name",
     "reference",
     "doi",

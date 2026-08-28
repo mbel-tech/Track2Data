@@ -237,7 +237,7 @@ def _build_tiny_real_traj_dict() -> dict:
     }
 
 
-def _build_tiny_real_session(base: Path) -> None:
+def _build_tiny_real_session(base: Path, *, track_wo_identities: bool = False) -> None:
     """Populate *base* with the full tiny_real session layout."""
     n_frames, n_animals = TINY_REAL_N_FRAMES, TINY_REAL_N_ANIMALS
     session_name = base.name
@@ -360,6 +360,10 @@ def _build_tiny_real_session(base: Path) -> None:
         '  "trajectories_formats": ["npy", "csv"],\n'
         '  "number_of_error_frames": 3,\n'
         '  "exclusive_rois": false,\n'
+        # Present in 70/70 real sessions (always false there). Parameterised
+        # so a test can build the identity-free branch, which gates every
+        # requires_identity metric in Engine.compute_metrics.
+        f'  "track_wo_identities": {str(track_wo_identities).lower()},\n'
         '  "velocity_threshold": 42.5,\n'
         '  "resolution_reduction": 0.75,\n'
         '  "id_image_size": [80, 80, 1],\n'
@@ -426,4 +430,17 @@ def tiny_real_session(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
     base = tmp_path_factory.mktemp("tiny_real")
     _build_tiny_real_session(base)
+    return base
+
+
+@pytest.fixture(scope="session")
+def tiny_identity_free_session(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The same session, but declared ``track_wo_identities: true``.
+
+    Everything else -- full coverage, fraction_identified 0.822 -- is
+    identical, so a test using this fixture isolates the identity-free flag
+    from every other reason a session might look unreliable.
+    """
+    base = tmp_path_factory.mktemp("tiny_identity_free")
+    _build_tiny_real_session(base, track_wo_identities=True)
     return base

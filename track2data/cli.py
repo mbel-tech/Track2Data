@@ -188,14 +188,21 @@ def list_metrics(level: str | None) -> None:
     # Column widths
     id_w = max(len(m.id) for m in metrics)
     lvl_w = max(len(m.level) for m in metrics)
+    # There is no metric-selection UI on the CLI path (metrics are edited
+    # by hand in the manifest), so this column is the only place a CLI
+    # user can see which metrics an identity-free session will refuse.
+    idy_w = len("IDENTITY")
 
     click.echo(
-        f"{'ID':<{id_w}}  {'LEVEL':<{lvl_w}}  NAME"
+        f"{'ID':<{id_w}}  {'LEVEL':<{lvl_w}}  {'IDENTITY':<{idy_w}}  NAME"
     )
-    click.echo("-" * (id_w + lvl_w + 30))
+    click.echo("-" * (id_w + lvl_w + idy_w + 32))
     for m in metrics:
         label = getattr(m, "label", getattr(m, "name", ""))
-        click.echo(f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {label}")
+        needs = "required" if m.requires_identity else "free"
+        click.echo(
+            f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {label}"
+        )
 
 
 # ── cache ─────────────────────────────────────────────────────────────────────

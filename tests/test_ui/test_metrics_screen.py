@@ -468,30 +468,47 @@ def test_info_button_is_absent_when_metric_has_no_formula_or_citation(qtbot, mon
     assert screen._ind_table.cellWidget(0, 2) is None
 
 
-# ── identity-aware graying ────────────────────────────────────────────────────
+# ── identity-aware graying ─────────────────────────────────────────────
+#
+# The trigger is SessionRef.is_identity_free() -- the same predicate
+# Engine.compute_metrics gates on -- not has_stable_identities, which also
+# folds in coverage heuristics and so used to grey rows the engine would
+# happily have computed.
 
 
-def test_identity_required_rows_greyed_when_every_session_lacks_stable_identities(qtbot) -> None:
+def _sessions(*specs):
+    """SessionRefs from (session_id, track_wo_identities, override) triples."""
     from track2data.core.models import SessionRef
+
+    return [
+        SessionRef(
+            session_id=sid,
+            folder=Path(sid),
+            sha256=sid,
+            track_wo_identities=declared,
+            identity_free_override=override,
+        )
+        for sid, declared, override in specs
+    ]
+
+
+def _il1_include_item(screen):
+    return screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0)
+
+
+def test_identity_required_rows_greyed_when_every_session_is_identity_free(qtbot) -> None:
     from ui.metrics_screen import MetricsScreen
 
     store = _make_store()
     store._manifest = store._manifest.model_copy(
-        update={
-            "sessions": [
-                SessionRef(
-                    session_id="s1", folder=Path("s1"), sha256="x",
-                    has_stable_identities=False,
-                ),
-            ]
-        }
+        update={"sessions": _sessions(("s1", True, None))}
     )
     screen = MetricsScreen(store=store)
     qtbot.addWidget(screen)
 
-    row = _row_for_id(screen._ind_table, "IL-1")  # IL-1.requires_identity is True
-    include_item = screen._ind_table.item(row, 0)
+    include_item = _il1_include_item(screen)  # IL-1.requires_identity is True
     assert not (include_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+    assert "identity-free" in include_item.toolTip()
 
 
 def test_rows_not_greyed_when_sessions_are_unprobed(qtbot) -> None:
@@ -505,12 +522,67 @@ def test_rows_not_greyed_when_sessions_are_unprobed(qtbot) -> None:
     screen = MetricsScreen(store=store)
     qtbot.addWidget(screen)
 
-    row = _row_for_id(screen._ind_table, "IL-1")
-    include_item = screen._ind_table.item(row, 0)
-    assert bool(include_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+    assert bool(_il1_include_item(screen).flags() & Qt.ItemFlag.ItemIsEnabled)
 
 
-def test_rows_not_greyed_when_at_least_one_session_has_stable_identities(qtbot) -> None:
+def test_rows_not_greyed_when_at_least_one_session_preserves_identity(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", True, None), ("s2", False, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    # Selection is one global list, so refusing the tick outright would make
+    # IL-1 unavailable for s2, which can support it.
+    assert bool(_il1_include_item(screen).flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_partially_identity_free_project_names_the_affected_sessions(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", True, None), ("s2", False, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    tooltip = _il1_include_item(screen).toolTip()
+    assert "1 of 2" in tooltip
+    assert "s1" in tooltip
+    assert "s2" not in tooltip
+
+
+def test_many_identity_free_sessions_are_summarised_not_all_listed(qtbot) -> None:
+    """A 70-session project (the GOT corpus is one) must not produce a
+    tooltip listing every session id."""
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "sessions": _sessions(
+                *[(f"s{i}", True, None) for i in range(6)],
+                ("keeper", False, None),
+            )
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    tooltip = _il1_include_item(screen).toolTip()
+    assert "and 3 more" in tooltip
+    assert "s5" not in tooltip
+
+
+def test_low_coverage_session_alone_does_not_grey_identity_rows(qtbot) -> None:
+    """Deliberate change of behaviour: greying used to fire on
+    has_stable_identities, so a session that merely had poor coverage disabled
+    every individual metric even though the engine would still compute them.
+    Only an identity-free session gates now."""
     from track2data.core.models import SessionRef
     from ui.metrics_screen import MetricsScreen
 
@@ -520,21 +592,63 @@ def test_rows_not_greyed_when_at_least_one_session_has_stable_identities(qtbot) 
             "sessions": [
                 SessionRef(
                     session_id="s1", folder=Path("s1"), sha256="x",
-                    has_stable_identities=False,
-                ),
-                SessionRef(
-                    session_id="s2", folder=Path("s2"), sha256="y",
-                    has_stable_identities=True,
-                ),
+                    has_stable_identities=False, track_wo_identities=False,
+                )
             ]
         }
     )
     screen = MetricsScreen(store=store)
     qtbot.addWidget(screen)
 
-    row = _row_for_id(screen._ind_table, "IL-1")
-    include_item = screen._ind_table.item(row, 0)
+    assert bool(_il1_include_item(screen).flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_user_override_greys_rows_for_a_session_the_tracker_called_identified(
+    qtbot,
+) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", False, True))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    assert not (_il1_include_item(screen).flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_user_override_ungreys_rows_for_a_session_tracked_without_identities(
+    qtbot,
+) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", True, False))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    assert bool(_il1_include_item(screen).flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_identity_independent_rows_are_never_greyed(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", True, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    # GL-1 (nearest-neighbour distance) is an unordered per-frame point set --
+    # genuinely identity-free, so it stays selectable.
+    row = _row_for_id(screen._grp_table, "GL-1")
+    include_item = screen._grp_table.item(row, 0)
     assert bool(include_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+    assert include_item.toolTip() == ""
 
 
 # ── zone tab disabling ────────────────────────────────────────────────────────
@@ -569,40 +683,20 @@ def test_zone_tab_enabled_when_zones_are_defined(qtbot) -> None:
 # ── live signal-path updates ──────────────────────────────────────────────────
 
 
-def test_identity_graying_updates_live_when_a_stable_identity_session_arrives(qtbot) -> None:
-    from track2data.core.models import SessionRef
+def test_identity_graying_updates_live_when_an_identified_session_arrives(qtbot) -> None:
     from ui.metrics_screen import MetricsScreen
 
     store = _make_store()
     store._manifest = store._manifest.model_copy(
-        update={
-            "sessions": [
-                SessionRef(
-                    session_id="s1", folder=Path("s1"), sha256="x",
-                    has_stable_identities=False,
-                ),
-            ]
-        }
+        update={"sessions": _sessions(("s1", True, None))}
     )
     screen = MetricsScreen(store=store)
     qtbot.addWidget(screen)
 
-    row = _row_for_id(screen._ind_table, "IL-1")
-    include_item = screen._ind_table.item(row, 0)
+    include_item = _il1_include_item(screen)
     assert not (include_item.flags() & Qt.ItemFlag.ItemIsEnabled)  # initially greyed
 
-    store.update_sessions(
-        [
-            SessionRef(
-                session_id="s1", folder=Path("s1"), sha256="x",
-                has_stable_identities=False,
-            ),
-            SessionRef(
-                session_id="s2", folder=Path("s2"), sha256="y",
-                has_stable_identities=True,
-            ),
-        ]
-    )
+    store.update_sessions(_sessions(("s1", True, None), ("s2", False, None)))
 
     assert bool(include_item.flags() & Qt.ItemFlag.ItemIsEnabled)  # re-enabled live
 
@@ -624,19 +718,11 @@ def test_zone_tab_enables_live_when_zones_are_added(qtbot) -> None:
 
 
 def test_greyed_row_still_has_clickable_info_and_config_buttons(qtbot) -> None:
-    from track2data.core.models import SessionRef
     from ui.metrics_screen import MetricsScreen
 
     store = _make_store()
     store._manifest = store._manifest.model_copy(
-        update={
-            "sessions": [
-                SessionRef(
-                    session_id="s1", folder=Path("s1"), sha256="x",
-                    has_stable_identities=False,
-                ),
-            ]
-        }
+        update={"sessions": _sessions(("s1", True, None))}
     )
     screen = MetricsScreen(store=store)
     qtbot.addWidget(screen)

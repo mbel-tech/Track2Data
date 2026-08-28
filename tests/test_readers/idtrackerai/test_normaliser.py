@@ -176,6 +176,52 @@ class TestNormaliserHasStableIdentities:
         assert s.has_stable_identities is True
 
 
+class TestNormaliserTrackWoIdentities:
+    """track_wo_identities used to be read and immediately discarded --
+    folded into has_stable_identities, which is a 3-way OR and so cannot
+    say whether a session is identity-free by construction or merely
+    poorly covered. Only the former is grounds for refusing to compute a
+    per-individual metric, so the raw flag is now kept on Session."""
+
+    def test_true_is_preserved_on_the_session(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"track_wo_identities": True}
+        )
+        assert s.track_wo_identities is True
+
+    def test_false_is_preserved_on_the_session(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"track_wo_identities": False}
+        )
+        assert s.track_wo_identities is False
+
+    def test_absent_key_is_none_not_false(self, tmp_path: Path) -> None:
+        """None means "the source said nothing" -- a CSV bundle without
+        attributes.json must not be read as "tracked with identities"."""
+        payload = _minimal_payload(tmp_path)
+        s = Normaliser(tmp_path).normalise(payload, session_meta={})
+        assert s.track_wo_identities is None
+
+    def test_string_boolean_forms_are_understood(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"track_wo_identities": "true"}
+        )
+        assert s.track_wo_identities is True
+        assert s.has_stable_identities is False
+
+    def test_unparseable_value_is_none_and_does_not_gate(self, tmp_path: Path) -> None:
+        payload = _minimal_payload(tmp_path)
+        s = Normaliser(tmp_path).normalise(
+            payload, session_meta={"track_wo_identities": "maybe"}
+        )
+        assert s.track_wo_identities is None
+        # Falls through to fraction_identified (0.822 in _minimal_payload).
+        assert s.has_stable_identities is True
+
+
 class TestNormaliserTrajectoryShapeValidation:
     """Regression coverage: _extract_trajectories used to accept any array
     shape with no validation -- a missing key silently produced an empty

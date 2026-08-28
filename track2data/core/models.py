@@ -48,6 +48,19 @@ class Session(BaseModel):
     n_animals: int
     trajectory_variant: Literal["with_gaps", "wo_gaps"]
     has_stable_identities: bool
+    # idtracker.ai's own --track_wo_identities declaration, verbatim
+    # (idtracker.ai_usage.md: "Track the video without assigning
+    # identities"). None when the source didn't report it -- a CSV bundle
+    # without attributes.json, or a legacy v4 session.
+    #
+    # Deliberately kept separate from has_stable_identities, which is a
+    # 3-way OR (this flag OR fraction_identified < 0.5 OR the NaN-coverage
+    # fallback) and therefore cannot distinguish "identity-free by
+    # construction" -- where the row index is just a per-frame detection
+    # slot and no per-individual metric means anything -- from "identities
+    # exist but are low quality". Only the former is grounds for refusing
+    # to compute a metric; see Engine.compute_metrics.
+    track_wo_identities: bool | None = None
     # Shape (n_frames, n_animals, 2), dtype float64, NaN = missing position.
     raw_xy: np.ndarray
     # Shape (n_animals,) in pixels; None when no body-length data is available.
@@ -308,6 +321,31 @@ class SessionRef(BaseModel):
     folder: Path
     sha256: str
     has_stable_identities: bool | None = None
+    # Session.track_wo_identities as reported by the tracker, filled in by
+    # the background probe in ui/store/project_store.py. None means "not
+    # probed yet, or the reader had nothing to report" -- never "False".
+    track_wo_identities: bool | None = None
+    # The user's per-session answer from the Sessions screen checkbox.
+    # None = follow the detected value; True/False = the user has
+    # deliberately disagreed with (or confirmed) the tracker. Persisted,
+    # unlike the detected value's cached twin in SessionFacts, because it
+    # is user-authored project state that cannot be re-derived from the
+    # session folder.
+    identity_free_override: bool | None = None
+
+    def is_identity_free(self) -> bool:
+        """Whether per-individual metrics are meaningless for this session.
+
+        The single source of truth for that question: the GUI greys rows
+        with it (ui/metrics_screen.py) and the engine skips metrics with
+        it (Engine.compute_metrics). Keeping the rule here rather than
+        writing it out at both call sites is the point -- if those two
+        ever disagreed, the UI would promise a skip that didn't happen
+        (which is exactly the bug this replaced).
+        """
+        if self.identity_free_override is not None:
+            return self.identity_free_override
+        return self.track_wo_identities is True
 
 
 class MetadataSource(BaseModel):

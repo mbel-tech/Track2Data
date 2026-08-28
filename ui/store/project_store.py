@@ -240,18 +240,54 @@ class ProjectStore(QObject):
         if isinstance(result, Exception):
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
             return
-        self._set_session_identity(session_id, result.has_stable_identities)
+        self._set_session_identity(
+            session_id, result.has_stable_identities, result.track_wo_identities
+        )
         # The probe already read the full Session for that one boolean --
         # cache the rest of it too rather than discard it (see
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
 
-    def _set_session_identity(self, session_id: str, has_stable_identities: bool) -> None:
+    def _set_session_identity(
+        self,
+        session_id: str,
+        has_stable_identities: bool,
+        track_wo_identities: bool | None = None,
+    ) -> None:
+        """Record what the probe read. Deliberately does not touch
+        ``identity_free_override`` -- a re-probe (re-opening a project, or
+        re-adding a folder) must never quietly undo the user's own answer
+        on the Sessions screen."""
         if self._manifest is None:
             return
         sessions = [
-            s.model_copy(update={"has_stable_identities": has_stable_identities})
+            s.model_copy(
+                update={
+                    "has_stable_identities": has_stable_identities,
+                    "track_wo_identities": track_wo_identities,
+                }
+            )
+            if s.session_id == session_id else s
+            for s in self._manifest.sessions
+        ]
+        self._manifest = self._manifest.model_copy(update={"sessions": sessions})
+        self.sessionsChanged.emit()
+
+    def set_session_identity_free(self, session_id: str, value: bool | None) -> None:
+        """Set (or clear, via None) the user's identity-free override for one
+        session.
+
+        ``None`` restores "follow whatever the tracker said". Anything else
+        is the user overruling it -- which is the whole point of the
+        Sessions-screen checkbox: idtracker.ai only knows whether *it* was
+        asked to assign identities, not whether the resulting identities
+        are trustworthy enough to build per-individual metrics on.
+        """
+        if self._manifest is None:
+            return
+        sessions = [
+            s.model_copy(update={"identity_free_override": value})
             if s.session_id == session_id else s
             for s in self._manifest.sessions
         ]

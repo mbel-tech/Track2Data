@@ -91,7 +91,8 @@ class Normaliser:
             height_px=height,
         )
 
-        has_stable = self._check_stability(raw_xy, quality, meta)
+        track_wo_identities = self._parse_track_wo_identities(meta)
+        has_stable = self._check_stability(raw_xy, quality, track_wo_identities)
         body_length_px = self._normalise_body_length(payload.get("body_length"), n_animals)
 
         return Session(
@@ -102,6 +103,7 @@ class Normaliser:
             n_animals=n_animals,
             trajectory_variant="with_gaps",
             has_stable_identities=has_stable,
+            track_wo_identities=track_wo_identities,
             raw_xy=raw_xy,
             body_length_px=body_length_px,
             # output_structure_idtrackerai.md:104 warns this value depends on
@@ -339,8 +341,38 @@ class Normaliser:
         return p if p.exists() else None
 
     @staticmethod
+    def _parse_track_wo_identities(session_meta: dict[str, Any]) -> bool | None:
+        """Read session.json's ``track_wo_identities`` as a tri-state.
+
+        None means "the source said nothing", which is emphatically not
+        False: a CSV bundle without attributes.json and a session that was
+        genuinely tracked *with* identities must stay distinguishable,
+        because Engine.compute_metrics refuses to run per-individual
+        metrics on a True and would otherwise refuse on every session that
+        merely came from a format that doesn't carry the key.
+
+        Real idtracker.ai writes a JSON boolean (verified: 70/70 in the GOT
+        corpus), but the string forms are accepted too -- some CSV bundles
+        round-trip attributes through a text column, and silently reading
+        the string "true" as None would disable the gate exactly where it
+        was asked for.
+        """
+        raw = session_meta.get("track_wo_identities")
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            lowered = raw.strip().lower()
+            if lowered in ("true", "1"):
+                return True
+            if lowered in ("false", "0"):
+                return False
+        return None
+
+    @staticmethod
     def _check_stability(
-        raw_xy: np.ndarray, quality: dict[str, Any] | None, session_meta: dict[str, Any]
+        raw_xy: np.ndarray,
+        quality: dict[str, Any] | None,
+        track_wo_identities: bool | None,
     ) -> bool:
         """
         Decide whether per-individual identity is meaningful for this session.
@@ -362,8 +394,12 @@ class Normaliser:
         3. Falls back to the raw per-animal NaN-coverage heuristic only when
            neither authoritative signal is available (e.g. a CSV bundle
            whose attributes.json doesn't carry these keys).
+
+        Takes the already-parsed flag rather than re-reading session_meta so
+        this and Session.track_wo_identities cannot disagree about the same
+        key.
         """
-        if session_meta.get("track_wo_identities") is True:
+        if track_wo_identities is True:
             return False
 
         if quality is not None and "fraction_identified" in quality:
