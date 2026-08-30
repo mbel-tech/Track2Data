@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **A runnable example** (`examples/`). A complete two-minute, four-fish
+  project — `cd examples && track2data run example.t2d.json -o out` — so a
+  new user can see the shape of the output before pointing the tool at their
+  own data.
+
+  The session is deliberately **simulated behaviour, not random noise**: two
+  fish hug the wall and two use the centre, with freezing bouts and short
+  tracking dropouts, so the exported metrics differ between individuals in a
+  way a reader can interpret. Random positions would exercise the code while
+  teaching nothing, since every metric would land on its null value. A test
+  asserts the thigmotaxis split actually shows up in Z-1.
+
+  It ships as an inert **CSV bundle, not a pickled `.npy`**. Committing a
+  pickle would hand out an execution vector as a "try this" example — and
+  Track2Data would refuse to open it without an opt-in, so the walkthrough's
+  first command would fail. `make_example_session.py` regenerates it, and a
+  test checks it still reproduces the committed bytes.
+
+  With starter analysis scripts for R (`lme4`/`glmmTMB`) and Python
+  (`statsmodels`) that both read `metrics_long.csv`, join the codebook for
+  units and D-11 for data quality, refuse to pool sessions that disagree on
+  frame rate, and explain the four traps specific to this data:
+  pseudo-replication across animals in one tank, unequal tracking durations,
+  ratios of small counts, and preprocessing choices being analysis choices.
+
 - **Analytic-truth tests** (`tests/test_metrics/test_analytic_truth.py`).
   R-parity shows this pipeline agrees with a reference R pipeline; it cannot
   show either is right, since two implementations of the same misreading

@@ -91,6 +91,17 @@ track2data run my-study.t2d.json          # import → preprocess → metrics �
 Or launch `track2data-gui` and walk the wizard: **Sessions → Calibration →
 Zones → Metadata → Metrics → Process → Export**.
 
+**Want to see the output before pointing it at your own data?** There is a
+complete two-minute example that runs in about ten seconds:
+
+```bash
+cd examples && track2data run example.t2d.json -o out
+```
+
+See [`examples/README.md`](examples/README.md) — it also ships starter
+analysis scripts for R (`lme4`/`glmmTMB`) and Python (`statsmodels`), and a
+short note on the four ways this kind of data is most often mis-analysed.
+
 ## What you get out
 
 Every run writes a directory like this:

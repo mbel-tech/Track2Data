@@ -1,0 +1,13 @@
+{
+  "frames_per_second": 30.0,
+  "body_length": 40.0,
+  "number_of_animals": 4,
+  "length_unit": 10.0,
+  "identities_labels": [
+    "fish_1",
+    "fish_2",
+    "fish_3",
+    "fish_4"
+  ],
+  "version": "6.0.14"
+}
