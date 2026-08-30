@@ -340,6 +340,27 @@ class MetricSelection(BaseModel):
     config: dict[str, dict[str, Any]] = {}
 
 
+# ── Security ──────────────────────────────────────────────────────────────────
+
+
+class SecurityConfig(BaseModel):
+    """Per-project consent for operations that can execute code from data.
+
+    ``npy`` is one of idtracker.ai's default trajectory output formats, and
+    loading one means ``np.load(..., allow_pickle=True)`` -- which runs
+    arbitrary code from the file. That matters more for a desktop app that
+    invites the user to point a file dialog at a folder than it would for a
+    library: any shared, downloaded or collaborator-supplied session folder
+    is otherwise an execution vector.
+
+    Defaults to off. When off, the reader refuses the pickled formats and
+    falls through to h5/csv if the folder has them, so an ordinary session
+    still imports; only a pickle-only folder needs the user to opt in.
+    """
+
+    allow_pickle_trajectories: bool = False
+
+
 # ── Manifest building blocks ──────────────────────────────────────────────────
 
 
@@ -411,6 +432,7 @@ class ProjectManifest(BaseModel):
     mapping: MappingRule | None = None
     preprocess: PreprocessConfig = PreprocessConfig()
     metrics: MetricSelection = MetricSelection()
+    security: SecurityConfig = SecurityConfig()
     export_targets: list[ExportTarget] = []
     run_log_path: Path | None = None
 

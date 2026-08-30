@@ -60,8 +60,19 @@ def detect_reader(folder: Path) -> type[SessionReader] | None:
     return None
 
 
-def read_session(folder: Path) -> Session:
-    """Auto-detect the reader for *folder* and return a Session."""
+def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
+    """Auto-detect the reader for *folder* and return a Session.
+
+    ``allow_pickle`` permits trajectory formats whose deserialisation
+    executes code from the file (idtracker.ai's ``trajectories.npy``).
+    Defaults to False.
+
+    The keyword is forwarded only to readers that declare
+    ``accepts_allow_pickle``. External readers written against the original
+    one-argument ``read(folder)`` signature therefore keep working -- but
+    they also never see the flag, so a third-party reader that unpickles is
+    trusting whatever it is pointed at, and should opt in.
+    """
     from track2data.core.errors import ImportError_
     cls = detect_reader(folder)
     if cls is None:
@@ -71,7 +82,10 @@ def read_session(folder: Path) -> Session:
             subject=str(folder),
             remediation="Ensure the folder is a valid idtracker.ai output directory.",
         )
-    return cls().read(folder)
+    reader = cls()
+    if cls.accepts_allow_pickle:
+        return reader.read(folder, allow_pickle=allow_pickle)
+    return reader.read(folder)
 
 
 __all__ = [

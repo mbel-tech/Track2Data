@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Loading a trajectory file no longer executes whatever code it contains.**
+  `formats/npy.py` called `np.load(..., allow_pickle=True)` unconditionally
+  while its own docstring claimed the GUI/CLI enforced a consent gate first.
+  No such gate existed anywhere — a fact `docs/IDTRACKERAI_FORMAT_ANALYSIS.md`
+  had already recorded. Since `npy` is one of idtracker.ai's default
+  trajectory output formats, that path was reached by importing an *ordinary*
+  session folder, which made any shared, downloaded or collaborator-supplied
+  folder an execution vector. That matters more for a desktop app that
+  invites the user to point a file dialog at data than it would for a library.
+
+  New `ProjectManifest.security.allow_pickle_trajectories`, **defaulting to
+  False**, is threaded from the manifest through `Engine.import_session()` →
+  `read_session()` → `IDTrackerAiReader.read()` → `_load_payload()` into the
+  loader, which now refuses with `IDT_PICKLE_REFUSED` — a documented error
+  code that had never been implemented (issue #77).
+
+  **A refusal is not an import failure.** The reader's existing
+  format-fallback walk treats it like any other unreadable format, so a
+  folder carrying an h5 or csv trajectory alongside the pickled one — which
+  a standard idtracker.ai session does — imports exactly as before and never
+  prompts. Only a pickle-only folder forces the question, and the error then
+  names consent as the cause rather than leaving the user thinking the file
+  is corrupt.
+
+  The GUI asks once per project, naming the folder, and persists the answer;
+  the CLI reports it. The audit named one ungated call site — there were
+  **two**: `idtrackerai_v5.py`'s `video_object.npy` load is a second,
+  separately reachable one. It carries metadata only, with a session.json
+  fallback, so refusing it degrades the import rather than failing it.
+
+  Third-party readers are unaffected: `read_session()` passes the keyword
+  only to readers that set `SessionReader.accepts_allow_pickle`, so one
+  written against the original `read(folder)` signature keeps working.
+
+  **Existing projects that import pickle-only session folders will need to
+  opt in once**, via the GUI prompt or by setting
+  `security.allow_pickle_trajectories` in the project file.
+
 ### Added
 
 - **Input provenance: the manifest's central claim is now checkable.**

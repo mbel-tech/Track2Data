@@ -178,8 +178,17 @@ class Engine:
     # ── session import ─────────────────────────────────────────────────────
 
     def import_session(self, folder: Path) -> Session:
-        """Auto-detect reader and return a Session for *folder*."""
-        return read_session(Path(folder))
+        """Auto-detect reader and return a Session for *folder*.
+
+        Trajectory formats that execute code on load are refused unless this
+        project has opted in via ``security.allow_pickle_trajectories``. A
+        folder that also carries an h5 or csv trajectory imports normally
+        either way -- the reader falls through to it.
+        """
+        return read_session(
+            Path(folder),
+            allow_pickle=self._manifest.security.allow_pickle_trajectories,
+        )
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -1196,7 +1205,7 @@ class Engine:
         summaries: list[SessionSummary] = []
         for ref in self._manifest.sessions:
             try:
-                session = read_session(ref.folder)
+                session = self.import_session(ref.folder)
             except Exception:
                 continue
             summaries.append(
@@ -1279,7 +1288,7 @@ class Engine:
         unreadable: list[str] = []
         for ref in self._manifest.sessions:
             try:
-                session = read_session(ref.folder)
+                session = self.import_session(ref.folder)
             except Exception:
                 unreadable.append(ref.session_id)
                 continue

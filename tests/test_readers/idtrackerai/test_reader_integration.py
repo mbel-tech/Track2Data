@@ -53,32 +53,32 @@ class TestReaderRead:
     def test_returns_session(self, reader: IDTrackerAiReader,
                              tiny_real_session: Path) -> None:
         from track2data.core.models import Session
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert isinstance(s, Session)
 
     def test_session_id_is_folder_name(self, reader: IDTrackerAiReader,
                                        tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.session_id == tiny_real_session.name
 
     def test_raw_xy_shape(self, reader: IDTrackerAiReader,
                           tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.raw_xy.shape == (10, 2, 2)
 
     def test_n_animals(self, reader: IDTrackerAiReader,
                        tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.n_animals == 2
 
     def test_video_fps(self, reader: IDTrackerAiReader,
                        tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.video.fps == pytest.approx(25.0)
 
     def test_video_dimensions(self, reader: IDTrackerAiReader,
                               tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.video.width_px == 1920
         assert s.video.height_px == 1080
 
@@ -87,7 +87,7 @@ class TestReaderRead:
     def test_id_probabilities_squeezed_to_2d(self, reader: IDTrackerAiReader,
                                               tiny_real_session: Path) -> None:
         """Real files ship (N, M, 1); the reader must return (N, M)."""
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.id_probabilities is not None
         assert s.id_probabilities.shape == (10, 2)
 
@@ -95,45 +95,45 @@ class TestReaderRead:
 
     def test_quality_metrics_present(self, reader: IDTrackerAiReader,
                                      tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.quality is not None
         assert "estimated_accuracy" in s.quality
         assert "fraction_identified" in s.quality
 
     def test_idtrackerai_version(self, reader: IDTrackerAiReader,
                                   tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.idtrackerai_version == "6.0.13"
 
     # ── body length ───────────────────────────────────────────────────────────
 
     def test_body_length_reliable_is_false(self, reader: IDTrackerAiReader,
                                            tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.body_length_reliable is False
 
     def test_length_unit_none(self, reader: IDTrackerAiReader,
                               tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.length_unit is None
 
     # ── session.json enrichment ───────────────────────────────────────────────
 
     def test_tracking_intervals_from_session_json(self, reader: IDTrackerAiReader,
                                                    tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.tracking_intervals == [(0, 9)]
 
     def test_roi_list_from_session_json(self, reader: IDTrackerAiReader,
                                          tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.roi_list is not None
         assert len(s.roi_list) >= 1
 
     def test_roi_list_entries_are_parsed_signed_polygons(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.roi_list is not None
         entry = s.roi_list[0]
         assert entry["sign"] == "+"
@@ -145,7 +145,7 @@ class TestReaderRead:
         """identities_colors only exists in session.json, never the
         trajectory dict -- verified absent from all 70 real trajectory
         payloads."""
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.identities_colors == ["#e41a1c", "#377eb8"]
 
     # ── session.json Fase-4 fields ──────────────────────────────────────────
@@ -153,51 +153,51 @@ class TestReaderRead:
     def test_number_of_error_frames_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.number_of_error_frames == 3
 
     def test_exclusive_rois_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.exclusive_rois is False
 
     def test_last_validated_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.last_validated == "2024-01-15T10:30:00"
 
     def test_data_policy_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.data_policy == "idmatcher.ai"
 
     def test_length_calibrations_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.length_calibrations is not None
         assert s.length_calibrations[0]["distance"] == 1.0
 
     def test_velocity_threshold_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.velocity_threshold_px_frame == pytest.approx(42.5)
 
     def test_resolution_reduction_and_id_image_size_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.resolution_reduction == pytest.approx(0.75)
         assert s.id_image_size == [80, 80, 1]
 
     def test_segmentation_params_grouped_from_session_json(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.segmentation_params is not None
         assert s.segmentation_params["intensity_ths"] == [10, 128]
         assert s.segmentation_params["use_bkg"] is True
@@ -207,14 +207,14 @@ class TestReaderRead:
     def test_timers_merged_into_tracking_log_durations(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.tracking_log is not None
         assert s.tracking_log["durations"]["Tracking session"] == pytest.approx(13.0)
 
     def test_preprocessing_image_paths_recorded(
         self, reader: IDTrackerAiReader, tiny_real_session: Path
     ) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.roi_mask_path is not None
         assert s.roi_mask_path.exists()
         assert s.background_image_path is not None
@@ -225,24 +225,24 @@ class TestReaderRead:
     def test_inconsistent_frames_loaded(self, reader: IDTrackerAiReader,
                                          tiny_real_session: Path) -> None:
         from tests.conftest import TINY_REAL_INCONSISTENT_FRAMES
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.inconsistent_frames == TINY_REAL_INCONSISTENT_FRAMES
 
     def test_bbox_table_loaded(self, reader: IDTrackerAiReader,
                                tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.bbox_table is not None
         assert len(s.bbox_table) == 20  # 10 frames x 2 animals
 
     def test_bbox_summary_loaded(self, reader: IDTrackerAiReader,
                                   tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.bbox_summary is not None
         assert s.bbox_summary["status"] == "ok"
 
     def test_matching_results_empty_when_absent(self, reader: IDTrackerAiReader,
                                                  tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.matching_results == []
 
     # ── video path ────────────────────────────────────────────────────────────
@@ -250,14 +250,14 @@ class TestReaderRead:
     def test_unreachable_video_path_sets_none(self, reader: IDTrackerAiReader,
                                                tiny_real_session: Path) -> None:
         """video_paths points at /Volumes/Expansion/…; must not be reachable."""
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.video.path is None
 
     # ── log digest ────────────────────────────────────────────────────────────
 
     def test_tracking_log_status_success(self, reader: IDTrackerAiReader,
                                           tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.tracking_log is not None
         assert s.tracking_log["status"] == "Success"
 
@@ -265,7 +265,7 @@ class TestReaderRead:
 
     def test_trajectory_format_is_npy(self, reader: IDTrackerAiReader,
                                        tiny_real_session: Path) -> None:
-        s = reader.read(tiny_real_session)
+        s = reader.read(tiny_real_session, allow_pickle=True)
         assert s.trajectory_format == "npy"
 
 
@@ -304,7 +304,7 @@ class TestReaderFormatFallback:
         assert hit is not None
         assert hit.format == "parquet"  # confirms the test actually exercises the fallback
 
-        s = reader.read(session_dir)
+        s = reader.read(session_dir, allow_pickle=True)
         assert s.raw_xy.shape == (3, 2, 2)
         assert s.trajectory_format == "npy"
 
@@ -320,7 +320,7 @@ class TestReaderFormatFallback:
         (traj_dir / "trajectories.pickle").write_bytes(b"not real")
 
         with pytest.raises(ImportError_) as exc_info:
-            reader.read(session_dir)
+            reader.read(session_dir, allow_pickle=True)
         assert exc_info.value.code == "IDT_FORMAT_AMBIGUOUS"
 
     def test_reads_via_npy_when_h5_is_corrupt(
@@ -351,6 +351,6 @@ class TestReaderFormatFallback:
         }
         np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
 
-        s = reader.read(session_dir)
+        s = reader.read(session_dir, allow_pickle=True)
         assert s.raw_xy.shape == (3, 2, 2)
         assert s.trajectory_format == "npy"

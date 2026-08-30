@@ -47,7 +47,7 @@ def test_add_session_registers_ref_immediately(qtbot, store, tmp_path: Path) -> 
 def test_add_session_fills_in_has_stable_identities_on_probe_success(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         return Session(
             session_id=folder.name,
             folder=folder,
@@ -76,7 +76,7 @@ def test_add_session_fills_in_has_stable_identities_on_probe_success(
 def test_add_session_leaves_has_stable_identities_none_on_probe_failure(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         raise RuntimeError("not a real session folder")
 
     monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
@@ -133,7 +133,7 @@ def test_session_facts_unknown_id_returns_none(store) -> None:
 def test_session_facts_populated_on_probe_success(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         return Session(
             session_id=folder.name,
             folder=folder,
@@ -179,7 +179,7 @@ def test_session_facts_populated_on_probe_success(
 def test_session_facts_stays_none_on_probe_failure(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         raise RuntimeError("not a real session folder")
 
     monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
@@ -197,7 +197,7 @@ def test_session_facts_stays_none_on_probe_failure(
 
 
 def test_session_facts_cleared_on_new_project(store, tmp_path: Path) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         return Session(
             session_id=folder.name,
             folder=folder,
@@ -268,3 +268,105 @@ def test_identity_probes_cleared_on_open_project(store, tmp_path: Path) -> None:
 
     # Verify probes are cleared
     assert store._identity_probes == {}
+
+
+# ── pickled-trajectory consent ────────────────────────────────────────────────
+
+
+def test_probe_asks_for_consent_when_the_reader_refuses_to_unpickle(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    """A folder whose only trajectory format executes code is not a broken
+    folder -- the user has to be asked, and told which folder."""
+    from track2data.core.errors import ImportError_
+
+    def refusing_read_session(folder: Path, **kwargs: object) -> Session:
+        raise ImportError_(
+            "No readable trajectory format among: npy. Skipped: npy "
+            "(unreadable: [IDT_PICKLE_REFUSED] ...).",
+            code="IDT_FORMAT_AMBIGUOUS",
+            subject=str(folder),
+        )
+
+    monkeypatch.setattr("track2data.readers.read_session", refusing_read_session)
+
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+
+    with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
+        store.add_session(folder)
+
+    with qtbot.waitSignal(store.pickleConsentRequired, timeout=2000) as blocker:
+        pass
+
+    session_id, reported_folder = blocker.args
+    assert session_id == "session_a"
+    assert reported_folder == str(folder)
+
+
+def test_an_ordinary_probe_failure_does_not_ask_about_pickles(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    """Only a refusal asks. A genuinely broken folder must not be turned into
+    a security question the user cannot answer usefully."""
+
+    def broken_read_session(folder: Path, **kwargs: object) -> Session:
+        raise RuntimeError("not a real session folder")
+
+    monkeypatch.setattr("track2data.readers.read_session", broken_read_session)
+
+    asked: list[tuple[str, str]] = []
+    store.pickleConsentRequired.connect(lambda sid, f: asked.append((sid, f)))
+
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+
+    with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
+        store.add_session(folder)
+    with qtbot.waitSignal(store.taskFinished, timeout=2000):
+        pass
+
+    assert asked == []
+
+
+def test_consent_is_recorded_in_the_manifest(qtbot, store) -> None:
+    """Persisted, so the user is asked once per project rather than once per
+    launch -- a question repeated every session stops being read."""
+    assert store.manifest.security.allow_pickle_trajectories is False
+
+    with qtbot.waitSignal(store.projectChanged, timeout=1000):
+        store.set_allow_pickle_trajectories(True)
+
+    assert store.manifest.security.allow_pickle_trajectories is True
+
+
+def test_probe_passes_the_project_setting_to_the_reader(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    """The consent has to actually reach the reader, or it is decoration."""
+    seen: list[object] = []
+
+    def recording_read_session(folder: Path, **kwargs: object) -> Session:
+        seen.append(kwargs.get("allow_pickle"))
+        return Session(
+            session_id=folder.name,
+            folder=folder,
+            reader="fake",
+            video=VideoInfo(fps=25.0, n_frames=10, width_px=100, height_px=100),
+            n_animals=1,
+            trajectory_variant="wo_gaps",
+            has_stable_identities=True,
+            raw_xy=np.zeros((10, 1, 2)),
+        )
+
+    monkeypatch.setattr("track2data.readers.read_session", recording_read_session)
+    store.set_allow_pickle_trajectories(True)
+
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
+        store.add_session(folder)
+    with qtbot.waitSignal(store.taskFinished, timeout=2000):
+        pass
+
+    assert seen == [True]

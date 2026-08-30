@@ -432,7 +432,7 @@ one case.
 |---|---|---|---|
 | `IDT_NO_TRAJ` | error | "No trajectory file found in `<folder>/trajectories/`." | ✅ implemented (`reader.py`, `formats/*.py`) |
 | `IDT_FORMAT_AMBIGUOUS` | info | "Multiple trajectory formats present (`<list>`); chose `<best>`." | ✅ implemented at **info**, matching this spec (`reader.py::_load_payload`) -- was previously misused as a fatal `error` for an unrelated "not a dict" condition; that use is gone |
-| `IDT_PICKLE_REFUSED` | error | "Loading `<path>` requires explicit consent (`--allow-pickle` / GUI prompt)." | ❌ not implemented as a code; the *behaviour* exists differently -- `readers/idtrackerai/blobs.py`'s blob-pickle loader requires an explicit `allow_pickle=True` **function parameter**, not a CLI flag or manifest field (see §7.2) |
+| `IDT_PICKLE_REFUSED` | error | "Loading `<path>` requires explicit consent (`--allow-pickle` / GUI prompt)." | ✅ implemented — raised by `formats/npy.py` when `allow_pickle` is False, gated on `ProjectManifest.security.allow_pickle_trajectories` with a one-time-per-project GUI prompt (see §7.2) |
 | `IDT_VERSION_UNKNOWN` | warning | "idtracker.ai version `<v>` not recognised; using v6.x assumptions." | ❌ not implemented; no 5.x/6.x version gating exists (`readers/idtrackerai_detect.py::sniff_version` has no production caller) |
 | `IDT_PARTIAL_SESSION` | warning | "Session looks incomplete (no `trajectories/`; log ended in error)." | ❌ not implemented as this code, but the underlying signal exists: `log.py`'s rewritten parser now returns `status: "Failed"` with a `failure_summary` when a crash is detected, surfaced in the export's provenance section |
 | `IDT_BODY_LENGTH_UNRELIABLE` | warning | (§5 / F12) | ❌ not a logged code, but `Session.body_length_reliable` (always False regardless of source) carries the same caveat through to the README's provenance section |
@@ -455,20 +455,37 @@ secure*. Policy:
 | CLI | Refuse without `--allow-pickle`; emit `IDT_PICKLE_REFUSED` |
 | GUI | One-time-per-project consent modal; choice persisted in manifest as `security.allow_pickle_trajectories` |
 
-**Status (2026-08):** not built as specified. `formats/npy.py`'s
-docstring claimed this gate existed (`security.allow_pickle_trajectories`
-in the project manifest) when it never did -- that phantom claim has not
-been corrected, and `np.load(path, allow_pickle=True)` still runs
-unconditionally for `.npy` trajectories, same as when this table was
-written. The new `readers/idtrackerai/blobs.py` (list_of_blobs.pickle
-reader) takes a different, narrower approach instead of implementing
-this table as written: a restricted `pickle.Unpickler` allowlist (stubs
-every `idtrackerai.*` class, refuses everything outside a small numpy
-allowlist -- no idtracker.ai code ever executes) plus a mandatory
-`allow_pickle: bool` **function parameter** that the caller must pass
-`True` explicitly. No CLI flag, no GUI modal, no `ProjectManifest.security`
-field exist. A caller wiring this into the CLI/GUI still needs to build
-the consent surface this table describes; the loader itself is ready for it.
+**Status (2026-08-30):** built. `ProjectManifest.security.allow_pickle_trajectories`
+exists and defaults to **False**; `formats/npy.py` refuses with
+`IDT_PICKLE_REFUSED` unless the caller passes `allow_pickle=True`; the flag
+is threaded through `IDTrackerAiReader.read()` -> `_load_payload()` and
+`read_session()` into `Engine.import_session()`, which reads it from the
+project manifest. The GUI asks once per project, naming the folder, and
+persists the answer (`ProjectStore.pickleConsentRequired` ->
+`MainWindow._ask_pickle_consent`).
+
+Three details worth keeping in mind when changing this:
+
+* **Refusal is not failure.** The reader's existing format-fallback walk
+  treats `IDT_PICKLE_REFUSED` like any other unreadable format, so a folder
+  carrying `trajectories_csv` or an h5 alongside the npy imports normally
+  and never prompts. Only a pickle-only folder forces the question. This is
+  what keeps a security default from becoming a usability wall.
+* **Two loaders, not one.** `formats/npy.py` (trajectories) and
+  `idtrackerai_v5.py::_load_video_object` (`video_object.npy`) are separate
+  pickle-load paths. The second is metadata only, with a session.json
+  fallback, so refusing it degrades the import rather than failing it.
+* **The plug-in contract is preserved** via `SessionReader.accepts_allow_pickle`
+  (default False). `read_session()` passes the keyword only to readers that
+  declare it, so an external reader written against `read(folder)` keeps
+  working -- but also never sees the flag, and should opt in if it unpickles.
+
+`blobs.py` keeps its own, stricter arrangement (a restricted
+`pickle.Unpickler` allowlist that stubs every `idtrackerai.*` class, so no
+idtracker.ai code executes at all, plus the same mandatory `allow_pickle`
+parameter). That remains the stronger pattern; the trajectory loaders use
+the manifest gate because their payload is the data itself rather than an
+enrichment that can simply be skipped.
 
 ### 7.3 JSON-strictness hook
 

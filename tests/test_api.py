@@ -1094,7 +1094,7 @@ def test_validate_session_mode_clean_when_every_session_is_calibrated(
 ) -> None:
     from track2data.api import Engine
 
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         return _make_session(session_id=folder.name).model_copy(update={"length_unit": 12.5})
 
     monkeypatch.setattr("track2data.api.read_session", fake_read_session)
@@ -1739,7 +1739,7 @@ def _patch_read_session(
     """Serve a different Session per folder, keyed by folder name."""
     import track2data.api as api_module
 
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         return sessions[Path(folder).name]
 
     monkeypatch.setattr(api_module, "read_session", fake_read_session)
@@ -1812,7 +1812,7 @@ def test_consistency_warnings_skip_unreadable_sessions(
 
     good = {"a": _session_at("a", 30.0), "b": _session_at("b", 60.0)}
 
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         name = Path(folder).name
         if name == "broken":
             raise OSError("cannot read")

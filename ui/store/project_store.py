@@ -34,6 +34,17 @@ from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
 
+def _is_pickle_refusal(exc: object) -> bool:
+    """Whether *exc* is the reader declining to execute code from a file.
+
+    Matches on the error code rather than the message: the refusal can
+    surface either directly from the loader or wrapped by the reader's
+    format-fallback walk once nothing inert remains.
+    """
+    code = getattr(exc, "code", "") or ""
+    return code == "IDT_PICKLE_REFUSED" or "IDT_PICKLE_REFUSED" in str(exc)
+
+
 class ProjectStore(QObject):
     """
     Reactive project state container.
@@ -68,6 +79,11 @@ class ProjectStore(QObject):
     taskProgress       = Signal(str, int)      # task_id, percent 0-100
     taskFinished       = Signal(str, object)   # task_id, result-or-exception
     sessionFactsChanged = Signal()             # a SessionFacts entry was added/removed
+    # A session folder could only be read by unpickling, which this project
+    # has not consented to. Carries (session_id, folder) so the view can name
+    # the file it is asking about -- "do you trust this folder?" is not a
+    # question anyone can answer in the abstract.
+    pickleConsentRequired = Signal(str, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -230,7 +246,13 @@ class ProjectStore(QObject):
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
 
-        task_id = self._tasks.submit(partial(read_session, folder))
+        task_id = self._tasks.submit(
+            partial(
+                read_session,
+                folder,
+                allow_pickle=self._manifest.security.allow_pickle_trajectories,
+            )
+        )
         self._identity_probes[task_id] = session_id
 
     def _on_identity_probe_finished(self, task_id: str, result: object) -> None:
@@ -239,6 +261,19 @@ class ProjectStore(QObject):
             return  # not an identity-probe task (e.g. a pipeline run/preview)
         if isinstance(result, Exception):
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
+            if _is_pickle_refusal(result):
+                # Not a broken folder -- a folder whose only trajectory format
+                # executes code on load. Ask, naming the file, rather than
+                # leaving the user with an import that simply failed.
+                folder = next(
+                    (
+                        str(ref.folder)
+                        for ref in (self._manifest.sessions if self._manifest else [])
+                        if ref.session_id == session_id
+                    ),
+                    "",
+                )
+                self.pickleConsentRequired.emit(session_id, folder)
             return
         self._set_session_identity(
             session_id, result.has_stable_identities, result.track_wo_identities
@@ -249,6 +284,23 @@ class ProjectStore(QObject):
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
+
+    def set_allow_pickle_trajectories(self, allowed: bool) -> None:
+        """Record the project's answer to the unpickling question.
+
+        Persisted in the manifest rather than held in memory so the user is
+        asked once per project, not once per launch -- a question repeated
+        every session stops being read.
+        """
+        if self._manifest is None:
+            return
+        security = self._manifest.security.model_copy(
+            update={"allow_pickle_trajectories": allowed}
+        )
+        self._manifest = self._manifest.model_copy(update={"security": security})
+        state = "enabled" if allowed else "disabled"
+        self.append_log(f"_Loading pickled trajectories {state} for this project._\n")
+        self.projectChanged.emit()
 
     def _set_session_input_hash(self, session_id: str, session: object) -> None:
         """Record the SHA-256 of the trajectory file this session was read from.

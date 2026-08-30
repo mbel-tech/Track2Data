@@ -37,6 +37,7 @@ from track2data.core.models import (
     CalibrationConfig,
     MetricSelection,
     ProjectManifest,
+    SecurityConfig,
     SessionRef,
 )
 
@@ -50,7 +51,12 @@ _FPS = 25.0
 
 
 def _minimal_manifest(session_folder: Path) -> ProjectManifest:
-    """Return a minimal valid ProjectManifest pointing at *session_folder*."""
+    """Return a minimal valid ProjectManifest pointing at *session_folder*.
+
+    Opts into pickled trajectories: the tiny_real fixture is npy-only, and
+    these tests exercise the pipeline rather than the consent gate. The gate
+    itself is tested in test_pickle_gate.py.
+    """
     now = datetime.now(tz=UTC)
     sha = hashlib.sha256(str(session_folder).encode()).hexdigest()
     return ProjectManifest(
@@ -71,6 +77,7 @@ def _minimal_manifest(session_folder: Path) -> ProjectManifest:
             zone=[],
             diagnostic=[],
         ),
+        security=SecurityConfig(allow_pickle_trajectories=True),
     )
 
 
@@ -827,8 +834,8 @@ def test_project_summary_leads_with_heterogeneity_when_present(
     calls = {"n": 0}
     real_read = read_session
 
-    def doubled_fps_on_second_call(folder: Path) -> Session:
-        session = real_read(folder)
+    def doubled_fps_on_second_call(folder: Path, **kwargs: object) -> Session:
+        session = real_read(folder, **kwargs)  # type: ignore[arg-type]
         calls["n"] += 1
         if calls["n"] % 2 == 0:
             return session.model_copy(
