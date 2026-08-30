@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Speed, acceleration and heading are now Savitzky–Golay derivatives.**
+  **Every speed, acceleration and turning value will change.** The previous
+  estimator had two compounding defects:
+
+  1. *A half-frame offset.* Speed was a forward difference assigned to frame
+     *t*, which actually estimates the derivative at *t + ½*. On a uniformly
+     accelerating trajectory the resulting bias is exactly `a·Δt/2`, every
+     frame, in the same direction — now pinned by a regression test.
+  2. *Squared noise.* Acceleration was a first difference **of that first
+     difference**, so positional noise was amplified twice over.
+
+  Both quantities now come from one filtered derivative of position each,
+  using the Savitzky–Golay filter family already applied to positions — no
+  new dependency, since `scipy` was already required.
+
+  Measured on a synthetic correlated random walk with realistic positional
+  noise (3000 frames at 30 fps; **not** corpus numbers — the embargoed
+  corpus was not available here — but they show the magnitude, not just the
+  direction): mean speed **−10.6 %**, max speed **−55.1 %**, mean |accel|
+  **−76.1 %**, max |accel| **−71.3 %**. The old maxima were largely noise.
+
+  Two further improvements fall out of the method: there is no longer a
+  special case at the end of a session (a forward difference had nowhere to
+  look, so the last frame's speed and the last two accelerations were NaN —
+  an artefact of the arithmetic, not a property of the data), and a single
+  missing position no longer destroys its neighbour's value, because
+  derivatives are taken per contiguous segment and never bridge a gap.
+
+  **The old estimator is retained** as
+  `PreprocessConfig.kinematics.method = "forward_difference"` for one
+  release, so a project can reproduce earlier numbers; its artefacts are
+  pinned by tests as known behaviour rather than as goals.
+
+- **IL-6 acceleration is documented as tangential**, i.e. the rate of change
+  of speed `d|v|/dt` — which is what it always was, and what the metric spec
+  says, but the distinction was never written down. It is obtained from the
+  exact identity `(v · a)/|v|` rather than by differencing a differenced
+  series. It is *not* the magnitude of the acceleration vector: an animal
+  circling at constant speed reports zero, and the centripetal component
+  belongs to the turning metrics. A test pins this, so the two can never be
+  swapped silently.
+
+- **Caveats the estimator cannot fix are now recorded on the metrics they
+  affect.** IL-1 records that summing step lengths sums `|dx|` rather than
+  `dx`, so `E[|dx|] > |E[dx]|` whenever there is positional noise: path
+  length is biased *upward*, always, and the bias grows with frame rate —
+  making path length non-comparable across the mixed-rate projects
+  `sessions.csv` now surfaces. IL-8 records that stationary frames carry no
+  heading and are therefore absent from its denominator, so a mostly-still
+  animal's turn rate is estimated from a small, non-random subset of its
+  behaviour.
+
 ### Security
 
 - **Loading a trajectory file no longer executes whatever code it contains.**

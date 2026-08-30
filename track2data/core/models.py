@@ -252,6 +252,23 @@ class SmoothCfg(BaseModel):
     polyorder: int = 2
 
 
+class KinematicsCfg(BaseModel):
+    # "savgol" differentiates the trajectory with a Savitzky-Golay filter:
+    # centred (no half-frame offset) and one filtered derivative per
+    # quantity (no squared noise). "forward_difference" is the pre-0.2
+    # estimator, kept for one release so a project can reproduce older
+    # numbers -- it assigns each forward difference to the earlier frame and
+    # obtains acceleration by differencing an already-differenced series.
+    # Switching shifts every speed, acceleration and turning value.
+    method: Literal["savgol", "forward_difference"] = "savgol"
+    # Deliberately separate from SmoothCfg's window even though the defaults
+    # match: with smoothing on, the trajectory is filtered once for position
+    # and again for the derivative, and tying the two together would hide
+    # that rather than make it adjustable.
+    window: int = 5
+    polyorder: int = 2
+
+
 class ValidateCfg(BaseModel):
     min_track_frames: int = 0
     max_pct_na_per_individual: float = 0.10
@@ -262,6 +279,7 @@ class PreprocessConfig(BaseModel):
     jump: JumpCfg = JumpCfg()
     identity_switch: IdSwitchCfg = IdSwitchCfg()
     smoothing: SmoothCfg = SmoothCfg()
+    kinematics: KinematicsCfg = KinematicsCfg()
     coverage: ValidateCfg = ValidateCfg()
 
 

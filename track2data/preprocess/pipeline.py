@@ -113,7 +113,7 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # Compute kinematics on final preprocessed xy
-    kinematics = compute_kinematics(xy, fps=session.video.fps)
+    kinematics = compute_kinematics(xy, fps=session.video.fps, cfg=config.kinematics)
 
     return PreprocessedSession(
         session=session,
