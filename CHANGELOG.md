@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`CITATION.cff`, PyPI publishing, and a release checklist.** GitHub's
+  "Cite this repository" button now works, and it cites idtracker.ai
+  alongside this tool — a paper citing Track2Data without the tracker
+  misattributes the part of the pipeline that did the hard work, so a test
+  pins that reference. `tests/test_version_consistency.py` also pins the
+  version, which otherwise goes stale and makes every citation name a
+  release that did not produce the results being cited.
+
+  `release.yml` gains a `pypi` job publishing the engine wheel via **trusted
+  publishing** (OIDC — no API token stored anywhere), with `twine check`
+  first, because a PyPI version can never be re-uploaded. The desktop
+  binaries serve someone clicking through a wizard; a wheel serves the
+  headless and HPC cases a binary cannot.
+
+  Both Zenodo and PyPI need a **one-time manual setup** that cannot live in
+  a workflow file. `docs/dev/RELEASING.md` is the checklist for each,
+  including which of Zenodo's two DOIs goes where.
+
+  `pyproject.toml` gains the author, keywords, classifiers and project URLs
+  a PyPI page needs.
+
 - **`SECURITY.md` and `.github/dependabot.yml`.** For a project that ships
   desktop binaries built from PyPI wheels, dependency updates are a real
   supply-chain control rather than paperwork: a vulnerable transitive

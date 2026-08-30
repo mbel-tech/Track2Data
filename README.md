@@ -164,9 +164,11 @@ Cite the upstream tracker as well as this tool:
 > small or large collectives of unmarked animals. *Nature Methods*, 16,
 > 179–182. https://doi.org/10.1038/s41592-018-0295-5
 
-A `CITATION.cff` and a per-release DOI are planned. Until then, cite the
-version and commit you ran — both are recorded in every export's
-`manifest.json`.
+For Track2Data itself, GitHub's **Cite this repository** button reads
+[`CITATION.cff`](CITATION.cff). A per-release DOI via Zenodo is set up but
+not yet switched on (see [`docs/dev/RELEASING.md`](docs/dev/RELEASING.md));
+until it is, cite the version and commit you ran — both are recorded in
+every export's `manifest.json`.
 
 ## Documentation
 

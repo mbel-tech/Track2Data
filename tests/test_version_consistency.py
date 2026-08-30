@@ -134,3 +134,23 @@ def test_py_typed_is_declared_as_a_build_artifact() -> None:
 
     artifacts = config["tool"]["hatch"]["build"]["targets"]["wheel"].get("artifacts", [])
     assert "track2data/py.typed" in artifacts
+
+
+def test_citation_cff_version_matches() -> None:
+    """CITATION.cff is what GitHub's "Cite this repository" button and Zenodo
+    both read. A stale version there makes every citation of this software
+    name a release that did not produce the results being cited."""
+    text = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    match = re.search(r"^version:\s*(\S+)\s*$", text, re.MULTILINE)
+    assert match, "CITATION.cff has no top-level version field"
+    assert match.group(1) == __version__, (
+        f"CITATION.cff says {match.group(1)}, _version.py says {__version__}"
+    )
+
+
+def test_citation_cff_cites_idtrackerai() -> None:
+    """Track2Data reads idtracker.ai's output and does no tracking of its own.
+    A paper citing this tool without citing the tracker misattributes the
+    part of the pipeline that did the hard work."""
+    text = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    assert "10.1038/s41592-018-0295-5" in text

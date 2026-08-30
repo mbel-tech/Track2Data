@@ -57,6 +57,9 @@ Remaining work is release mechanics, not implementation — see **M5** below.
 
 ## M5 — v1.0 release
 
+Release mechanics, including the one-time Zenodo and PyPI setup, are in
+[`RELEASING.md`](RELEASING.md).
+
 The only milestone with work left. Nothing here is blocked on
 implementation.
 

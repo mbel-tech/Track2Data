@@ -12,6 +12,22 @@ dynamic = ["version"]
 description = "Open-source desktop app that turns idtracker.ai output folders into analysis-ready behavioural datasets."
 readme = "README.md"
 license = { text = "MIT" }
+authors = [{ name = "Martina Bellio", email = "m.bellio2199@gmail.com" }]
+keywords = [
+    "animal-behaviour", "behavioural-phenotyping", "collective-behaviour",
+    "idtrackerai", "trajectory-analysis", "zebrafish", "ethology",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Typing :: Typed",
+]
+
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
@@ -60,6 +76,12 @@ dev = [
 [project.scripts]
 track2data     = "track2data.cli:main"
 track2data-gui = "app.main:main"
+
+[project.urls]
+Homepage = "https://github.com/mbel-tech/Track2Data"
+Repository = "https://github.com/mbel-tech/Track2Data"
+Issues = "https://github.com/mbel-tech/Track2Data/issues"
+Changelog = "https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md"
 
 [project.entry-points."track2data.readers"]
 idtrackerai    = "track2data.readers.idtrackerai.reader:IDTrackerAiReader"
