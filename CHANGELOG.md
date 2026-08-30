@@ -7,7 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`codebook.csv` in every export.** One row per exported column with its
+  unit, level, originating metric, definition, citation and DOI, generated
+  from the registry. That turns "45 cited metrics" from a README claim into
+  a machine-readable artefact shipped with the data.
+
+  It also fixes a unit trap nothing else records: **every `*_pct` column in
+  this project holds a fraction in [0, 1], not a percentage.** `time_pct =
+  0.42` means 42 %, and a reader trusting the suffix records 0.42 %. All
+  eight such columns (`time_pct`, `time_in_centre_pct`, `home_base_time_pct`,
+  `wall_contact_time_pct`, `polarised_time_pct`, `milling_time_pct`,
+  `swarm_time_pct`) are documented as fractions. The names are unchanged —
+  renaming them would break every existing analysis script — so the codebook
+  is where the units are stated truthfully.
+
+  A test asserts every column in the registry resolves to a known unit, so a
+  new metric cannot ship a codebook row reading "unknown".
+
+- **`metrics_long.csv` — a genuinely long table.** Despite its name, the
+  `csv_long` exporter only wrote *wide* tables: one row per session ×
+  individual with a column per metric, with `metric_id` dropped during the
+  merge. The new file is
+  `session_id, individual_id, zone_name, from_zone, to_zone, metric_id,
+  column, value, unit` — one row per measured value, across individual,
+  group, zone and diagnostic metrics at once. It keeps `metric_id`, so a
+  value can be traced back through the codebook to the work that defines it,
+  and it joins to `codebook.csv` on `column`.
+
 ### Changed
+
+- **Five metrics were returning columns they did not declare.**
+  `Metric.output_columns` is what the UI, the exporters and the generated
+  docs promise, and IL-1 (`path_length_cm`, `path_length_bl`), IL-2
+  (`mean_speed_cm_s`, `mean_speed_bl_s`), GL-1 (`mean_nnd_cm`,
+  `mean_nnd_bl`), GL-5 and GL-7 (`*_cm_s`) all under-declared. All are
+  emitted unconditionally — NaN when uncalibrated rather than absent — so
+  they are now declared.
+
+  The 33 per-metric `test_output_columns_present` tests could not catch
+  this: each asserted a hardcoded list of names was *present*, a subset
+  check against a literal that never read `output_columns` at all. They are
+  replaced by one parametrised test over the whole registry asserting set
+  **equality**, run against both a calibrated and an uncalibrated session —
+  which also pins that the calibration-dependent columns never change the
+  schema's shape. Metrics are run through the engine's effective config, so
+  derived parameters (IL-3's arena radius, which gates
+  `time_in_centre_pct`) are supplied as they are in a real run.
 
 - **Speed, acceleration and heading are now Savitzky–Golay derivatives.**
   **Every speed, acceleration and turning value will change.** The previous

@@ -80,13 +80,6 @@ class TestHomeBaseOccupancy:
     def test_metric_id(self) -> None:
         assert HomeBaseOccupancy.id == "IL-9"
 
-    def test_output_columns_present(self) -> None:
-        xy = np.zeros((50, 2, 2))
-        psess = make_psess(xy=xy)
-        df = HomeBaseOccupancy().compute(psess)
-        for col in ("session_id", "individual_id", "home_base_time_pct", "home_base_stable"):
-            assert col in df.columns
-
     def test_corner_hugging_animal_has_high_home_base_pct(self) -> None:
         n_frames = 100
         xy = np.zeros((n_frames, 1, 2))
@@ -131,18 +124,6 @@ class TestRoamingEntropy:
     def test_metric_id(self) -> None:
         assert RoamingEntropy.id == "IL-10"
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = RoamingEntropy().compute(psess)
-        for col in (
-            "session_id",
-            "individual_id",
-            "roaming_entropy_bits",
-            "roaming_entropy_normalised",
-            "n_visited_cells",
-        ):
-            assert col in df.columns
-
     def test_single_cell_has_zero_entropy_and_one_visited_cell(self) -> None:
         xy = np.full((50, 1, 2), 5.0)
         psess = make_psess(n_frames=50, n_animals=1, xy=xy)
@@ -181,19 +162,6 @@ class TestRoamingEntropy:
 class TestCircularHeadingStats:
     def test_metric_id(self) -> None:
         assert CircularHeadingStats.id == "IL-11"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = CircularHeadingStats().compute(psess)
-        for col in (
-            "session_id",
-            "individual_id",
-            "mean_heading_rad",
-            "resultant_length",
-            "rayleigh_p",
-            "left_right_turn_bias",
-        ):
-            assert col in df.columns
 
     def test_identical_headings_give_resultant_length_one(self) -> None:
         n_frames = 30
@@ -235,19 +203,6 @@ class TestCircularHeadingStats:
 class TestWallDistanceThigmotaxis:
     def test_metric_id(self) -> None:
         assert WallDistanceThigmotaxis.id == "IL-14"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        zone_set = ZoneSet(rois=[])
-        cfg = derive_metric_params("IL-14", psess, zone_set)
-        df = WallDistanceThigmotaxis().compute(psess, cfg)
-        for col in (
-            "session_id",
-            "individual_id",
-            "mean_wall_distance_px",
-            "wall_contact_time_pct",
-        ):
-            assert col in df.columns
 
     def test_falls_back_to_video_frame_rectangle_with_no_zones(self) -> None:
         xy = np.array([[[50.0, 50.0]]])  # centre of a 100x100 frame

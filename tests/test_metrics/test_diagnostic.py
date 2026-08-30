@@ -516,18 +516,6 @@ class TestPhysicalPlausibilityViolations:
     def test_metric_id(self) -> None:
         assert PhysicalPlausibilityViolations.id == "D-10"
 
-    def test_output_columns_present(self) -> None:
-        sess = make_session()
-        df = PhysicalPlausibilityViolations().compute(sess)
-        for col in (
-            "session_id",
-            "individual_id",
-            "violation_fraction",
-            "teleport_jump_count",
-            "speed_limit_px_s",
-        ):
-            assert col in df.columns
-
     def test_smooth_trajectory_has_no_violations_with_explicit_limit(self) -> None:
         n_frames = 50
         xy = np.zeros((n_frames, 1, 2))

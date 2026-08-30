@@ -1004,3 +1004,61 @@ def test_every_metric_row_can_be_joined_to_its_input_quality(
     assert "path_length_px" in joined.columns
     assert "frac_measured" in joined.columns
     assert (joined["n_frames_used"] > 0).all()
+
+
+# ── long table and codebook ───────────────────────────────────────────────────
+
+
+def test_run_writes_a_genuinely_long_metric_table(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """trial_activity_summary.csv is wide whatever its name says. This is the
+    shape lme4/glmmTMB/statsmodels actually want."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    df = pd.read_csv(tmp_path / tiny_real_session.name / "metrics_long.csv")
+
+    assert list(df.columns) == [
+        "session_id", "individual_id", "zone_name", "from_zone", "to_zone",
+        "metric_id", "column", "value", "unit",
+    ]
+    # metric_id survives here, unlike the wide merge which drops it.
+    assert "IL-1" in set(df["metric_id"])
+    path_rows = df[df["column"] == "path_length_px"]
+    assert len(path_rows) == _N_ANIMALS
+    assert set(path_rows["unit"]) == {"px"}
+
+
+def test_run_writes_a_codebook_at_the_run_root(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """One row per exported column with its unit and DOI -- the machine-
+    readable half of "45 cited metrics"."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    codebook = pd.read_csv(tmp_path / "codebook.csv")
+
+    assert "path_length_px" in set(codebook["column"])
+    row = codebook[codebook["column"] == "path_length_cm"].iloc[0]
+    assert row["unit"] == "cm"
+    assert row["metric_id"] == "IL-1"
+
+
+def test_every_long_table_column_is_in_the_codebook(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """The point of shipping a codebook is that it explains what shipped."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    long_df = pd.read_csv(tmp_path / tiny_real_session.name / "metrics_long.csv")
+    codebook = pd.read_csv(tmp_path / "codebook.csv")
+
+    documented = set(codebook["column"])
+    assert set(long_df["column"]) <= documented
+    assert "unknown" not in set(codebook["unit"])

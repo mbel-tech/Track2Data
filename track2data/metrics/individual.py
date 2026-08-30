@@ -55,6 +55,12 @@ class PathLength(Metric):
         "metric_id",
         "individual_id",
         "path_length_px",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "path_length_cm",
+        "path_length_bl",
     ]
     documentation = MetricDocumentation(
         definition="Total distance travelled by each individual over the session.",
@@ -150,6 +156,12 @@ class Speed(Metric):
         "mean_speed_px_s",
         "median_speed_px_s",
         "max_speed_px_s",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "mean_speed_cm_s",
+        "mean_speed_bl_s",
     ]
     documentation = MetricDocumentation(
         definition="Mean, median, and maximum speed of each individual over the session.",

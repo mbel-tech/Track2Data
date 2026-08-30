@@ -953,6 +953,18 @@ class Engine:
                 self._project_readme_text(results, warnings), encoding="utf-8"
             )
             written.append(readme_path)
+
+            # At the run root, not per session: it describes the schema every
+            # session folder shares. Covers the whole registry rather than
+            # only this run's selection, so a reader can look up any column
+            # they encounter in any table.
+            from track2data.exporters.schema import build_codebook
+
+            codebook_path = out_dir / "codebook.csv"
+            build_codebook().to_csv(
+                codebook_path, index=False, encoding="utf-8", lineterminator="\n"
+            )
+            written.append(codebook_path)
         except Exception:
             logger.exception("Could not write the run summary to %s", out_dir)
         return written

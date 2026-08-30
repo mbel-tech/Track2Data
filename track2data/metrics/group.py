@@ -55,6 +55,12 @@ class NearestNeighbourDistance(Metric):
         "mean_nnd_px",
         "median_nnd_px",
         "n_skipped_frames",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "mean_nnd_cm",
+        "mean_nnd_bl",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -302,7 +308,16 @@ class CentroidSpeed(Metric):
     level = "group"
     priority = "primary"
     requires_identity = False
-    output_columns: ClassVar[list[str]] = ["session_id", "metric_id", "mean_centroid_speed_px_s"]
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "mean_centroid_speed_px_s",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "mean_centroid_speed_cm_s",
+    ]
     documentation = MetricDocumentation(
         definition=(
             "The group centroid is computed each frame as the mean position of all "
@@ -389,7 +404,16 @@ class NNMatchedSpeed(Metric):
     level = "group"
     priority = "primary"
     requires_identity = False
-    output_columns: ClassVar[list[str]] = ["session_id", "metric_id", "mean_matched_speed_px_s"]
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "mean_matched_speed_px_s",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "mean_matched_speed_cm_s",
+    ]
     documentation = MetricDocumentation(
         definition=(
             "An identity-free estimate of individual speed.  For each consecutive "
