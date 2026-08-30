@@ -5,10 +5,10 @@
 researchers wanting to know what each number means.
 **Companion docs:**
 
-- [`../PRD.md` §5.6](../PRD.md) — high-level catalogue
+- [`../PRD.md` §5.6](../docs/dev/PRD.md) — high-level catalogue
 - [`./ENGINE_DESIGN.md` §8](./ENGINE_DESIGN.md) — engine API
 - [`./USER_WORKFLOW.md` Stage 6](./USER_WORKFLOW.md) — wizard UI
-- [`./UI_DESIGN.md` Page 6](./UI_DESIGN.md) — PySide6 controls
+- [`./UI_DESIGN.md` Page 6](dev/UI_DESIGN.md) — PySide6 controls
 - [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) — provenance of diagnostic inputs
 
 > This document is the **canonical** definition of every metric that
@@ -55,9 +55,9 @@ When `Session.length_unit` is present, this is converted to real units by
 `calibration/bodylength.py`; otherwise it stays in pixels.
 
 **`Session.bbox_table` (the `<session>_bboxes.csv` produced by
-`extract_bboxes.py`) is deliberately NOT used for calibration**, and no
+`scripts/extract_bboxes.py`) is deliberately NOT used for calibration**, and no
 future revision of this spec should reintroduce it without re-reading
-`docs/EXTRACT_BBOXES_FIX.md` first. Measured on a real session, that
+`docs/dev/EXTRACT_BBOXES_FIX.md` first. Measured on a real session, that
 script's per-identity median overestimates the tracker's own
 `median_body_length` by **+27.8%**, with a **1.75×** spread between
 individual medians of the same species in the same arena -- because it
@@ -831,7 +831,7 @@ instead of per-individual rows on identity-free sessions, which changes
 the output shape of six metrics. Do not "fix" this by flipping the flags
 alone — that would simply make all zone analysis unavailable for such a
 session. See `track2data/metrics/zone.py`'s module docstring and
-`docs/ROADMAP.md`.
+`docs/dev/ROADMAP.md`.
 
 ### 4.6 Tracking-quality diagnostics
 
@@ -1296,7 +1296,7 @@ exposed so future per-user opt-outs are non-breaking.
    construction rather than by contributor discipline. The audit's 20
    proposed new metrics were triaged for actual feasibility against
    this codebase (rather than taken at face value) and 11 were built —
-   see §3/§4 above and `docs/ROADMAP.md`'s "Reserved metric IDs" table
+   see §3/§4 above and `docs/dev/ROADMAP.md`'s "Reserved metric IDs" table
    for the 9 that were not, and why.
 5. **Bout-criterion thresholds (2026-08)** — resolved, as an **opt-in**.
    IL-7's `min_bout_frames`, Z-3's `min_visit_frames`, and Z-4/Z-5's

@@ -17,7 +17,7 @@ from the original draft are corrected in place below (§1.4 x2, §3)
 rather than left standing.
 
 **Authoritative references:**
-- [`../idtrackerai_output_structure.md`](../idtrackerai_output_structure.md) — official idtracker.ai 6.0.14 docs (superseded by `docs_from_idtracker.ai/output_structure_idtrackerai.md`, 6.0.15a0, for anything not cited by line number below)
+- [`../idtrackerai_output_structure.md`](../docs/idtrackerai_output_structure.md) — official idtracker.ai 6.0.14 docs (superseded by `docs_from_idtracker.ai/output_structure_idtrackerai.md`, 6.0.15a0, for anything not cited by line number below)
 - `Checked sessions GOT/` — 70 real session folders (idtracker.ai 6.0.13)
 
 **Audience:** Engineers and reviewers before any reader rewrite

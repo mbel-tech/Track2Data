@@ -1,3 +1,21 @@
+"""Extract per-blob bounding boxes from an idtracker.ai list_of_blobs.pickle.
+
+UNMAINTAINED, AND KNOWN TO BE WRONG. Not part of the Track2Data package:
+nothing here imports it, no test covers it, and it is kept only because it
+is used in an adjacent pipeline. See issue #80.
+
+Four confirmed defects are catalogued, with fixes, in
+``docs/dev/EXTRACT_BBOXES_FIX.md`` -- among them ``blob.contours`` (the real
+attribute is ``blob.contour``, singular) at line ~47 below, still present.
+Those corrections were written to be applied to whichever copy you actually
+run; this one has not had them. Read that document before trusting any
+output from this script.
+
+It also loads a pickle with no consent gate. The packaged reader
+(``track2data/readers/idtrackerai/blobs.py``) does the same job safely, with
+a restricted unpickler that never executes idtracker.ai code -- prefer it.
+"""
+
 import argparse
 import csv
 import json

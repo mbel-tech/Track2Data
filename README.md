@@ -1,96 +1,199 @@
 # Track2Data
 
-Open-source desktop application that turns `idtracker.ai` output folders into analysis-ready behavioural datasets.
+**Turn idtracker.ai output folders into analysis-ready behavioural datasets.**
 
-See [PRD.md](PRD.md) for the full product requirements. Design and workflow docs live in [docs/](docs/):
+You tracked your fish. idtracker.ai gave you a folder of trajectories.
+Track2Data turns that into tables you can put straight into R or Python:
+45 behavioural metrics, every one with a citation, in documented units,
+with a record of exactly which frames were measured and which were
+reconstructed.
 
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased M1–M5 implementation plan, module build order, and exit criteria.
-- [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — **read first.** System-level technical contract: tech stack, architecture, project file format, build/packaging, testing pyramid, plug-in compatibility policy.
-- [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md) — the end-to-end user journey through the wizard, wireframes, validation messages, and save/resume logic.
-- [`docs/UI_DESIGN.md`](docs/UI_DESIGN.md) — PySide6 wizard architecture and engine bindings.
-- [`docs/ENGINE_DESIGN.md`](docs/ENGINE_DESIGN.md) — pure-Python `track2data` engine: layout, models, plug-in surface.
-- [`docs/IDTRACKERAI_FORMAT_ANALYSIS.md`](docs/IDTRACKERAI_FORMAT_ANALYSIS.md) — gap analysis of the current reader against the official idtracker.ai 6.0.14 docs and a 70-session real-data corpus; cross-version normalisation strategy.
-- [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — canonical, implementation-ready specification for every behavioural metric (formulas, inputs, outputs, units, citations) plus the UI info-button architecture.
-- [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) — how to enable signed releases on each OS, what it costs, and why the first release is necessarily unsigned.
+It is a desktop application — a seven-step wizard, no scripting required —
+and a Python engine you can drive headlessly for batch or HPC work.
 
-Contributing: see [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup, TDD workflow, branch policy, and how to run tests.
+> **Status:** v0.1.0, pre-1.0. Usable, and its numbers are tested against
+> analytic ground truth and a reference R pipeline — but read the
+> [CHANGELOG](CHANGELOG.md) before upgrading, since metric definitions are
+> still being corrected.
 
-## Installation
+---
 
-**Engine only** (CLI + headless processing, no PySide6):
+## What it does
+
+```
+  idtracker.ai session folder          Track2Data                  your analysis
+  ───────────────────────────          ──────────                  ─────────────
+   trajectories.npy / .h5      ──►  import  → preprocess    ──►   metrics_long.csv
+   session.json                             → calibrate           trial_activity_summary.csv
+   list_of_fragments.json                   → define zones        master_fish_by_frame.csv
+                                            → choose metrics      codebook.csv
+                                            → export              sessions.csv
+```
+
+**Individual** — distance travelled, speed, acceleration, tortuosity,
+freezing bouts, thigmotaxis, turn rate, home-base use.
+**Group** — nearest-neighbour and inter-individual distance, polarisation,
+cohesion, convex hull area, milling/swarming state.
+**Zone** — occupancy, dwell time, visit counts, transitions, Jacobs' D.
+**Diagnostics** — tracking coverage, identity stability, crossing rate,
+physical-plausibility violations, and how much of each metric's input was
+actually measured rather than interpolated.
+
+Every metric carries a DOI. Nothing is computed without one.
+
+## What it deliberately does not do
+
+Track2Data starts where the tracker stops. It does **not** do pose
+estimation or tracking (that is idtracker.ai, DeepLabCut, SLEAP), and it
+does **not** do statistics — no models, no p-values, no plots of your
+result. It produces the dataset you run those on, and the provenance record
+you need to defend it.
+
+## Install
+
+**Pre-built application** — no Python needed. Download for your OS from the
+[Releases page](https://github.com/mbel-tech/Track2Data/releases).
+
+Releases are unsigned, so your OS will warn on first run. That is expected:
+the free code-signing programme for open-source projects requires a project
+to have already published a release, so the first one cannot be signed. See
+[`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
+
+- **Windows** — SmartScreen says "Windows protected your PC": **More info** → **Run anyway**.
+- **macOS** — Gatekeeper blocks it: right-click `Track2Data.app` → **Open** → **Open**.
+  (A plain double-click reports the app as damaged. That is Gatekeeper, not a bad download.)
+- **Linux** — `chmod +x Track2Data-x86_64.AppImage`.
+
+Verify your download first — every release ships `SHA256SUMS.txt`:
+
 ```bash
-pip install -e "."
+sha256sum -c SHA256SUMS.txt
+```
+
+**From source:**
+
+```bash
+pip install -e ".[ui]"     # desktop app
+track2data-gui
+
+pip install -e "."         # engine + CLI only, no PySide6
 track2data --help
 ```
 
-**Desktop GUI** (adds PySide6):
-```bash
-pip install -e ".[ui]"
-track2data-gui
-# or: python -m app.main
-```
-
-**Pre-built binaries** (no Python install needed): download the latest
-release for your OS from the [Releases page](https://github.com/mbel-tech/Track2Data/releases).
-These ship unsigned, so your OS will warn before the first run. That is
-expected, and it is not a sign of a corrupted download — the free
-code-signing programme for open-source projects requires a project to
-have already published a release, so the first one cannot be signed.
-See [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) for the full picture
-and the plan for signing later releases.
-
-- **Windows**: SmartScreen shows "Windows protected your PC". Click
-  **More info**, then **Run anyway**.
-- **macOS**: Gatekeeper blocks the app on first launch. Right-click (or
-  Control-click) `Track2Data.app` → **Open** → **Open** again in the
-  dialog. (A plain double-click will just say the app is damaged/can't
-  be opened — that's Gatekeeper, not a broken download.)
-- **Linux**: mark the `.AppImage` executable before running:
-  `chmod +x Track2Data-x86_64.AppImage`.
-
-Every release includes a `SHA256SUMS.txt` alongside the binaries —
-verify your download with `sha256sum -c SHA256SUMS.txt` (or `shasum -a
-256 -c` on macOS) before running past the warning above.
-
-## Development setup
+## Quickstart
 
 ```bash
-pip install -e ".[dev]"
-pytest                                  # all tests (engine + UI smoke)
-pytest tests/ -m "not r_parity" -v     # skip R-parity (no fixture data needed)
-pytest tests/test_app_smoke.py -v      # Phase 1 smoke tests only
-ruff check .                            # lint
+track2data new my-study.t2d.json          # scaffold a project
+track2data validate my-study.t2d.json     # check it before spending time on a run
+track2data run my-study.t2d.json          # import → preprocess → metrics → export
 ```
 
-## Running the app
+Or launch `track2data-gui` and walk the wizard: **Sessions → Calibration →
+Zones → Metadata → Metrics → Process → Export**.
+
+## What you get out
+
+Every run writes a directory like this:
+
+```
+exports/2026-08-30T1408/
+├── PROJECT_SUMMARY.md          what ran, what failed, what not to pool
+├── sessions.csv                per-session fps, group size, duration, calibration
+├── codebook.csv                every column: unit, level, metric, DOI
+└── session_trial01/
+    ├── metrics_long.csv              one row per value — feed this to lme4/statsmodels
+    ├── trial_activity_summary.csv    one row per individual, a column per metric
+    ├── group_dynamics_summary.csv
+    ├── master_fish_by_frame.csv      per-frame positions and kinematics
+    ├── manifest.json                 every parameter, plus input checksums
+    └── README.md
+```
+
+`metrics_long.csv` is the tidy/long form:
+
+| session_id | individual_id | metric_id | column | value | unit |
+|---|---|---|---|---|---|
+| trial01 | 0 | IL-1 | path_length_cm | 412.7 | cm |
+| trial01 | 0 | IL-2 | mean_speed_cm_s | 3.44 | cm/s |
+| trial01 | 1 | IL-1 | path_length_cm | 388.1 | cm |
+
+Join it to `codebook.csv` on `column` for the unit, definition and DOI of
+anything in it. **Read the codebook before trusting a column name to imply
+its unit** — notably, every `*_pct` column holds a fraction in [0, 1], not a
+percentage.
+
+## Reproducibility
+
+The point of the manifest is that someone else can check your numbers. Each
+run records the app version, every preprocessing and metric parameter, a hash
+of the project configuration, and a SHA-256 of each session's trajectory
+file — so "these bytes produced these numbers" is a checkable claim, and a
+source folder that changed underneath you is reported rather than silently
+used.
+
+To reproduce a dataset, send the `.t2d.json` plus the original session
+folders. The reviewer runs:
 
 ```bash
-# After pip install -e ".[ui]":
-track2data-gui
-
-# Or directly:
-python -m app.main
+track2data run project.t2d.json
 ```
 
-Opens the full import → calibrate → zones → metadata → metrics →
-process → preview → export wizard, wired end to end to the
-`track2data` engine.
+`sessions.csv` and `PROJECT_SUMMARY.md` say when sessions are **not**
+comparable — different frame rates, group sizes, resolutions or calibration
+states — because pooling across those without accounting for them produces a
+wrong result with nothing to indicate it.
 
 ## Requesting a metric
 
-Track2Data computes 45 built-in metrics — individual, group, zone, and
-tracking-quality diagnostics. Every one carries a scientific reference,
-published in [`docs/METRIC_REFERENCES.csv`](docs/METRIC_REFERENCES.csv)
-and [`docs/references.bib`](docs/references.bib), and shown in the
-app's ⓘ info dialog.
-
 If a measure you need is missing,
-[open a metric request](../../issues/new?template=metric_request.yml).
-The form asks for three things: the metric's level (individual, group,
-zone, or diagnostic), its name, and **a DOI** for the paper defining it.
-The DOI is required because it becomes that metric's row in the
-references list — a proposal with no citable source can't become one.
+[open a metric request](../../issues/new?template=metric_request.yml). The
+form asks for the metric's level, its name, and **a DOI** for the paper
+defining it. The DOI is required: it becomes that metric's row in the
+reference list, and a proposal with no citable source cannot become one.
 
-For the full definition of every existing metric, see
-[`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md); for how to add one, see
-[`CONTRIBUTING.md` §7](CONTRIBUTING.md).
+Existing references are published in
+[`docs/METRIC_REFERENCES.csv`](docs/METRIC_REFERENCES.csv) and
+[`docs/references.bib`](docs/references.bib), and shown in the app's ⓘ dialog.
+
+## How to cite
+
+Cite the upstream tracker as well as this tool:
+
+> Romero-Ferrero, F., Bergomi, M. G., Hinz, R. C., Heras, F. J. H., &
+> de Polavieja, G. G. (2019). idtracker.ai: tracking all individuals in
+> small or large collectives of unmarked animals. *Nature Methods*, 16,
+> 179–182. https://doi.org/10.1038/s41592-018-0295-5
+
+A `CITATION.cff` and a per-release DOI are planned. Until then, cite the
+version and commit you ran — both are recorded in every export's
+`manifest.json`.
+
+## Documentation
+
+**Using it**
+
+- [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md) — the wizard, screen by screen
+- [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — every metric: formula, inputs, units, assumptions, citation
+- [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) — why releases are unsigned, and the plan
+- [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, and handling untrusted session folders
+
+**Contributing and internals**
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, TDD workflow, branch policy, adding a metric
+- [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — architecture, project file format, testing strategy
+- [`docs/ENGINE_DESIGN.md`](docs/ENGINE_DESIGN.md) — engine layout, models, plug-in surface
+- [`docs/IDTRACKERAI_FORMAT_ANALYSIS.md`](docs/IDTRACKERAI_FORMAT_ANALYSIS.md) — the reader vs. the real idtracker.ai formats
+- [`docs/dev/`](docs/dev/) — product requirements, roadmap, decision record, UI design
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest -m "not r_parity and not network"   # the usual run
+mypy                                        # engine type check
+ruff check .                                # lint
+```
+
+## Licence
+
+See [`LICENSE`](LICENSE).

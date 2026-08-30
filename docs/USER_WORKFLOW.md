@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.1 (companion to PRD §14 and UI_DESIGN §5; aligned with v1.0 MVP scope)
 **Audience:** Frontend implementers, UX reviewers, scientific testers writing acceptance scripts
-**Related docs:** [`../PRD.md`](../PRD.md), [`./TECHNICAL_SPEC.md`](./TECHNICAL_SPEC.md), [`./UI_DESIGN.md`](./UI_DESIGN.md), [`./ENGINE_DESIGN.md`](./ENGINE_DESIGN.md)
+**Related docs:** [`../PRD.md`](../docs/dev/PRD.md), [`./TECHNICAL_SPEC.md`](./TECHNICAL_SPEC.md), [`./UI_DESIGN.md`](dev/UI_DESIGN.md), [`./ENGINE_DESIGN.md`](./ENGINE_DESIGN.md)
 
 This document describes the **user-facing journey** through Track2Data
 from launch to export. It complements PRD.md (which states *what* the

@@ -105,7 +105,7 @@ ignore = [
 "tests/**" = ["ANN", "S", "RUF012"]  # RUF012: ClassVar annotation not required in test ABC subclasses
 "track2data/core/errors.py" = ["N801", "N818"]  # ImportError_ uses trailing _ to avoid shadowing built-in
 "track2data/core/progress.py" = ["N818"]  # OperationCancelled is a control-flow signal, not an "error"
-"extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
+"scripts/extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
 ".claude/skills/**" = ["ANN"]  # agent tooling (GUI driver), not product surface -- same
                                 # rationale as extract_bboxes.py above. Only ANN is relaxed,
                                 # so real errors (F, E, B, SIM, ...) still gate normally.
@@ -138,8 +138,18 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [tool.coverage.run]
-source = ["track2data"]
+# The whole shipped package, not just the engine. Measuring only
+# track2data/ meant the reported number was widely read as whole-project
+# coverage when tests/test_ui/ and tests/test_app/ ran against no floor at
+# all -- see docs/TECHNICAL_SPEC.md §11 for the policy and the two
+# thresholds CI actually enforces.
+source = ["track2data", "app", "ui"]
 omit = ["track2data/cli.py"]
 
 [tool.coverage.report]
-fail_under = 80
+# The floor for a plain `pytest --cov` run. CI additionally holds the
+# engine and the GUI to their own thresholds from the same coverage data
+# (`coverage report --include=...`), because a well-covered GUI must not
+# be able to mask an engine regression, and the two carry very different
+# consequences when they break.
+fail_under = 85

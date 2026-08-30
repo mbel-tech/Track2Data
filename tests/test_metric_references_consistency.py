@@ -438,11 +438,11 @@ def test_metric_counts_stated_in_the_docs_match_the_registry() -> None:
         ),
         (
             "README.md",
-            r"Track2Data computes (\d+) built-in metrics",
+            r"(\d+) behavioural metrics, every one with a citation",
             ("total",),
         ),
         (
-            "docs/ROADMAP.md",
+            "docs/dev/ROADMAP.md",
             r"Behavioural metrics \| ✅ (\d+) registered",
             ("total",),
         ),

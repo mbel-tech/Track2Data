@@ -1,0 +1,41 @@
+# Dependency updates.
+#
+# Not paperwork: Track2Data ships desktop binaries built from PyPI wheels,
+# so a compromised or vulnerable transitive dependency reaches users as a
+# signed-looking executable rather than as something they chose to install.
+# That makes this a real supply-chain control for this project specifically.
+#
+# Grouped and monthly rather than per-package and weekly: a single-author
+# scientific tool cannot absorb a PR per dependency, and an update stream
+# nobody reads is worse than none -- it trains the maintainer to merge
+# without looking.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+
+  # The workflows pin actions by major version; this catches the ones that
+  # move underneath a tag.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"

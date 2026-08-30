@@ -134,7 +134,7 @@ For other contributors: the synthetic `tiny_v5` fixture (in `tests/conftest.py`)
 Every change to a metric, error code, or user-visible message must update the corresponding spec:
 - New metric → add a `#### <ID> — <name>` section to `docs/METRICS_SPEC.md` §4
 - New error code → add a row to `docs/USER_WORKFLOW.md` §6
-- New UI screen → add a section to `docs/UI_DESIGN.md` §6
+- New UI screen → add a section to `docs/dev/UI_DESIGN.md` §6
 
 The spec is the contract; code that diverges from spec is a bug.
 
@@ -211,9 +211,33 @@ Open a GitHub issue with:
 
 Security issues should be reported privately to the maintainer (see `CODE_OF_CONDUCT.md` for contact).
 
-## 10. Roadmap
+## 10. Repository layout oddities
 
-See `docs/ROADMAP.md` for the phased M1–M5 build plan. New contributors are welcome to pick up any unblocked item — open an issue first so we can coordinate.
+Two directories are not product source and are easy to mistake for it:
+
+**`.claude/skills/`** — a Claude Code *skill* (`run-track2data`) that drives
+the GUI and CLI for agent-assisted development: launching the app, taking
+screenshots of a wizard screen, reproducing a UI bug, invoking the pipeline
+headlessly. It carries a ruff `ANN` exemption in `pyproject.toml` because it
+is tooling, not public API.
+
+It has to live at `.claude/skills/` — that is where Claude Code discovers
+skills, so relocating it under `tools/` would simply stop it working. Delete
+it if you do not use Claude Code; nothing in the package imports it.
+
+**`scripts/extract_bboxes.py`** — an unmaintained utility used by an adjacent
+pipeline. Nothing in the package imports it and no test covers it. It has
+four confirmed defects catalogued in
+[`docs/dev/EXTRACT_BBOXES_FIX.md`](docs/dev/EXTRACT_BBOXES_FIX.md), none of
+them applied to this copy, and it loads a pickle with no consent gate. Prefer
+`track2data/readers/idtrackerai/blobs.py`, which does the same job with a
+restricted unpickler that never executes idtracker.ai code. See issue #80.
+
+---
+
+## 11. Roadmap
+
+See `docs/dev/ROADMAP.md` for the phased M1–M5 build plan. New contributors are welcome to pick up any unblocked item — open an issue first so we can coordinate.
 
 ---
 

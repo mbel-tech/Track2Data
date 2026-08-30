@@ -90,9 +90,9 @@ jobs:
       - name: Install package + dev deps
         run: pip install -e ".[dev]"
       - name: Run unit tests (excluding r_parity and network)
-        # 80% per docs/TECHNICAL_SPEC.md §11 and pyproject.toml's
-        # [tool.coverage.report] fail_under (M2 restored this from the
-        # temporary 70% floor used during M1; actual coverage is ~94%).
+        # Coverage covers the whole shipped package (track2data + app + ui);
+        # the per-package floors are enforced in the next step. See
+        # docs/TECHNICAL_SPEC.md §11.
         #
         # `network` covers tests/test_references_resolve.py, which asks
         # Crossref to confirm every DOI in the bibliography resolves to
@@ -103,7 +103,16 @@ jobs:
         #   pytest tests/test_references_resolve.py -m network
         run: >
           pytest tests/ -v -m "not r_parity and not network"
-          --cov=track2data --cov-report=term --cov-fail-under=80
+          --cov --cov-report=term
+      - name: Enforce per-package coverage floors
+        # Two thresholds from the one coverage run above. Separate because a
+        # well-covered GUI must not be able to mask an engine regression --
+        # a bug in the engine changes exported numbers, a bug in the GUI is
+        # visible to the person hitting it. Engine ~96%, GUI ~90% today, so
+        # both floors have real headroom without being decorative.
+        run: |
+          coverage report --include='track2data/*' --fail-under=90
+          coverage report --include='app/*,ui/*' --fail-under=85
 
   r_parity:
     name: R-parity (synthetic fixtures)

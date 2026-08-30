@@ -5,6 +5,17 @@
 
 ---
 
+## Completed milestones
+
+M1 (engine foundation), M2 (metadata + remaining metrics) and M3 (the
+PySide6 UI layer) are done. Their task lists lived here and are now
+redundant three ways over: `CHANGELOG.md` records what shipped, the issue
+tracker records what is open, and `docs/dev/DECISIONS.md` records why. Three
+places to update meant two went stale — see the git history for the original
+breakdowns.
+
+---
+
 ## Current state
 
 The engine, the GUI, and the packaging pipeline are all built and green.
@@ -27,126 +38,6 @@ Remaining work is release mechanics, not implementation — see **M5** below.
 
 ---
 
-## Prerequisites for M1 (P0/P1 items — must be complete first)
-
-- [x] `LICENSE` (MIT)
-- [x] `CONTRIBUTING.md`
-- [x] `CODE_OF_CONDUCT.md`
-- [x] `docs/ROADMAP.md` (this file)
-- [x] `.github/workflows/ci.yml`
-- [x] Unified `idtrackerai` reader entry point in `pyproject.toml`
-- [x] `r_parity_local` pytest marker registered
-- [x] `ENGINE_DESIGN.md` §4 reconciled with implemented models
-
----
-
-## Module dependency graph
-
-```
-core/{hashing,logging,parallel}   ← no deps; used everywhere
-reference/{canonical_columns,default_params}
-        ↓
-readers/idtrackerai/              ← Session output
-        ↓
-calibration/{scalar,bodylength}
-zones/{geometry,io,orientation}
-metadata/{loader,mapping,join,schema}
-        ↓
-preprocess/{kinematics,gap_fill,jump_detect,identity_switch,smoothing,validate}
-preprocess/pipeline               ← orchestrates the above
-        ↓
-metrics/{individual,group,zone,diagnostic}        ← GL-7 (identity-free) lives in group.py
-        ↓
-exporters/{csv_long,csv_wide,excel,feather,readme}
-cache/store
-        ↓
-cli.py  api.py                    ← public surface
-        ↓
-ui/ app/                          ← M3 (PySide6 layer)
-```
-
----
-
-## M1 — Engine foundation ✅ complete
-
-**Goal:** `track2data run project.t2d.json` produces a correct CSV for the `tiny_v5` fixture.
-
-**Exit criteria:**
-- All M1 modules implemented and TDD-green
-- `pytest tests/ -m "not r_parity"` passes with coverage ≥ 70 %
-- `pytest tests/test_r_parity/ -m "r_parity and not r_parity_local"` passes
-- `ruff check .` clean
-
-The coverage floor was temporarily 70% during M1 and was restored to 80%
-in M2; it sits well above that in practice.
-
-**Build order (TDD — each module fully green before moving on):**
-
-| # | Module | Notes |
-|---|---|---|
-| 1 | `core/hashing.py` | SHA-256 helpers; zero deps |
-| 2 | `core/logging.py` | Structured logger + run-log Markdown writer |
-| 3 | `core/parallel.py` | `ProcessPoolExecutor` wrapper, worker-cap policy |
-| 4 | `reference/canonical_columns.py` | Frozen column-name registry |
-| 5 | `reference/default_params.py` | All default parameter values |
-| 6 | `preprocess/kinematics.py` | Speed, acceleration, heading |
-| 7 | `preprocess/gap_fill.py` | PP-1 linear interpolation |
-| 8 | `preprocess/jump_detect.py` | PP-2 SD-multiple + percentile |
-| 9 | `preprocess/identity_switch.py` | PP-3 mutual-NN + Hungarian |
-| 10 | `preprocess/smoothing.py` | PP-4 moving-avg + Savitzky-Golay |
-| 11 | `preprocess/validate.py` | PP-5 coverage gate |
-| 12 | `preprocess/pipeline.py` | Ordered preprocessor chain |
-| 13 | `calibration/scalar.py` | px-per-cm scalar mode |
-| 14 | `calibration/bodylength.py` | Per-session body-length normalisation |
-| 15 | `zones/geometry.py` | Shapely polygon ops, PIP, area |
-| 16 | `zones/io.py` | CSV ↔ `ZoneSet` round-trip |
-| 17 | `zones/orientation.py` | FT/FD orientation pairing |
-| 18 | `metrics/individual.py` | IL-1 path length, IL-2 speed first; others incremental |
-| 19 | `metrics/group.py` | GL-1 NND, GL-3 polarisation, GL-5 centroid speed |
-| 20 | `metrics/zone.py` | Z-1 time in zone, Z-3 visits |
-| 21 | `metrics/group.py` (GL-7) | GL-7 NN-matched speed -- built here, not a separate `identity_free.py` module |
-| 22 | `metrics/diagnostic.py` | D-1..D-5 always-on diagnostics |
-| 23 | `exporters/csv_long.py` | Primary long-format CSV |
-| 24 | `exporters/readme.py` | Human-readable run README |
-| 25 | `exporters/excel.py` | Multi-sheet xlsx |
-| 26 | `cache/store.py` | Content-addressed Parquet cache |
-| 27 | `cli.py` | `track2data run / validate / list-metrics / cache clear / new` |
-| 28 | `api.py` | Engine facade wired end-to-end |
-
----
-
-## M2 — Metadata + remaining metrics ✅ complete
-
-**Goal:** Full metric suite + metadata join; R-parity gate enabled for choice-pipeline fixtures (post-embargo).
-
-| Area | Items | Status |
-|---|---|---|
-| Metadata pipeline | `metadata/{schema,loader,mapping,join}.py`, wired into `Engine` | ✅ |
-| Remaining individual metrics | IL-3..IL-8 | ✅ |
-| Remaining group metrics | GL-2, GL-4, GL-6, GL-8, GL-9, GL-10 | ✅ |
-| Remaining zone metrics | Z-2, Z-4, Z-5, Z-6 | ✅ |
-| Additional exporters | `csv_wide.py`, `feather.py` | ✅ |
-| Additional diagnostics | D-6..D-9 (fragment-derived; added alongside the reader realignment) | ✅ |
-| Coverage gate | Restored to 80 % | ✅ |
-| R-parity gate | Enable `r_parity_local` → `r_parity` after embargo lift | ⏳ blocked on the pre-publication embargo, not on code |
-
----
-
-## M3 — UI layer (PySide6) ✅ complete
-
-**Goal:** Fully functional desktop wizard, wired end-to-end to the engine.
-
-| Area | Items | Status |
-|---|---|---|
-| State management | `ui/store/project_store.py`, `ui/store/task_runner.py` | ✅ |
-| Shell | `app/main.py`, `app/main_window.py`, `app/navigation.py`, `app/state.py` | ✅ |
-| Screens (flat in `ui/`, per D-006) | `project`, `import`, `calibration`, `zones`, `metadata`, `metrics`, `preprocessing`, `processing`, `preview`, `export` | ✅ |
-| Dialogs / shared widgets | `ui/dialogs/metric_info_dialog.py`, `ui/widgets/dataframe_table.py` | ✅ |
-| Testing | `pytest-qt` integration tests per screen, headless via `QT_QPA_PLATFORM=offscreen` | ✅ |
-
-Background execution is `QThreadPool`/`QRunnable` only — no `qasync`
-(D-003). The engine never imports PySide6 (D-001).
-
 ---
 
 ## M4 — Packaging + cross-OS
@@ -159,6 +50,8 @@ Background execution is `QThreadPool`/`QRunnable` only — no `qasync`
 | Determinism gate | `packaging/check_determinism.py` — byte-diffs two independent runs | ✅ |
 | `track2data[ui]` / `[build]` extras | Declared in `pyproject.toml` | ✅ |
 | Signed binaries | macOS notarisation, Windows Authenticode | ⏳ deferred to v1.1 (TECHNICAL_SPEC §10.3); v1.0 ships unsigned with a documented trust path in `README.md` |
+
+---
 
 ---
 
@@ -187,7 +80,9 @@ implementation.
 - [ ] Code signing — **not** a v1.0 blocker, and cannot be done before
       the first release: SignPath Foundation's free OSS signing requires
       an already-published release. Infrastructure is implemented and
-      activates on secrets alone — see [`./CODE_SIGNING.md`](CODE_SIGNING.md)
+      activates on secrets alone — see [`./CODE_SIGNING.md`](../CODE_SIGNING.md)
+
+---
 
 ---
 
@@ -243,16 +138,12 @@ by the arithmetic.
 
 ---
 
+---
+
 ## Repository visibility
 
 Private until v1.0 release. Switch to public after M5 tag is cut.
 
 ---
 
-## See also
-
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — dev setup, TDD workflow, branch policy
-- [`docs/TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md) — system architecture, testing strategy
-- [`docs/ENGINE_DESIGN.md`](ENGINE_DESIGN.md) — engine internals and module layout
-- [`docs/METRICS_SPEC.md`](METRICS_SPEC.md) — 29 behavioural metrics with formulas and citations
-- [`docs/UI_DESIGN.md`](UI_DESIGN.md) — 14-screen PySide6 GUI specification
+---
