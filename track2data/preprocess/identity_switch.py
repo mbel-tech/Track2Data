@@ -1,62 +1,146 @@
-"""PP-3 identity-switch correction using Tier-1 ratio test and Tier-2 Hungarian assignment.
+"""PP-3 identity-switch correction: constant-velocity prediction + Hungarian assignment.
 
 Off by default (IdSwitchCfg.enabled=False) -- see the docstring on
 IdSwitchCfg in core/models.py for why. This module still exists so callers
 who understand the risk can opt in, and so a fragment-boundary-aware
 replacement (planned) has somewhere to land, but it must not run
 unconditionally in the default pipeline.
+
+The correction rests on one physical fact: an identity switch is a
+*persistent* relabelling from the switch point onward, and it can only
+happen where two animals were confusable -- at an idtracker.ai fragment
+boundary. Both halves of that are load-bearing here:
+
+* the relabelling persists. It is tracked as a running permutation that
+  stays in effect until some later frame changes it, not applied to one
+  frame at a time. A single-frame permutation converts one discontinuity
+  into two, which is worse for speed, acceleration and IL-1 than leaving
+  the switch in place.
+* when ``swap_boundaries`` is supplied from
+  ``readers.idtrackerai.fragments.fragment_swap_boundaries``, only those
+  frames are considered at all. Everywhere else a swap is physically
+  impossible, so evaluating it can only manufacture false positives.
+
+Without fragment data the search falls back to every frame, which is why
+the feature stays opt-in: geometry alone cannot distinguish "these two
+animals crossed and were relabelled" from "these two animals crossed".
+
+Cost note: the running permutation is materialised into the output array
+once, as one disjoint slice assignment per switch, so the whole pass is
+O(n_frames x n_animals) no matter how many switches are found. Physically
+permuting the remaining tail at each accepted switch instead would be
+quadratic, which on a dense fragment-less session does not terminate in
+any useful time.
 """
 
 from __future__ import annotations
+
+import logging
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment  # type: ignore[import-untyped]
 
 from track2data.core.models import IdSwitchCfg, PPStepResult
 
+logger = logging.getLogger(__name__)
 
-def _pairwise_distances(positions: np.ndarray) -> np.ndarray:
-    """Compute pairwise Euclidean distance matrix for n_animals positions.
+
+def _predict_next(previous: np.ndarray, current: np.ndarray) -> np.ndarray:
+    """Constant-velocity prediction of the next frame from two known frames.
+
+    Constant *velocity*, not constant position: a crossing is exactly the
+    case where two animals are close together and moving, so a
+    constant-position prediction fails precisely where this step exists to
+    help.
+
+    Falls back to constant position wherever the previous frame is missing
+    -- a NaN velocity would otherwise poison a prediction whose current
+    frame is perfectly usable.
 
     Parameters
     ----------
-    positions:
-        Array of shape ``(n_animals, 2)``.
+    previous, current:
+        Positions at frames *t-1* and *t*, each shape ``(n_animals, 2)``.
 
     Returns
     -------
     np.ndarray
-        Distance matrix of shape ``(n_animals, n_animals)``.
+        Predicted positions at *t+1*, shape ``(n_animals, 2)``.
     """
-    diff = positions[:, np.newaxis, :] - positions[np.newaxis, :, :]  # (n, n, 2)
+    velocity = current - previous
+    return current + np.where(np.isnan(velocity), 0.0, velocity)
+
+
+def _prediction_cost(pred: np.ndarray, obs: np.ndarray) -> np.ndarray:
+    """Distances from each predicted position to each observed position.
+
+    ``cost[k, j]`` is how far identity *k* would have to travel to reach
+    observation *j*. Rows are identity slots, columns are observations, so
+    the diagonal is the cost of believing the tracker.
+
+    This is the matrix the module docstring has always described. The
+    previous implementation instead computed distances *among conspecifics
+    within a single frame*, which is a proximity detector rather than an
+    assignment-ambiguity detector -- and, because self-distance had to be
+    excluded from it, left only one finite distance for a dyad and so could
+    never fire at ``n_animals == 2``.
+
+    Parameters
+    ----------
+    pred:
+        Predicted positions, shape ``(n_animals, 2)``.
+    obs:
+        Observed positions, shape ``(n_animals, 2)``.
+
+    Returns
+    -------
+    np.ndarray
+        Cost matrix of shape ``(n_animals, n_animals)``.
+    """
+    diff = pred[:, np.newaxis, :] - obs[np.newaxis, :, :]  # (n, n, 2)
     return np.sqrt((diff ** 2).sum(axis=-1))
 
 
-def _apply_permutation(xy: np.ndarray, frame: int, perm: np.ndarray) -> None:
-    """Apply an animal-index permutation in-place at a specific frame."""
-    xy[frame] = xy[frame][perm]
-
-
-def correct_switches(xy: np.ndarray, cfg: IdSwitchCfg) -> tuple[np.ndarray, PPStepResult]:
+def correct_switches(
+    xy: np.ndarray,
+    cfg: IdSwitchCfg,
+    swap_boundaries: set[int] | None = None,
+) -> tuple[np.ndarray, PPStepResult]:
     """Correct identity switches in multi-animal trajectory data.
 
-    Tier-1: For each consecutive pair of frames, build the distance matrix
-    between predicted next positions (extrapolated from *t-1* to *t*) and
-    observed positions at *t+1*.  If the nearest-neighbour assignment is
-    ambiguous (ratio of best to second-best distance < ``cfg.tier1_ratio``),
-    flag the frame for Tier-2.
+    For each candidate frame *t*, positions at *t+1* are predicted from
+    *t-1* and *t* by constant velocity, and a cost matrix is built between
+    those predictions and the observations at *t+1*.
 
-    Tier-2: For flagged regions, run Hungarian assignment
-    (``scipy.optimize.linear_sum_assignment``) on the pairwise distance matrix
-    within a ``cfg.consolidate_window``-frame window to find the globally optimal
-    identity permutation.
+    Tier-1 (cheap gate): when the tracker's own labelling is already each
+    identity's nearest observation, the frame is skipped without further
+    work.
+
+    Tier-2: on flagged frames, Hungarian assignment
+    (``scipy.optimize.linear_sum_assignment``) finds the globally optimal
+    permutation. It is accepted only when it beats the tracker's labelling
+    by a factor of at least ``cfg.tier1_ratio``, so ties and noise-level
+    differences leave the data alone. An accepted permutation is composed
+    into the running relabelling and stays in effect for every later frame
+    until another accepted permutation changes it.
 
     Parameters
     ----------
     xy:
         Position array of shape ``(n_frames, n_animals, 2)``, dtype float64.
     cfg:
-        Identity-switch correction configuration.
+        Identity-switch correction configuration. ``cfg.tier1_ratio`` is the
+        margin by which a permutation must beat the identity assignment
+        before it is accepted. ``cfg.consolidate_window`` is no longer read:
+        a switch persists until superseded rather than for a fixed window.
+    swap_boundaries:
+        Frames at which an identity swap is physically possible, from
+        ``readers.idtrackerai.fragments.fragment_swap_boundaries``. Those are
+        fragment ``end_frame`` values, which idtracker.ai stores *exclusive*,
+        so a boundary *b* is the first frame of the following fragment and
+        the permutation it licenses applies from *b* onward. When ``None``,
+        every frame is a candidate -- correct, but far more
+        false-positive-prone, so prefer supplying it.
 
     Returns
     -------
@@ -66,91 +150,110 @@ def correct_switches(xy: np.ndarray, cfg: IdSwitchCfg) -> tuple[np.ndarray, PPSt
         ``PPStepResult`` describing corrected frames.
     """
     n_frames, n_animals, _ = xy.shape
-    out = xy.copy()
 
-    if not cfg.enabled or n_animals < 2:
-        return out, PPStepResult(
+    if not cfg.enabled or n_animals < 2 or n_frames < 3:
+        return xy.copy(), PPStepResult(
             step_name="identity_switch",
             affected_frames=0,
             affected_per_individual=[0] * n_animals,
         )
 
-    corrected_frames: set[int] = set()
-    # Per-identity slot indices that were actually permuted at some frame --
-    # NOT "every animal, every time a swap happened anywhere" (the previous
-    # behaviour), which overstated corrections in PreprocessReport by ~4x on
-    # real data (10,224 reported vs 2,556 actual events on a 4-animal
-    # session) and fed that inflated number straight into the exported
-    # README's provenance.
+    logger.warning(
+        "Identity-switch correction is enabled (preprocess.identity_switch.enabled) "
+        "and re-labels trajectories from %s. Review the corrected output before "
+        "publishing numbers computed from it.",
+        "geometry within idtracker.ai fragment boundaries"
+        if swap_boundaries
+        else "geometry alone, with no fragment boundaries to constrain it",
+    )
+
+    identity = np.arange(n_animals)
+
+    # ``active[k]`` is the column of the *input* array that currently holds
+    # identity k. Segments record the frame from which each successive value
+    # of it takes effect; the array is rebuilt from them in one pass at the
+    # end, which is what keeps this linear.
+    active = identity.copy()
+    segments: list[tuple[int, np.ndarray]] = [(0, active.copy())]
+
+    # *t* is the last frame believed correct, so any permutation applies
+    # from t+1 onward.
+    #
+    # fragment_swap_boundaries() reports each fragment's ``end_frame``, which
+    # is EXCLUSIVE (fragments.py defensive-parsing rule 5): a fragment with
+    # end_frame=21 covers frames 0..20, so frame 21 is the first frame of
+    # whatever follows and a swap there shows up between 20 and 21. The
+    # candidate is therefore b-1, not b -- evaluating b directly corrects one
+    # frame late and leaves the switch itself in the data.
+    if swap_boundaries is None:
+        candidates: list[int] = list(range(1, n_frames - 1))
+    else:
+        candidates = sorted(
+            b - 1 for b in swap_boundaries if 1 <= b - 1 < n_frames - 1
+        )
+
+    for t in candidates:
+        previous = xy[t - 1][active]
+        current = xy[t][active]
+        obs = xy[t + 1][active]
+
+        pred = _predict_next(previous, current)
+        if np.any(np.isnan(pred)) or np.any(np.isnan(obs)):
+            continue
+
+        cost = _prediction_cost(pred, obs)
+
+        # Tier-1: the tracker's labelling is already each identity's nearest
+        # observation, so there is nothing to reassign.
+        if np.array_equal(np.argmin(cost, axis=1), identity):
+            continue
+
+        if cfg.tier2_hungarian:
+            _, perm = linear_sum_assignment(cost)
+        else:
+            # Greedy row-wise nearest, usable only when it happens to come out
+            # a valid permutation -- the honest meaning of "no Hungarian".
+            perm = np.argmin(cost, axis=1)
+            if np.unique(perm).size != n_animals:
+                continue
+
+        if np.array_equal(perm, identity):
+            continue
+
+        # Accept only a decisive improvement. Equal costs (two animals at the
+        # same point mid-crossing) must leave the data untouched: permuting on
+        # a tie invents a switch the geometry does not evidence.
+        cost_identity = float(cost[identity, identity].sum())
+        cost_perm = float(cost[identity, perm].sum())
+        if cost_identity <= cfg.tier1_ratio * cost_perm:
+            continue
+
+        active = active[perm]
+        segments.append((t + 1, active.copy()))
+
+    # ── materialise ───────────────────────────────────────────────────────────
+    out = xy.copy()
+    # Frames whose identity assignment ends up differing from the tracker's --
+    # NOT "every animal, every time a swap happened anywhere" (behaviour
+    # removed earlier, which overstated corrections by ~4x on real data and
+    # fed that inflated number straight into the exported README's
+    # provenance).
+    affected_frames = 0
     affected_per_individual = [0] * n_animals
 
-    for t in range(1, n_frames - 1):
-        # Skip frames with any NaN
-        if np.any(np.isnan(out[t])) or np.any(np.isnan(out[t + 1])):
+    for i, (start, perm) in enumerate(segments):
+        end = segments[i + 1][0] if i + 1 < len(segments) else n_frames
+        if np.array_equal(perm, identity):
             continue
-
-        # Cost matrix: distance from current position (t) to next positions (t+1)
-        cost = _pairwise_distances(out[t])  # (n_animals, n_animals)
-
-        # Tier-1: check each animal's nearest neighbour ratio
-        ambiguous = False
+        out[start:end] = xy[start:end][:, perm, :]
+        span = end - start
+        affected_frames += span
         for k in range(n_animals):
-            row = cost[k].copy()
-            row[k] = np.inf  # exclude self
-            if row.min() == np.inf:
-                continue
-            sorted_dists = np.sort(row[row < np.inf])
-            if sorted_dists.size >= 2 and sorted_dists[0] > 0:
-                ratio = sorted_dists[1] / sorted_dists[0]
-                if ratio < cfg.tier1_ratio:
-                    ambiguous = True
-                    break
-
-        if not ambiguous:
-            continue
-
-        # Tier-2: Hungarian assignment over consolidate_window
-        if cfg.tier2_hungarian:
-            win_end = min(t + cfg.consolidate_window, n_frames)
-            for tf in range(t, win_end):
-                if tf + 1 >= n_frames:
-                    break
-                if np.any(np.isnan(out[tf])) or np.any(np.isnan(out[tf + 1])):
-                    continue
-                cost_matrix = _pairwise_distances(out[tf + 1])
-                # Build cost: distance from predicted position (out[tf]) to candidates
-                pred_cost = np.zeros((n_animals, n_animals), dtype=np.float64)
-                for ki in range(n_animals):
-                    for kj in range(n_animals):
-                        pred_cost[ki, kj] = np.sqrt(
-                            (out[tf + 1, kj, 0] - out[tf, ki, 0]) ** 2
-                            + (out[tf + 1, kj, 1] - out[tf, ki, 1]) ** 2
-                        )
-                _, col_ind = linear_sum_assignment(pred_cost)
-                # col_ind[k] = which observed animal is assigned to identity k
-                perm = col_ind  # permutation of observations → identities
-                # Only apply if perm is not identity
-                if not np.all(perm == np.arange(n_animals)):
-                    out[tf + 1] = out[tf + 1][perm]
-                    corrected_frames.add(tf + 1)
-                    for k in range(n_animals):
-                        if perm[k] != k:
-                            affected_per_individual[k] += 1
-        else:
-            # Tier-1 swap: find best swap pair
-            cost_matrix = _pairwise_distances(out[t])
-            _, col_ind = linear_sum_assignment(cost_matrix)
-            if not np.all(col_ind == np.arange(n_animals)):
-                out[t + 1] = out[t + 1][col_ind]
-                corrected_frames.add(t + 1)
-                for k in range(n_animals):
-                    if col_ind[k] != k:
-                        affected_per_individual[k] += 1
-
-    total_affected = len(corrected_frames)
+            if perm[k] != k:
+                affected_per_individual[k] += span
 
     return out, PPStepResult(
         step_name="identity_switch",
-        affected_frames=total_affected,
+        affected_frames=affected_frames,
         affected_per_individual=affected_per_individual,
     )

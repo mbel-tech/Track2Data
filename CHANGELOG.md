@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **PP-3 identity-switch correction now corrects identity switches.** The
+  step was unsound in three compounding ways, all of which changed data
+  for the worse when enabled. It remains **off by default**, so no
+  existing project's numbers change unless it was deliberately switched
+  on in the manifest.
+
+  1. *Silent no-op for dyads.* The Tier-1 gate compared distances **among
+     conspecifics within a single frame**, so self-distance had to be
+     excluded — leaving one finite distance at `n_animals == 2` and a
+     ratio test that could never fire. On a synthetic dyadic crossing
+     with a persistent swap at frame 21, the step reported 0 frames
+     corrected and left mean absolute error at 16.0 px, unchanged. Dyads
+     are one of the commonest designs in the target literature.
+  2. *Corrections did not persist.* An identity switch is a **persistent**
+     relabelling, but the permutation was applied one frame at a time for
+     the 5 frames of `consolidate_window` and never propagated. On a
+     4-animal crossing this corrected 6 frames, moved mean absolute error
+     only from 8.00 px to 7.35 px, left 32 of 60 frames on the wrong
+     identity, and introduced a 14 px per-frame step where the true step
+     is 2 px — converting one discontinuity into several, which is worse
+     for speed, acceleration and IL-1 than leaving the switch alone.
+  3. *Implementation did not match its own docstring.* The documented
+     algorithm (predicted next positions extrapolated from *t-1* to *t*,
+     matched against observations at *t+1*) was never implemented; what
+     ran was a proximity detector that fired whenever two animals were
+     close relative to a third, regardless of whether the assignment was
+     actually ambiguous. Tier-2 assigned on a constant-*position*
+     prediction, which fails precisely in the moving-crossing case it
+     exists for. One computed cost matrix was never read.
+
+  The rewrite uses constant-velocity prediction, keeps an accepted
+  permutation in effect until something later supersedes it, and accepts
+  a permutation only when it beats the tracker's own labelling by
+  `tier1_ratio` — so a crossing on its own, where the two costs tie, no
+  longer triggers a swap.
+
+  **`consolidate_window` is retained for manifest compatibility and is no
+  longer read.** `tier1_ratio` keeps its name and default (1.5) but is now
+  the acceptance margin rather than a nearest-neighbour ratio.
+
+- **PP-3 uses idtracker.ai fragment boundaries when the session has them.**
+  `preprocess.pipeline` now passes `fragment_swap_boundaries(session.fragments)`
+  into `correct_switches`, mirroring how the crossing mask already reaches
+  `fill_gaps`. Fragment boundaries are the only frames where a swap is
+  physically possible, so everywhere else the search could only manufacture
+  false positives. Sessions without `preprocessing/list_of_fragments.json`
+  fall back to scanning every frame, as before — fragment data is a bonus,
+  never a requirement.
+
+### Changed
+
+- **PP-3 is dramatically faster and no longer degrades quadratically.**
+  Measured on synthetic 8-animal sessions: an hour-long session (108k
+  frames) went from 47.8 s to 4.7 s on the full-scan path, and to 0.07 s
+  when fragment boundaries are available. The nested Python loop that
+  rebuilt a distance matrix already computable by broadcasting is gone.
+  A crowded session, where many permutations are accepted, previously did
+  not terminate in any useful time; the running permutation is now
+  materialised in one pass, keeping the whole step linear in frame count.
+  Performance guards with explicit budgets were added so either
+  regression fails in CI rather than in someone's afternoon.
+
+- **PP-3's tests now assert what the step did to the data.** Several
+  previously asserted only `out.shape == xy.shape` — including one that
+  injected a real identity swap and never checked whether it had been
+  corrected, which is how these defects survived. Added
+  `tests/test_preprocess/test_identity_switch_crossing_regression.py`
+  covering the canonical crossing cases.
+
 ### Added
 
 - **Opt-in data-derived bout/visit/dwell thresholds (Sibly et al. 1990

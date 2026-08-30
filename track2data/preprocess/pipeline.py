@@ -26,7 +26,8 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
 
     1. Gap fill (linear interpolation of short NaN gaps)
     2. Jump detection (flag and replace anomalous displacements)
-    3. Identity-switch correction (Tier-1 ratio + Tier-2 Hungarian)
+    3. Identity-switch correction (constant-velocity prediction + Hungarian
+       assignment, restricted to fragment boundaries when available)
     4. Smoothing (Savitzky-Golay or moving average)
     5. Coverage validation (warn on excessive NaN)
 
@@ -66,7 +67,18 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # 3. Identity-switch correction
-    xy, step = correct_switches(xy, config.identity_switch)
+    # Fragment boundaries are the only frames where a swap is physically
+    # possible, so hand them over when the session carries them -- same
+    # opportunistic pattern as the crossing mask above. Without them the
+    # corrector falls back to scanning every frame, which is why the step
+    # stays off by default (IdSwitchCfg's docstring).
+    swap_boundaries = None
+    if session.fragments is not None:
+        from track2data.readers.idtrackerai.fragments import fragment_swap_boundaries
+        swap_boundaries = fragment_swap_boundaries(session.fragments)
+    xy, step = correct_switches(
+        xy, config.identity_switch, swap_boundaries=swap_boundaries
+    )
     report.steps.append(step)
 
     # 4. Smoothing

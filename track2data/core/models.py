@@ -201,20 +201,34 @@ class JumpCfg(BaseModel):
 
 
 class IdSwitchCfg(BaseModel):
-    # Defaults to OFF. This corrector reasons about identity from raw
-    # geometry alone (nearest-neighbour + Hungarian assignment), with no
-    # knowledge of idtracker.ai's own fragment boundaries -- the only
-    # frames where an identity swap is even possible. Measured on the real
-    # idtracker.ai corpus (session_trial10_Segment1), it re-permutes 17.1%
-    # of the recording and injects ~640px single-frame teleports (a
+    # Defaults to OFF. The corrector predicts each identity's next position
+    # by constant velocity and reassigns against the observations at t+1,
+    # propagating an accepted permutation to the end of the segment -- and,
+    # when the session carries preprocessing/list_of_fragments.json, it only
+    # evaluates idtracker.ai's own fragment boundaries, the only frames
+    # where a swap is physically possible (see
+    # docs_from_idtracker.ai/fragment_idtrackerai.md).
+    #
+    # It stays off by default because that last clause is conditional: a
+    # session without fragment data falls back to scanning every frame, and
+    # geometry alone cannot tell "these two animals crossed and were
+    # relabelled" from "these two animals crossed". The earlier
+    # implementation, which reasoned from within-frame conspecific proximity
+    # and applied single-frame permutations, re-permuted 17.1% of a real
+    # recording (session_trial10_Segment1) and injected ~640px teleports (a
     # stationary animal's path length inflated from 218px to 11,639px,
-    # +5234%). See docs_from_idtracker.ai/fragment_idtrackerai.md and the
-    # format-alignment plan Fase 1.5b/6d: a fragment-boundary-aware
-    # replacement is planned; this pass is not safe to run unconditionally
-    # until then. Enable only if you understand and accept that risk.
+    # +5234%). That specific failure mode is fixed; enabling this on a
+    # fragment-less session still warrants reviewing the output.
     enabled: bool = False
+    # Margin by which a candidate permutation must beat the tracker's own
+    # labelling before it is accepted. Ties (two animals at the same point
+    # mid-crossing) are rejected, so a crossing alone never triggers a swap.
     tier1_ratio: float = 1.5
     tier2_hungarian: bool = True
+    # Retained for manifest backward-compatibility and no longer read: an
+    # identity switch is a persistent relabelling, so the correction runs to
+    # the end of the segment rather than for a fixed window. Applying it for
+    # a few frames and then reverting turned one discontinuity into two.
     consolidate_window: int = 5
 
 
