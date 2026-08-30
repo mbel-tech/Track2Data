@@ -30,7 +30,7 @@ window rather than silently reusing ``SmoothCfg``'s.
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import savgol_filter  # type: ignore[import-untyped]
+from scipy.signal import savgol_filter
 
 from track2data.core.models import KinematicsArrays, KinematicsCfg
 

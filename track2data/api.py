@@ -45,6 +45,7 @@ from track2data.readers import read_session
 
 if TYPE_CHECKING:
     from track2data.core.session_consistency import SessionSummary
+    from track2data.metrics.base import Metric
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +294,9 @@ class Engine:
 
     # ── metrics ────────────────────────────────────────────────────────────
 
-    def _effective_cfg(self, metric_cls: type, psess: PreprocessedSession) -> dict[str, Any]:
+    def _effective_cfg(
+        self, metric_cls: type[Metric], psess: PreprocessedSession
+    ) -> dict[str, Any]:
         """Build the cfg dict passed to metric_cls().compute().
 
         Layered, lowest to highest precedence:

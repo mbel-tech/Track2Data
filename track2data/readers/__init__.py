@@ -14,7 +14,6 @@ from pathlib import Path
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
 from track2data.readers.idtrackerai.reader import IDTrackerAiReader
-from track2data.readers.idtrackerai_v4 import IDTrackerAiV4Reader
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
 
 log = logging.getLogger(__name__)
@@ -41,11 +40,10 @@ def _load_entry_points() -> None:
         log.debug("Entry-point discovery failed: %s", exc)
 
 
-# Register built-ins — unified reader has highest priority (20) so it wins
-# over the legacy v5 (10) and v4 (5) readers when the folder is detected.
+# Register built-ins — the unified reader has the highest priority (20) so it
+# wins over the legacy v5 reader (10) when a folder is detected by both.
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
-register(IDTrackerAiV4Reader)
 _load_entry_points()
 
 
@@ -90,7 +88,6 @@ def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
 
 __all__ = [
     "IDTrackerAiReader",
-    "IDTrackerAiV4Reader",
     "IDTrackerAiV5Reader",
     "SessionReader",
     "detect_reader",

@@ -56,7 +56,7 @@ def load_bbox_table(folder: Path) -> Any | None:
 
     path = candidates[0]
     try:
-        import pandas as pd  # type: ignore[import]
+        import pandas as pd
         return pd.read_csv(path)
     except Exception:
         return None

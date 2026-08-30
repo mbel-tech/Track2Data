@@ -46,7 +46,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
@@ -147,16 +147,23 @@ class IDTrackerAiV5Reader(SessionReader):
 
     # ── private helpers ───────────────────────────────────────────────────────
 
-    def _find_trajectory(self, folder: Path) -> tuple[Path, str]:
+    def _find_trajectory(
+        self, folder: Path
+    ) -> tuple[Path, Literal["with_gaps", "wo_gaps"]]:
         """
         Return (path, variant_label).  Prefers wo_gaps; falls back to with_gaps.
         Raises DataValidationError if neither file exists.
+
+        The return type is the same Literal ``Session.trajectory_variant``
+        accepts, so the two cannot drift apart -- a plain ``str`` here let a
+        typo reach the model as a runtime validation error instead.
         """
         traj_dir = folder / _TRAJ_SUBDIR
-        for name, variant in (
+        candidates: tuple[tuple[str, Literal["with_gaps", "wo_gaps"]], ...] = (
             ("trajectories_wo_gaps.npy", "wo_gaps"),
             ("trajectories.npy", "with_gaps"),
-        ):
+        )
+        for name, variant in candidates:
             candidate = traj_dir / name
             if candidate.exists():
                 return candidate, variant

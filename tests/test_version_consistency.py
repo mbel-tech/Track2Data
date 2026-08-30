@@ -103,3 +103,34 @@ def test_windows_installer_version_is_not_a_hardcoded_literal() -> None:
     assert not re.fullmatch(
         r"\d+\.\d+\.\d+", fallback
     ), f"the #ifndef fallback ({fallback}) looks like a real version; make it obviously local"
+
+
+def test_package_ships_a_py_typed_marker() -> None:
+    """PEP 561: without this file a downstream type checker ignores every
+    annotation in the package, however complete they are.
+
+    Ruff's ANN rules have required annotations throughout since early on, so
+    the work was already done -- it just never reached anyone importing the
+    engine.
+    """
+    import track2data
+
+    marker = Path(track2data.__file__).parent / "py.typed"
+    assert marker.exists(), "track2data/py.typed is missing"
+
+
+def test_py_typed_is_declared_as_a_build_artifact() -> None:
+    """A marker that is not packaged is a marker that does nothing.
+
+    hatchling includes package data by directory, but py.typed is empty and
+    easy to lose in a build reconfiguration, so the declaration is pinned
+    here rather than assumed.
+    """
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as fh:
+        config = tomllib.load(fh)
+
+    artifacts = config["tool"]["hatch"]["build"]["targets"]["wheel"].get("artifacts", [])
+    assert "track2data/py.typed" in artifacts

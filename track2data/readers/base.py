@@ -35,7 +35,7 @@ class SessionReader(ABC):
         """Return True if this reader can handle *folder*."""
 
     @abstractmethod
-    def read(self, folder: Path) -> Session:
+    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """
         Parse *folder* and return a Session.
 

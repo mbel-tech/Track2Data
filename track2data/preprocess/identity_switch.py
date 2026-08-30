@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from scipy.optimize import linear_sum_assignment  # type: ignore[import-untyped]
+from scipy.optimize import linear_sum_assignment
 
 from track2data.core.models import IdSwitchCfg, PPStepResult
 

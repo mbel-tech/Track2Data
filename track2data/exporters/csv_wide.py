@@ -19,7 +19,7 @@ _CSV_KWARGS: dict[str, object] = {
 
 def _write_csv(df: pd.DataFrame, path: Path) -> Path:
     """Write *df* to *path* as UTF-8 CSV with LF line endings."""
-    df.to_csv(path, **_CSV_KWARGS)  # type: ignore[arg-type]
+    df.to_csv(path, **_CSV_KWARGS)
     return path
 
 

@@ -34,6 +34,22 @@ jobs:
       - run: pip install ruff
       - run: ruff check .
 
+  typecheck:
+    name: Types (mypy)
+    # Required from the start rather than advisory: the engine is clean
+    # today, and a non-required job that is already green protects nothing.
+    # Ruff's ANN rules require annotations everywhere; this is what checks
+    # they are correct. Engine only -- see [tool.mypy] in pyproject.toml.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - run: mypy
+
   test:
     name: Tests (${{ matrix.os }} / Python ${{ matrix.python }})
     strategy:
@@ -124,7 +140,7 @@ jobs:
     # longer exists blocks every PR until someone notices. One stable name
     # keeps settings and workflow decoupled.
     if: always()
-    needs: [lint, test, r_parity]
+    needs: [lint, typecheck, test, r_parity]
     runs-on: ubuntu-22.04
     steps:
       - name: Fail unless every upstream job succeeded
@@ -134,6 +150,7 @@ jobs:
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: |
           echo "lint=${{ needs.lint.result }}"
+          echo "typecheck=${{ needs.typecheck.result }}"
           echo "test=${{ needs.test.result }}"
           echo "r_parity=${{ needs.r_parity.result }}"
           echo "::error::One or more CI jobs did not succeed."

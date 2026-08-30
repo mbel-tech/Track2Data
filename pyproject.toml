@@ -40,6 +40,7 @@ dev = [
     "pytest-cov>=5.0",
     "pytest-qt>=4.0",
     "hypothesis>=6.0",
+    "mypy>=1.10",
     "ruff>=0.4",
     "numpy>=1.26",
     "pandas>=2.0",
@@ -84,6 +85,10 @@ path = "track2data/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["track2data", "app", "ui"]
+# PEP 561 marker. Without it a downstream type checker ignores every
+# annotation in this package, however complete they are -- which was the
+# situation despite ruff's ANN rules requiring them throughout.
+artifacts = ["track2data/py.typed"]
 
 # ── Ruff ───────────────────────────────────────────────────────────────────────
 [tool.ruff]
@@ -118,6 +123,19 @@ markers = [
     "corpus_local: marks tests requiring the embargoed 70-session real idtracker.ai corpus (skip in CI; skips automatically when the corpus directory is absent)",
     "network: marks tests that call a third-party API (Crossref DOI resolution); excluded in CI, since an outage there is not a defect here. Run with: pytest -m network",
 ]
+
+# ── mypy ───────────────────────────────────────────────────────────────────────
+# Engine only. app/ and ui/ are excluded because PySide6's stubs would
+# dominate the signal, and tests because their fixtures deliberately build
+# partial objects. Ruff's ANN rules already require annotations everywhere;
+# this is what checks they are *correct* -- nothing did before, and
+# `# type: ignore` comments were accumulating unchecked.
+[tool.mypy]
+files = ["track2data"]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 
 [tool.coverage.run]
 source = ["track2data"]

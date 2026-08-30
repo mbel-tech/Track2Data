@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`track2data/py.typed`, and mypy in CI.** Ruff's `ANN` rules have required
+  annotations throughout the engine since early on, but nothing verified they
+  were *correct*, and PEP 561 meant a downstream type checker ignored all of
+  them anyway for want of a marker file. Both are fixed: the marker ships in
+  the wheel, and `mypy` runs as part of the required `CI passed` gate.
+
+  Getting there fixed 87 real type errors, which fell into five patterns:
+  `Metric`'s class attributes were declared as instance variables, making all
+  45 concrete metrics' assignments errors (they are `ClassVar` now, which is
+  what they always were); `Metric.compute` declared its parameter as `object`
+  and every subclass narrowed it, an unsound override 36 times over (it is
+  `Any`, with the reason written down: D-1..D-10 take a `Session` and
+  everything else a `PreprocessedSession`, and that split is real);
+  `_effective_cfg` took a bare `type`; the reader contract did not carry
+  `allow_pickle`; and `idtrackerai_v5._find_trajectory` returned `str` where a
+  `Literal` was required.
+
+  `warn_unused_ignores` then found **8 stale `# type: ignore` comments** — the
+  accumulation the audit flagged — all now removed.
+
+### Removed
+
+- **`track2data/readers/idtrackerai_v4.py`.** A stub whose `detect()` always
+  returned `False` and whose `read()` raised `NotImplementedError`: it could
+  never be selected, and could only fail if it somehow were. D-012 had already
+  removed its entry point, but the class stayed registered as a built-in,
+  where it did nothing except violate the reader contract that `read()` returns
+  a `Session`. A class that raises on use is worse than an absent one. The
+  decision record keeps the history.
+
+### Added
+
 - **`codebook.csv` in every export.** One row per exported column with its
   unit, level, originating metric, definition, citation and DOI, generated
   from the registry. That turns "45 cited metrics" from a README claim into

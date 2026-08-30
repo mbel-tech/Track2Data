@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from scipy.signal import savgol_filter  # type: ignore[import-untyped]
+from scipy.signal import savgol_filter
 
 from track2data.core.models import PPStepResult, SmoothCfg
 
