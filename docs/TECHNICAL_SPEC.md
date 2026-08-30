@@ -496,6 +496,25 @@ single 80 % figure measured the engine while `tests/test_ui/` and
 naturally read as whole-project coverage. `track2data/cli.py` remains
 omitted (it is exercised end-to-end through `CliRunner`, not line-covered).
 
+### 11.1b Analytic-truth tests
+
+`tests/test_metrics/test_analytic_truth.py` computes metrics from
+trajectories whose true value is derivable in closed form, and checks the
+code returns it.
+
+This exists because R-parity cannot do it. Agreeing with a reference R
+pipeline shows the two implementations match; two implementations of the
+same misreading agree perfectly. A straight track of known step length, a
+fixed lattice, a square wave in and out of a zone, and a closed circle each
+have a metric value a reader can check by hand — so recovering them is
+evidence about correctness rather than about consistency.
+
+It is also the acceptance criterion for the PP-3 identity-switch rewrite: a
+preprocessing step that quietly relabels or displaces positions shows up
+here as a metric that no longer recovers its own analytic answer. One test
+makes the asymmetry explicit — an identity swap leaves GL-1 completely
+unchanged while destroying IL-1, so a group-level check would notice nothing.
+
 ### 11.2 R-parity tests
 
 Golden CSV fixtures in `tests/fixtures/r_outputs/` capture the

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Analytic-truth tests** (`tests/test_metrics/test_analytic_truth.py`).
+  R-parity shows this pipeline agrees with a reference R pipeline; it cannot
+  show either is right, since two implementations of the same misreading
+  agree perfectly. These compute metrics from trajectories whose true value
+  is derivable on paper: a straight track of known step length (IL-1, IL-2),
+  a fixed lattice (GL-1, exactly), a square wave in and out of a zone (Z-1,
+  exactly 10 s), a closed circle (IL-1 circumference) and a half circle
+  (IL-5 tortuosity = π/2). Frame-rate scaling is pinned as an exact factor
+  of two, which is the arithmetic behind the mixed-frame-rate warning.
+
+  This is the acceptance criterion for the PP-3 rewrite. One test makes the
+  reason explicit: an identity swap leaves GL-1 *completely unchanged* while
+  destroying IL-1, so a group-level check would notice nothing.
+
 - **`CITATION.cff`, PyPI publishing, and a release checklist.** GitHub's
   "Cite this repository" button now works, and it cites idtracker.ai
   alongside this tool — a paper citing Track2Data without the tracker
