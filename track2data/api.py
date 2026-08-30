@@ -246,7 +246,19 @@ class Engine:
         from track2data.preprocess.pipeline import run as pp_run
 
         psess = pp_run(session, self._manifest.preprocess)
+        return self.apply_calibration_and_zones(psess)
 
+    def apply_calibration_and_zones(
+        self, psess: PreprocessedSession
+    ) -> PreprocessedSession:
+        """Steps 2 and 3 of :meth:`preprocess`, on an already-preprocessed session.
+
+        Separated so a caller that ran the pipeline itself -- the
+        sensitivity sweep re-runs it once per grid point -- gets the same
+        calibration and zone treatment as a normal run rather than a
+        re-implementation of it that could drift.
+        """
+        session = psess.session
         try:
             # Calibration.
             cfg = self._manifest.calibration

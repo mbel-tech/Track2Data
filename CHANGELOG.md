@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`track2data sensitivity` — recompute metrics across a grid of
+  preprocessing settings.** The strongest methodological objection this class
+  of tool attracts is that the preprocessing choices, not the animals, drive
+  the result. It is a fair objection, and nothing in a normal export answered
+  it. This does: re-run a session across a grid of smoothing windows and
+  `max_gap_frames`, and report per column how far the value moved.
+
+  The headline is a **coefficient of variation** (SD / |mean|), which is
+  unitless and so comparable between a path length in cm and a bounded
+  fraction. Computed per individual and then averaged, not pooled — pooling
+  would mix genuine between-animal variation into a number meant to measure
+  parameter sensitivity alone. No "is this robust?" verdict is printed:
+  where that line sits depends on the effect size being claimed, which the
+  tool cannot know.
+
+  On the shipped example it reports IL-7's freezing-bout count moving 6.7%
+  across the grid while IL-1's path length moves 1.2% — which is exactly the
+  kind of thing worth knowing before publishing either.
+
+- **A documentation site** at <https://mbel-tech.github.io/Track2Data/>,
+  built with `mkdocs-material` and published by a GitHub Pages workflow.
+  7,000+ lines of markdown existed in this repo with nothing rendering them.
+  The site is *assembled* from those files rather than duplicating them — a
+  second hand-maintained copy would go stale, which is the failure mode this
+  project has hit repeatedly.
+
+  The one generated page is the **metric catalogue**: all 45 metrics with
+  formula, per-column units, assumptions, warnings and DOI, built from the
+  registry so it cannot drift from the code. `mkdocs build --strict` runs in
+  CI, so a broken internal link fails there rather than shipping a 404 to
+  someone following a citation.
+
+- **`docs/INTEROPERABILITY.md`** — where Track2Data sits between the trackers
+  and the statistics, why it deliberately does neither, and a documented
+  mapping onto the `movement` package's xarray layout with a working snippet.
+  Documented before implementing, per the audit, and it surfaces two things
+  that do *not* map cleanly: `movement`'s `confidence` is a pose estimator's
+  positional confidence while idtracker.ai's `id_probabilities` is identity
+  confidence — the position can be exact while the identity is a coin flip —
+  and zones and calibration have no home in a pose schema at all.
+
 - **A runnable example** (`examples/`). A complete two-minute, four-fish
   project — `cd examples && track2data run example.t2d.json -o out` — so a
   new user can see the shape of the output before pointing the tool at their

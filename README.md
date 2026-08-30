@@ -149,6 +149,20 @@ folders. The reviewer runs:
 track2data run project.t2d.json
 ```
 
+### How much of this result is the preprocessing?
+
+The question a reviewer will ask. Answer it before they do:
+
+```bash
+track2data sensitivity my-study.t2d.json -o sensitivity
+```
+
+That recomputes every selected metric across a grid of smoothing windows and
+gap-fill limits, and reports how far each column moved — as a coefficient of
+variation, so columns in different units are comparable. A value near zero
+means the choice barely mattered; a large one means the number is
+substantially a statement about the settings rather than the animals.
+
 `sessions.csv` and `PROJECT_SUMMARY.md` say when sessions are **not**
 comparable — different frame rates, group sizes, resolutions or calibration
 states — because pooling across those without accounting for them produces a
@@ -183,9 +197,14 @@ every export's `manifest.json`.
 
 ## Documentation
 
+A rendered site is published from these files at
+**<https://mbel-tech.github.io/Track2Data/>**, including a browsable
+catalogue of all 45 metrics with their formulas, units and DOIs.
+
 **Using it**
 
 - [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md) — the wizard, screen by screen
+- [`docs/INTEROPERABILITY.md`](docs/INTEROPERABILITY.md) — where Track2Data sits in the ecosystem, and reading its output elsewhere
 - [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — every metric: formula, inputs, units, assumptions, citation
 - [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) — why releases are unsigned, and the plan
 - [`SECURITY.md`](SECURITY.md) — reporting a vulnerability, and handling untrusted session folders

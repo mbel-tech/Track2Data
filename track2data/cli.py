@@ -297,3 +297,94 @@ def new(name: str, out: str | None) -> None:
 
 def main() -> None:
     cli()
+
+
+# ── sensitivity ───────────────────────────────────────────────────────────────
+
+
+@cli.command()
+@click.argument("project", type=click.Path(exists=True, dir_okay=False))
+@click.option("--out-dir", "-o", default="sensitivity",
+              help="Output directory (default: ./sensitivity).")
+@click.option("--smoothing-windows", default=None,
+              help="Comma-separated odd window sizes (default: 3,5,9,15).")
+@click.option("--max-gap-frames", "gap_frames", default=None,
+              help="Comma-separated gap limits (default: 5,15,30,60).")
+@click.option("--metric", "-m", "metric_ids", multiple=True,
+              help="Restrict to these metric IDs (repeatable).")
+def sensitivity(
+    project: str,
+    out_dir: str,
+    smoothing_windows: str | None,
+    gap_frames: str | None,
+    metric_ids: tuple[str, ...],
+) -> None:
+    """Recompute metrics across a grid of preprocessing settings.
+
+    Answers the question a reviewer will ask: how much of this result is the
+    animals, and how much is the smoothing window? Writes the raw sweep and
+    a per-column summary of how far each value moved.
+
+    The summary's headline is the coefficient of variation, which is
+    unitless and so comparable across columns in different units. Where the
+    line between "robust" and "not" sits depends on the effect size being
+    claimed, so no verdict is printed -- only the number.
+    """
+    from track2data.api import Engine
+    from track2data.sensitivity import SensitivityGrid, run_sensitivity, summarise
+
+    manifest = _load_manifest(project)
+    engine = Engine(manifest)
+
+    def _ints(raw: str | None, default: tuple[int, ...]) -> tuple[int, ...]:
+        if raw is None:
+            return default
+        return tuple(int(part) for part in raw.split(",") if part.strip())
+
+    grid = SensitivityGrid(
+        smoothing_windows=_ints(smoothing_windows, (3, 5, 9, 15)),
+        max_gap_frames=_ints(gap_frames, (5, 15, 30, 60)),
+        metric_ids=list(metric_ids),
+    )
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    n_points = len(grid.points())
+    frames = []
+    for ref in manifest.sessions:
+        click.echo(f"Sweeping {ref.session_id} over {n_points} settings...")
+        try:
+            session = engine.import_session(ref.folder)
+        except Exception as exc:
+            click.echo(f"[warn] {ref.session_id}: {exc}", err=True)
+            continue
+        frames.append(run_sensitivity(engine, session, grid))
+
+    if not frames:
+        click.echo("No sessions could be read; nothing written.", err=True)
+        sys.exit(1)
+
+    import pandas as pd
+
+    sweep = pd.concat(frames, ignore_index=True)
+    sweep.to_csv(out_path / "sensitivity.csv", index=False, encoding="utf-8")
+
+    summary = summarise(sweep)
+    summary.to_csv(out_path / "sensitivity_summary.csv", index=False, encoding="utf-8")
+
+    click.echo(f"\nWrote {out_path / 'sensitivity.csv'}")
+    click.echo(f"Wrote {out_path / 'sensitivity_summary.csv'}")
+
+    if not summary.empty:
+        click.echo("\nMost setting-dependent columns (coefficient of variation):")
+        for _, row in summary.head(10).iterrows():
+            click.echo(
+                f"  {row['cv']:>7.3f}  {row['metric_id']:<6} {row['column']} "
+                f"({row['unit']})"
+            )
+        click.echo(
+            "\nA value near 0 means the preprocessing choice barely moved that "
+            "column.\nA large one means the number is substantially a statement "
+            "about the settings."
+        )

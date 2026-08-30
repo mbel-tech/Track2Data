@@ -154,3 +154,30 @@ def test_citation_cff_cites_idtrackerai() -> None:
     part of the pipeline that did the hard work."""
     text = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
     assert "10.1038/s41592-018-0295-5" in text
+
+
+def test_the_docs_site_builder_covers_every_page_the_nav_lists() -> None:
+    """A nav entry with no page is a 404 in a published site, and mkdocs
+    --strict only catches it at build time in CI. This catches it here."""
+    import yaml
+
+    config = yaml.safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+    nav_pages = {
+        page for entry in config["nav"] for page in entry.values()
+    }
+
+    import scripts.build_docs_site as builder
+
+    produced = set(builder.PAGES.values()) | {"api.md", "metrics.md"}
+    assert nav_pages <= produced, (
+        f"mkdocs.yml lists pages the builder does not produce: {nav_pages - produced}"
+    )
+
+
+def test_the_docs_site_sources_all_exist() -> None:
+    """The builder copies from the repo's real documentation. A rename that
+    misses it produces an empty site page rather than an error."""
+    import scripts.build_docs_site as builder
+
+    missing = [str(src) for src in builder.PAGES if not src.exists()]
+    assert not missing, f"build_docs_site.py reads files that do not exist: {missing}"

@@ -1,0 +1,67 @@
+# Documentation site (https://www.mkdocs.org/).
+#
+#     pip install -e ".[docs]"
+#     python scripts/generate_metric_catalogue.py docs/site/metrics.md
+#     mkdocs serve
+#
+# 7,000+ lines of markdown already existed in this repo with nothing
+# rendering them, so the primary job here is publishing what is written
+# rather than writing more. The one generated page is the metric catalogue:
+# a browsable, linkable, citable list of every metric with its formula,
+# units and DOI, built from the registry so it cannot drift from the code.
+site_name: Track2Data
+site_description: >-
+  Turn idtracker.ai output folders into analysis-ready behavioural datasets.
+site_url: https://mbel-tech.github.io/Track2Data/
+repo_url: https://github.com/mbel-tech/Track2Data
+repo_name: mbel-tech/Track2Data
+edit_uri: edit/main/docs/
+
+docs_dir: docs/site
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Metric catalogue: metrics.md
+  - User workflow: workflow.md
+  - Interoperability: interoperability.md
+  - Security: security.md
+  - Engine API: api.md
+  - Contributing: contributing.md
