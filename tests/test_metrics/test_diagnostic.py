@@ -14,6 +14,7 @@ from track2data.metrics.diagnostic import (
     IdentityStability,
     IdProbabilityStats,
     InconsistentFrameCount,
+    MetricInputProvenance,
     PhysicalPlausibilityViolations,
     SegmentationErrorFrames,
     SwapOpportunityCount,
@@ -37,6 +38,29 @@ def make_session(**kwargs):  # type: ignore[no-untyped-def]
     )
     defaults.update(kwargs)
     return Session(**defaults)
+
+
+def make_psess(**kwargs):  # type: ignore[no-untyped-def]
+    """Wrap make_session() in a minimal PreprocessedSession.
+
+    D-11 reads the preprocessed arrays rather than Session.raw_xy, so the
+    aggregate runner takes the PreprocessedSession; D-1..D-10 read
+    ``psess.session`` and are unaffected.
+    """
+    from track2data.core.models import KinematicsArrays, PreprocessedSession
+
+    session = make_session(**kwargs)
+    n_frames, n_animals = session.n_frames, session.n_animals
+    empty = np.full((n_frames, n_animals), np.nan)
+    return PreprocessedSession(
+        session=session,
+        xy=session.raw_xy.copy(),
+        kinematics=KinematicsArrays(
+            speed_px_s=empty.copy(),
+            accel_px_s2=empty.copy(),
+            heading_rad=empty.copy(),
+        ),
+    )
 
 
 # ── D-1: Tracking Coverage ─────────────────────────────────────────────────────
@@ -565,23 +589,143 @@ class TestPhysicalPlausibilityViolations:
 
 
 class TestComputeAllDiagnostics:
-    def test_returns_ten_keys(self) -> None:
-        sess = make_session()
-        result = compute_all_diagnostics(sess)
+    def test_returns_every_registered_diagnostic(self) -> None:
+        result = compute_all_diagnostics(make_psess())
         assert set(result.keys()) == {
-            "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9", "D-10",
+            "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9",
+            "D-10", "D-11",
         }
 
     def test_values_are_dataframes(self) -> None:
         import pandas as pd
 
-        sess = make_session()
-        result = compute_all_diagnostics(sess)
+        result = compute_all_diagnostics(make_psess())
         for key, df in result.items():
             assert isinstance(df, pd.DataFrame), f"{key} is not a DataFrame"
 
     def test_all_contain_session_id(self) -> None:
-        sess = make_session(session_id="full_test")
-        result = compute_all_diagnostics(sess)
+        result = compute_all_diagnostics(make_psess(session_id="full_test"))
         for key, df in result.items():
             assert "session_id" in df.columns, f"{key} missing session_id"
+
+
+# ── D-11: Metric Input Provenance ─────────────────────────────────────────────
+
+
+def _psess_with(raw: np.ndarray, final: np.ndarray, jumps: np.ndarray | None = None):  # type: ignore[no-untyped-def]
+    """PreprocessedSession with explicit raw/final arrays and a jump mask."""
+    from track2data.core.models import KinematicsArrays, PreprocessedSession
+
+    session = make_session(
+        raw_xy=raw,
+        n_animals=raw.shape[1],
+        video=VideoInfo(
+            fps=25.0, n_frames=raw.shape[0], width_px=100, height_px=100
+        ),
+    )
+    empty = np.full(final.shape[:2], np.nan)
+    return PreprocessedSession(
+        session=session,
+        xy=final,
+        kinematics=KinematicsArrays(
+            speed_px_s=empty.copy(),
+            accel_px_s2=empty.copy(),
+            heading_rad=empty.copy(),
+        ),
+        jump_replaced=jumps,
+    )
+
+
+class TestMetricInputProvenance:
+    def test_metric_id(self) -> None:
+        assert MetricInputProvenance.id == "D-11"
+
+    def test_fully_measured_session_reports_no_reconstruction(self) -> None:
+        xy = np.ones((10, 2, 2), dtype=np.float64)
+        df = MetricInputProvenance().compute(_psess_with(xy, xy.copy()))
+
+        assert list(df["n_frames_used"]) == [10, 10]
+        assert (df["frac_interpolated"] == 0.0).all()
+        assert (df["frac_measured"] == 1.0).all()
+
+    def test_interpolated_frames_are_counted_against_the_used_frames(self) -> None:
+        """The denominator is what the metrics saw, not the session length."""
+        raw = np.ones((10, 1, 2), dtype=np.float64)
+        raw[2:4] = np.nan            # a gap the pipeline filled
+        final = np.ones((10, 1, 2), dtype=np.float64)
+
+        row = MetricInputProvenance().compute(_psess_with(raw, final)).iloc[0]
+
+        assert row["n_frames_used"] == 10
+        assert row["n_interpolated"] == 2
+        assert row["frac_interpolated"] == pytest.approx(0.2)
+        assert row["frac_measured"] == pytest.approx(0.8)
+
+    def test_frames_still_missing_are_excluded_from_the_denominator(self) -> None:
+        """A gap too long to fill is not a frame any metric could have used."""
+        raw = np.ones((10, 1, 2), dtype=np.float64)
+        raw[2:6] = np.nan
+        final = np.ones((10, 1, 2), dtype=np.float64)
+        final[2:6] = np.nan          # gap_fill declined it (max_gap_frames)
+
+        row = MetricInputProvenance().compute(_psess_with(raw, final)).iloc[0]
+
+        assert row["n_frames_total"] == 10
+        assert row["n_frames_used"] == 6
+        assert row["frac_frames_used"] == pytest.approx(0.6)
+        assert row["n_interpolated"] == 0
+        assert row["frac_measured"] == pytest.approx(1.0)
+
+    def test_jump_replaced_frames_are_reported_separately(self) -> None:
+        """A jump-replaced position started as a real measurement, so it is
+        not interpolation -- but it is not observation either."""
+        xy = np.ones((10, 1, 2), dtype=np.float64)
+        jumps = np.zeros((10, 1), dtype=bool)
+        jumps[5:8] = True
+
+        row = MetricInputProvenance().compute(_psess_with(xy, xy.copy(), jumps)).iloc[0]
+
+        assert row["n_jump_replaced"] == 3
+        assert row["frac_jump_replaced"] == pytest.approx(0.3)
+        assert row["frac_interpolated"] == 0.0
+        assert row["frac_measured"] == pytest.approx(0.7)
+
+    def test_absent_jump_mask_reports_zero_not_nan(self) -> None:
+        """Jump detection that never ran replaced nothing."""
+        xy = np.ones((10, 1, 2), dtype=np.float64)
+        row = MetricInputProvenance().compute(_psess_with(xy, xy.copy(), None)).iloc[0]
+        assert row["n_jump_replaced"] == 0
+        assert row["frac_jump_replaced"] == 0.0
+
+    def test_animal_with_no_usable_frames_reports_nan_not_a_number(self) -> None:
+        """0/0 must read as "nothing to report", never as a fraction."""
+        raw = np.full((10, 1, 2), np.nan)
+        final = np.full((10, 1, 2), np.nan)
+
+        row = MetricInputProvenance().compute(_psess_with(raw, final)).iloc[0]
+
+        assert row["n_frames_used"] == 0
+        assert np.isnan(row["frac_interpolated"])
+        assert np.isnan(row["frac_measured"])
+
+    def test_distinguishes_two_sessions_d1_would_report_identically(self) -> None:
+        """The whole point: 92% and 41% real coverage must not look the same."""
+        good_raw = np.ones((100, 1, 2), dtype=np.float64)
+        good_raw[:8] = np.nan
+        poor_raw = np.ones((100, 1, 2), dtype=np.float64)
+        poor_raw[:59] = np.nan
+        final = np.ones((100, 1, 2), dtype=np.float64)
+
+        good = MetricInputProvenance().compute(_psess_with(good_raw, final)).iloc[0]
+        poor = MetricInputProvenance().compute(
+            _psess_with(poor_raw, final.copy())
+        ).iloc[0]
+
+        assert good["n_frames_used"] == poor["n_frames_used"] == 100
+        assert good["frac_measured"] == pytest.approx(0.92)
+        assert poor["frac_measured"] == pytest.approx(0.41)
+
+    def test_output_columns_match_the_declaration(self) -> None:
+        xy = np.ones((10, 2, 2), dtype=np.float64)
+        df = MetricInputProvenance().compute(_psess_with(xy, xy.copy()))
+        assert list(df.columns) == MetricInputProvenance.output_columns

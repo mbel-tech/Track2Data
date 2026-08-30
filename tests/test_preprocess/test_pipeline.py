@@ -274,3 +274,101 @@ def test_identity_switch_without_fragments_still_runs() -> None:
     psess = run(session, cfg)
 
     np.testing.assert_allclose(psess.xy, truth)
+
+
+# ── jump-replacement mask ─────────────────────────────────────────────────────
+
+
+def test_pipeline_records_which_frames_jump_detect_replaced() -> None:
+    """Previously visible only as an aggregate count in PreprocessReport, so
+    no reviewer could tell which rows the step touched."""
+    xy = np.zeros((60, 1, 2), dtype=np.float64)
+    frames = np.arange(60, dtype=np.float64)
+    xy[:, 0, 0] = frames * 3.0
+    xy[30, 0, 0] += 500.0  # injected jump
+
+    session = _make_session(xy)
+    session = session.model_copy(update={"velocity_threshold_px_frame": 20.0})
+    cfg = PreprocessConfig(
+        gap_fill=GapFillCfg(enabled=False),
+        jump=JumpCfg(
+            enabled=True, method="idtracker_velocity_threshold", replacement="nan"
+        ),
+        identity_switch=IdSwitchCfg(enabled=False),
+        smoothing=SmoothCfg(enabled=False),
+    )
+
+    psess = run(session, cfg)
+
+    assert psess.jump_replaced is not None
+    assert psess.jump_replaced.shape == (60, 1)
+    assert psess.jump_replaced[30, 0]
+    assert psess.jump_replaced.sum() >= 1
+
+
+def test_jump_mask_is_empty_when_jump_detection_is_off() -> None:
+    xy = np.zeros((30, 1, 2), dtype=np.float64)
+    xy[:, 0, 0] = np.arange(30, dtype=np.float64) * 3.0
+
+    psess = run(
+        _make_session(xy),
+        PreprocessConfig(
+            gap_fill=GapFillCfg(enabled=False),
+            jump=JumpCfg(enabled=False),
+            identity_switch=IdSwitchCfg(enabled=False),
+            smoothing=SmoothCfg(enabled=False),
+        ),
+    )
+
+    assert psess.jump_replaced is not None
+    assert not psess.jump_replaced.any()
+
+
+def test_jump_mask_excludes_pre_existing_gaps() -> None:
+    """A frame that was already NaN was not replaced by this step -- the mask
+    must not claim credit for gap_fill's policy."""
+    xy = np.zeros((40, 1, 2), dtype=np.float64)
+    xy[:, 0, 0] = np.arange(40, dtype=np.float64) * 3.0
+    xy[10:15, 0, :] = np.nan
+
+    psess = run(
+        _make_session(xy),
+        PreprocessConfig(
+            gap_fill=GapFillCfg(enabled=False),
+            jump=JumpCfg(enabled=True, method="sd_multiple", replacement="nan"),
+            identity_switch=IdSwitchCfg(enabled=False),
+            smoothing=SmoothCfg(enabled=False),
+        ),
+    )
+
+    assert psess.jump_replaced is not None
+    assert not psess.jump_replaced[10:15, 0].any()
+
+
+def test_jump_mask_is_captured_before_smoothing_moves_everything() -> None:
+    """Smoothing moves every position, so a mask derived at the end of the
+    pipeline would flag the whole session."""
+    xy = np.zeros((60, 1, 2), dtype=np.float64)
+    frames = np.arange(60, dtype=np.float64)
+    xy[:, 0, 0] = frames * 3.0
+    xy[30, 0, 0] += 500.0
+
+    session = _make_session(xy)
+    session = session.model_copy(update={"velocity_threshold_px_frame": 20.0})
+    psess = run(
+        session,
+        PreprocessConfig(
+            gap_fill=GapFillCfg(enabled=False),
+            jump=JumpCfg(
+                enabled=True,
+                method="idtracker_velocity_threshold",
+                replacement="linear_interp",
+            ),
+            identity_switch=IdSwitchCfg(enabled=False),
+            smoothing=SmoothCfg(enabled=True, method="savgol", window=5, polyorder=2),
+        ),
+    )
+
+    assert psess.jump_replaced is not None
+    # A handful of frames, not all 60.
+    assert 0 < int(psess.jump_replaced.sum()) < 10

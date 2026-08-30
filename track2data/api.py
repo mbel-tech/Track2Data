@@ -417,7 +417,7 @@ class Engine:
         # D-5 IdentityStability is precisely the record of that fact, so
         # suppressing the diagnostics would remove the evidence for the
         # skips below.
-        results.update(compute_all_diagnostics(psess.session))
+        results.update(compute_all_diagnostics(psess))
 
         sel = self._manifest.metrics
 
@@ -542,6 +542,14 @@ class Engine:
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
+
+        # Distinct from was_interpolated, which covers only gap-filled frames
+        # that started as NaN. A jump-replaced position started as a real
+        # measurement that jump_detect judged implausible -- previously
+        # visible only as an aggregate count in PreprocessReport, so no
+        # reviewer could tell which rows it touched.
+        if psess.jump_replaced is not None:
+            df["was_jump_replaced"] = psess.jump_replaced.reshape(-1)
 
         if psess.px_per_cm is not None:
             df["x_cm"] = df["x_px"] / psess.px_per_cm
@@ -844,6 +852,51 @@ class Engine:
         )
         return RunResult(sessions=results)
 
+    def _hash_and_check_input(self, session: Session, ref: SessionRef) -> str:
+        """SHA-256 of the trajectory file that produced this session's numbers.
+
+        The export's central provenance claim is "these bytes produced these
+        numbers", and it is not checkable without this. Recorded in
+        ``sessions.csv`` and in each session's export README.
+
+        Also the staleness check: when the manifest already carries a hash
+        for this session and the folder now hashes differently, the source
+        data changed after the project was configured. That is worth saying
+        loudly -- it is exactly the case where a cached or re-exported
+        session folder silently changes what a "reproduced" run means.
+
+        Never fatal: a hash that cannot be computed costs provenance, not
+        results.
+        """
+        from track2data.core.hashing import file_sha256
+
+        source = session.trajectory_source
+        if source is None:
+            return ""
+        try:
+            digest = file_sha256(Path(source))
+        except OSError:
+            logger.warning(
+                "Could not hash %s for session %s; the export will record no "
+                "input checksum for it.",
+                source,
+                ref.session_id,
+            )
+            return ""
+
+        if ref.sha256 and ref.sha256 != digest:
+            logger.warning(
+                "Session %s: the trajectory file %s has changed since this "
+                "project recorded it (manifest %s, now %s). The numbers in "
+                "this run come from the current file, not the one the project "
+                "was configured against.",
+                ref.session_id,
+                source.name,
+                ref.sha256[:12],
+                digest[:12],
+            )
+        return digest
+
     def _write_project_summary(
         self, out_dir: Path, results: list[SessionRunResult]
     ) -> list[Path]:
@@ -1047,6 +1100,7 @@ class Engine:
                     calibration_mode=self._manifest.calibration.mode,
                     is_identity_free=ref.is_identity_free(),
                     px_per_cm=psess.px_per_cm,
+                    trajectory_sha256=self._hash_and_check_input(session, ref),
                 ),
             )
         except OperationCancelled:

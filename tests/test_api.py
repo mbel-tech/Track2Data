@@ -1323,6 +1323,7 @@ def test_build_payload_buckets_metrics_by_level(tmp_path: Path) -> None:
     assert all(k.startswith("D-") for k in payload.diagnostic_metrics)
     assert set(payload.diagnostic_metrics) == {
         "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9", "D-10",
+        "D-11",
     }
 
 
@@ -1901,3 +1902,42 @@ def test_unwritable_project_summary_does_not_fail_the_run(
     assert (tmp_path / "sessions.csv").exists()
     assert not (tmp_path / "PROJECT_SUMMARY.md").exists()
     assert "Could not write the run summary" in caplog.text
+
+
+def test_unhashable_input_costs_provenance_not_results(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A trajectory file that cannot be re-read at hashing time must not fail
+    a run whose numbers were already computed."""
+    import logging
+
+    import track2data.core.hashing as hashing_module
+    from track2data.api import Engine
+
+    def unreadable(path: Path, chunk_size: int = 65536) -> str:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(hashing_module, "file_sha256", unreadable)
+
+    session = _make_session("s1").model_copy(
+        update={"trajectory_source": Path("/tmp/s1/trajectories/trajectories.npy")}
+    )
+    engine = Engine(_make_manifest(sessions=[_ref("s1")]))
+
+    with caplog.at_level(logging.WARNING):
+        digest = engine._hash_and_check_input(session, _ref("s1"))
+
+    assert digest == ""
+    assert "will record no input checksum" in caplog.text
+
+
+def test_session_with_no_recorded_source_hashes_to_nothing() -> None:
+    """A reader that does not report its source file yields no checksum
+    rather than a checksum of the wrong thing."""
+    from track2data.api import Engine
+
+    session = _make_session("s1")
+    assert session.trajectory_source is None
+
+    engine = Engine(_make_manifest(sessions=[_ref("s1")]))
+    assert engine._hash_and_check_input(session, _ref("s1")) == ""

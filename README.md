@@ -78,7 +78,7 @@ process → preview → export wizard, wired end to end to the
 
 ## Requesting a metric
 
-Track2Data computes 44 built-in metrics — individual, group, zone, and
+Track2Data computes 45 built-in metrics — individual, group, zone, and
 tracking-quality diagnostics. Every one carries a scientific reference,
 published in [`docs/METRIC_REFERENCES.csv`](docs/METRIC_REFERENCES.csv)
 and [`docs/references.bib`](docs/references.bib), and shown in the

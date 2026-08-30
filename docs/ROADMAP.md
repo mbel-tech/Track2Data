@@ -15,7 +15,7 @@ The engine, the GUI, and the packaging pipeline are all built and green.
 | Full error hierarchy (`core/errors.py`) | ✅ Implemented |
 | Manifest read/write + migration (`core/manifest.py`) | ✅ Implemented |
 | Unified idtracker.ai reader (`readers/idtrackerai/`) — h5 / npy / csv | ✅ Implemented; 70/70 real corpus sessions import |
-| Behavioural metrics | ✅ 44 registered (IL-1..11, IL-14, GL-1..11, GL-13, GL-15, Z-1..9, D-1..10) |
+| Behavioural metrics | ✅ 45 registered (IL-1..11, IL-14, GL-1..11, GL-13, GL-15, Z-1..9, D-1..11) |
 | Exporters | ✅ 5 (`csv_long`, `csv_wide`, `excel`, `feather`, `readme`) |
 | Metadata join wired into `Engine` | ✅ Implemented |
 | Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |

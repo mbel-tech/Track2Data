@@ -981,6 +981,26 @@ selection, and exported alongside the metrics CSV in a separate
 | **Reference** | Bjorneraas et al. 2010, J. Wildl. Manage. 74(6):1361-1366 (screening GPS location data for errors using animal movement characteristics) — DOI [10.2193/2009-405](https://doi.org/10.2193/2009-405) |
 | **Supporting references** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) (DOI: 10.1038/s41592-018-0295-5) |
 
+#### D-11 — Metric input provenance
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Metric input provenance |
+| **Level** | Per individual |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.was_interpolated`, `PreprocessedSession.jump_replaced` |
+| **Formula** | `n_frames_used = count(¬nan(xy[:,k,0]))`; `frac_interpolated = count(was_interpolated[:,k] ∧ used[:,k]) / n_frames_used`; `frac_jump_replaced = count(jump_replaced[:,k] ∧ used[:,k]) / n_frames_used`; `frac_measured = 1 − frac_interpolated − frac_jump_replaced` |
+| **Output columns** | `individual_id`, `n_frames_total`, `n_frames_used`, `frac_frames_used`, `n_interpolated`, `frac_interpolated`, `n_jump_replaced`, `frac_jump_replaced`, `frac_measured` |
+| **Units** | counts; dimensionless fractions |
+| **Assumptions** | The denominator is the frames the metrics actually used (non-NaN *after* preprocessing), not the session length — a metric cannot be affected by a frame it never saw. A frame counts in at most one of interpolated/jump-replaced: gap-fill acts on frames that were NaN, jump replacement on frames that were not. |
+| **Warnings** | Distinct from **D-1**, which reports coverage of `Session.raw_xy` — the tracker's own output. This reports what the *metrics* consumed. Without it, a session with 92 % real coverage and one with 41 % produce indistinguishable `path_length_px` rows. A high `frac_interpolated` means those values rest largely on interpolation rather than observation; path length and speed are most affected, since interpolating across a gap draws a straight line and understates both. `frac_jump_replaced` is zero whenever jump detection did not run, which is not the same as no jumps being present. |
+| **Parameters** | none |
+| **Reference** | Data-provenance convention for derived measures; no single originating work |
+
+Keyed on `(session_id, individual_id)` — the same key the exporters merge
+summary metrics on — so every metric row can be joined to the quality of the
+data behind it.
+
 ---
 
 ## 5. Engine implementation map

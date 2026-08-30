@@ -873,3 +873,127 @@ def test_project_summary_names_failed_sessions(
     assert "## Sessions that failed" in text
     assert "`missing`" in text
     assert "Sessions processed: 1 of 2" in text
+
+
+# ── input provenance (trajectory SHA-256) ─────────────────────────────────────
+
+
+def test_run_records_the_input_checksum(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """"These bytes produced these numbers" is only a checkable claim if the
+    bytes are named and hashed."""
+    import pandas as pd
+
+    from track2data.api import Engine
+    from track2data.core.hashing import file_sha256
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    row = pd.read_csv(tmp_path / "sessions.csv").iloc[0]
+    assert row["trajectory_source"] == "trajectories.npy"
+    assert row["trajectory_sha256"] == file_sha256(
+        tiny_real_session / "trajectories" / "trajectories.npy"
+    )
+
+
+def test_reader_records_which_trajectory_file_it_read(
+    tiny_real_session: Path,
+) -> None:
+    """The reader falls back through formats, so only it knows."""
+    from track2data.api import Engine
+
+    session = Engine(_minimal_manifest(tiny_real_session)).import_session(
+        tiny_real_session
+    )
+
+    assert session.trajectory_source is not None
+    assert session.trajectory_source.name == "trajectories.npy"
+    assert session.trajectory_source.exists()
+
+
+def test_changed_input_since_the_project_was_configured_is_reported(
+    tiny_real_session: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A re-exported or swapped session folder must not silently change what a
+    "reproduced" run means."""
+    import logging
+
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_real_session)
+    # The manifest records a hash that does not match the folder's contents,
+    # exactly as it would after the source was re-exported.
+    manifest = manifest.model_copy(
+        update={"sessions": [manifest.sessions[0].model_copy(update={"sha256": "d" * 64})]}
+    )
+
+    with caplog.at_level(logging.WARNING):
+        Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    assert "has changed since this project recorded it" in caplog.text
+
+
+def test_matching_input_hash_is_silent(
+    tiny_real_session: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The staleness check must not cry wolf on an unchanged folder."""
+    import logging
+
+    from track2data.api import Engine
+    from track2data.core.hashing import file_sha256
+
+    digest = file_sha256(tiny_real_session / "trajectories" / "trajectories.npy")
+    manifest = _minimal_manifest(tiny_real_session)
+    manifest = manifest.model_copy(
+        update={"sessions": [manifest.sessions[0].model_copy(update={"sha256": digest})]}
+    )
+
+    with caplog.at_level(logging.WARNING):
+        Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    assert "has changed since this project recorded it" not in caplog.text
+
+
+def test_per_frame_table_distinguishes_interpolated_from_jump_replaced(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """Two different reconstructions, two different columns. was_interpolated
+    covers frames that started as NaN; a jump-replaced frame started as a real
+    measurement the pipeline judged implausible."""
+    import pandas as pd
+
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    df = pd.read_csv(
+        tmp_path / tiny_real_session.name / "master_fish_by_frame.csv"
+    )
+    assert "was_interpolated" in df.columns
+    assert "was_jump_replaced" in df.columns
+
+
+def test_every_metric_row_can_be_joined_to_its_input_quality(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """D-11 is keyed on (session_id, individual_id) -- the same key the
+    exporters merge summary metrics on -- so a reader can always ask how much
+    of a path_length_px value rests on real observation."""
+
+    from track2data.api import Engine
+
+    engine = Engine(_minimal_manifest(tiny_real_session))
+    session = engine.import_session(tiny_real_session)
+    psess = engine.preprocess(session)
+    results = engine.compute_metrics(psess)
+
+    assert "D-11" in results
+    provenance = results["D-11"]
+    individual = results["IL-1"]
+
+    joined = individual.merge(provenance, on=["session_id", "individual_id"])
+    assert len(joined) == len(individual)
+    assert "path_length_px" in joined.columns
+    assert "frac_measured" in joined.columns
+    assert (joined["n_frames_used"] > 0).all()

@@ -153,6 +153,13 @@ class Session(BaseModel):
     # across sessions for identity matching to be valid), not for use here.
     resolution_reduction: float | None = None
     id_image_size: list[int] | None = None
+    # The trajectory file whose bytes produced raw_xy. Set by the reader,
+    # which is the only layer that knows: it falls back through the formats
+    # present in the folder, so the file actually read is not always the
+    # highest-ranked one and cannot be re-derived afterwards. Hashed into the
+    # export's provenance record -- "these bytes produced these numbers" is
+    # not a checkable claim without it.
+    trajectory_source: Path | None = None
     # Paths only, not decoded pixel data -- see
     # readers/idtrackerai/preprocessing.py's module docstring for why.
     roi_mask_path: Path | None = None
@@ -510,6 +517,13 @@ class PreprocessedSession:
     main_zone: np.ndarray | None = None       # (n_frames, n_animals)
     sec_zone: np.ndarray | None = None        # (n_frames, n_animals)
     report: PreprocessReport = field(default_factory=PreprocessReport)
+    # (n_frames, n_animals) bool -- True where jump_detect replaced an
+    # anomalous position. Captured by the pipeline rather than derived like
+    # was_interpolated, because it cannot be recovered by comparing raw_xy to
+    # the final array: smoothing runs afterwards and moves every position, so
+    # "differs from raw" stops isolating this step the moment it is enabled.
+    # None when jump detection did not run.
+    jump_replaced: np.ndarray | None = None
 
     # ── convenience pass-throughs ─────────────────────────────────────────────
 

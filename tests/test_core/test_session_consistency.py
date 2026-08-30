@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -213,7 +214,8 @@ def test_sessions_table_column_order_is_stable() -> None:
     assert list(df.columns) == [
         "session_id", "reader", "fps", "n_frames", "duration_s", "n_animals",
         "width_px", "height_px", "calibration_mode", "length_unit",
-        "px_per_cm", "is_calibrated", "is_identity_free", "error",
+        "px_per_cm", "is_calibrated", "is_identity_free",
+        "trajectory_source", "trajectory_sha256", "error",
     ]
 
 
@@ -243,3 +245,47 @@ def test_session_that_failed_before_summarising_still_gets_a_row() -> None:
 def test_table_of_only_failures_still_names_them() -> None:
     df = sessions_table([], errors={"a": "boom", "b": "boom"})
     assert list(df["session_id"]) == ["a", "b"]
+
+
+# ── provenance (trajectory hash) ──────────────────────────────────────────────
+
+
+def test_from_session_records_the_file_that_was_read() -> None:
+    """The reader falls back between formats, so the file that produced the
+    numbers cannot be re-derived from the folder afterwards."""
+    xy = np.zeros((10, 2, 2), dtype=np.float64)
+    session = Session(
+        session_id="s",
+        folder=".",
+        reader="idtrackerai",
+        video=VideoInfo(fps=25.0, n_frames=10, width_px=100, height_px=100),
+        n_animals=2,
+        trajectory_variant="with_gaps",
+        has_stable_identities=True,
+        raw_xy=xy,
+        trajectory_source=Path("sessions") / "s" / "trajectories" / "trajectories.npy",
+    )
+
+    summary = SessionSummary.from_session(
+        session, calibration_mode="scalar", trajectory_sha256="abc123"
+    )
+
+    # The name, not the absolute path: the path is machine-specific and would
+    # make otherwise-identical exports differ.
+    assert summary.trajectory_source == "trajectories.npy"
+    assert summary.trajectory_sha256 == "abc123"
+
+
+def test_summary_without_a_hash_says_so_rather_than_guessing() -> None:
+    """Pre-flight reports skip hashing; the field must be empty, not wrong."""
+    summary = _summary("a")
+    assert summary.trajectory_sha256 == ""
+    assert summary.trajectory_source is None
+
+
+def test_sessions_table_reports_a_missing_hash_as_null() -> None:
+    """An empty string in a checksum column reads as "hashed to nothing"."""
+    import pandas as pd
+
+    df = sessions_table([_summary("a")])
+    assert pd.isna(df.iloc[0]["trajectory_sha256"])

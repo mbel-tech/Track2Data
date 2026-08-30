@@ -243,11 +243,43 @@ class ProjectStore(QObject):
         self._set_session_identity(
             session_id, result.has_stable_identities, result.track_wo_identities
         )
+        self._set_session_input_hash(session_id, result)
         # The probe already read the full Session for that one boolean --
         # cache the rest of it too rather than discard it (see
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
+
+    def _set_session_input_hash(self, session_id: str, session: object) -> None:
+        """Record the SHA-256 of the trajectory file this session was read from.
+
+        Persisted (unlike SessionFacts) because it is the project's record of
+        *which* input it was configured against: Engine.run() compares against
+        it and says so when the source folder has changed underneath. Without
+        it, `SessionRef.sha256` stayed "" forever and the manifest's central
+        provenance claim was unverifiable.
+
+        Best-effort. A folder that cannot be hashed must not stop it being
+        added -- the run reports the missing checksum itself.
+        """
+        if self._manifest is None:
+            return
+        source = getattr(session, "trajectory_source", None)
+        if source is None:
+            return
+        from track2data.core.hashing import file_sha256
+
+        try:
+            digest = file_sha256(Path(source))
+        except OSError as exc:
+            self.append_log(f"_Could not hash `{source}` for `{session_id}`: {exc}_\n")
+            return
+
+        sessions = [
+            s.model_copy(update={"sha256": digest}) if s.session_id == session_id else s
+            for s in self._manifest.sessions
+        ]
+        self._manifest = self._manifest.model_copy(update={"sessions": sessions})
 
     def _set_session_identity(
         self,

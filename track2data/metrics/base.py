@@ -126,7 +126,7 @@ class Metric(ABC):
     requires_identity: bool
     output_columns: list[str]
     documentation: MetricDocumentation
-    # Most metrics (24 of 44 today) take no configuration at all --
+    # Most metrics (25 of 45 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.

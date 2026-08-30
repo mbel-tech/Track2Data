@@ -19,6 +19,22 @@ from track2data.preprocess.smoothing import smooth_trajectories
 from track2data.preprocess.validate import validate_coverage
 
 
+def _replaced_mask(before: np.ndarray, after: np.ndarray) -> np.ndarray:
+    """(n_frames, n_animals) bool: positions a step changed or removed.
+
+    "Was present and is no longer the same value" -- so a pre-existing NaN
+    left alone does not count, and neither does a position the step declined
+    to touch. ``equal_nan=True`` keeps an untouched NaN out of the mask; a
+    position replaced *by* NaN still lands in it, because it was present
+    before.
+    """
+    was_present = ~np.isnan(before[:, :, 0])
+    unchanged = np.isclose(
+        before[:, :, 0], after[:, :, 0], equal_nan=True
+    ) & np.isclose(before[:, :, 1], after[:, :, 1], equal_nan=True)
+    return was_present & ~unchanged
+
+
 def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     """Run the full preprocessing pipeline on a session.
 
@@ -61,9 +77,16 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # 2. Jump detection
+    # Captured by comparison, the same way PreprocessedSession.was_interpolated
+    # compares raw_xy to the final array. It has to happen here rather than at
+    # the end: smoothing (step 4) moves every position, so "differs from the
+    # input" stops isolating this step once it runs. detect_jumps returns a
+    # new array and never mutates its input, so `before_jumps` stays valid.
+    before_jumps = xy
     xy, step = detect_jumps(
         xy, config.jump, velocity_threshold_px_frame=session.velocity_threshold_px_frame
     )
+    jump_replaced = _replaced_mask(before_jumps, xy)
     report.steps.append(step)
 
     # 3. Identity-switch correction
@@ -97,4 +120,5 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
         xy=xy,
         kinematics=kinematics,
         report=report,
+        jump_replaced=jump_replaced,
     )

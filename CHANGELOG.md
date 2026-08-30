@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Input provenance: the manifest's central claim is now checkable.**
+  `SessionRef.sha256` was always `""`, so "these bytes produced these
+  numbers" — the whole point of the manifest for a tool whose deliverable
+  ends up in a figure — could not be verified by anyone.
+
+  The reader now records which trajectory file it actually read
+  (`Session.trajectory_source`); it has to, because `_load_payload` falls
+  back through the formats present in a folder, so the file that was read
+  is not always the highest-ranked one and cannot be re-derived afterwards.
+  Every run hashes that file and records the digest and filename in
+  `sessions.csv`. The GUI fills `SessionRef.sha256` on import, which also
+  makes `ProjectManifest.project_hash()` cover the inputs rather than only
+  the parameters.
+
+  That in turn gives a **staleness check**: when a session folder's
+  trajectory file no longer matches the hash the project recorded, the run
+  says so loudly. Silently re-exporting a source folder used to change what
+  a "reproduced" run meant, with nothing anywhere to notice.
+
+  Never fatal — an input that cannot be hashed costs provenance, not
+  results.
+
+- **D-11 Metric Input Provenance, and a `was_jump_replaced` per-frame
+  column.** No summary metric said how much of its input was real. A
+  session with 92 % coverage and one with 41 % produced indistinguishable
+  `path_length_px` rows; D-1 was the only handle, and it measures the
+  tracker's raw output rather than what the metrics consumed.
+
+  D-11 reports, per individual: `n_frames_used` (frames non-NaN *after*
+  preprocessing — a metric cannot be affected by a frame it never saw),
+  plus `frac_interpolated`, `frac_jump_replaced` and `frac_measured`.
+  Keyed on `(session_id, individual_id)`, the same key the exporters merge
+  summary metrics on, so any metric row can be joined to the quality of the
+  data behind it.
+
+  Separately, `master_fish_by_frame.csv` gains `was_jump_replaced`. This is
+  **new information, not a split of `was_interpolated`**, which was already
+  gap-fill-only by design: a jump-replaced position started life as a real
+  measurement that `jump_detect` judged implausible, and was previously
+  visible only as an aggregate count in `PreprocessReport`. The mask is
+  captured mid-pipeline, since smoothing moves every position afterwards
+  and "differs from the input" stops isolating the step once it runs.
+
 - **Cross-session consistency reporting, and a `sessions.csv` in every
   export.** Nothing previously guarded against pooling sessions that are
   not interchangeable. `fps` alone reaches the numbers in four places —

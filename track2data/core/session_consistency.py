@@ -68,6 +68,12 @@ class SessionSummary:
     # session -- which is the interesting case when other sessions have one.
     px_per_cm: float | None = None
     is_identity_free: bool = False
+    # SHA-256 of the trajectory file that produced this session's numbers,
+    # and its name. Empty/None when the hash was not computed -- pre-flight
+    # reports skip it, since hashing every input is a full extra read of
+    # every session and only the run itself needs the provenance record.
+    trajectory_sha256: str = ""
+    trajectory_source: str | None = None
 
     @property
     def duration_s(self) -> float:
@@ -88,8 +94,10 @@ class SessionSummary:
         calibration_mode: str,
         is_identity_free: bool = False,
         px_per_cm: float | None = None,
+        trajectory_sha256: str = "",
     ) -> SessionSummary:
         """Build from a freshly-read engine ``Session``."""
+        source = session.trajectory_source
         return cls(
             session_id=session.session_id,
             reader=session.reader,
@@ -102,6 +110,8 @@ class SessionSummary:
             calibration_mode=calibration_mode,
             px_per_cm=px_per_cm,
             is_identity_free=is_identity_free,
+            trajectory_sha256=trajectory_sha256,
+            trajectory_source=source.name if source is not None else None,
         )
 
 
@@ -237,6 +247,8 @@ def sessions_table(
             "px_per_cm": s.px_per_cm,
             "is_calibrated": s.is_calibrated,
             "is_identity_free": s.is_identity_free,
+            "trajectory_source": s.trajectory_source,
+            "trajectory_sha256": s.trajectory_sha256 or None,
             "error": errors.get(s.session_id),
         }
         for s in summaries
@@ -252,6 +264,7 @@ def sessions_table(
         columns=[
             "session_id", "reader", "fps", "n_frames", "duration_s", "n_animals",
             "width_px", "height_px", "calibration_mode", "length_unit",
-            "px_per_cm", "is_calibrated", "is_identity_free", "error",
+            "px_per_cm", "is_calibrated", "is_identity_free",
+            "trajectory_source", "trajectory_sha256", "error",
         ],
     )

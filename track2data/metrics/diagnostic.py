@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 
-from track2data.core.models import Session
+from track2data.core.models import PreprocessedSession, Session
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.references import (
     BERNARDIN_STIEFELHAGEN_2008,
@@ -830,11 +830,132 @@ class PhysicalPlausibilityViolations(Metric):
         return pd.DataFrame(rows, columns=self.output_columns)
 
 
+# ── D-11: Metric Input Provenance ─────────────────────────────────────────────
+
+
+class MetricInputProvenance(Metric):
+    """D-11: How much of each animal's metric input was actually measured.
+
+    D-1 reports coverage of ``Session.raw_xy`` -- the tracker's own output.
+    This reports what the *metrics* consumed, after gap-filling and jump
+    replacement, and how much of that was reconstructed rather than measured.
+
+    The distinction matters because without it a session with 92% real
+    coverage and one with 41% produce indistinguishable ``path_length_px``
+    rows. Keyed on (session_id, individual_id) -- the same key the exporters
+    merge summary metrics on -- so every metric row can be joined to the
+    quality of the data behind it.
+    """
+
+    id = "D-11"
+    name = "metric_input_provenance"
+    label = "Metric Input Provenance"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "individual_id",
+        "n_frames_total",
+        "n_frames_used",
+        "frac_frames_used",
+        "n_interpolated",
+        "frac_interpolated",
+        "n_jump_replaced",
+        "frac_jump_replaced",
+        "frac_measured",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Per individual: how many frames the metrics were computed from, "
+            "and what fraction of those were gap-filled or jump-replaced "
+            "rather than measured directly."
+        ),
+        formula_plain=(
+            "n_frames_used = count(~nan(preprocessed xy[:,k,0])); "
+            "frac_interpolated = count(was_interpolated[:,k]) / n_frames_used; "
+            "frac_jump_replaced = count(jump_replaced[:,k]) / n_frames_used; "
+            "frac_measured = 1 - frac_interpolated - frac_jump_replaced"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.was_interpolated",
+            "PreprocessedSession.jump_replaced",
+        ],
+        assumptions=[
+            "The denominator is the frames the metrics actually used (non-NaN "
+            "after preprocessing), not the session length -- a metric cannot "
+            "be affected by a frame it never saw.",
+            "A frame counts in at most one of interpolated/jump_replaced: "
+            "gap-fill acts on frames that were NaN, jump replacement on "
+            "frames that were not.",
+        ],
+        warnings=[
+            "A high frac_interpolated means the corresponding metric values "
+            "rest largely on interpolation rather than observation. Path "
+            "length and speed are the most affected: interpolating across a "
+            "gap draws a straight line, understating both.",
+            "frac_jump_replaced is zero whenever jump detection did not run, "
+            "which is not the same as no jumps being present.",
+        ],
+        citation=(
+            "Data-provenance convention for derived measures; no single "
+            "originating work"
+        ),
+    )
+
+    def compute(
+        self, session: PreprocessedSession, cfg: dict[str, Any] | None = None
+    ) -> pd.DataFrame:
+        n_frames = session.n_frames
+        n_animals = session.n_animals
+
+        used = ~np.isnan(session.xy[:, :, 0])       # (n_frames, n_animals)
+        interpolated = session.was_interpolated
+        replaced = (
+            session.jump_replaced
+            if session.jump_replaced is not None
+            else np.zeros_like(used)
+        )
+
+        rows = []
+        for k in range(n_animals):
+            n_used = int(used[:, k].sum())
+            n_interp = int((interpolated[:, k] & used[:, k]).sum())
+            n_replaced = int((replaced[:, k] & used[:, k]).sum())
+            # NaN rather than inf or 0 when nothing was usable: an animal with
+            # no frames is a real and important case, and 0/0 should read as
+            # "nothing to report" rather than as a number.
+            denom = float(n_used) if n_used else float("nan")
+            rows.append(
+                {
+                    "session_id": session.session_id,
+                    "individual_id": k,
+                    "n_frames_total": n_frames,
+                    "n_frames_used": n_used,
+                    "frac_frames_used": n_used / n_frames if n_frames else float("nan"),
+                    "n_interpolated": n_interp,
+                    "frac_interpolated": n_interp / denom,
+                    "n_jump_replaced": n_replaced,
+                    "frac_jump_replaced": n_replaced / denom,
+                    "frac_measured": (n_used - n_interp - n_replaced) / denom,
+                }
+            )
+        return pd.DataFrame(rows, columns=self.output_columns)
+
+
 # ── Convenience function ───────────────────────────────────────────────────────
 
 
-def compute_all_diagnostics(session: Session) -> dict[str, pd.DataFrame]:
-    """Run all 10 diagnostic metrics and return {metric_id: DataFrame}."""
+
+def compute_all_diagnostics(psess: PreprocessedSession) -> dict[str, pd.DataFrame]:
+    """Run every diagnostic metric and return {metric_id: DataFrame}.
+
+    Takes the PreprocessedSession, not the Session: D-1..D-10 all describe
+    the tracker's own output and read ``psess.session``, but D-11 describes
+    what the metrics consumed and needs the preprocessed arrays.
+    """
+    session = psess.session
     metrics: list[Metric] = [
         TrackingCoverage(),
         TrackingAccuracy(),
@@ -847,7 +968,9 @@ def compute_all_diagnostics(session: Session) -> dict[str, pd.DataFrame]:
         SwapOpportunityCount(),
         PhysicalPlausibilityViolations(),
     ]
-    return {m.id: m.compute(session) for m in metrics}
+    results = {m.id: m.compute(session) for m in metrics}
+    results[MetricInputProvenance.id] = MetricInputProvenance().compute(psess)
+    return results
 
 
 # ── Registration ──────────────────────────────────────────────────────────────
@@ -864,3 +987,4 @@ _register(FragmentLengthDistribution)
 _register(CrossingRate)
 _register(SwapOpportunityCount)
 _register(PhysicalPlausibilityViolations)
+_register(MetricInputProvenance)

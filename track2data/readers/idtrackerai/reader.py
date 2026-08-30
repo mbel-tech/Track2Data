@@ -76,7 +76,7 @@ class IDTrackerAiReader(SessionReader):
         # Load trajectory payload from the best available format, falling back
         # through hit.all_present when the highest-priority format (often h5,
         # idtracker.ai's own default) has no loader yet.
-        fmt_used, payload = self._load_payload(hit)
+        fmt_used, source_path, payload = self._load_payload(hit)
 
         # Load session.json once, up front: it is both a fallback source for
         # fps/width/height/version (some formats' payloads omit them -- see
@@ -125,6 +125,12 @@ class IDTrackerAiReader(SessionReader):
         if fragments_data is not None:
             session = session.model_copy(update={"fragments": fragments_data})
 
+        # Which file's bytes actually produced these numbers. Recorded rather
+        # than re-derived: _load_payload falls back through hit.all_present,
+        # so the file that was read is not always the highest-ranked one
+        # present, and nothing downstream could work it out from the folder.
+        session = session.model_copy(update={"trajectory_source": source_path})
+
         return session
 
     # ── private helpers ────────────────────────────────────────────────────────
@@ -138,9 +144,15 @@ class IDTrackerAiReader(SessionReader):
     }
 
     @classmethod
-    def _load_payload(cls, hit: ReaderHit) -> tuple[str, dict[str, Any]]:
+    def _load_payload(cls, hit: ReaderHit) -> tuple[str, Path, dict[str, Any]]:
         """
         Load the trajectory payload from the best *readable* format in *hit*.
+
+        Returns the path as well as the format, because the file that was
+        actually read is the one whose bytes have to be hashed for the
+        export's provenance record. It is not always the highest-ranked
+        format -- see the fallback walk below -- so it cannot be re-derived
+        from the folder afterwards.
 
         detect() ranks formats by priority (h5 first, per idtracker.ai's own
         default `trajectories_formats`), but not every format has a loader
@@ -185,7 +197,7 @@ class IDTrackerAiReader(SessionReader):
                     fmt,
                     path,
                 )
-            return fmt, result
+            return fmt, path, result
 
         available = ", ".join(fmt for fmt, _ in hit.all_present) or "none"
         raise ImportError_(
