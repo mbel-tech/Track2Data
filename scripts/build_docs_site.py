@@ -67,10 +67,23 @@ def _rewrite_links(text: str) -> str:
     )
 
 
+def _clear(directory: Path) -> None:
+    """Empty *directory* without removing it.
+
+    Removing the directory itself fails on Windows whenever anything holds a
+    handle to it -- a synced OneDrive checkout does, routinely -- and the
+    build has no reason to need the inode gone.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    for child in directory.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def main() -> None:
-    if SITE.exists():
-        shutil.rmtree(SITE)
-    SITE.mkdir(parents=True)
+    _clear(SITE)
 
     for source, page in PAGES.items():
         if not source.exists():
