@@ -872,14 +872,27 @@ After Stage 9 the user has, on disk:
 ├── .t2d_cache/                   # content-addressed feather cache
 └── exports/
     └── 2026-05-14T1410/
-        ├── manifest.json         # hash + parameters + SHA-256s
-        ├── README.md             # one-page summary
-        ├── master_fish_by_frame.csv
-        ├── trial_activity_summary_long.csv
-        ├── trial_occupancy_long.csv
-        ├── group_dynamics_summary.csv
-        └── Track2Data_feb-experiment.xlsx
+        ├── PROJECT_SUMMARY.md    # what ran, what failed, what not to pool
+        ├── sessions.csv          # per-session fps, group size, calibration
+        ├── session_trial01/      # one directory per session
+        │   ├── manifest.json     # hash + parameters + SHA-256s
+        │   ├── README.md         # one-page summary for this session
+        │   ├── master_fish_by_frame.csv
+        │   ├── trial_activity_summary.csv
+        │   ├── group_dynamics_summary.csv
+        │   └── Track2Data_feb-experiment.xlsx
+        └── session_trial02/
+            └── ...
 ```
+
+The two files at the run root describe the **project**; everything else
+describes one session. `sessions.csv` is the machine-readable half — one
+row per session with frame rate, frame count, duration, group size, video
+resolution, calibration state, and the error for any session that failed.
+`PROJECT_SUMMARY.md` is the human half, and leads with anything that makes
+the sessions non-interchangeable (mixed frame rates, mixed group sizes,
+mixed calibration), because a result pooled across those without
+accounting for them will be wrong.
 
 To reproduce: send a reviewer the `project.t2d.json` plus the
 original `session_*` folders. The reviewer runs:

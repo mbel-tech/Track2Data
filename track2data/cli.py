@@ -147,6 +147,12 @@ def validate(project: str) -> None:
     engine = Engine(manifest)
     issues = engine.validate()
 
+    # Non-blocking, and printed whether or not there are blocking issues:
+    # a mixed-frame-rate project is a legitimate design, but silently
+    # pooling it is the mistake this exists to prevent.
+    for warning in engine.consistency_warnings():
+        click.echo(f"[consistency] {warning}", err=True)
+
     if not issues:
         click.echo(f"OK — '{manifest.project_name}' is ready to run.")
     else:

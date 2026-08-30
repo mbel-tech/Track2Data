@@ -323,7 +323,20 @@ class MainWindow(QMainWindow):
 
         from track2data.api import Engine
 
-        issues = Engine(self._store.manifest).validate()
+        engine = Engine(self._store.manifest)
+        issues = engine.validate()
+        # Non-blocking by design: pooling 30 fps and 60 fps sessions is a
+        # legitimate deliberate choice and a serious accident, and only the
+        # user can tell those apart. Reported either way -- a project can be
+        # perfectly valid and still not be safe to pool.
+        warnings = engine.consistency_warnings()
+        if warnings:
+            self._store.append_log(
+                "### Session consistency\n"
+                + "\n".join(f"- {w}" for w in warnings)
+                + "\n"
+            )
+
         if issues:
             self._store.append_log(
                 "### Validation failed\n" + "\n".join(f"- {i}" for i in issues) + "\n"
@@ -335,7 +348,16 @@ class MainWindow(QMainWindow):
             )
         else:
             self._store.append_log("### Validation passed\nReady to run.\n")
-            QMessageBox.information(self, "Pipeline validation", "Ready to run.")
+            if warnings:
+                QMessageBox.warning(
+                    self,
+                    "Pipeline validation",
+                    "Ready to run, but these sessions are not interchangeable:\n\n"
+                    + "\n\n".join(warnings)
+                    + "\n\nThe run will proceed and record this in the export.",
+                )
+            else:
+                QMessageBox.information(self, "Pipeline validation", "Ready to run.")
         self._run_action.setEnabled(not issues)
 
     def _action_run(self) -> None:

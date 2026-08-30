@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Cross-session consistency reporting, and a `sessions.csv` in every
+  export.** Nothing previously guarded against pooling sessions that are
+  not interchangeable. `fps` alone reaches the numbers in four places —
+  `compute_kinematics` scales speed and acceleration by it, `JumpCfg`
+  thresholds are per *frame*, `SmoothCfg.window` is a frame count (5 frames
+  is 167 ms at 30 fps and 83 ms at 60 fps), and path length is a sum over
+  inter-frame steps — so a project pooling 30 fps and 60 fps sessions, a
+  normal consequence of a camera change mid-study, produced systematically
+  different metric values per group with nothing in the export to say so.
+
+  New `track2data.core.session_consistency` reports every way a project's
+  sessions disagree: frame rate, group size, video resolution, calibration
+  mode, and calibration availability. Each warning names the affected
+  sessions and the consequence, not just the discrepancy.
+
+  Surfaced in three places: `Engine.consistency_warnings()` for
+  programmatic use, the GUI's Validate action and the CLI's `validate`
+  command, and every run's output.
+
+  **These warn, they do not block.** A mixed-frame-rate design is
+  legitimate when the analyst knows and can model it; the failure being
+  prevented is not knowing. `Engine.validate()` keeps returning only
+  blocking issues.
+
+- **Two project-level files at the root of every run's output directory.**
+  `sessions.csv` — one row per session with `fps`, `n_frames`,
+  `duration_s`, `n_animals`, video resolution, calibration mode,
+  `length_unit`, the `px_per_cm` actually used, and identity-free state, so
+  a downstream analyst can filter or build a covariate directly. Sessions
+  that failed keep a row carrying their id and error, because a silently
+  shorter table reads as a smaller study.
+
+  `PROJECT_SUMMARY.md` — the human-readable counterpart, leading with
+  anything that makes the sessions non-poolable. Named `PROJECT_SUMMARY.md`
+  rather than `README.md` so it cannot be confused with the per-session
+  README the `readme` exporter writes into each session folder.
+
+  Both are built from summaries the run already collected, so they cost no
+  additional session reads, and neither can fail a run: a bookkeeping file
+  that cannot be written is logged, not raised.
+
 ### Fixed
 
 - **PP-3 identity-switch correction now corrects identity switches.** The

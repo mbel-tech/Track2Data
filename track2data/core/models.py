@@ -17,10 +17,16 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    # Type-only: session_consistency imports Session from here, so a runtime
+    # import would close the cycle. SessionRunResult is a plain dataclass, not
+    # a pydantic model, so its annotations are never evaluated.
+    from track2data.core.session_consistency import SessionSummary
 
 # Imported from the module, not the package, to keep this import leaf-level:
 # track2data/__init__.py re-exports __version__ from here too, and models.py
@@ -455,6 +461,11 @@ class SessionRunResult:
     preprocess_report: PreprocessReport | None = None
     duration_s: float = 0.0
     error: str | None = None
+    # Per-session facts (fps, group size, realised calibration) carried back
+    # so run() can write sessions.csv and report cross-session heterogeneity
+    # without re-reading 70 session folders. Small and frozen, so it does not
+    # compromise this class's picklability. None when import itself failed.
+    summary: SessionSummary | None = None
 
 
 @dataclass
