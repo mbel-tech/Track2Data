@@ -20,7 +20,10 @@ The engine, the GUI, and the packaging pipeline are all built and green.
 | Metadata join wired into `Engine` | ✅ Implemented |
 | Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |
 | Standalone binaries (Windows / macOS / Linux) | ✅ Built + validated in CI |
-| Test suite | ✅ ~1170 passing (plus `r_parity` and `corpus_local` gates) |
+| Test suite | ✅ ~1760 passing (plus `r_parity` and `corpus_local` gates) |
+| Preprocessed-session cache, parallel runs, in-session cancel | ✅ Implemented (D-019, D-020); parallel not yet benchmarked on the real corpus |
+| Trajectory viewer, zone tools, calibration ruler, stage status / Next gating | ✅ Implemented (D-021, D-022) |
+| User guide with screenshots (`docs/guide/`) | ✅ Generated from the real app |
 | CI workflow | ✅ Green across a 6-cell OS × Python matrix |
 
 Remaining work is release mechanics, not implementation — see **M5** below.
@@ -232,9 +235,20 @@ Z-9 follow a slot across frames, so they now declare
 
 ---
 
+## Open after the critical-issues audit
+
+Tracked in [`docs/CRITICAL_ISSUES.md`](CRITICAL_ISSUES.md):
+
+- **Per-animal metadata** (SCI-03): needs a composite `(session_id, individual_id)` join, which reverses D-010.
+- **Timepoint binning**: `MetricSelection.timepoint_minutes` is stored but never used by the engine.
+- **Parallel benchmark**: measure `n_workers > 1` on real, long sessions (D-020).
+- **Probe pool**: session probes still share the single-thread `TaskRunner` pool with pipeline runs (D-018).
+- **idtracker.ai v4 reader**: stub; needs sample data (D-012).
+- **Signed binaries**: infrastructure exists; needs certificates and a published release (`docs/CODE_SIGNING.md`).
+
 ## Repository visibility
 
-Private until v1.0 release. Switch to public after M5 tag is cut.
+The repository is public (see M5).
 
 ---
 
@@ -243,5 +257,5 @@ Private until v1.0 release. Switch to public after M5 tag is cut.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — dev setup, TDD workflow, branch policy
 - [`docs/TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md) — system architecture, testing strategy
 - [`docs/ENGINE_DESIGN.md`](ENGINE_DESIGN.md) — engine internals and module layout
-- [`docs/METRICS_SPEC.md`](METRICS_SPEC.md) — 29 behavioural metrics with formulas and citations
+- [`docs/METRICS_SPEC.md`](METRICS_SPEC.md) — 44 behavioural metrics with formulas and citations
 - [`docs/UI_DESIGN.md`](UI_DESIGN.md) — 14-screen PySide6 GUI specification

@@ -244,7 +244,7 @@ support with no real fixture to test against would be speculation, not
 engineering. Revisit if v4 sample data becomes available; re-add the
 entry-point line at that point, not before.
 
-### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now
+### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now — CLOSED
 
 **Decision:** `Engine.run_all()` continues to loop over sessions
 sequentially rather than calling `core/parallel.map_sessions()`.
@@ -289,11 +289,14 @@ dataclasses directly, sidestepping Parquet) — an API design question,
 not a missing function call. Deferred until that's designed
 deliberately, with its own tests, rather than improvised here.
 
+
+**Closed (critical-issues audit):** the cache is wired in by D-019 and parallel runs by D-020.
+
 ---
 
 ## Phase 3 — GUI wiring (M3)
 
-### D-014 · `Engine.run()` accepts `n_workers` but only implements `n_workers=1`
+### D-014 · `Engine.run()` accepts `n_workers` but only implements `n_workers=1` — CLOSED
 
 **Decision:** `Engine.run(out_dir, exporters=None, *, progress=None,
 n_workers=1)` accepts an `n_workers` parameter (per issue #19's
@@ -323,6 +326,9 @@ as part of `Engine.run()`'s signature, and `ui/store/task_runner.py`
 (issue #20) is being built immediately after this and will call
 `Engine.run()`; adding the parameter now avoids a second signature
 change once parallel execution does land.
+
+
+**Closed (critical-issues audit):** `n_workers > 1` now runs in a spawn process pool; see D-020.
 
 ---
 
