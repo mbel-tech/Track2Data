@@ -86,8 +86,12 @@ class IDTrackerAiV5Reader(SessionReader):
     """Reader for the current (v5) idtracker.ai output format."""
 
     name = "idtrackerai_v5"
+    display_name: ClassVar[str] = "idtracker.ai v5 (legacy layout)"
     accepts_allow_pickle: ClassVar[bool] = True
     priority = 10
+    # The legacy layout was designed from idtracker.ai v5 sessions; body_length_px stays None.
+    verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "real_sample"
+    provides_body_length: ClassVar[bool] = False
 
     # ── detect ────────────────────────────────────────────────────────────────
 

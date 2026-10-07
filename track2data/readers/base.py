@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from track2data.core.models import Session
+from track2data.readers.params import ReaderParameter
 
 
 class SessionReader(ABC):
@@ -28,6 +29,22 @@ class SessionReader(ABC):
     #: that declare they understand it. A reader that loads pickled data
     #: without declaring this is trusting every file it is pointed at.
     accepts_allow_pickle: ClassVar[bool] = False
+    #: Name shown in the confirm dialog ("DeepLabCut (CSV/H5)"). Empty falls back to ``name``.
+    display_name: ClassVar[str] = ""
+    #: Options the reader must be told because its files do not say (readers/params.py).
+    #: Empty means it takes none, and ``read`` is called without ``options``. A reader that
+    #: declares parameters also accepts a keyword-only ``options`` mapping on ``read``.
+    parameters: ClassVar[tuple[ReaderParameter, ...]] = ()
+    #: "real_sample": tested against real tracker output. "synthetic_only": built from the
+    #: documented layout alone (DECISIONS D-012). Shown as a badge, recorded in provenance.
+    verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "synthetic_only"
+    #: Whether coordinates are in the image's pixel frame (zones and the background image only
+    #: make sense then), or in physical units that are / are not aligned with that frame.
+    coordinate_frame: ClassVar[Literal["image_px", "physical_aligned", "physical_unaligned"]] = (
+        "image_px"
+    )
+    #: Whether the reader supplies per-animal body length (the default calibration needs it).
+    provides_body_length: ClassVar[bool] = False
 
     @classmethod
     @abstractmethod
@@ -38,6 +55,9 @@ class SessionReader(ABC):
     def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """
         Parse *folder* and return a Session.
+
+        *folder* is the session folder, or its primary file for single-file formats. A folder
+        that holds several sessions raises ``SESSION_AMBIGUOUS`` listing the candidates.
 
         Must not modify any file inside *folder* (FR-IMP-5).
         Raises DataValidationError on unrecoverable format problems.

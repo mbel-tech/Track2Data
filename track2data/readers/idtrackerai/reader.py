@@ -16,7 +16,7 @@ import contextlib
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
@@ -52,8 +52,13 @@ class IDTrackerAiReader(SessionReader):
     """
 
     name = "idtrackerai"
+    display_name: ClassVar[str] = "idtracker.ai"
     accepts_allow_pickle: ClassVar[bool] = True
     priority = 20  # Higher than the legacy v5 reader (priority=10).
+    # Tested against the real 70-session idtracker.ai 6.0.13 corpus; its sessions carry the
+    # per-animal body length the default 'bodylength' calibration needs.
+    verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "real_sample"
+    provides_body_length: ClassVar[bool] = True
 
     # ── SessionReader protocol ─────────────────────────────────────────────────
 
