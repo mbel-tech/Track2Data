@@ -138,6 +138,34 @@ Every change to a metric, error code, or user-visible message must update the co
 
 The spec is the contract; code that diverges from spec is a bug.
 
+### Adding a reader (a new tracking software)
+
+The foundation is in `track2data/readers/` and designed in `docs/tracker-formats/`.
+A reader for a new tracker is a `SessionReader` subclass; the checklist:
+
+1. **Tests first, on real files where the format is a container.** Add the fixture to
+   `tests/real_samples/fixtures_manifest.json` (URL, sha256, licence, attribution) and
+   flip that tracker's contract cases from XFAIL to PASS. A text layout documented well
+   enough may ship with `verification = "synthetic_only"`; HDF5, MAT, NPZ and SQLite
+   need a real sample (DECISIONS D-029).
+2. **Declare it honestly.** `name` is saved in project files, so it is frozen once
+   released. Set `display_name`, `verification`, `coordinate_frame`,
+   `provides_body_length` and `provides_identification_quality` for what the reader
+   really supplies, and `parameters` for everything the files do not record (frame
+   rate, frame size, which keypoint). A required option that is missing must raise
+   `READER_OPTION_MISSING`, never fall back to a default (D-028).
+3. **`discover(index, peek)` is a pure function of a `ScanIndex`.** It may read headers
+   through `peek` and nothing else: no unpickling, no writes, no file opened by
+   other means (D-027). Report HIGH only with a structural marker and no rival, and
+   make sure the reader's fixtures give **zero** HIGH on every other tracker's.
+4. **`read(path, *, options)` never modifies the input folder** (FR-IMP-5), takes the
+   session folder or its primary file, and raises coded errors that carry a
+   `remediation`. Declare `accepts_allow_pickle` only if it can load code from a file.
+5. **Register it** by importing it in `readers/__init__.py` (built-in) or through the
+   `track2data.readers` entry point (plug-in).
+6. **Document it:** a reader card in `docs/tracker-formats/README.md`, new error codes
+   in `docs/USER_WORKFLOW.md` §6, a `CHANGELOG.md` entry.
+
 ### Metric references
 
 Every specific, findable work a metric cites lives in exactly one place: `track2data/metrics/references.py`,

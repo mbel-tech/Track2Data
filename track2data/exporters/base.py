@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -72,6 +73,21 @@ class SessionProvenance:
     # sessions in one analysis without recording which is which is a
     # reproducibility hazard.
     blob_body_length_source_file: str | None = None
+
+    # Which software produced the trajectories and how the reader that read them was chosen.
+    # Every field above that is about idtracker.ai stays empty for any other tracker; these are
+    # what a Methods section needs from a session that did not come from idtracker.ai. A reader
+    # written from documentation alone is not a reader tested against real output, and the
+    # export has to say which one it was.
+    #   source_software     -- the reader's display name ("idtracker.ai", "DeepLabCut")
+    #   reader_verification -- "real_sample" | "synthetic_only"; None = reader not registered
+    #   reader_chosen_by    -- "detected" | "user"; None = recorded before readers were saved
+    source_software: str | None = None
+    reader_verification: str | None = None
+    reader_options: dict[str, Any] = field(default_factory=dict)
+    reader_chosen_by: str | None = None
+    detection_confidence: str | None = None
+    source_files: tuple[str, ...] = ()
 
 
 @dataclass

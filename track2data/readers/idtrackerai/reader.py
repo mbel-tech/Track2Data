@@ -14,19 +14,29 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
+from track2data.core.ids import default_session_id
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
+from track2data.readers.detection import Confidence, Detection, SessionCandidate
+from track2data.readers.discovery import claim_sessions
 from track2data.readers.idtrackerai.custom_artefacts import (
     load_bbox_summary,
     load_bbox_table,
     load_inconsistent_frames,
     load_matching_results,
 )
-from track2data.readers.idtrackerai.detect import ReaderHit, detect
+from track2data.readers.idtrackerai.detect import (
+    TRAJECTORY_ARTEFACTS,
+    VIDEO_OBJECT_NAME,
+    ReaderHit,
+    detect,
+    hit_from_index,
+    is_v5_layout,
+)
 from track2data.readers.idtrackerai.formats.csv_bundle import load_csv_bundle
 from track2data.readers.idtrackerai.formats.h5 import load_h5
 from track2data.readers.idtrackerai.formats.npy import load_npy
@@ -39,8 +49,38 @@ from track2data.readers.idtrackerai.session_json import (
     parse_roi_string,
     parse_timers_to_durations,
 )
+from track2data.readers.index import ScanIndex
+from track2data.readers.peek import Peeker
 
 logger = logging.getLogger(__name__)
+
+
+def _trajectories_subfolder_hint(
+    cls: type[SessionReader], index: ScanIndex
+) -> Detection | None:
+    """A LOW suggestion for someone who picked a session's own ``trajectories/`` folder.
+
+    The session is the folder above it, so that is what is proposed, and the evidence says why.
+    """
+    for root in index.roots:
+        entry = index.entry(root)
+        if entry is None or not entry.is_dir or entry.name != "trajectories":
+            continue
+        names = {child.name for child in index.children(root)}
+        if any(name in names for _, name in TRAJECTORY_ARTEFACTS):
+            parent = root.parent
+            return Detection(
+                reader=cls.name,
+                display_name=cls.display_name,
+                confidence=Confidence.LOW,
+                evidence=(
+                    "the folder you picked is a session's `trajectories` subfolder; "
+                    "the session is its parent folder",
+                ),
+                sessions=(SessionCandidate(session_id=default_session_id(parent), source=parent),),
+                verification=cls.verification,
+            )
+    return None
 
 
 class IDTrackerAiReader(SessionReader):
@@ -52,14 +92,62 @@ class IDTrackerAiReader(SessionReader):
     """
 
     name = "idtrackerai"
+    display_name: ClassVar[str] = "idtracker.ai"
     accepts_allow_pickle: ClassVar[bool] = True
     priority = 20  # Higher than the legacy v5 reader (priority=10).
+    # Tested against the real 70-session idtracker.ai 6.0.13 corpus; its sessions carry the
+    # per-animal body length the default 'bodylength' calibration needs.
+    verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "real_sample"
+    provides_body_length: ClassVar[bool] = True
+    provides_identification_quality: ClassVar[bool] = True
 
     # ── SessionReader protocol ─────────────────────────────────────────────────
 
     @classmethod
     def detect(cls, folder: Path) -> bool:
-        return detect(folder) is not None
+        hit = detect(folder)
+        if hit is None:
+            return False
+        # The legacy v5 layout shares trajectories.npy but is a raw array beside a
+        # video_object.npy. Leave it to the v5 reader instead of claiming it and then failing
+        # with IDT_FORMAT_AMBIGUOUS (the header is peeked, nothing is unpickled).
+        return not is_v5_layout(
+            hit, has_video_object=(folder / VIDEO_OBJECT_NAME).exists(), peek=Peeker()
+        )
+
+    @classmethod
+    def discover(cls, index: ScanIndex, peek: Peeker) -> list[Detection]:
+        def accept(folder: Path) -> SessionCandidate | None:
+            hit = hit_from_index(index, folder)
+            if hit is None:
+                return None
+            has_video_object = index.child(folder, VIDEO_OBJECT_NAME) is not None
+            if is_v5_layout(hit, has_video_object=has_video_object, peek=peek):
+                return None
+            return SessionCandidate(
+                session_id=default_session_id(folder),
+                source=folder,
+                files=tuple(path for _, path in hit.all_present),
+            )
+
+        sessions = claim_sessions(index, accept)
+        if sessions:
+            artefacts = sorted({f.name for s in sessions for f in s.files})
+            return [
+                Detection(
+                    reader=cls.name,
+                    display_name=cls.display_name,
+                    confidence=Confidence.HIGH,
+                    evidence=(
+                        f"{len(sessions)} folder(s) with a trajectories/ subfolder "
+                        f"holding {', '.join(artefacts)}",
+                    ),
+                    sessions=tuple(sessions),
+                    verification=cls.verification,
+                )
+            ]
+        hint = _trajectories_subfolder_hint(cls, index)
+        return [hint] if hint is not None else []
 
     def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """Parse *folder* and return a Session.
@@ -71,7 +159,13 @@ class IDTrackerAiReader(SessionReader):
         """
         return self._read(folder, light=False, allow_pickle=allow_pickle)
 
-    def probe(self, folder: Path, *, allow_pickle: bool = False) -> Session:
+    def probe(
+        self,
+        folder: Path,
+        *,
+        allow_pickle: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> Session:
         """Session facts without the bulky opportunistic artefacts.
 
         Skips the bounding-box tables, matching results, inconsistent-frame
@@ -81,6 +175,7 @@ class IDTrackerAiReader(SessionReader):
 
         ``allow_pickle`` is the same consent ``read`` takes: a probe loads the
         same trajectory file, so it must be refused (or allowed) the same way.
+        ``options`` is part of the probe contract; this reader takes none.
         """
         return self._read(folder, light=True, allow_pickle=allow_pickle)
 

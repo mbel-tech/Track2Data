@@ -1,0 +1,213 @@
+{
+ "_comment": "Fixtures are NOT redistributed: they are downloaded at test time from `url` and verified against `sha256`. A hash mismatch fails the test (upstream drift).",
+ "files": {
+  "DLC_single-mouse_EPM.predictions.h5": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/DLC_single-mouse_EPM.predictions.h5",
+   "sha256": "e9c5a61790d6881d5639b2fd7c1c4afcb8521840d3d9a1bb613595529e06a7fc",
+   "bytes": 3755001,
+   "licence": "CC BY 4.0 (movement-sample-data repo; per-file terms in its metadata.yaml)",
+   "attribution": "Loukia Katsouri via movement-sample-data",
+   "group": "dlc"
+  },
+  "DLC_two-mice.predictions.csv": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/DLC_two-mice.predictions.csv",
+   "sha256": "6e891ab4e14a3ad74451ed0899f770b47aa3eb959d9824d3782827297d7c75e0",
+   "bytes": 29244920,
+   "licence": "CC BY 4.0 (movement-sample-data repo; per-file terms in its metadata.yaml)",
+   "attribution": "Dimokratis Karamanlis via movement-sample-data",
+   "group": "dlc"
+  },
+  "EKS_IBL-paw_multicam_left.predictions.csv": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/EKS_IBL-paw_multicam_left.predictions.csv",
+   "sha256": "10499eda7321d4da9212f318a7bae654b24a0ee5fbe0557d714cdb55959addeb",
+   "bytes": 172277,
+   "licence": "CC BY 4.0 (movement-sample-data repo; per-file terms in its metadata.yaml)",
+   "attribution": "Matt Whiteway via movement-sample-data",
+   "group": "lightningpose"
+  },
+  "SLEAP_three-mice_Aeon_mixed-labels.analysis.h5": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/SLEAP_three-mice_Aeon_mixed-labels.analysis.h5",
+   "sha256": "899651ec027eb8fd6181246f89142ad1c0a40f14394fc8144d44ea093c0e137d",
+   "bytes": 49619,
+   "licence": "CC BY 4.0 (movement-sample-data repo; per-file terms in its metadata.yaml)",
+   "attribution": "Chang Huan Lo via movement-sample-data",
+   "group": "sleap"
+  },
+  "SLEAP_single-mouse_EPM.analysis.h5": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/SLEAP_single-mouse_EPM.analysis.h5",
+   "sha256": "33f8e21961ded2081495a75997391835ce4596049d8ab497ebd761124d9b0ac2",
+   "bytes": 1225927,
+   "licence": "CC BY 4.0 (movement-sample-data repo; per-file terms in its metadata.yaml)",
+   "attribution": "Niko Sirmpilatze via movement-sample-data",
+   "group": "sleap"
+  },
+  "anipose_mouse-paw_anipose-paper.triangulation.csv": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/anipose_mouse-paw_anipose-paper.triangulation.csv",
+   "sha256": "5ccd549bc122154b0e4a6bd01b4a8ee6f21c28dc3e1651a19dd0dd09f89d64e6",
+   "bytes": 84230,
+   "licence": "CC0 (original Anipose Dryad deposit, per movement-sample-data README)",
+   "attribution": "Tuthill lab, Anipose paper data (doi 10.5061/dryad.nzs7h44s4)",
+   "group": "anipose"
+  },
+  "TRex_five-locusts.zip": {
+   "url": "https://gin.swc.ucl.ac.uk/neuroinformatics/movement-sample-data/raw/master/poses/TRex_five-locusts.zip",
+   "sha256": "a0619765b826466c0a8e015f40dfcf2bae35ba4a046ae641be829b8174707ad5",
+   "bytes": 1794555,
+   "licence": "CC BY 4.0 (movement-sample-data repo; per-file terms in its metadata.yaml)",
+   "attribution": "Angela Albi via movement-sample-data",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_Coordinates.csv": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/AnimalTAOutput/2602_ISA3080_Low_5_Coordinates.csv",
+   "sha256": "5d89cfa21dc760cfda668d413e79c99c921367c3bdbf3fa5c40b13b2332cf6f9",
+   "bytes": 5058741,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "animalta"
+  },
+  "2602_ISA3080_Low_5.mat": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/CtraxOutput/2602_ISA3080_Low_5.mat",
+   "sha256": "19015a3bcc340d09f44e15bcf26f4275173a7f9b63f7cdf3797158d388fdd3d9",
+   "bytes": 7861976,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "ctrax"
+  },
+  "Tracking_RealSpace_1.txt": {
+   "url": "https://raw.githubusercontent.com/AmanRathoreP/ToxTrac-Data-Analyser/master/samples/Sample-1-Open-Field-side-by-side/Tracking_RealSpace_1.txt",
+   "sha256": "e51eb254ffc54100330a0581618a130d1fec9c622a8fe0b67a3fe95861bfd7c9",
+   "bytes": 528491,
+   "licence": "Code Credit License 1.1.0 (repository); data terms not stated separately",
+   "attribution": "AmanRathoreP/ToxTrac-Data-Analyser samples",
+   "group": "toxtrac"
+  },
+  "FrozenEvents_1.txt": {
+   "url": "https://raw.githubusercontent.com/AmanRathoreP/ToxTrac-Data-Analyser/master/samples/Sample-1-Open-Field-side-by-side/FrozenEvents_1.txt",
+   "sha256": "3c20c05a2cb9f15661c5fe0d66c139826aaf885f087ed40ff37ed5aeb40c4be8",
+   "bytes": 146,
+   "licence": "Code Credit License 1.1.0 (repository); data terms not stated separately",
+   "attribution": "AmanRathoreP/ToxTrac-Data-Analyser samples",
+   "group": "toxtrac"
+  },
+  "Stats_1.txt": {
+   "url": "https://raw.githubusercontent.com/AmanRathoreP/ToxTrac-Data-Analyser/master/samples/Sample-1-Open-Field-side-by-side/Stats_1.txt",
+   "sha256": "c52ac73906912f502dbb5067be19b22fddc2647c2e9ba9d222be3500870f451a",
+   "bytes": 858,
+   "licence": "Code Credit License 1.1.0 (repository); data terms not stated separately",
+   "attribution": "AmanRathoreP/ToxTrac-Data-Analyser samples",
+   "group": "toxtrac"
+  },
+  "test_fish0.csv": {
+   "url": "https://raw.githubusercontent.com/mooch443/trex/main/videos/compare_data_automatic/test_fish0.csv",
+   "sha256": "7c305659d7965fbebd60848eee350efdc4e6ee5507fd905e975e988e5df02342",
+   "bytes": 5666,
+   "licence": "repository licence not asserted (GitHub reports NOASSERTION)",
+   "attribution": "mooch443/trex videos/compare_data_automatic",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish0.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish0.npz",
+   "sha256": "d09735b9a8f2260cf599242e5da41499904e17da0644e3653e28c25a4d098803",
+   "bytes": 1575802,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish1.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish1.npz",
+   "sha256": "fd76a5b797263ed707cff495c54bb991185de1be73cb09fbe3c7527160b3c331",
+   "bytes": 1576102,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish2.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish2.npz",
+   "sha256": "b2f2ee3792dcd3d0de8879b45ddf8ef14a50b5266d890438610f6329afb7ced1",
+   "bytes": 1568670,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish3.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish3.npz",
+   "sha256": "ca993375ece15c4700d5de73b3d5fc9d0654eb2760ed4bdfffbdebcf6d51666d",
+   "bytes": 1583398,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish4.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish4.npz",
+   "sha256": "7fc37ca8a339f518ddd6ec564af78c84d865141c44a5a737b0e5786c827dd58a",
+   "bytes": 1572126,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish5.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish5.npz",
+   "sha256": "95d785ecd6a60cd92669a6f19d1c1d6ec1a6b4a23d63ade6ca906a893d7b713d",
+   "bytes": 1570774,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish6.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish6.npz",
+   "sha256": "16ba697cacc20427d25a7489a05416ea186333954cd7e231d8415f85d6f649ba",
+   "bytes": 1574230,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish7.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish7.npz",
+   "sha256": "53049a2d85489f3bdb3de261e43481b5458417e5a4baa611727b55bbfffc36c4",
+   "bytes": 1576390,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish8.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish8.npz",
+   "sha256": "1986c53a00b2ae5bfb03fa32f930a8997ddb36653ec96f1345e3779a2178865d",
+   "bytes": 1559166,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish9.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish9.npz",
+   "sha256": "7419dac34c2b9a13e3247150a808db6ac7b7ab8d2d3b5ef38a2db750e0fea553",
+   "bytes": 1571750,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish10.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish10.npz",
+   "sha256": "fcbeb8e8c1c734026c2ba57683d547690936f795030707c73d95d6f6b033e24f",
+   "bytes": 1568022,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish11.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish11.npz",
+   "sha256": "feac35479ee6c09f252106d0c8d843fdb78b782f0537ac1a6091defbce38bb03",
+   "bytes": 1577302,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  },
+  "2602_ISA3080_Low_5_fish12.npz": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/main/sample_1/TRexOutput/2602_ISA3080_Low_5_fish12.npz",
+   "sha256": "c2bc4660d1c49c9149c7ba9d2bdc22c700505dedff797cc226639b6ab126700a",
+   "bytes": 1585918,
+   "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
+   "attribution": "qpetitjean/MoveR_SampleData sample_1",
+   "group": "trex"
+  }
+ }
+}

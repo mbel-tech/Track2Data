@@ -59,6 +59,9 @@ artifacts/
 docs/site/
 site/
 
+# Real-sample fixture cache (defaults to a local, unsynced directory; this is for other machines)
+tests/real_samples/.fixture_cache/
+
 # Local git worktrees
 .worktrees/
 

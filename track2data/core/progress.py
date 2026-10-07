@@ -29,7 +29,7 @@ from typing import Literal
 
 from track2data.core.errors import Track2DataError
 
-Stage = Literal["import", "preprocess", "metrics", "export", "session", "run"]
+Stage = Literal["import", "preprocess", "metrics", "export", "session", "run", "scan"]
 
 
 @dataclass(frozen=True)

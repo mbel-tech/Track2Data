@@ -18,6 +18,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
+from track2data.core.ids import default_session_id
 from track2data.core.models import (
     CalibrationConfig,
     ExportTarget,
@@ -263,7 +264,7 @@ class ProjectStore(QObject):
         if any(s.folder.resolve() == folder.resolve() for s in self._manifest.sessions):
             self.append_log(f"_Skipped already-imported session folder `{folder}`_\n")
             return
-        session_id = folder.name
+        session_id = default_session_id(folder)
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
         sessions = [*list(self._manifest.sessions), ref]
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
@@ -274,14 +275,27 @@ class ProjectStore(QObject):
     def _submit_probe(self, session_id: str, folder: Path) -> None:
         from track2data.readers import probe_session
 
+        manifest = self._manifest
+        ref = next(
+            (r for r in (manifest.sessions if manifest else []) if r.session_id == session_id),
+            None,
+        )
         # The project's consent travels with the probe: it opens the same
         # trajectory file a read would, so a pickled-only session must be
         # refused (and prompt the user) here exactly as it is when it runs.
-        allow_pickle = (
-            self._manifest.security.allow_pickle_trajectories if self._manifest else False
-        )
+        allow_pickle = manifest.security.allow_pickle_trajectories if manifest else False
+        # A session whose reader was chosen is probed by that reader with its saved
+        # options, never detected again: another reader could read the same files into
+        # different numbers, and one that needs the frame rate cannot be probed without it.
         task_id = self._tasks.submit(
-            partial(probe_session, folder, allow_pickle=allow_pickle), lane="probe"
+            partial(
+                probe_session,
+                folder,
+                allow_pickle=allow_pickle,
+                reader=ref.reader if ref else None,
+                options=dict(ref.reader_options) if ref else None,
+            ),
+            lane="probe",
         )
         self._identity_probes[task_id] = session_id
 

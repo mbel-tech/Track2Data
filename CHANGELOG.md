@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Readers can declare options and be read by name.** The first step towards
+  importing output from trackers other than idtracker.ai. A reader can now
+  declare the options its files do not record (frame rate, frame size, which
+  keypoint stands for the animal) as `parameters`, and say whether it was tested
+  against real tracker output (`verification`). `read_session` takes
+  `reader=` and `options=`, so a confirmed choice can be replayed instead of
+  re-detected. A required option that is missing is a coded error
+  (`READER_OPTION_MISSING`), never a default: a made-up frame rate would
+  silently corrupt every speed metric.
+
+  All of it is additive. A reader written against the original one-argument
+  `read(folder)` keeps working, because a keyword is passed only to a reader that
+  declares it. Session ids now come from one helper (`track2data.core.ids`), and
+  `SessionRef` rejects ids that could escape the output directory; every id that
+  loaded before still loads. The design and rollout plan are in
+  `docs/tracker-formats/`.
+
+- **A session remembers which reader read it, and the export says so.** A project
+  entry now records the reader chosen for it (by detection or by the user) and
+  that reader's options, and every later use replays the choice instead of
+  detecting again. A session whose reader is not installed fails with
+  `READER_NOT_AVAILABLE`; it is never read by a different reader, which could
+  turn the same files into different numbers. Projects saved before this still
+  load and write byte-identical per-session CSVs; only the project hash changes,
+  once. One thing is newly visible: an idtracker.ai v5 project on the default
+  body-length calibration now gets a note that its sessions carry no body
+  length. That calibration was already being skipped without a word, so nothing
+  about the numbers changes, only that they are now told.
+
+  For a session from any tracker other than idtracker.ai, the per-session
+  `README.md` and `manifest.json` carry a "Source software provenance" section:
+  the software and reader, whether the reader was tested against real tracker
+  output, whether it was detected or chosen, its options, and the name of the
+  file it read. The idtracker.ai section is unchanged. Two cautions are shown
+  before a run (`validate`, the GUI) and in `PROJECT_SUMMARY.md`, and never block
+  it: a reader written from documentation and never checked against real output,
+  and body-length calibration chosen for sessions that carry no body length
+  (they are exported in pixels only). `Engine.scan` looks at a folder and reports
+  which software wrote it.
+
+  The same steps are available headlessly. `track2data list-readers` shows what can be
+  read and what each reader must be told; `track2data scan ROOT` says which software wrote
+  a folder, with the evidence; `track2data add PROJECT ROOT` shows the suggestion, lets
+  you amend it (`--reader`, `--option fps=30`, `--exclude`, `--rename`), and adds the
+  sessions only after you confirm. `python -m track2data` runs the same CLI from the
+  code on the current path.
+
+  The session cache and the GUI's session probe use the saved reader too. The
+  same folder read with a different frame rate is a different cached session
+  (the cache key now includes the reader and its options), a reopened project
+  re-probes each session with the reader it was added with, and a session
+  renamed between runs keeps its own id when its result comes from the cache.
+
 - **`track2data sensitivity` — recompute metrics across a grid of
   preprocessing settings.** The strongest methodological objection this class
   of tool attracts is that the preprocessing choices, not the animals, drive
@@ -778,6 +831,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and it joins to `codebook.csv` on `column`.
 
 ### Fixed
+
+- **A session in the legacy idtracker.ai layout could not be opened by auto-detection.**
+  A raw `trajectories.npy` array beside a `video_object.npy` was claimed first by the
+  unified reader, which then failed with `IDT_FORMAT_AMBIGUOUS` ("expected a dict, got
+  ndarray"), so the legacy reader was unreachable from `read_session`, the CLI and the
+  app; only calling it directly worked. The unified reader now declines that layout
+  (it looks at the `.npy` header, never unpickling), so detection reaches the legacy
+  reader. A raw array with no `video_object.npy` is still claimed, so reading it
+  explains the problem instead of "no reader recognised the folder".
+
+- **The D-5 identity-stability diagnostic no longer calls a tracker "weak" for
+  not reporting identification quality.** With no `fraction_identified` it
+  defaulted to 0.0, so any session from a tracker that does not report one
+  (everything but idtracker.ai) would have read "weak" however well it kept
+  identities. It now reports `not_assessed`.
 
 - **PP-3 identity-switch correction now corrects identity switches.** The
   step was unsound in three compounding ways, all of which changed data
