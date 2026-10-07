@@ -507,3 +507,88 @@ def test_manifest_written_before_identity_fields_still_loads() -> None:
     assert ref.track_wo_identities is None
     assert ref.identity_free_override is None
     assert ref.is_identity_free() is False
+
+
+def test_manifest_written_before_reader_fields_still_loads() -> None:
+    """The saved reader choice is additive: an old manifest has none, and the engine then
+    auto-detects exactly as it always did."""
+    import json
+
+    from track2data.core.models import ProjectManifest
+
+    legacy = {
+        "schema_version": 1,
+        "project_name": "p",
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+        "sessions": [{"session_id": "s1", "folder": "s1", "sha256": ""}],
+    }
+    ref = ProjectManifest.model_validate(json.loads(json.dumps(legacy))).sessions[0]
+    assert ref.reader is None
+    assert ref.reader_options == {}
+    assert ref.reader_chosen_by is None
+    assert ref.reader_confidence is None
+
+
+def test_a_reader_choice_round_trips_through_json() -> None:
+    from track2data.core.models import SessionRef
+
+    ref = SessionRef(
+        session_id="s",
+        folder=Path("s"),
+        sha256="",
+        reader="deeplabcut",
+        reader_options={"fps": 30.0, "keypoint": "snout"},
+        reader_chosen_by="user",
+        reader_confidence="HIGH",
+    )
+    again = SessionRef.model_validate_json(ref.model_dump_json())
+    assert again == ref
+    # pydantic drops unknown fields silently, so equality alone would hold with no fields at all.
+    assert again.reader == "deeplabcut"
+    assert again.reader_options == {"fps": 30.0, "keypoint": "snout"}
+    assert again.reader_chosen_by == "user"
+    assert again.reader_confidence == "HIGH"
+
+
+def test_reader_chosen_by_accepts_only_the_two_known_values() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from track2data.core.models import SessionRef
+
+    for value in ("detected", "user", None):
+        SessionRef(session_id="s", folder=Path("s"), sha256="", reader_chosen_by=value)
+    with pytest.raises(ValidationError):
+        SessionRef(session_id="s", folder=Path("s"), sha256="", reader_chosen_by="guess")
+
+
+def test_refs_do_not_share_one_options_dict() -> None:
+    from track2data.core.models import SessionRef
+
+    a = SessionRef(session_id="a", folder=Path("a"), sha256="")
+    b = SessionRef(session_id="b", folder=Path("b"), sha256="")
+    a.reader_options["fps"] = 30.0
+    assert b.reader_options == {}
+
+
+def test_the_project_hash_depends_on_which_reader_read_the_sessions() -> None:
+    """A different reader (or different options) is a different analysis."""
+    from datetime import datetime
+
+    from track2data.core.models import ProjectManifest, SessionRef
+
+    def manifest(**ref_fields: object) -> ProjectManifest:
+        return ProjectManifest(
+            project_name="p",
+            created_at=datetime(2026, 1, 1),
+            updated_at=datetime(2026, 1, 1),
+            sessions=[SessionRef(session_id="s", folder=Path("s"), sha256="", **ref_fields)],
+        )
+
+    plain = manifest().project_hash()
+    assert manifest(reader="deeplabcut").project_hash() != plain
+    assert (
+        manifest(reader="deeplabcut", reader_options={"fps": 30.0}).project_hash()
+        != manifest(reader="deeplabcut", reader_options={"fps": 25.0}).project_hash()
+    )

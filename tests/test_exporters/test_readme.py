@@ -307,3 +307,167 @@ class TestReadmeValidatorProvenance:
         ReadmeExporter().write(provenance_payload, tmp_path)
         content = (tmp_path / "README.md").read_text(encoding="utf-8")
         assert "never opened in the Validator" in content
+
+# ── Source-software provenance: any tracker, not only idtracker.ai ────────────
+#
+# SessionProvenance used to describe idtracker.ai and nothing else, so a session read from
+# another tracker would have been reported as an idtracker.ai run with every field "unknown".
+
+
+def _from(minimal_payload: ExportPayload, **fields: object) -> ExportPayload:
+    from dataclasses import replace
+
+    from track2data.exporters.base import SessionProvenance
+
+    fields.setdefault("reader", "toy_csv")
+    fields.setdefault("source_software", "Toy tracker")
+    return replace(minimal_payload, provenance=SessionProvenance(**fields))  # type: ignore[arg-type]
+
+
+def _readme(tmp_path: Path, payload: ExportPayload) -> str:
+    ReadmeExporter().write(payload, tmp_path)
+    return (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+class TestWhichSectionTheReadmeWrites:
+    def test_a_session_from_another_tracker_gets_the_generic_section_only(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload))
+        assert "## Source software provenance" in content
+        assert "## idtracker.ai provenance" not in content
+
+    @pytest.mark.parametrize("reader", ["idtrackerai", "idtrackerai_v5"])
+    def test_an_idtracker_session_keeps_its_own_section_unchanged(
+        self, tmp_path: Path, minimal_payload: ExportPayload, reader: str
+    ) -> None:
+        payload = _from(
+            minimal_payload,
+            reader=reader,
+            source_software="idtracker.ai",
+            reader_verification="real_sample",
+        )
+        content = _readme(tmp_path, payload)
+        assert "## idtracker.ai provenance" in content
+        assert "## Source software provenance" not in content
+
+    def test_a_provenance_with_no_reader_is_still_read_as_idtracker(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        # What every payload built before readers were recorded looks like.
+        content = _readme(tmp_path, minimal_payload)
+        assert "## idtracker.ai provenance" in content
+        assert "## Source software provenance" not in content
+
+
+class TestTheSourceSoftwareSection:
+    def test_the_software_falls_back_to_the_reader_name(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload, source_software=None))
+        assert "| Software | toy_csv |" in content
+
+    def test_a_reader_whose_verification_is_unknown_says_so(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload))
+        assert "| Reader verification | *(not recorded)* |" in content
+
+    def test_a_reader_with_nothing_recorded_about_how_it_was_chosen_says_so(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload))
+        assert "| Reader chosen | *(not recorded)* |" in content
+        assert "| Reader options | *(none)* |" in content
+        assert "| Source file(s) | *(not recorded)* |" in content
+
+    def test_an_automatically_detected_reader_is_not_called_user_chosen(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        payload = _from(
+            minimal_payload, reader_chosen_by="detected", detection_confidence="MEDIUM"
+        )
+        content = _readme(tmp_path, payload)
+        assert "detected automatically (detection confidence MEDIUM)" in content
+        assert "chosen by the user" not in content
+
+    def test_option_values_cannot_break_the_table(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        payload = _from(minimal_payload, reader_options={"label": "a|b"})
+        content = _readme(tmp_path, payload)
+        assert "label=a\\|b" in content
+
+    def test_only_the_file_names_are_shown_not_where_they_live(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        source = tmp_path / "private_dir" / "trial.csv"
+        content = _readme(tmp_path / "out", _from(minimal_payload, source_files=(str(source),)))
+        assert "`trial.csv`" in content
+        assert "private_dir" not in content
+
+    def test_a_long_list_of_files_is_cut_short_and_counted(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        files = tuple(str(tmp_path / f"f{i}.csv") for i in range(8))
+        content = _readme(tmp_path / "out", _from(minimal_payload, source_files=files))
+        assert "`f4.csv`" in content
+        assert "`f5.csv`" not in content
+        assert "+3 more" in content
+
+    def test_the_manifest_json_gets_every_new_field(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        payload = _from(
+            minimal_payload,
+            reader_verification="synthetic_only",
+            reader_options={"fps": 25.0},
+            reader_chosen_by="user",
+            detection_confidence="HIGH",
+            source_files=("a.csv",),
+        )
+        ReadmeExporter().write(payload, tmp_path)
+        prov = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))[
+            "run_metadata"
+        ]["session_provenance"]
+        assert prov["source_software"] == "Toy tracker"
+        assert prov["reader_verification"] == "synthetic_only"
+        assert prov["reader_options"] == {"fps": 25.0}
+        assert prov["reader_chosen_by"] == "user"
+        assert prov["detection_confidence"] == "HIGH"
+        assert prov["source_files"] == ["a.csv"]
+
+
+class TestCalibrationInTheSourceSoftwareSection:
+    def test_an_unconfirmed_factor_is_flagged_without_blaming_idtracker(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload, length_unit=10.0))
+        assert "| Length calibration factor | 10 px per cm (**not confirmed**" in content
+        assert "idtracker.ai does not record" not in content
+
+    def test_a_confirmed_factor_carries_no_warning(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        payload = _from(
+            minimal_payload,
+            length_unit=10.0,
+            length_unit_label="mm",
+            length_unit_confirmed_by_user=True,
+        )
+        content = _readme(tmp_path, payload)
+        assert "10 px per mm (confirmed by user)" in content
+        assert "not confirmed" not in content
+
+    def test_no_factor_says_not_calibrated(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload))
+        assert "| Length calibration factor | *(not calibrated)* |" in content
+
+    def test_the_idtracker_wording_is_unchanged(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        payload = _from(minimal_payload, reader="idtrackerai", length_unit=10.0)
+        content = _readme(tmp_path, payload)
+        assert "idtracker.ai does not record which physical unit" in content

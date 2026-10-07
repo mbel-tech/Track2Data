@@ -27,8 +27,8 @@ jobs:
     name: Lint (ruff)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - run: pip install ruff
@@ -42,8 +42,8 @@ jobs:
     # they are correct. Engine only -- see [tool.mypy] in pyproject.toml.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install package + dev deps
@@ -54,8 +54,8 @@ jobs:
     name: Lint workflows (actionlint)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       # actionlint runs shellcheck over every run: block when it is on PATH.
@@ -90,8 +90,8 @@ jobs:
       # platform plugin lets QApplication() succeed headlessly.
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - name: Install Qt runtime libraries (Linux only)
@@ -136,8 +136,8 @@ jobs:
       # never touches the GUI itself.
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install Qt runtime libraries

@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
+from track2data.core.errors import ImportError_
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
 from track2data.readers.idtrackerai.reader import IDTrackerAiReader
 from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
+from track2data.readers.params import resolve_options
 
 log = logging.getLogger(__name__)
 
@@ -62,10 +66,79 @@ def detect_reader(folder: Path) -> type[SessionReader] | None:
     return None
 
 
+def find_reader(name: str) -> type[SessionReader] | None:
+    """Return the registered reader called *name*, or None.
+
+    For callers that only want to describe a reader (its display name, whether it was verified).
+    Use :func:`get_reader` when a missing reader is an error.
+    """
+    for cls in _REGISTRY:
+        if cls.name == name:
+            return cls
+    return None
+
+
+def get_reader(name: str) -> type[SessionReader]:
+    """Return the registered reader called *name*."""
+    cls = find_reader(name)
+    if cls is not None:
+        return cls
+    raise ImportError_(
+        f"No reader named {name!r} is registered",
+        code="READER_UNKNOWN",
+        subject=name,
+        remediation="Check the spelling (the registered names are listed by "
+        "`track2data list-readers`) or install the plug-in that provides it.",
+    )
+
+
+def reader_names() -> list[str]:
+    """Registered reader names, highest priority first."""
+    return [cls.name for cls in _REGISTRY]
+
+
+def _reader_kwargs(
+    cls: type[SessionReader], *, allow_pickle: bool, options: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """The keywords ``cls`` declares it takes, and only those.
+
+    This is what keeps the contract additive: a reader written against the original
+    one-argument ``read(folder)`` never sees ``allow_pickle`` or ``options``.
+    """
+    kwargs: dict[str, Any] = {}
+    if cls.accepts_allow_pickle:
+        kwargs["allow_pickle"] = allow_pickle
+    # Also rejects options given to a reader that declares none.
+    resolved = resolve_options(cls.name, cls.parameters, options)
+    if cls.parameters:
+        kwargs["options"] = resolved
+    return kwargs
+
+
+def _call_read(
+    cls: type[SessionReader],
+    path: Path,
+    *,
+    allow_pickle: bool,
+    options: Mapping[str, Any] | None,
+) -> Session:
+    """Call ``cls().read(path)``, passing each keyword only to readers that declare it."""
+    return cls().read(path, **_reader_kwargs(cls, allow_pickle=allow_pickle, options=options))
+
+
+def _call_probe(
+    cls: type[SessionReader],
+    path: Path,
+    *,
+    allow_pickle: bool,
+    options: Mapping[str, Any] | None,
+) -> Session:
+    """Call ``cls().probe(path)`` with exactly the keywords ``read`` would get."""
+    return cls().probe(path, **_reader_kwargs(cls, allow_pickle=allow_pickle, options=options))
+
+
 def _require_reader(folder: Path) -> type[SessionReader]:
     """The reader for *folder*, or a specific ``ImportError_`` explaining why none."""
-    from track2data.core.errors import ImportError_
-
     cls = detect_reader(folder)
     if cls is not None:
         return cls
@@ -87,38 +160,55 @@ def _require_reader(folder: Path) -> type[SessionReader]:
     )
 
 
-def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
-    """Auto-detect the reader for *folder* and return a Session.
+def _choose(folder: Path, reader: str | None) -> type[SessionReader]:
+    """The reader named *reader*, else the one that detects *folder*; an error if neither."""
+    return get_reader(reader) if reader is not None else _require_reader(folder)
 
-    ``allow_pickle`` permits trajectory formats whose deserialisation
-    executes code from the file (idtracker.ai's ``trajectories.npy``).
-    Defaults to False.
 
-    The keyword is forwarded only to readers that declare
-    ``accepts_allow_pickle``. External readers written against the original
-    one-argument ``read(folder)`` signature therefore keep working -- but
-    they also never see the flag, so a third-party reader that unpickles is
-    trusting whatever it is pointed at, and should opt in.
+def read_session(
+    folder: Path,
+    *,
+    allow_pickle: bool = False,
+    reader: str | None = None,
+    options: Mapping[str, Any] | None = None,
+) -> Session:
+    """Return a Session for *folder*, auto-detecting the reader unless one is named.
+
+    ``reader`` names a registered reader and skips detection, which is how a confirmed
+    choice is replayed. ``options`` are that reader's declared parameters (frame rate,
+    keypoint, ...); a required one that is missing is an error, never a default.
+
+    ``allow_pickle`` permits trajectory formats whose deserialisation executes code from
+    the file (idtracker.ai's ``trajectories.npy``). Defaults to False.
+
+    ``allow_pickle`` and ``options`` are forwarded only to readers that declare them
+    (``accepts_allow_pickle``, ``parameters``). External readers written against the
+    original one-argument ``read(folder)`` signature therefore keep working -- but they
+    also never see the flag, so a third-party reader that unpickles is trusting whatever
+    it is pointed at, and should opt in.
     """
-    cls = _require_reader(folder)
-    reader = cls()
-    if cls.accepts_allow_pickle:
-        return reader.read(folder, allow_pickle=allow_pickle)
-    return reader.read(folder)
+    return _call_read(
+        _choose(folder, reader), folder, allow_pickle=allow_pickle, options=options
+    )
 
 
-def probe_session(folder: Path, *, allow_pickle: bool = False) -> Session:
+def probe_session(
+    folder: Path,
+    *,
+    allow_pickle: bool = False,
+    reader: str | None = None,
+    options: Mapping[str, Any] | None = None,
+) -> Session:
     """Like ``read_session`` but via ``SessionReader.probe`` -- the cheap path
     the GUI uses to describe a folder without loading every artefact.
 
-    ``allow_pickle`` is the project's consent, passed on exactly as
-    ``read_session`` passes it: a probe opens the same trajectory file.
+    ``allow_pickle``, ``reader`` and ``options`` mean what they mean for ``read_session``:
+    a probe opens the same trajectory file, so it needs the project's consent, and a session
+    whose reader was chosen is probed by that reader with its saved options.
     """
-    cls = _require_reader(folder)
-    reader = cls()
-    if cls.accepts_allow_pickle:
-        return reader.probe(folder, allow_pickle=allow_pickle)
-    return reader.probe(folder)
+    return _call_probe(
+        _choose(folder, reader), folder, allow_pickle=allow_pickle, options=options
+    )
 
 
 __all__ = [
@@ -126,7 +216,10 @@ __all__ = [
     "IDTrackerAiV5Reader",
     "SessionReader",
     "detect_reader",
+    "find_reader",
+    "get_reader",
     "probe_session",
     "read_session",
+    "reader_names",
     "register",
 ]

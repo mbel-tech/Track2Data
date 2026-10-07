@@ -27,6 +27,7 @@ Typical usage::
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
 import multiprocessing
 import queue as queue_mod
@@ -39,6 +40,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from track2data.core.errors import ImportError_
+from track2data.core.ids import default_session_id
 from track2data.core.models import (
     PreprocessedSession,
     PreprocessReport,
@@ -48,13 +51,23 @@ from track2data.core.models import (
     SessionRef,
     SessionRunResult,
 )
-from track2data.core.progress import OperationCancelled, ProgressCallback, ProgressEvent, emit
+from track2data.core.progress import (
+    CancellationToken,
+    OperationCancelled,
+    ProgressCallback,
+    ProgressEvent,
+    emit,
+)
 from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
-from track2data.readers import read_session
+from track2data.readers import find_reader, read_session
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from track2data.core.session_consistency import SessionSummary
     from track2data.metrics.base import Metric
+    from track2data.readers.index import ScanBudget
+    from track2data.readers.scan import ScanResult
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +314,28 @@ class Engine:
 
     # ── session import ─────────────────────────────────────────────────────
 
+    @staticmethod
+    def scan(
+        roots: Sequence[Path],
+        *,
+        budget: ScanBudget | None = None,
+        progress: ProgressCallback | None = None,
+        token: CancellationToken | None = None,
+    ) -> ScanResult:
+        """Look at the folder(s) a user pointed at and report what is in them.
+
+        Which tracking software wrote the output, with what confidence and on what evidence,
+        and which sessions it holds -- ranked, so the first group is the best guess. The first
+        step of adding sessions: nothing is read into a session and nothing is added to a
+        project until the user has confirmed the result.
+
+        Static because it needs no project (it is how a project gets its first sessions).
+        Read-only: never writes, and never unpickles. Raises only ``OperationCancelled``.
+        """
+        from track2data.readers.scan import scan
+
+        return scan(roots, budget=budget, progress=progress, token=token)
+
     def import_session(self, folder: Path) -> Session:
         """Auto-detect reader and return a Session for *folder*.
 
@@ -376,6 +411,41 @@ class Engine:
         overrides = {**self._manifest.video_overrides, session_id: path}
         self._manifest = self._manifest.model_copy(update={"video_overrides": overrides})
 
+    def import_ref(self, ref: SessionRef) -> Session:
+        """Import the session a manifest entry describes.
+
+        An entry that records its reader replays that choice, with its saved options, instead of
+        detecting again. One that does not (a manifest from before readers could be chosen) is
+        auto-detected through :meth:`import_session`, exactly as it always was. A recorded
+        reader that is not installed is an error and never a quiet fall back to detection: a
+        different reader could read the same files into different numbers.
+
+        Either way the session takes the entry's id, so the output directory, the metadata join
+        and the export all key on one name whatever id the reader derived from the files.
+        """
+        if ref.reader is None:
+            session = self.import_session(ref.folder)
+        else:
+            try:
+                session = read_session(
+                    Path(ref.folder),
+                    reader=ref.reader,
+                    options=ref.reader_options,
+                    allow_pickle=self._manifest.security.allow_pickle_trajectories,
+                )
+            except ImportError_ as exc:
+                if exc.code != "READER_UNKNOWN":
+                    raise
+                raise ImportError_(
+                    f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
+                    "which is not available here",
+                    code="READER_NOT_AVAILABLE",
+                    subject=ref.reader,
+                    remediation="Install the plug-in that provides this reader, or remove the "
+                    "session and add it again so a reader is detected afresh.",
+                ) from exc
+        return session.model_copy(update={"session_id": ref.session_id})
+
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
     ) -> list[Session]:
@@ -406,7 +476,7 @@ class Engine:
                     message=f"Importing {ref.session_id}",
                 ),
             )
-            sessions.append(self.import_session(ref.folder))
+            sessions.append(self.import_ref(ref))
         return sessions
 
     # ── preprocessed-session cache ─────────────────────────────────────────
@@ -414,8 +484,16 @@ class Engine:
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
     _CACHE_SCHEMA = 1
 
-    def _cache_key(self, folder: Path) -> tuple[Any, str] | None:
-        """(store, key) for *folder*, or None when caching is off/impossible."""
+    def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
+        """(store, key) for the session *ref* describes, or None when caching is
+        off or impossible.
+
+        The key is the reader that reads it, the options that reader was given, the
+        folder's fingerprint and the configs. The reader is the one the entry saved, or
+        the one detected for an entry that saved none. The options are in the key because
+        they are inputs the files do not record: the same folder read at 25 fps and at
+        50 fps is two different sessions.
+        """
         if self._cache_dir is None:
             return None
         from track2data import __version__
@@ -423,43 +501,64 @@ class Engine:
         from track2data.core.hashing import dict_sha256, folder_fingerprint
         from track2data.readers import detect_reader
 
-        reader = detect_reader(folder)
-        if reader is None:
-            return None
+        reader_name = ref.reader
+        if reader_name is None:
+            detected = detect_reader(ref.folder)
+            if detected is None:
+                return None
+            reader_name = detected.name
         m = self._manifest
         config_hash = dict_sha256(
             {
                 "schema": self._CACHE_SCHEMA,
                 "app": __version__,
+                "reader_options": ref.reader_options,
                 "preprocess": m.preprocess.model_dump(mode="json"),
                 "calibration": m.calibration.model_dump(mode="json"),
                 "zones": m.zones.model_dump(mode="json"),
             }
         )
         store = CacheStore(self._cache_dir)
-        return store, store.key(reader.name, folder_fingerprint(folder), config_hash)
+        return store, store.key(reader_name, folder_fingerprint(ref.folder), config_hash)
 
-    def preprocess_folder(self, folder: Path) -> PreprocessedSession:
-        """Preprocess the session in *folder*, reusing/filling the cache when
-        ``cache_dir`` is set. For callers (e.g. the GUI's trajectory viewer)
-        that need the arrays but are not running the whole pipeline."""
-        psess = self._cache_get(folder)
+    def preprocess_ref(self, ref: SessionRef) -> PreprocessedSession:
+        """Preprocess the session a manifest entry describes, reusing/filling the cache
+        when ``cache_dir`` is set. For callers (e.g. the GUI's trajectory viewer) that
+        need the arrays but are not running the whole pipeline. A run and the viewer
+        share cache entries, because both key on the entry's reader and options."""
+        psess = self._cache_get(ref)
         if psess is None:
-            psess = self.preprocess(self.import_session(folder))
-            self._cache_put(folder, psess)
+            psess = self.preprocess(self.import_ref(ref))
+            self._cache_put(ref, psess)
         return psess
 
-    def _cache_get(self, folder: Path) -> PreprocessedSession | None:
-        keyed = self._cache_key(folder)
+    def preprocess_folder(self, folder: Path) -> PreprocessedSession:
+        """Like :meth:`preprocess_ref` for a folder that is not a manifest entry: its
+        reader is detected and no options are saved for it."""
+        folder = Path(folder)
+        ref = SessionRef(
+            session_id=default_session_id(folder.resolve()), folder=folder, sha256=""
+        )
+        return self.preprocess_ref(ref)
+
+    def _cache_get(self, ref: SessionRef) -> PreprocessedSession | None:
+        keyed = self._cache_key(ref)
         if keyed is None:
             return None
         store, key = keyed
         obj = store.get_object(key)
-        return obj if isinstance(obj, PreprocessedSession) else None
+        if not isinstance(obj, PreprocessedSession):
+            return None
+        # The entry is keyed by what was read, not by what the session is called: the same
+        # files may have been cached under another id (a renamed session, the viewer).
+        if obj.session.session_id == ref.session_id:
+            return obj
+        session = obj.session.model_copy(update={"session_id": ref.session_id})
+        return dataclasses.replace(obj, session=session)
 
-    def _cache_put(self, folder: Path, psess: PreprocessedSession) -> None:
+    def _cache_put(self, ref: SessionRef, psess: PreprocessedSession) -> None:
         try:
-            keyed = self._cache_key(folder)
+            keyed = self._cache_key(ref)
             if keyed is not None:
                 keyed[0].put_object(keyed[1], psess)
         except Exception:
@@ -1026,8 +1125,20 @@ class Engine:
         from track2data.calibration.session_unit import length_calibration_spread
 
         cal_n, cal_rel_sd = length_calibration_spread(session.length_calibrations)
+        # What the export says about the software behind the numbers. The reader class knows its
+        # display name and whether it was ever tested on real output; the manifest entry knows
+        # who chose it and with which options. A reader that is no longer registered has neither.
+        reader_cls = find_reader(session.reader)
         provenance = SessionProvenance(
             reader=session.reader,
+            source_software=(reader_cls.display_name or reader_cls.name) if reader_cls else None,
+            reader_verification=reader_cls.verification if reader_cls else None,
+            reader_options=dict(ref.reader_options) if ref is not None else {},
+            reader_chosen_by=ref.reader_chosen_by if ref is not None else None,
+            detection_confidence=ref.reader_confidence if ref is not None else None,
+            source_files=(
+                (str(session.trajectory_source),) if session.trajectory_source else ()
+            ),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,
             trajectory_variant=session.trajectory_variant,
@@ -1319,6 +1430,7 @@ class Engine:
             heterogeneity_warnings,
             sessions_table,
         )
+        from track2data.readers.advisories import reader_advisories
 
         if not results:
             return []
@@ -1326,9 +1438,12 @@ class Engine:
         summaries = [r.summary for r in results if r.summary is not None]
         errors = {r.session_id: r.error for r in results if r.error}
         warnings = heterogeneity_warnings(summaries)
+        advisories = reader_advisories(summaries)
 
         for warning in warnings:
             logger.warning("Session consistency: %s", warning)
+        for advisory in advisories:
+            logger.warning("Reader: %s", advisory)
 
         written: list[Path] = []
         try:
@@ -1342,7 +1457,7 @@ class Engine:
 
             readme_path = out_dir / "PROJECT_SUMMARY.md"
             readme_path.write_text(
-                self._project_readme_text(results, warnings), encoding="utf-8"
+                self._project_readme_text(results, warnings, advisories), encoding="utf-8"
             )
             written.append(readme_path)
 
@@ -1362,7 +1477,10 @@ class Engine:
         return written
 
     def _project_readme_text(
-        self, results: list[SessionRunResult], warnings: list[str]
+        self,
+        results: list[SessionRunResult],
+        warnings: list[str],
+        advisories: Sequence[str] = (),
     ) -> str:
         """Run-root project summary: what ran, what failed, what not to pool.
 
@@ -1416,6 +1534,18 @@ class Engine:
                 "recording setup implies a cross-session correction.",
                 "",
             ]
+
+        # Kept apart from the pooling warnings above: these say how the sessions were read, not
+        # that they disagree, and filing them under "not interchangeable" would mislead.
+        if advisories:
+            lines += [
+                "## Notes on the readers",
+                "",
+                "What the numbers rest on, which is not visible in them:",
+                "",
+            ]
+            lines += [f"{i}. {a}" for i, a in enumerate(advisories, start=1)]
+            lines.append("")
 
         if failed:
             lines += ["## Sessions that failed", ""]
@@ -1543,11 +1673,11 @@ class Engine:
         start = time.monotonic()
         psess = None
         try:
-            psess = self._cache_get(ref.folder)
+            psess = self._cache_get(ref)
             cached = psess is not None
             # A cached result carries the Session it was built from, which is all
             # the summary and the input hash below need.
-            session = self.import_session(ref.folder) if psess is None else psess.session
+            session = self.import_ref(ref) if psess is None else psess.session
             # The override only, not ref.is_identity_free(): this method is
             # keyed by ref.session_id (see the docstring) because a
             # reader-derived id may differ, so the lookup inside
@@ -1565,7 +1695,7 @@ class Engine:
             )
             if psess is None:
                 psess = self.preprocess(session)
-                self._cache_put(ref.folder, psess)
+                self._cache_put(ref, psess)
             emit(
                 progress,
                 ProgressEvent(
@@ -1691,10 +1821,18 @@ class Engine:
         something called on every keystroke, so a complete report is worth
         the I/O. Unreadable sessions are skipped silently here; ``validate()``
         and the run itself both report them.
+
+        Also carries the reader advisories (a reader that was never checked
+        against real output; body-length calibration for a tracker that
+        reports no body length). They are not disagreements between
+        sessions, but they are the same kind of fact: true of the project,
+        invisible in the numbers, and worth knowing before pooling them.
         """
         from track2data.core.session_consistency import heterogeneity_warnings
+        from track2data.readers.advisories import reader_advisories
 
-        return heterogeneity_warnings(self._session_summaries())
+        summaries = self._session_summaries()
+        return [*heterogeneity_warnings(summaries), *reader_advisories(summaries)]
 
     def _session_summaries(self) -> list[SessionSummary]:
         """Read every session in the manifest and summarise it.
@@ -1709,7 +1847,7 @@ class Engine:
         summaries: list[SessionSummary] = []
         for ref in self._manifest.sessions:
             try:
-                session = self.import_session(ref.folder)
+                session = self.import_ref(ref)
             except Exception:
                 continue
             summaries.append(
@@ -1792,7 +1930,7 @@ class Engine:
         unreadable: list[str] = []
         for ref in self._manifest.sessions:
             try:
-                session = self.import_session(ref.folder)
+                session = self.import_ref(ref)
             except Exception:
                 unreadable.append(ref.session_id)
                 continue

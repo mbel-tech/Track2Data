@@ -80,6 +80,10 @@ class SessionSummary:
     segmentation_params: dict[str, Any] | None = None
     resolution_reduction: float | None = None
     id_image_size: tuple[int, ...] | None = None
+    # Whether the reader supplied a body length. Without one, the default "bodylength"
+    # calibration cannot run and the session is exported in pixels only. Defaults to True so a
+    # summary built without the fact never raises that warning.
+    has_body_length: bool = True
 
     @property
     def duration_s(self) -> float:
@@ -123,6 +127,7 @@ class SessionSummary:
             id_image_size=(
                 tuple(session.id_image_size) if session.id_image_size else None
             ),
+            has_body_length=session.body_length_px is not None,
         )
 
 

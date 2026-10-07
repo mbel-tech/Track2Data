@@ -31,8 +31,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install
@@ -48,7 +48,7 @@ jobs:
           python scripts/benchmark_parallel.py \
             --sessions "$SESSIONS" --frames "$FRAMES" --animals "$ANIMALS" \
             --workers "$WORKERS" --cache "$CACHE" --json benchmark.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: benchmark-results
           path: benchmark.json

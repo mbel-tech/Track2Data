@@ -212,8 +212,7 @@ deleted, along with its lazy-import line in
 `metrics/__init__.py::_load_builtins()`. Separately, the
 `idtrackerai_v4` entry in `[project.entry-points."track2data.readers"]`
 is removed from `pyproject.toml`; the `IDTrackerAiV4Reader` class
-itself is untouched and still registered as a built-in directly in
-`readers/__init__.py`.
+itself is untouched (see the second addendum: it is no longer registered).
 
 **Rationale (metrics):** GL-7 ("NN-Matched Speed" — identity-free speed
 via greedy nearest-neighbour assignment) was already fully implemented,
@@ -248,6 +247,13 @@ entry-point line at that point, not before.
 `read_session`/`probe_session` raise `V4_NOT_SUPPORTED` rather than `NO_READER`;
 `detect()` still returns False and no entry point is added. The inspector script and
 `docs/IDTRACKERAI_V4_SAMPLES.md` exist so real samples can be gathered.
+
+**Second addendum (pp3 and #101 reconciled):** the class is not registered as a
+built-in any more. Its `detect()` is always False, so registering it could never
+select it, and a registered class whose only behaviour is to raise is worse than an
+absent one. The module keeps the class (a test pins `detect() is False`) and
+`looks_like_v4`, which `read_session` and `probe_session` use to raise
+`V4_NOT_SUPPORTED`.
 
 ### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now — CLOSED
 
@@ -588,3 +594,133 @@ mode matches the wrong animals silently, so the screen names the mode and the
 guide says when to use each. A column constant across a session is treated as
 session-level, so for an animal without a row it is still set from the session.
 Unmatched animals and keys are logged once per session, not per frame.
+
+---
+
+## Phase 6 — Importing output from other trackers
+
+The design is in `docs/tracker-formats/`; these are the decisions the first tier built.
+
+### D-026 · The reader a session was added with is saved, replayed, and never silently replaced
+
+**Decision:** `SessionRef` records `reader` (a registered reader's `name`),
+`reader_options` (what the user gave it), `reader_chosen_by` (`detected` or `user`)
+and `reader_confidence`. `Engine.import_ref` replays exactly that reader with those
+options; an entry that records none (every project saved before this) is detected as
+before. A saved reader that is not registered here fails with `READER_NOT_AVAILABLE`
+and is **never** replaced by auto-detection. The preprocessed-session cache (D-019)
+is keyed by the saved reader and its options, and a session probe (D-018) uses them.
+The session id comes from the manifest entry, not from the reader.
+
+**Rationale:** Another reader can turn the same files into different numbers, so
+"fall back to whichever reader detects it" would change a project's results with no
+warning, on the machine that happens to lack a plug-in. The user confirmed the
+software once; the project should not ask a heuristic again. Reader `name`s are
+therefore manifest API and are frozen once released.
+
+**Alternative considered:** Detect on every use (the previous behaviour). Rejected:
+it is slower on a folder of folders, and it cannot work for formats that need options
+the files do not record.
+
+**Trade-offs:** The manifest stays `schema_version=1` (the fields are additive), but
+`project_hash()` changes once for every project. A project opened where a plug-in is
+missing cannot run that session until the plug-in is installed or the session is
+removed and added again.
+
+---
+
+### D-027 · Scanning is read-only, bounded, and never unpickles
+
+**Decision:** `track2data scan`, `Engine.scan` and the confirm dialog look at a folder
+with one `os.scandir` walk into an immutable `ScanIndex`; each reader's `discover`
+is a pure function of that index. The only code that opens a file is `Peeker`, and it
+reads headers only (head bytes, CSV header rows, a `.npy` header through
+`np.lib.format`); it never unpickles and never writes. Folders a reader has claimed
+are not looked into again, and the walk stops at a budget (100,000 entries, 30 s,
+4 levels by default) with `truncated=True` rather than raising. Files that exist
+only in the cloud (OneDrive placeholders) are never opened, because opening one
+downloads it.
+
+**Rationale:** The user points at a folder and expects an answer in a second, from
+folders that may hold gigabytes, sit on a sync client, or have been sent by someone
+else (SECURITY.md). Detection must therefore be cheap, side-effect free and safe
+by construction rather than by care.
+
+**Trade-offs:** A reader cannot decide from file *contents* beyond a header. A tree
+nested deeper than four levels needs `--max-depth` (the CLI says so when it finds
+nothing).
+
+---
+
+### D-028 · What the files do not record is asked for as an option, not read from a sidecar
+
+**Decision:** Most trackers record neither the frame rate nor the frame size
+(DeepLabCut, SLEAP, Anipose, AnimalTA, Ctrax). A reader declares them as
+`ReaderParameter`s; the confirm dialog or `--option NAME=VALUE` supplies them; they
+are saved on the session and passed to `read(..., options=...)`. A required option
+that is missing is `READER_OPTION_MISSING` and **never** a default. Nothing is
+written into the input folder (FR-IMP-5). Where a file or a neighbouring file does
+record a value, the dialog is pre-filled and says where it came from.
+
+**Rationale:** A made-up frame rate silently scales every speed, acceleration and
+path-length metric. A sidecar file in the input folder would modify data the user
+considers read-only and would not travel with the project.
+
+**Alternative considered:** Default to 30 fps with a warning. Rejected for the reason
+above.
+
+---
+
+### D-029 · Amends D-012: text readers may ship unverified, binary containers need a real sample
+
+**Decision:** D-012 refuses to implement a format "with no real fixture". For
+importers of other trackers, a reader for a **text or CSV** layout that is documented
+in enough detail may ship before a real sample is found, provided it declares
+`verification = "synthetic_only"`: the confirm dialog shows an "unverified" badge,
+`list-readers` says so, the export's provenance records it, and a pre-flight warning
+repeats it. A reader for a **binary container** (HDF5, MAT, NPZ, SQLite) needs a real
+sample, because its layout cannot be guessed from documentation. A reader is
+`real_sample` only when a pinned real file is part of its test suite.
+
+**Rationale:** A wrong CSV parser fails loudly on the first row; a wrong HDF5
+dataset path or axis order can produce plausible, wrong numbers. The label puts the
+residual risk in front of the person who can check it against their own tracker.
+
+---
+
+### D-030 · D-5 says "not assessed" for a tracker that reports no identification quality
+
+**Decision:** The identity-stability diagnostic (D-5) used to treat a missing
+`fraction_identified` as 0.0, so every session from a tracker that does not report one
+read "weak". A reader that never supplies it (`provides_identification_quality =
+False`) now gets `not_assessed`. Separately, the pre-flight note about body-length
+calibration is driven by whether the session actually carries a body length, not by
+the reader's declared flag.
+
+**Rationale:** "Weak" is a claim about the tracking; for these trackers nothing was
+measured. Driving the note from the data keeps it right for an idtracker.ai session
+whose trajectory lacks the key.
+
+---
+
+### D-031 · Accepted for the tiers not yet built (pose, native units, fragments, 3-D)
+
+**Status:** accepted; not implemented. The reasoning is in
+`docs/tracker-formats/2026-10-07-tracker-import-design.md` §4.6-4.9.
+
+**Decision:** *Pose.* One keypoint (the user's choice; default the best-covered)
+drives the metrics; the full skeleton is kept on the session, stored only, and no
+metric consumes it. The animal's position is never the mean of the visible
+keypoints, which jitters whenever the visible set changes. *Units.* A source with no
+pixel frame (Anipose, ToxTrac RealSpace without its pixel twin) gets a native-unit
+mode; a scale a tool applied (TRex `cm_per_pixel`, ToxTrac RealSpace) only rebuilds
+true pixels and is never presented as a physical unit without the user's confirmation,
+and a factor of exactly 1.0 or a default arena counts as uncalibrated. *Fragments.*
+A tracker whose identities are track fragments (Ctrax) keeps every fragment as its own
+slot and is flagged identity-free; keeping only the N longest is an opt-in. *3-D.*
+Metrics use a chosen 2-D plane (default x, y); z is kept.
+
+**Rationale:** These are the places where a reader could report plausible but wrong
+physical quantities. Recording them before the readers exist keeps each reader's
+review about the format, not about re-deciding the policy.
+

@@ -482,3 +482,62 @@ def test_new_project_cancels_queued_probes(qtbot, monkeypatch, store, tmp_path: 
     qtbot.wait(300)
     assert ran == ["a"]  # the queued probe never started
     assert store.session_facts("b") is None
+
+
+def test_open_project_reprobes_with_the_saved_reader_and_options(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    """A session added with a chosen reader must not be re-detected when the project is
+    reopened: another reader could read the same files into different numbers, and a
+    reader that needs the frame rate cannot be probed without it."""
+    seen: list[dict[str, object]] = []
+
+    def fake_probe_session(folder: Path, **kwargs: object) -> Session:
+        seen.append(kwargs)
+        return Session(
+            session_id=folder.name,
+            folder=folder,
+            reader="toy",
+            video=VideoInfo(fps=25.0, n_frames=10, width_px=100, height_px=100),
+            n_animals=1,
+            trajectory_variant="wo_gaps",
+            has_stable_identities=True,
+            raw_xy=np.zeros((10, 1, 2)),
+        )
+
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    ref = SessionRef(
+        session_id="a",
+        folder=folder,
+        sha256="",
+        reader="toy",
+        reader_options={"fps": 25.0},
+    )
+    store.update_sessions([ref])
+    path = store.save_project()
+
+    seen.clear()
+    store.open_project(path)
+    qtbot.waitUntil(lambda: store.session_facts("a") is not None, timeout=2000)
+    assert seen[-1]["reader"] == "toy"
+    assert seen[-1]["options"] == {"fps": 25.0}
+
+
+def test_a_session_added_without_a_reader_is_still_detected(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    seen: list[dict[str, object]] = []
+
+    def fake_probe_session(folder: Path, **kwargs: object) -> Session:
+        seen.append(kwargs)
+        raise RuntimeError("not a real session folder")
+
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
+        store.add_session(folder)
+    qtbot.waitUntil(lambda: bool(seen), timeout=3000)
+    assert seen[-1].get("reader") is None

@@ -28,7 +28,7 @@
 
 Track2Data turns [idtracker.ai](https://idtracker.ai) output folders into clean, calibrated,
 analysis-ready tables. This guide follows the desktop app one screen at a time, using a small demo
-project (two fish in a circular arena). Each screenshot sits next to the explanation of the screen
+project (two animals in a circular arena). Each screenshot sits next to the explanation of the screen
 it shows.
 
 > The screenshots are generated from the real app by
@@ -128,7 +128,7 @@ number of animals, and **Identity** (`Stable` or `Unstable`).
 **Identity-free**
 
 Tick this if the video was tracked *without* identification, or if identities swapped so often that
-"animal 1" is not one fish. Sessions flagged this way (by you or by idtracker.ai's own
+"animal 1" is not one animal. Sessions flagged this way (by you or by idtracker.ai's own
 `track_wo_identities`) skip every metric that follows an individual across frames, because those
 numbers would be meaningless. Group metrics and the pooled zone-occupancy metrics still run. The
 sidebar shows ⚠ while any session is identity-free.
@@ -231,7 +231,7 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 The `session_id` column must equal the session folder name. Without an *Individual ID* column one
 row is matched per session (if several rows match, the first is used and the summary says so).
 
-### Per-animal information (sex, weight, genotype of individual fish)
+### Per-animal information (sex, weight, genotype of individual animals)
 
 Give the CSV **one row per animal** and map its animal column (`fish_id`, `animal_id` or any name)
 to *Individual ID*. Then:

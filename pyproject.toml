@@ -72,6 +72,9 @@ dev = [
     "pyyaml>=6.0",               # tests/test_issue_templates.py parses the GitHub issue forms
                                   # in .github/ISSUE_TEMPLATE/. Test-only: nothing in the
                                   # shipped package reads YAML.
+    "tables>=3.9",               # tests/real_samples/oracles.py reads DeepLabCut's pandas-HDF5
+                                  # output through PyTables. Test-only ORACLE: the shipped reader
+                                  # must not depend on it (decided at design gate G-H5).
 ]
 
 [project.scripts]
@@ -126,6 +129,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN", "S", "RUF012"]  # RUF012: ClassVar annotation not required in test ABC subclasses
+"tests/real_samples/**" = [          # The supplied reader fixture-test suite, kept close to the
+    "E501", "SIM115", "B905", "E731",   # original so it stays comparable with its source. Only
+    "N802", "N812", "RUF005", "RUF046", "SIM118",  # style rules are relaxed; F, B and the
+]                                       # remaining E rules still gate.
 "track2data/core/errors.py" = ["N801", "N818"]  # ImportError_ uses trailing _ to avoid shadowing built-in
 "track2data/core/progress.py" = ["N818"]  # OperationCancelled is a control-flow signal, not an "error"
 "scripts/extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
@@ -145,6 +152,9 @@ markers = [
     "slow: marks tests that are expected to be slow",
     "corpus_local: marks tests requiring the embargoed 70-session real idtracker.ai corpus (skip in CI; skips automatically when the corpus directory is absent)",
     "network: marks tests that call a third-party API (Crossref DOI resolution); excluded in CI, since an outage there is not a defect here. Run with: pytest -m network",
+    "quirk: format-quirk test; parses raw fixture files and needs no Track2Data (tests/real_samples)",
+    "contract: reader-contract test; runs against the registered readers (tests/real_samples)",
+    "real_sample: needs downloaded real tracker output (about 70 MB); opt in with -m quirk, -m contract or -m real_sample, or T2D_REAL_SAMPLES=1",
 ]
 
 # ── mypy ───────────────────────────────────────────────────────────────────────

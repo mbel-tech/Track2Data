@@ -11,7 +11,7 @@ from __future__ import annotations
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -21,6 +21,7 @@ from track2data.core.errors import ImportError_
 from track2data.core.models import Session, VideoInfo
 from track2data.readers import probe_session
 from track2data.readers.base import SessionReader
+from track2data.readers.params import ReaderParameter
 
 
 def _session(folder: Path, reader: str) -> Session:
@@ -134,3 +135,65 @@ def test_probing_a_folder_nobody_recognises_names_the_folder(tmp_path: Path) -> 
     with pytest.raises(ImportError_) as err:
         probe_session(tmp_path)
     assert err.value.code == "NO_READER"
+
+
+# ── a probe that replays a saved reader and its options ──────────────────────
+
+
+class _NeedsFps(SessionReader):
+    """Needs an option its files do not record; never found by detection."""
+
+    name = "probe_needs_fps"
+    parameters: ClassVar[tuple[ReaderParameter, ...]] = (
+        ReaderParameter(name="fps", label="Frame rate", kind="float", required=True),
+    )
+    seen: ClassVar[list[dict[str, Any]]] = []
+
+    @classmethod
+    def detect(cls, folder: Path) -> bool:
+        return False
+
+    def read(self, folder: Path, *, options: Any = None) -> Session:  # type: ignore[override]
+        type(self).seen.append(dict(options))
+        return _session(folder, self.name)
+
+
+@pytest.fixture
+def needs_fps() -> Iterator[None]:
+    _NeedsFps.seen.clear()
+    readers.register(_NeedsFps)
+    yield
+    readers._REGISTRY.remove(_NeedsFps)
+
+
+class TestProbeWithASavedReader:
+    def test_the_default_probe_hands_the_saved_options_to_read(
+        self, needs_fps: None, tmp_path: Path
+    ) -> None:
+        probe_session(tmp_path, reader="probe_needs_fps", options={"fps": 25.0})
+        assert _NeedsFps.seen == [{"fps": 25.0}]
+
+    def test_a_missing_required_option_is_named_and_never_defaulted(
+        self, needs_fps: None, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ImportError_) as err:
+            probe_session(tmp_path, reader="probe_needs_fps")
+        assert err.value.code == "READER_OPTION_MISSING"
+        assert err.value.subject == "fps"
+        assert _NeedsFps.seen == []
+
+    def test_a_named_reader_skips_detection(
+        self, stub_readers: None, tmp_path: Path
+    ) -> None:
+        # no consenting.marker here, so detection would find nothing
+        session = probe_session(tmp_path, reader="probe_consenting", allow_pickle=True)
+        assert session.reader == "probe_consenting"
+        assert _Consenting.seen == [True]
+
+    def test_a_reader_that_is_not_registered_is_an_error_not_a_fall_back(
+        self, stub_readers: None, tmp_path: Path
+    ) -> None:
+        (tmp_path / "plain.marker").write_text("x")  # detection WOULD succeed
+        with pytest.raises(ImportError_) as err:
+            probe_session(tmp_path, reader="no_such_reader")
+        assert err.value.code == "READER_UNKNOWN"

@@ -77,7 +77,7 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
     from track2data.api import Engine
 
     ref = next(r for r in manifest.sessions if r.session_id == session_id)
-    psess = Engine(manifest, cache_dir=cache_dir).preprocess_folder(ref.folder)
+    psess = Engine(manifest, cache_dir=cache_dir).preprocess_ref(ref)
     video = psess.session.video
     return TrajectoryData(
         raw_xy=psess.session.raw_xy,

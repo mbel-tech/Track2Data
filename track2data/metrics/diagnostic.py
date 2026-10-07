@@ -306,6 +306,21 @@ class InconsistentFrameCount(Metric):
 # ── D-5: Identity Stability ────────────────────────────────────────────────────
 
 
+def _reader_has_no_identification_quality(reader_name: str) -> bool:
+    """True for a *registered* reader whose tracker reports no identification quality.
+
+    An unregistered name (a hand-built Session, a plug-in that is not installed) keeps D-5's
+    original reading of a missing value, so nothing that worked before changes.
+    """
+    from track2data import readers
+    from track2data.core.errors import ImportError_
+
+    try:
+        return not readers.get_reader(reader_name).provides_identification_quality
+    except ImportError_:
+        return False
+
+
 class IdentityStability(Metric):
     """D-5: Categorical identity-stability classification for the session."""
 
@@ -321,16 +336,24 @@ class IdentityStability(Metric):
             "Categorical classification of identity stability: "
             "'stable' when identities are well-maintained, "
             "'weak' when identities exist but are unreliable, "
-            "'identity_free' when the session has no stable identities."
+            "'identity_free' when the session has no stable identities, "
+            "'not_assessed' when the tracker reports no identification quality to judge by."
         ),
         formula_plain=(
             "stable        if has_stable_identities=True  and fraction_identified >= 0.5; "
             "weak          if has_stable_identities=True  and fraction_identified < 0.5"
             " (or missing); "
+            "not_assessed  if has_stable_identities=True  and fraction_identified is missing"
+            " and the session's reader has no identification-quality metric; "
             "identity_free if has_stable_identities=False"
         ),
         inputs=["Session.has_stable_identities", "Session.quality"],
-        assumptions=["fraction_identified defaults to 0.0 when not available."],
+        assumptions=[
+            "fraction_identified defaults to 0.0 when not available, for readers whose "
+            "tracker does report it (idtracker.ai) or whose reader is unknown.",
+            "Readers whose tracker has no such metric (provides_identification_quality is "
+            "False) are 'not_assessed' rather than 'weak': the metric does not exist for them.",
+        ],
         warnings=["'weak' status may indicate frequent identity swaps."],
         citation=(
             "Track2Data engineering threshold on idtracker.ai's own "
@@ -344,12 +367,17 @@ class IdentityStability(Metric):
         if not session.has_stable_identities:
             status = "identity_free"
         else:
-            fraction_identified: float = 0.0
+            fraction_identified: float | None = None
             if session.quality is not None:
                 raw = session.quality.get("fraction_identified")
                 if raw is not None:
                     fraction_identified = float(raw)
-            status = "stable" if fraction_identified >= 0.5 else "weak"
+            if fraction_identified is None and _reader_has_no_identification_quality(
+                session.reader
+            ):
+                status = "not_assessed"
+            else:
+                status = "stable" if (fraction_identified or 0.0) >= 0.5 else "weak"
 
         return pd.DataFrame(
             [

@@ -2,16 +2,15 @@
 
 **Turn idtracker.ai output folders into analysis-ready behavioural datasets.**
 
-You tracked your fish. idtracker.ai gave you a folder of trajectories.
+You tracked your animals. idtracker.ai gave you a folder of trajectories.
 Track2Data turns that into tables you can put straight into R or Python:
 50 behavioural metrics, every one with a citation, in documented units,
 with a record of exactly which frames were measured and which were
 reconstructed.
 
-It is a desktop application — a seven-step wizard, no scripting required —
-and a Python engine you can drive headlessly for batch or HPC work.
+It is a desktop application and a Python engine you can drive headlessly for batch or HPC work.
 
-**New here? Start with the user guide**: a single step-by-step walkthrough of the app with screenshots, as [Markdown](docs/guide/USER_GUIDE.md) or as a [PDF download](docs/guide/Track2Data_User_Guide.pdf).
+**New here? Start with the [user guide](docs/guide/USER_GUIDE.md)**: a single step-by-step walkthrough of the app with screenshots, also available as a [PDF download](docs/guide/Track2Data_User_Guide.pdf).
 
 > **Status:** v0.1.0, pre-1.0. Usable, and its numbers are tested against
 > analytic ground truth and a reference R pipeline — but read the
@@ -86,6 +85,7 @@ track2data --help
 
 ```bash
 track2data new my-study.t2d.json          # scaffold a project
+track2data add my-study.t2d.json /path/to/trajectories   # find the sessions, confirm the software
 track2data validate my-study.t2d.json     # check it before spending time on a run
 track2data run my-study.t2d.json          # import → preprocess → metrics → export
 ```

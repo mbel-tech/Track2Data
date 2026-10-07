@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 from track2data.core.errors import DataValidationError
+from track2data.core.ids import default_session_id
 from track2data.core.models import Session, VideoInfo
 from track2data.readers.idtrackerai.key_aliases import KNOWN_TRAJECTORY_KEYS, QUALITY_KEYS
 
@@ -107,7 +108,7 @@ class Normaliser:
         self._log_version_and_body_length(version, body_length_px)
 
         return Session(
-            session_id=self._folder.name,
+            session_id=default_session_id(self._folder),
             folder=self._folder,
             reader="idtrackerai",
             video=video,
