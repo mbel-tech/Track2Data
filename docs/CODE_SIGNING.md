@@ -176,7 +176,14 @@ spctl --assess --type execute --verbose /Applications/Track2Data.app
 
 # Linux
 gpg --verify Track2Data-x86_64.AppImage.asc Track2Data-x86_64.AppImage
+
+# Any platform: checksum (and, with --sig, the GPG signature)
+python packaging/verify_release.py <artifact> --sums SHA256SUMS.txt [--sig <artifact>.asc]
 ```
+
+Before tagging, `python packaging/check_signing_readiness.py` reports per platform
+whether the secrets are complete (`sign`), absent (`skip`) or half-set (`partial`,
+which fails the release job). See [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md).
 
 ---
 

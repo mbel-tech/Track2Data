@@ -402,7 +402,7 @@ class MainWindow(QMainWindow):
         self._processing_screen.start_run()
 
     def _action_cancel(self) -> None:
-        self._store.tasks.cancel_all()
+        self._store.tasks.cancel_all(lane="run")
 
     def _action_export(self) -> None:
         # Phase 2+: calls exporters

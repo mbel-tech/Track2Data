@@ -14,14 +14,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -61,12 +65,21 @@ class MetadataScreen(QWidget):
         if store is not None:
             store.metadataChanged.connect(self._on_metadata_changed)
             store.sessionsChanged.connect(self._refresh_match_summary)
+            store.sessionFactsChanged.connect(self._refresh_match_summary)
             store.projectChanged.connect(self._on_metadata_changed)
 
     # ── build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+        root = QVBoxLayout(inner)
         root.setContentsMargins(48, 36, 48, 36)
         root.setSpacing(16)
 
@@ -116,15 +129,30 @@ class MetadataScreen(QWidget):
             self._combos[field] = combo
             combo.currentIndexChanged.connect(self._auto.trigger)
             if field == "individual_id":
-                # Metadata is joined per session (D-010): a per-animal value
-                # would be copied onto every animal, so it is not offered.
-                combo.setEnabled(False)
-                combo.setToolTip(
-                    "Per-animal metadata is not supported yet: the join is per "
-                    "session, so this value would be copied to every animal."
-                )
+                combo.currentIndexChanged.connect(lambda _i: self._update_match_mode_enabled())
             self._mapping_form.addRow(f"{label_for(field, _FIELD_LABELS)}:", combo)
         root.addLayout(self._mapping_form)
+
+        # Per-animal options (D-010 superseded): how an Individual ID value is
+        # matched to an animal, and which further columns to carry through.
+        self._match_mode = QComboBox()
+        self._match_mode.addItem("Validator label (position if none)", userData="label")
+        self._match_mode.addItem("Position, 0-based", userData="index")
+        self._match_mode.setEnabled(False)
+        self._match_mode.setToolTip(
+            "How each Individual ID in the CSV is matched to an animal. Labels are "
+            "the names set in the idtracker.ai Validator (default 1, 2, ...)."
+        )
+        self._match_mode.currentIndexChanged.connect(self._auto.trigger)
+        self._mapping_form.addRow("Match animals by:", self._match_mode)
+
+        extra_label = QLabel("Also include these columns (e.g. weight, sex):")
+        extra_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        root.addWidget(extra_label)
+        self._extra_list = QListWidget()
+        self._extra_list.setMaximumHeight(110)
+        self._extra_list.itemChanged.connect(lambda _item: self._auto.trigger())
+        root.addWidget(self._extra_list)
 
         self._match_label = QLabel("")
         self._match_label.setWordWrap(True)
@@ -189,6 +217,27 @@ class MetadataScreen(QWidget):
             self._fill_combos(headers)
         self._auto.trigger()  # persist the auto-matched columns
 
+    def _fill_extra_list(self, headers: list[str], checked: list[str] | None = None) -> None:
+        """List the CSV columns that are not mapped to a field, as checkable extras."""
+        mapped = {
+            combo.currentText()
+            for combo in self._combos.values()
+            if combo.currentText() != "(skip)"
+        }
+        keep = set(checked or [])
+        self._extra_list.clear()
+        for col in headers:
+            if col in mapped:
+                continue
+            item = QListWidgetItem(col)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            on = col.strip().lower() in {c.strip().lower() for c in keep}
+            item.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+            self._extra_list.addItem(item)
+
+    def _update_match_mode_enabled(self) -> None:
+        self._match_mode.setEnabled(self._combos["individual_id"].currentText() != "(skip)")
+
     def _fill_combos(self, headers: list[str]) -> None:
         for field, combo in self._combos.items():
             combo.clear()
@@ -197,11 +246,11 @@ class MetadataScreen(QWidget):
                 combo.addItem(col)
             # auto-select a column named like the field, or by a known alias
             # ("date" -> trial_date, "condition" -> treatment, ...)
-            if not combo.isEnabled():
-                continue
             resolved = [resolve_column(h) for h in headers]
             if field in resolved:
                 combo.setCurrentIndex(resolved.index(field) + 1)  # +1 for (skip)
+        self._fill_extra_list(headers)
+        self._update_match_mode_enabled()
 
     def _skip_metadata(self) -> None:
         if self._store is not None:
@@ -219,7 +268,23 @@ class MetadataScreen(QWidget):
             val = combo.currentText()
             if val != "(skip)":
                 rules[field] = val
-        rule = MappingRule(rules=rules)
+        extras = [
+            self._extra_list.item(i).text()
+            for i in range(self._extra_list.count())
+            if self._extra_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        # model_copy on the current rule so join_keys / join_regex, which this
+        # screen has no widgets for, are never reset to their defaults.
+        current = self._store.manifest.mapping or MappingRule()
+        rule = current.model_copy(
+            update={
+                "rules": rules,
+                "extra_columns": extras,
+                "individual_match": self._match_mode.currentData() or "label",
+            }
+        )
+        if rule == self._store.manifest.mapping:
+            return
         try:
             self._store.update_mapping(rule)
         except Exception as exc:
@@ -250,6 +315,11 @@ class MetadataScreen(QWidget):
                 idx = combo.findText(column) if combo is not None else -1
                 if idx >= 0 and combo.currentIndex() != idx:
                     combo.setCurrentIndex(idx)
+            self._fill_extra_list(self._columns, rule.extra_columns)
+            self._update_match_mode_enabled()
+            mode_idx = self._match_mode.findData(rule.individual_match)
+            if mode_idx >= 0:
+                self._match_mode.setCurrentIndex(mode_idx)
 
     def _restore_from_source(self, src: MetadataSource) -> None:
         import csv
@@ -264,6 +334,44 @@ class MetadataScreen(QWidget):
             self._fill_combos(rows[0])
         self._file_label.setText(src.path.name)
         self._file_label.setStyleSheet("color: #2c3e50;")
+
+    def _per_animal_notes(self, manifest, result) -> list[str]:
+        """Problems with per-animal rows that the engine will only log: animals
+        with no row, keys matching no animal, identity-free sessions."""
+        from track2data.metadata.join import resolve_animal
+
+        notes: list[str] = []
+        mode = manifest.mapping.individual_match if manifest.mapping else "label"
+        for ref in manifest.sessions:
+            keyed = result.matched_individuals.get(ref.session_id)
+            if not keyed:
+                continue
+            facts = self._store.session_facts(ref.session_id)
+            if ref.is_identity_free():
+                notes.append(
+                    f"Session {ref.session_id} is identity-free: per-animal metadata "
+                    "is ignored for it."
+                )
+                continue
+            if facts is None:
+                continue  # not probed yet: cannot resolve animals
+            labels = [str(x).strip().lower() for x in (facts.identities_labels or ())]
+            found: set[int] = set()
+            for key in keyed:
+                idx = resolve_animal(key, labels, mode, facts.n_animals)
+                if idx is None:
+                    notes.append(f"Session {ref.session_id}: '{key}' matches no animal.")
+                else:
+                    found.add(idx)
+            for k in range(facts.n_animals):
+                if k not in found:
+                    name = (
+                        facts.identities_labels[k]
+                        if facts.identities_labels and mode == "label"
+                        else k
+                    )
+                    notes.append(f"Session {ref.session_id}: no row for animal {name}.")
+        return notes
 
     def _refresh_match_summary(self) -> None:
         """"N of M sessions matched" from the same join the engine will run."""
@@ -294,7 +402,13 @@ class MetadataScreen(QWidget):
                 f" {len(result.conflicts)} session(s) matched several rows "
                 "(the first row is used)."
             )
-        ok = len(result.matched) == total and not result.conflicts
+        notes = self._per_animal_notes(m, result)
+        if result.matched_individuals:
+            n_rows = sum(len(v) for v in result.matched_individuals.values())
+            text += f" {n_rows} animal rows matched."
+        if notes:
+            text += " " + " ".join(notes)
+        ok = len(result.matched) == total and not result.conflicts and not notes
         self._match_label.setText(text)
         self._match_label.setStyleSheet(
             f"font-size: 13px; color: {'#2c7a4b' if ok else '#b8860b'};"

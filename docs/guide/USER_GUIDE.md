@@ -138,7 +138,8 @@ sidebar shows ⚠ while any session is identity-free.
 - Folders are only read, never modified.
 - Adding the same folder twice is ignored.
 - The status bar (bottom left) shows the session count.
-- Supported: idtracker.ai 6.x output (the legacy v5 layout is also read). v4 is not supported yet.
+- Supported: idtracker.ai 6.x output (the legacy v5 layout is also read). v4 is not supported yet (Track2Data tells you so if it recognises a v4 folder; see
+  [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)).
 
 ## 3. Calibration
 
@@ -227,12 +228,31 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 3. The line under the mapping tells you how many sessions found a row (`1 of 1 sessions matched`)
    and names any that did not.
 
-The `session_id` column must equal the session folder name. One row is matched per session (if
-several rows match, the first is used and the summary says so).
+The `session_id` column must equal the session folder name. Without an *Individual ID* column one
+row is matched per session (if several rows match, the first is used and the summary says so).
 
-> **Per-animal information** (sex, genotype of individual fish) cannot be attached yet: metadata is
-> joined per session, so such a value would be copied onto every animal. *Individual ID* is shown
-> disabled for that reason. Join those columns yourself in R or Python after exporting.
+### Per-animal information (sex, weight, genotype of individual fish)
+
+Give the CSV **one row per animal** and map its animal column (`fish_id`, `animal_id` or any name)
+to *Individual ID*. Then:
+
+- **Match animals by** decides how each value is matched to an animal. *Validator label* uses the
+  names set in the idtracker.ai Validator (the default labels are `1`, `2`, …) and falls back to the
+  0-based position for a session that has none. *Position* always uses the 0-based position (the
+  `individual_id` of the exported tables).
+- Tick the other columns you want under **Also include these columns**. Columns that are not mapped
+  to a field and not ticked are dropped.
+- Per-animal values land on every row that has an `individual_id` (the per-frame table and the
+  individual metric tables). Values that are the same for all animals of a session (such as
+  `treatment`) also go onto the group tables; per-animal values never do.
+- The summary lists animals with no row (their cells stay empty), and CSV rows whose animal matches
+  nothing.
+- **Identity-free sessions** get no per-animal values: their rows are detection slots, not animals.
+  Session-level fields still apply.
+
+Pick the right match mode: if your CSV counts animals from 1 and the Validator labels are the default
+`1`, `2`, … use *Validator label*; if it counts from 0, use *Position*. A column named like an
+engine column (`speed_px_s`, `frame`, `bin_index`, …) is never carried, so it cannot overwrite data.
 
 **Skip metadata** removes the file if you change your mind.
 
@@ -284,6 +304,11 @@ Choose what to compute. Metrics are grouped on three tabs: **Individual** (per a
   parameters (available on metrics that have any).
 - The counter shows how many are selected.
 - **Quality threshold** drops frames whose identification probability is below the value.
+- **Time bins** splits every session into bins of the chosen length (minutes) and reports each
+  metric per bin, with `bin_index`, `bin_start_s` and `bin_end_s` columns. *Whole session* (the
+  default) turns it off. Whole-track metrics (tortuosity, home-base stability) stay one row per
+  animal with empty bin columns; diagnostics are always whole-session. Thresholds such as the
+  freezing speed threshold are fixed from the whole session, so bins are comparable.
 - Rows are greyed out for sessions without stable identities; see
   [Sessions](#2-sessions).
 
@@ -416,6 +441,8 @@ same.
 | `group_dynamics_summary` | session | group-level metrics, plus metadata |
 | `trial_summary_wide` | session × animal | all summary metrics side by side |
 
+- **Time bins** (when set on the Metrics screen): summary tables have one row per animal *per bin*, with `bin_index`, `bin_start_s`, `bin_end_s`; `master_fish_by_frame` gets `bin_index`. Metrics that are not meaningful per window keep a single row with empty bin columns.
+
 ### Column naming
 
 | Suffix | Meaning |
@@ -442,7 +469,7 @@ Definitions, formulas and references for every metric: [`docs/METRICS_SPEC.md`](
 | You see | Why | What to do |
 |---|---|---|
 | **Next ▶** is disabled | A required stage is empty or invalid | Hover over Next: the tooltip names the problem. Check the ✗ / ○ badges in the sidebar |
-| *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet |
+| *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet (a v4-looking folder gets a specific message; see [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)) |
 | Session frames / animals show `—` | The folder is still being read | Wait a moment; a failed read is reported in the Run Log |
 | `*_cm` columns are empty | No pixels-per-unit scale | Use `*_bl` columns or set a scale in [Calibration](#3-calibration) |
 | ⚠ on *Sessions* | A session is identity-free | Expected for sessions tracked without identities; see [Sessions](#2-sessions) |

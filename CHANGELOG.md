@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **idtracker.ai v4 preparation:** folders that look like v4 output now fail with a specific
+  `V4_NOT_SUPPORTED` message instead of the generic "no reader" one; `scripts/inspect_idtrackerai_output.py`
+  describes any idtracker.ai folder (pickles are only opened with `--allow-pickle`);
+  `docs/IDTRACKERAI_V4_SAMPLES.md` lists what to send. The v4 reader itself is still not implemented.
+- **Signing readiness (no certificates needed):** `packaging/check_signing_readiness.py`
+  classifies each platform as sign / skip / partial from the secret names present, and
+  `release.yml` now uses it, so a half-configured platform (e.g. a macOS certificate
+  without its notarisation password) fails the job at once instead of mid-signing;
+  `packaging/verify_release.py` checks a download against `SHA256SUMS.txt` (and the
+  AppImage GPG signature); `docs/RELEASE_CHECKLIST.md` lists the steps and known risks;
+  CI now runs `actionlint` over the workflows.
+- **`scripts/benchmark_parallel.py`** times `Engine.run` for several worker counts
+  and cache modes on synthetic (or real) sessions, with per-stage and per-metric
+  breakdowns and per-configuration peak memory; `docs/BENCHMARKING.md` explains it
+  and records one local data point (4 sessions of 20,000 frames x 10 animals:
+  71.2 s sequential, 22.0 s with 4 workers on 4 cores). A manual-only workflow
+  runs it on a hosted runner. Not run on real long sessions yet.
+
+- **Per-animal metadata.** A metadata CSV with one row per animal (map its
+  animal column to *Individual ID*) now gives each animal its own values, matched
+  by validator label or 0-based position. Further columns (weight, sex, ...) are
+  carried via *Also include these columns*. Values constant across a session also
+  reach group tables; per-animal values never do. Identity-free sessions get none,
+  unmatched animals and keys are reported on the Metadata screen and logged once.
+  Supersedes D-010. The Metadata screen also stopped resetting `join_keys` and
+  `join_regex` whenever a mapping was edited.
+
+- **Timepoint binning.** Setting *Time bins* on the Metrics screen
+  (`MetricSelection.timepoint_minutes`, previously stored but ignored) computes
+  each metric per bin of true video time and adds `bin_index`, `bin_start_s`,
+  `bin_end_s` (and `bin_index` in `master_fish_by_frame`). Data-derived values
+  (activity threshold, fitted bout criterion) are resolved once on the whole
+  session so bins are comparable; whole-track metrics (IL-5, IL-9) and the
+  diagnostics stay whole-session. New `Metric.window_safe` and
+  `Metric.resolve_for_windows`.
+
 - **User guide with screenshots** as one document, `docs/guide/USER_GUIDE.md`
   (one chapter per screen, output file reference, troubleshooting), also
   published as `docs/guide/Track2Data_User_Guide.pdf` (author and copyright:
@@ -347,6 +383,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   user confirmation step.
 
 ### Fixed
+
+- **Metadata screen scrolls** instead of squashing its rows once the per-animal controls were added.
+
+- **Adding sessions no longer waits for, or disturbs, a pipeline run.** Session
+  probes now run in their own task lane. Before, a probe queued behind a long
+  run (blank frame counts until it ended), a failed probe popped the
+  "Pipeline run failed" dialog, and every probe start flashed the toolbar
+  Cancel button. Cancel now only targets the run lane, queued probes are
+  dropped when a project is created or opened (and on quit, instead of
+  draining the whole backlog), and shutdown shares one deadline across lanes.
+
+- **Exports with metadata no longer contain `treatment_x` / `treatment_y`.**
+  Session metadata is attached to every metric frame, and the exporters merged
+  those frames on all shared columns or on the id keys alone, so any
+  multi-metric export with metadata got duplicated suffixed columns (and the
+  Excel summary stacked metrics into separate rows instead of widening). All
+  four exporters now share `exporters/_merge.py`: join on identity keys only,
+  keep a column carried by several frames once when its values agree.
 
 - **Parameter screens no longer lose edits.** Calibration, Preprocessing,
   Metadata mapping and Metrics had "Apply" buttons; changing a value and

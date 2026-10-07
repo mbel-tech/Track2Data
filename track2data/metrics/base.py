@@ -127,6 +127,10 @@ class Metric(ABC):
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False
+    # False for metrics whose value is not meaningful on a time window of the
+    # session (whole-track tortuosity; a half-vs-half stability check). With
+    # timepoint binning on, such a metric stays one whole-session row per animal.
+    window_safe: ClassVar[bool] = True
     output_columns: list[str]
     documentation: MetricDocumentation
     # Most metrics (24 of 44 today) take no configuration at all --
@@ -141,6 +145,18 @@ class Metric(ABC):
     # other metric. Rendered as a notice in the ⓘ dialog and the
     # metrics-screen row tooltip; never changes what compute() returns.
     superseded_by: ClassVar[str | None] = None
+
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        """cfg entries a metric derives *from the data*, resolved on the whole
+        session so every time window (timepoint binning) uses the same value.
+
+        Without this, a metric that sets its own threshold from the data it is
+        given (mean speed, a fitted bout criterion) would pick a different one
+        per window, and per-bin values would stop being comparable. The default
+        is ``{}``: nothing is data-derived.
+        """
+        return {}
 
     @abstractmethod
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:

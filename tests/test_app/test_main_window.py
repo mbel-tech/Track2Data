@@ -406,3 +406,42 @@ def test_help_menu_opens_the_user_guide(qtbot, monkeypatch) -> None:
     win._action_open_guide()
     assert opened[0].toString() == GUIDE_URL
     assert GUIDE_URL.endswith("/docs/guide/USER_GUIDE.md")
+
+
+# ── probes must not drive the run-oriented chrome ─────────────────────────────
+
+
+def test_failed_probe_shows_no_failure_dialog(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    from app.main_window import MainWindow
+
+    shown: list[int] = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(1) or 0)
+    monkeypatch.setattr(
+        "track2data.readers.probe_session",
+        lambda folder: (_ for _ in ()).throw(RuntimeError("bad folder")),
+    )
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("p", tmp_path)
+    folder = tmp_path / "s"
+    folder.mkdir()
+    logged: list[str] = []
+    win._store.runLogAppended.connect(logged.append)
+    win._store.add_session(folder)
+    qtbot.waitUntil(lambda: any("Identity probe failed" in x for x in logged), timeout=3000)
+    qtbot.wait(100)
+    assert shown == []
+
+
+def test_probe_finishing_during_a_run_does_not_disable_cancel(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._cancel_action.setEnabled(True)  # as if a run were in flight
+    win._store.tasks.probeFinished.emit("t", object())
+    win._store.tasks.probeFailed.emit("t", "x", "tb")
+    win._store.tasks.probeCancelled.emit("t")
+    assert win._cancel_action.isEnabled()

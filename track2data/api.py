@@ -48,57 +48,34 @@ from track2data.core.models import (
     SessionRef,
     SessionRunResult,
 )
-from track2data.core.progress import ProgressCallback, ProgressEvent, emit
+from track2data.core.progress import OperationCancelled, ProgressCallback, ProgressEvent, emit
+from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
 from track2data.readers import read_session
 
 logger = logging.getLogger(__name__)
 
 
-def _map_array_index_to_true_frame(
-    tracking_intervals: list[tuple[int, int]] | None, n_frames: int
-) -> tuple[Any, bool]:
-    """
-    Map trajectory-array row position (0..n_frames-1) to the true video
-    frame number, using ``Session.tracking_intervals``.
+_BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
 
-    idtracker.ai only tracks (and stores trajectory rows for) frames inside
-    the configured ``--tracking_intervals``; array position 0 is the first
-    frame of the first interval, not frame 0 of the video
-    (idtracker.ai_usage.md:552: "Tracking intervals in frames ... If not
-    set, the whole video is tracked"; session_idtrackerai.md:240: interval
-    end is exclusive). With a single interval starting elsewhere than 0,
-    using the raw array position as "frame" understates every frame number
-    by the interval's start; with multiple intervals, it also makes the
-    derived time axis non-monotonic in real time across the gap between
-    intervals.
 
-    Returns
-    -------
-    true_frames:
-        Array of length n_frames with the true video frame number per row.
-    valid:
-        Whether the mapping could be trusted, i.e. the intervals'
-        combined length matches n_frames exactly. When False, true_frames
-        is simply ``arange(n_frames)`` (today's behaviour) because the
-        intervals don't reconcile with the data -- e.g. a partial/embargoed
-        session.json, or gaps closed by preprocessing on idtracker.ai's
-        side that this reader has no way to reconstruct.
-    """
+def _with_bin_columns(df: Any, window: Any | None) -> Any:
+    """*df* with bin_index/bin_start_s/bin_end_s placed after its key columns.
+    ``window=None`` fills them with NaN (a whole-session result in a binned run)."""
     import numpy as np
 
-    if not tracking_intervals:
-        return np.arange(n_frames), False
-
-    lengths = [max(0, end - start) for start, end in tracking_intervals]
-    if sum(lengths) != n_frames:
-        return np.arange(n_frames), False
-
-    true_frames = np.empty(n_frames, dtype=np.int64)
-    pos = 0
-    for (start, _end), length in zip(tracking_intervals, lengths, strict=True):
-        true_frames[pos : pos + length] = np.arange(start, start + length)
-        pos += length
-    return true_frames, True
+    df = df.copy()
+    values = (
+        (np.nan, np.nan, np.nan)
+        if window is None
+        else (window.index, window.start_s, window.end_s)
+    )
+    pos = max(
+        (df.columns.get_loc(k) + 1 for k in ("session_id", "individual_id") if k in df.columns),
+        default=0,
+    )
+    for offset, (name, value) in enumerate(zip(_BIN_COLUMNS, values, strict=True)):
+        df.insert(pos + offset, name, value)
+    return df
 
 
 def _recover_preprocess_report(
@@ -183,6 +160,9 @@ class Engine:
         self._cache_dir = Path(cache_dir) if cache_dir is not None else None
         # Set for the duration of run(); see run()'s cancel_check.
         self._cancel_check: Callable[[], None] | None = None
+        # (session_id, identity_free) -> per-animal metadata, so its warnings
+        # are logged once per session rather than once per result frame.
+        self._individual_metadata: dict[tuple[str, bool], dict[int, dict[str, Any]]] = {}
 
     @property
     def manifest(self) -> ProjectManifest:
@@ -230,6 +210,90 @@ class Engine:
             return {}
         fields = join.matched.get(session_id, {})
         return {k: v for k, v in fields.items() if k not in ("session_id", "individual_id")}
+
+    def _metadata_individual_fields_for(
+        self, psess: PreprocessedSession, identity_free: bool
+    ) -> dict[int, dict[str, Any]]:
+        """Per-animal metadata for one loaded session: animal index -> fields.
+
+        Only when the mapping gives ``individual_id`` (one metadata row per
+        animal). Keys are matched to animals per session, so the validator's
+        identity labels are available; see ``MappingRule.individual_match``.
+        Empty for identity-free sessions, where the row index is a detection
+        slot rather than an animal, so a per-animal value would be attached to
+        whichever animal happened to occupy the slot.
+        """
+        cache_key = (psess.session_id, bool(identity_free))
+        if cache_key not in self._individual_metadata:
+            self._individual_metadata[cache_key] = self._resolve_individual_metadata(
+                psess, identity_free
+            )
+        return self._individual_metadata[cache_key]
+
+    def _resolve_individual_metadata(
+        self, psess: PreprocessedSession, identity_free: bool
+    ) -> dict[int, dict[str, Any]]:
+        from track2data.metadata.join import resolve_animal
+
+        join = self._metadata_join
+        rule = self._manifest.mapping
+        keyed = join.matched_individuals.get(psess.session_id) if join is not None else None
+        if not keyed or rule is None:
+            return {}
+        if identity_free:
+            logger.warning(
+                "Session %s is identity-free: per-animal metadata is ignored for it "
+                "(animals cannot be told apart); session-level metadata still applies.",
+                psess.session_id,
+            )
+            return {}
+        n_animals = psess.n_animals
+        labels = [str(x).strip().lower() for x in (psess.session.identities_labels or [])]
+        out: dict[int, dict[str, Any]] = {}
+        for key, fields in keyed.items():
+            idx = resolve_animal(key, labels, rule.individual_match, n_animals)
+            if idx is None:
+                logger.warning(
+                    "Session %s: metadata individual '%s' matches no animal (%s); ignored.",
+                    psess.session_id, key,
+                    f"labels {labels}" if labels and rule.individual_match == "label"
+                    else f"{n_animals} animals, 0-based",
+                )
+                continue
+            out.setdefault(idx, fields)
+        for k in range(n_animals):
+            if k not in out:
+                logger.warning(
+                    "Session %s: no metadata row for animal %d; its metadata is left empty.",
+                    psess.session_id, k,
+                )
+        return out
+
+    def _attach_metadata(self, df: Any, psess: PreprocessedSession, identity_free: bool) -> None:
+        """Add this session's metadata columns to *df* in place.
+
+        Session-level fields go on every frame. Per-animal fields go only on
+        frames that have an ``individual_id`` column (never on group or pooled
+        frames), NaN for an animal with no metadata row. A metadata column
+        never overwrites a column the frame already has.
+        """
+        if df is None or len(df.columns) == 0:
+            return
+        attached: set[str] = set()
+        for col, val in self._metadata_fields_for(psess.session_id).items():
+            if col not in df.columns:
+                df[col] = val
+                attached.add(col)
+        if "individual_id" not in df.columns:
+            return
+        per_animal = self._metadata_individual_fields_for(psess, identity_free)
+        if not per_animal:
+            return
+        columns = list(dict.fromkeys(c for f in per_animal.values() for c in f))
+        for col in columns:
+            if col in df.columns and col not in attached:
+                continue  # an engine column: never overwritten
+            df[col] = df["individual_id"].map({k: f.get(col) for k, f in per_animal.items()})
 
     # ── session import ─────────────────────────────────────────────────────
 
@@ -501,6 +565,61 @@ class Engine:
                 skipped[mid] = reason
         return skipped
 
+    def _bin_seconds(self) -> float | None:
+        minutes = self._manifest.metrics.timepoint_minutes
+        return float(minutes) * 60.0 if minutes and minutes > 0 else None
+
+    @staticmethod
+    def _compute_one(
+        cls: type, psess: PreprocessedSession, cfg: dict[str, Any], identity_free: bool
+    ) -> Any:
+        """One metric on one (whole or sliced) session. Occupancy-style zone
+        metrics are pooled over detection slots on identity-free sessions."""
+        if identity_free and cls.pools_when_identity_free:
+            from track2data.metrics.zone import pooled_view
+
+            df = cls().compute(pooled_view(psess), cfg)
+            return df.drop(columns=["individual_id"], errors="ignore")
+        return cls().compute(psess, cfg)
+
+    def _compute_windowed(
+        self,
+        cls: type,
+        psess: PreprocessedSession,
+        cfg: dict[str, Any],
+        windows: list[Any],
+        identity_free: bool,
+    ) -> Any:
+        """Run *cls* on each time window and stack the results.
+
+        *cfg* (derived on the whole session by the caller) is extended with
+        whatever the metric derives from the data itself, resolved once on the
+        whole session, so every bin uses the same threshold.
+        """
+        import pandas as pd
+
+        from track2data.metrics.binning import slice_psess
+
+        window_cfg = {**cfg, **cls.resolve_for_windows(psess, cfg)}
+        parts = []
+        for w in windows:
+            if self._cancel_check is not None:
+                self._cancel_check()
+            df = self._compute_one(
+                cls, slice_psess(psess, w.start_row, w.stop_row), window_cfg, identity_free
+            )
+            if cls.id == "Z-5" and not df.empty:
+                # event frame/time are relative to the slice; keep them on the
+                # session axis, as in an unbinned run
+                df = df.copy()
+                df["frame"] = df["frame"] + w.start_row
+                df["t_s"] = df["t_s"] + w.start_row / psess.fps
+            parts.append(_with_bin_columns(df, w))
+        non_empty = [p for p in parts if not p.empty]
+        if not non_empty:
+            return parts[0] if parts else pd.DataFrame()
+        return pd.concat(non_empty, ignore_index=True)
+
     def compute_metrics(
         self,
         psess: PreprocessedSession,
@@ -556,7 +675,14 @@ class Engine:
                 psess.session_id,
             )
 
-        def _run(metric_ids: list[str]) -> None:
+        bin_seconds = self._bin_seconds()
+        windows = None
+        if bin_seconds is not None:
+            from track2data.metrics.binning import bin_windows
+
+            windows = bin_windows(psess, bin_seconds)
+
+        def _run(metric_ids: list[str], *, binned: bool = True) -> None:
             from track2data.metrics import get
             for mid in metric_ids:
                 if mid in skipped:
@@ -571,13 +697,18 @@ class Engine:
                     continue
                 try:
                     cfg = self._effective_cfg(cls, psess)
-                    if is_identity_free and cls.pools_when_identity_free:
-                        from track2data.metrics.zone import pooled_view
-
-                        df = cls().compute(pooled_view(psess), cfg)
-                        results[mid] = df.drop(columns=["individual_id"], errors="ignore")
-                    else:
-                        results[mid] = cls().compute(psess, cfg)
+                    if windows is not None and binned and cls.window_safe:
+                        results[mid] = self._compute_windowed(
+                            cls, psess, cfg, windows, is_identity_free
+                        )
+                        continue
+                    results[mid] = self._compute_one(cls, psess, cfg, is_identity_free)
+                    if windows is not None and binned:
+                        # Not meaningful per window: one whole-session row, with
+                        # empty bin columns so it never merges into a bin.
+                        results[mid] = _with_bin_columns(results[mid], None)
+                except OperationCancelled:
+                    raise
                 except Exception:
                     logger.exception("Metric %s failed; skipping.", mid)
 
@@ -606,17 +737,16 @@ class Engine:
             _run(sel.group)
 
         _run(sel.zone)
-        _run(sel.diagnostic)
+        _run(sel.diagnostic, binned=False)
 
-        meta_fields = self._metadata_fields_for(psess.session_id)
-        if meta_fields:
-            for df in results.values():
-                for col, val in meta_fields.items():
-                    df[col] = val
+        for df in results.values():
+            self._attach_metadata(df, psess, is_identity_free)
 
         return results
 
-    def build_fish_by_frame(self, psess: PreprocessedSession) -> Any:
+    def build_fish_by_frame(
+        self, psess: PreprocessedSession, *, identity_free: bool | None = None
+    ) -> Any:
         """
         Build the master per-frame DataFrame for *psess*.
 
@@ -677,6 +807,14 @@ class Engine:
             "heading_rad": heading_flat,
         })
 
+        bin_seconds = self._bin_seconds()
+        if bin_seconds is not None:
+            df.insert(
+                df.columns.get_loc("time_s") + 1,
+                "bin_index",
+                np.floor(time_s / bin_seconds + 1e-9).astype(np.int64),
+            )
+
         if psess.px_per_cm is not None:
             df["x_cm"] = df["x_px"] / psess.px_per_cm
             df["y_cm"] = df["y_px"] / psess.px_per_cm
@@ -729,8 +867,9 @@ class Engine:
             ]
             df.loc[below, masked_cols] = np.nan
 
-        for col, val in self._metadata_fields_for(psess.session_id).items():
-            df[col] = val
+        self._attach_metadata(
+            df, psess, self.identity_free_for(psess.session, identity_free)
+        )
 
         return df.sort_values(["session_id", "individual_id", "frame"]).reset_index(
             drop=True
@@ -757,7 +896,7 @@ class Engine:
         """
         from track2data.exporters.base import ExportPayload, SessionProvenance
 
-        fish_by_frame = self.build_fish_by_frame(psess)
+        fish_by_frame = self.build_fish_by_frame(psess, identity_free=identity_free)
 
         individual_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("IL-")}

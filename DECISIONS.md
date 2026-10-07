@@ -159,7 +159,7 @@ display server.
 
 ## Phase 2 — Metadata + remaining metrics (M2)
 
-### D-010 · Metadata join excludes `individual_id` and `session_id`
+### D-010 · Metadata join excludes `individual_id` and `session_id` — SUPERSEDED by D-025
 
 **Decision:** `Engine._metadata_fields_for()` never merges a
 metadata-sourced `individual_id` or `session_id` value into
@@ -243,6 +243,11 @@ data anywhere in this repo to validate against (the 70-session
 support with no real fixture to test against would be speculation, not
 engineering. Revisit if v4 sample data becomes available; re-add the
 entry-point line at that point, not before.
+
+**Addendum (offline prep):** a conservative `looks_like_v4()` heuristic now makes
+`read_session`/`probe_session` raise `V4_NOT_SUPPORTED` rather than `NO_READER`;
+`detect()` still returns False and no entry point is added. The inspector script and
+`docs/IDTRACKERAI_V4_SAMPLES.md` exist so real samples can be gathered.
 
 ### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now — CLOSED
 
@@ -501,3 +506,85 @@ platforms. Trails are strided to at most 1500 points each.
 **Trade-off:** no built-in axes, ROI tools or GPU acceleration. If time
 series plots (e.g. speed vs time with a live filter preview) are added
 later, pyqtgraph can be reconsidered for those alone.
+
+---
+
+## Phase 5 — Open items after the critical-issues audit
+
+### D-023 · Task lanes: probes get their own pool and their own signals
+
+**Decision:** `TaskRunner` owns one single-thread pool per lane (`run`, `probe`).
+Probe-lane tasks emit `probeFinished/probeFailed/probeCancelled` and none of the
+generic `task*` signals. `cancel_all(lane=...)` can target one lane; the Cancel
+button, Processing and Export screens pass `lane="run"`. A task whose token is
+already cancelled never starts. `shutdown()` waits on both pools against one
+deadline.
+
+**Rationale:** Extends D-003. A separate pool alone was not enough: the main
+window listens to the generic signals to enable Cancel and to show a modal
+failure dialog, so a probe finishing during a run would have disabled Cancel
+mid-run. Using different signals fixes that without touching the main window.
+
+**Trade-offs:** probes still do not poll their token while running (a probe is a
+single reader call), so cancelling only stops probes that have not started yet.
+Run and probe lanes can read the same session files concurrently; both are
+read-only and only the run lane writes the cache.
+
+---
+
+### D-024 · Timepoint binning by slicing, with whole-session config resolution
+
+**Decision:** Binning is done in the engine, not in metrics. `metrics/binning.py`
+cuts the session into windows of true video time (`bin_index = floor(time_s /
+bin_length)`, empty bins skipped, partial last bin keeps its real end) and
+`Engine.compute_metrics` runs each metric on a sliced copy of the
+`PreprocessedSession`, then stacks the results with `bin_index`, `bin_start_s`,
+`bin_end_s`. `Metric.resolve_for_windows(session, cfg)` lets a metric resolve
+data-derived config (IL-4/IL-7 threshold, bout criterion for IL-7 and Z-3/4/5)
+on the whole session once; `Metric.window_safe = False` (IL-5, IL-9) keeps a
+metric whole-session with NaN bin columns; diagnostics are never binned.
+
+**Rationale:** The alternative, giving every metric a time range, touches 40
+metrics. Slicing works because metrics only read per-frame arrays plus fps and
+calibration. Without whole-session resolution a data-driven threshold would
+differ per window and per-bin values would not be comparable (a one-bin run
+would also not equal the unbinned run; a test pins that).
+
+**Names:** the columns are `bin_*`, not `timepoint`, because `timepoint` is a
+canonical metadata field (metadata/schema.py) and the two must coexist.
+
+**Trade-offs:** diff-based metrics lose one step per bin edge; Z-6 is a latency
+from bin start; `timepoint_minutes` became a float so tests and short sessions
+can use sub-minute bins. Binning multiplies metric time by the number of bins
+only for the slicing overhead, not for the computation itself.
+
+---
+
+### D-025 · Per-animal metadata (supersedes D-010)
+
+**Decision:** When the mapping gives `individual_id`, the join becomes
+per-animal. `metadata/join.py` groups a session's rows by normalised animal key
+(`1`, `1.0` and `" 1 "` are the same animal); a repeated animal is a conflict
+(the first row is kept), several animals per session are not. Fields constant
+across the session's rows are session-level (`JoinResult.matched`, applied to
+every frame); everything else is per-animal (`matched_individuals`, applied only
+to frames with an `individual_id` column, NaN for an animal without a row).
+Keys are matched to animals per loaded session (`resolve_animal`): by the
+validator's identity label (case-insensitive) or, with no labels or with
+`MappingRule.individual_match="index"`, by 0-based position.
+`MappingRule.extra_columns` carries further columns by name; a metadata column
+never overwrites a column the frame already has, and names the engine writes
+itself are refused at mapping time. Identity-free sessions get no per-animal
+values (a row index there is a detection slot).
+
+**Rationale:** D-010 rejected this only because no call site needed it; the
+Metadata screen now does, and per-animal covariates (weight, sex) were the main
+thing users had to join by hand. The hazard D-010 named (an `individual_id` from
+metadata overwriting the real index) is avoided because the metadata key is
+never written to `individual_id`; it only selects which animal's values to use.
+
+**Trade-offs:** With default labels `1..N` and a CSV counting from 0, "label"
+mode matches the wrong animals silently, so the screen names the mode and the
+guide says when to use each. A column constant across a session is treated as
+session-level, so for an animal without a row it is still set from the session.
+Unmatched animals and keys are logged once per session, not per frame.

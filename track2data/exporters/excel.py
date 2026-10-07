@@ -7,25 +7,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from track2data.exporters._merge import merge_metric_frames
 from track2data.exporters.base import Exporter, ExportPayload
 
-
-def _merge_metric_dfs(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Outer-merge all metric DataFrames on shared key columns.
-
-    Returns an empty DataFrame when *metrics* is empty.
-    """
-    dfs = list(metrics.values())
-    if not dfs:
-        return pd.DataFrame()
-    result = dfs[0]
-    for other in dfs[1:]:
-        shared = [c for c in result.columns if c in other.columns]
-        if shared:
-            result = result.merge(other, on=shared, how="outer")
-        else:
-            result = pd.concat([result, other], axis=1)
-    return result
+_merge_metric_dfs = merge_metric_frames  # name kept for existing callers/tests
 
 
 def _merge_zone_dfs(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:

@@ -211,10 +211,9 @@ identity-free when idtracker.ai declared `track_wo_identities`, or when
 the user ticked the Identity-free box for it on Stage 2. Zone tab
 disabled when no zones are defined.
 
-**Footer (aspirational — not built on either screen today):**
-"Timepoint binning" spinbox (minutes; 0 = whole session). Note this
-predates the split above; `MetricSelection.timepoint_minutes` exists
-on the model but has no widget on Page 6 or Page 7 yet.
+**Footer:** a "Time bins" spinbox (minutes, fractions allowed; the special value
+"Whole session" = 0 = off) sits under *Quality threshold* on the real Metrics screen
+and auto-commits to `MetricSelection.timepoint_minutes`.
 
 #### MetricInfoDialog (info-button modal)
 
@@ -763,7 +762,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
   - Reset button (↺) per row
 
 - QLabel: "Global parameters" (section header)
-- QSpinBox: `timepoint_minutes_spinbox` (range 0–N, 0=whole session, default None)
+- QDoubleSpinBox: `timepoint_minutes_spinbox` (range 0–N, 0=whole session, default None) — **built**, as `_timepoint_spin` on the real Metrics screen
 - QDoubleSpinBox: `quality_threshold_slider` (range 0–1, default 0.0; display as slider or spinner; masks per-frame metrics when `id_probabilities[frame, animal] < threshold`) — **already implemented today**, on the real Screen 6.2 (§6.10) as `_quality_spin`, not gated behind this unbuilt screen
 
 **Data Bindings:**
