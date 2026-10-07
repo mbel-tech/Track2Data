@@ -31,6 +31,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from track2data.core.errors import ImportError_
 from track2data.core.models import (
     PreprocessedSession,
     PreprocessReport,
@@ -191,6 +192,41 @@ class Engine:
             allow_pickle=self._manifest.security.allow_pickle_trajectories,
         )
 
+    def import_ref(self, ref: SessionRef) -> Session:
+        """Import the session a manifest entry describes.
+
+        An entry that records its reader replays that choice, with its saved options, instead of
+        detecting again. One that does not (a manifest from before readers could be chosen) is
+        auto-detected through :meth:`import_session`, exactly as it always was. A recorded
+        reader that is not installed is an error and never a quiet fall back to detection: a
+        different reader could read the same files into different numbers.
+
+        Either way the session takes the entry's id, so the output directory, the metadata join
+        and the export all key on one name whatever id the reader derived from the files.
+        """
+        if ref.reader is None:
+            session = self.import_session(ref.folder)
+        else:
+            try:
+                session = read_session(
+                    Path(ref.folder),
+                    reader=ref.reader,
+                    options=ref.reader_options,
+                    allow_pickle=self._manifest.security.allow_pickle_trajectories,
+                )
+            except ImportError_ as exc:
+                if exc.code != "READER_UNKNOWN":
+                    raise
+                raise ImportError_(
+                    f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
+                    "which is not available here",
+                    code="READER_NOT_AVAILABLE",
+                    subject=ref.reader,
+                    remediation="Install the plug-in that provides this reader, or remove the "
+                    "session and add it again so a reader is detected afresh.",
+                ) from exc
+        return session.model_copy(update={"session_id": ref.session_id})
+
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
     ) -> list[Session]:
@@ -221,7 +257,7 @@ class Engine:
                     message=f"Importing {ref.session_id}",
                 ),
             )
-            sessions.append(self.import_session(ref.folder))
+            sessions.append(self.import_ref(ref))
         return sessions
 
     # ── preprocessing ──────────────────────────────────────────────────────
@@ -1075,7 +1111,7 @@ class Engine:
         start = time.monotonic()
         psess = None
         try:
-            session = self.import_session(ref.folder)
+            session = self.import_ref(ref)
             # The override only, not ref.is_identity_free(): this method is
             # keyed by ref.session_id (see the docstring) because a
             # reader-derived id may differ, so the lookup inside
@@ -1232,7 +1268,7 @@ class Engine:
         summaries: list[SessionSummary] = []
         for ref in self._manifest.sessions:
             try:
-                session = self.import_session(ref.folder)
+                session = self.import_ref(ref)
             except Exception:
                 continue
             summaries.append(
@@ -1315,7 +1351,7 @@ class Engine:
         unreadable: list[str] = []
         for ref in self._manifest.sessions:
             try:
-                session = self.import_session(ref.folder)
+                session = self.import_ref(ref)
             except Exception:
                 unreadable.append(ref.session_id)
                 continue

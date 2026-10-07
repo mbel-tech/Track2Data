@@ -355,7 +355,7 @@ def sensitivity(
     for ref in manifest.sessions:
         click.echo(f"Sweeping {ref.session_id} over {n_points} settings...")
         try:
-            session = engine.import_session(ref.folder)
+            session = engine.import_ref(ref)
         except Exception as exc:
             click.echo(f"[warn] {ref.session_id}: {exc}", err=True)
             continue
