@@ -114,16 +114,47 @@ from the command line.
 
 ## 2. Sessions
 
-Add the idtracker.ai output folders you want to analyse (one folder per recorded video). Drag and
-drop works too.
+Add the folders your tracking software wrote its output to, one per recorded video. Adding is two
+steps: Track2Data looks inside what you picked, then asks you to confirm before anything joins the
+project.
 
 <figure>
 <img src="images/02-sessions.png" alt="Sessions screen">
-<figcaption><b>Figure 2.</b> The Sessions screen lists every folder with what was read from it.</figcaption>
+<figcaption><b>Figure 2.</b> The Sessions screen lists every session with what was read from it.</figcaption>
 </figure>
 
-Each row in Figure 2 shows what was read from the folder: reader, frame rate, number of frames,
-number of animals, and **Identity** (`Stable` or `Unstable`).
+### Add sessions: scan, confirm, add
+
+1. Press **Add Folders…**, or drag folders (or single tracking files) onto the screen. A progress
+   bar with **Cancel** shows while Track2Data looks inside. Picking something else meanwhile
+   replaces the scan.
+2. When the scan ends, **Confirm tracking software** opens (Figure 3). It says which software
+   wrote the folder, how sure it is (*High*, *Medium* or *Low confidence*) and why. If it chose
+   wrongly, change **Software**.
+3. Fill in any options the files do not record (a frame rate, a frame size, which keypoint stands
+   for the animal). A required option shows *required* until you set it; Track2Data never guesses
+   one, because a made-up frame rate would corrupt every speed.
+4. Untick sessions you do not want, or rename them in the *Session* column. **Add** (it shows how
+   many) stays disabled until adding would work, and its tooltip says what is missing.
+
+<figure>
+<img src="images/02-sessions-confirm.png" alt="Confirm tracking software dialog">
+<figcaption><b>Figure 3.</b> The confirm step: the software found, why, and the sessions about to be added.</figcaption>
+</figure>
+
+A scan that finds nothing still opens the dialog and lists what it saw and what this version can
+read. A scan that fails writes its reason under the buttons. The chosen software is saved with each
+session, so reopening the project reads it the same way again.
+
+Each row of the table shows what was read: the software (*Reader*), frame rate, number of frames,
+number of animals, **Identity** (`Stable` or `Unstable`) and **Video**.
+
+### Video: Found, Not found, Located
+
+idtracker.ai records the path the video had on the computer it was tracked on, which is often not
+valid on yours. **Found** means the file is there. **Not found** means it is not; metrics are
+unaffected, but the video preview is unavailable. Select the row and press **Locate Video…** to
+point at the file; the row then reads **Located**, and the choice is stored in the project.
 
 **Identity-free**
 
@@ -143,12 +174,12 @@ sidebar shows ⚠ while any session is identity-free.
 
 ## 3. Calibration
 
-Calibration decides which units distances and speeds are reported in. Figure 3 shows the default,
+Calibration decides which units distances and speeds are reported in. Figure 4 shows the default,
 **Body length** mode.
 
 <figure>
 <img src="images/03-calibration-body-length.png" alt="Body length calibration">
-<figcaption><b>Figure 3.</b> Calibration in Body length mode, with a summary of the body lengths read from your sessions.</figcaption>
+<figcaption><b>Figure 4.</b> Calibration in Body length mode, with a summary of the body lengths read from your sessions.</figcaption>
 </figure>
 
 | Mode | Use it when | Reports |
@@ -156,6 +187,10 @@ Calibration decides which units distances and speeds are reported in. Figure 3 s
 | **Body length** (recommended) | You do not have a reliable scale | `*_bl` columns: distances in body lengths. Physical `*_cm` columns stay empty. |
 | **Custom (px per unit)** | You know the scale | `*_cm` columns, and `*_bl` columns too whenever the tracker recorded body length |
 | **Session calibration** | You used idtracker.ai's *Length Calibration* tool | each session's own ratio; you must confirm the unit |
+
+In Session calibration mode, Track2Data also records how much your length-calibration clicks disagreed
+(a relative spread, saved in `sessions.csv` as `length_calibration_rel_sd`) and warns when it is above 5%.
+A warning means the scale is less certain, and so are the `*_cm` values.
 
 In Body length mode the screen summarises the body lengths read from your sessions (median and
 range, in pixels) so you can sanity-check them.
@@ -168,7 +203,7 @@ you. A third click starts the measurement over.
 
 <figure>
 <img src="images/03-calibration-custom.png" alt="Custom calibration">
-<figcaption><b>Figure 4.</b> Custom calibration: click both ends of an object of known length to fill in the scale.</figcaption>
+<figcaption><b>Figure 5.</b> Custom calibration: click both ends of an object of known length to fill in the scale.</figcaption>
 </figure>
 
 If a mode is incomplete (no scale, or an unconfirmed unit) the stage shows ✗ and **Next** is
@@ -185,7 +220,7 @@ one. You can:
 
 <figure>
 <img src="images/04-zones.png" alt="Zones list">
-<figcaption><b>Figure 5.</b> The zone list, with the import and load buttons.</figcaption>
+<figcaption><b>Figure 6.</b> The zone list, with the import and load buttons.</figcaption>
 </figure>
 
 ### Drawing zones
@@ -195,7 +230,7 @@ with their names.
 
 <figure>
 <img src="images/04-zones-canvas.png" alt="Zone canvas">
-<figcaption><b>Figure 6.</b> The zone canvas: saved zones are shaded and named, validator landmarks are blue.</figcaption>
+<figcaption><b>Figure 7.</b> The zone canvas: saved zones are shaded and named, validator landmarks are blue.</figcaption>
 </figure>
 
 | Tool | How |
@@ -218,7 +253,7 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 
 <figure>
 <img src="images/05-metadata.png" alt="Metadata screen">
-<figcaption><b>Figure 7.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
+<figcaption><b>Figure 8.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
 </figure>
 
 1. **Load metadata CSV…**. The first rows are previewed.
@@ -263,7 +298,7 @@ step has an **Enabled** box; the raw data is never overwritten.
 
 <figure>
 <img src="images/06-preprocessing.png" alt="Preprocessing screen">
-<figcaption><b>Figure 8.</b> The Preprocessing screen with the default settings.</figcaption>
+<figcaption><b>Figure 9.</b> The Preprocessing screen with the default settings.</figcaption>
 </figure>
 
 | Step | What it does |
@@ -276,7 +311,7 @@ step has an **Enabled** box; the raw data is never overwritten.
 
 <figure>
 <img src="images/06-preprocessing-identity-switch.png" alt="Identity switch correction">
-<figcaption><b>Figure 9.</b> The identity switch correction options (experimental, off by default).</figcaption>
+<figcaption><b>Figure 10.</b> The identity switch correction options (experimental, off by default).</figcaption>
 </figure>
 
 **Identity switch correction is experimental and off by default.** It reassigns identities from
@@ -293,7 +328,7 @@ Choose what to compute. Metrics are grouped on three tabs: **Individual** (per a
 
 <figure>
 <img src="images/07-metrics.png" alt="Metrics screen">
-<figcaption><b>Figure 10.</b> The Metrics screen, with search, presets and the three metric tabs.</figcaption>
+<figcaption><b>Figure 11.</b> The Metrics screen, with search, presets and the three metric tabs.</figcaption>
 </figure>
 
 - **Search** filters all tabs by name or ID (`speed`, `IL-2`). The line beneath says which tabs
@@ -325,7 +360,7 @@ zone assignment, metrics, export.
 
 <figure>
 <img src="images/08-processing.png" alt="Processing screen">
-<figcaption><b>Figure 11.</b> The Processing screen: one row per session, with status and duration.</figcaption>
+<figcaption><b>Figure 12.</b> The Processing screen: one row per session, with status and duration.</figcaption>
 </figure>
 
 - The table shows each session's status and duration. A failed session is marked *Failed* and does
@@ -350,12 +385,12 @@ Choose a session and **Load trajectories** (it reuses the cache after a run). Th
 
 <figure>
 <img src="images/09-preview-trajectories.png" alt="Trajectories">
-<figcaption><b>Figure 12.</b> Trajectories with Raw + processed shown: the dashed grey line is a tracking jump that was removed.</figcaption>
+<figcaption><b>Figure 13.</b> Trajectories with Raw + processed shown: the dashed grey line is a tracking jump that was removed.</figcaption>
 </figure>
 
 - Drag the slider, or press ▶, to move through time. **Trail** sets how many past frames are drawn.
 - **Show ▸ Raw + processed** draws the raw path as a dashed grey line next to the processed one, so
-  you can see exactly what gap filling, jump removal and smoothing changed. In Figure 12 the
+  you can see exactly what gap filling, jump removal and smoothing changed. In Figure 13 the
   dashed line is a tracking jump that was removed.
 - **Zones** shows or hides the saved zones. The mouse wheel zooms.
 
@@ -368,7 +403,7 @@ Tick **Occupancy heatmap** to see where the animals spent their time (red = most
 
 <figure>
 <img src="images/09-preview-heatmap.png" alt="Heatmap">
-<figcaption><b>Figure 13.</b> The occupancy heatmap.</figcaption>
+<figcaption><b>Figure 14.</b> The occupancy heatmap.</figcaption>
 </figure>
 
 ### Diagnostics
@@ -379,7 +414,7 @@ changed.
 
 <figure>
 <img src="images/09-preview-diagnostics.png" alt="Diagnostics">
-<figcaption><b>Figure 14.</b> The Diagnostics tab.</figcaption>
+<figcaption><b>Figure 15.</b> The Diagnostics tab.</figcaption>
 </figure>
 
 ### Metrics
@@ -392,7 +427,7 @@ Tick the formats you want, choose where to write them, and press **Export**.
 
 <figure>
 <img src="images/10-export.png" alt="Export screen">
-<figcaption><b>Figure 15.</b> The Export screen, with the file receipt after an export.</figcaption>
+<figcaption><b>Figure 16.</b> The Export screen, with the file receipt after an export.</figcaption>
 </figure>
 
 1. Tick the formats you want.
@@ -422,7 +457,7 @@ After an export, the panel at the bottom gives ready-to-paste code for the files
 
 <figure>
 <img src="images/10-export-code.png" alt="Code snippets">
-<figcaption><b>Figure 16.</b> Ready-to-paste R and Python snippets for the files just written.</figcaption>
+<figcaption><b>Figure 17.</b> Ready-to-paste R and Python snippets for the files just written.</figcaption>
 </figure>
 
 See [Understanding the output files](#understanding-the-output-files) for what the columns mean.
@@ -470,6 +505,9 @@ Definitions, formulas and references for every metric: [`docs/METRICS_SPEC.md`](
 |---|---|---|
 | **Next ▶** is disabled | A required stage is empty or invalid | Hover over Next: the tooltip names the problem. Check the ✗ / ○ badges in the sidebar |
 | *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet (a v4-looking folder gets a specific message; see [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)) |
+| Video column says *Not found* | The video path idtracker.ai recorded does not exist on this computer | Select the session and press **Locate Video…** (Sessions). Metrics do not need the video |
+| *READER_NOT_AVAILABLE* | A project session was added with software this version of Track2Data does not have | Install a version that has that reader. Track2Data will not read it with a different one, since that could change the numbers |
+| *READER_OPTION_MISSING* | The software does not record an option (such as frame rate) and none was entered | Add the folder again and fill in the *required* option in the confirm dialog |
 | Session frames / animals show `—` | The folder is still being read | Wait a moment; a failed read is reported in the Run Log |
 | `*_cm` columns are empty | No pixels-per-unit scale | Use `*_bl` columns or set a scale in [Calibration](#3-calibration) |
 | ⚠ on *Sessions* | A session is identity-free | Expected for sessions tracked without identities; see [Sessions](#2-sessions) |

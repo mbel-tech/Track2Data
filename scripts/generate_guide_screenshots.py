@@ -23,6 +23,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -33,7 +34,7 @@ import numpy as np  # noqa: E402
 
 N_FRAMES, FPS, WIDTH, HEIGHT = 900, 25.0, 800, 600
 CENTRE, RADIUS = (400.0, 300.0), 250.0
-SESSION = "fish_trial_01"
+SESSION = "animal_trial_01"
 
 
 def _walk(rng: np.random.Generator, start: float) -> np.ndarray:
@@ -67,8 +68,8 @@ def build_demo_session(root: Path) -> Path:
     c.TINY_REAL_WIDTH, c.TINY_REAL_HEIGHT = WIDTH, HEIGHT
     real_dict = c._build_tiny_real_traj_dict
 
-    def traj_dict() -> dict:
-        d = real_dict()
+    def traj_dict(*args: Any, **kwargs: Any) -> dict:
+        d = real_dict(*args, **kwargs)
         d["trajectories"] = xy
         d["id_probabilities"] = np.full((N_FRAMES, 2, 1), 0.97)
         d["body_length"] = 46.0
@@ -153,12 +154,13 @@ def main() -> int:
             time.sleep(0.01)
         app.processEvents()
 
-    def shot(name: str, page: int | None = None) -> None:
+    def shot(name: str, page: int | None = None, widget: QWidget | None = None) -> None:
+        """Save the main window, or *widget* (a dialog) when one is given."""
         if page is not None:
             win._go_to_page(page)
         pump(0.15)
         path = out / f"{name}.png"
-        win.grab().save(str(path))
+        (widget or win).grab().save(str(path))
         print("wrote", path.relative_to(REPO) if path.is_relative_to(REPO) else path)
 
     def scroll_bottom(widget: QWidget) -> None:
@@ -171,9 +173,16 @@ def main() -> int:
 
     # 1 Project ---------------------------------------------------------------
     shot("01-project", 0)
-    store.new_project("Zebrafish demo", work)
+    store.new_project("Animal demo", work)
     # 2 Sessions --------------------------------------------------------------
-    store.add_session(folder)
+    win._go_to_page(1)
+    sessions_page = win._stack.widget(1)
+    sessions_page._import_paths([folder])  # the real flow: scan, then confirm, then add
+    pump(until=lambda: sessions_page._dialog is not None)
+    dialog = sessions_page._dialog
+    pump(0.3)
+    shot("02-sessions-confirm", widget=dialog)
+    dialog.ok_button.click()
     pump(until=lambda: store.session_facts(SESSION) is not None)
     shot("02-sessions", 1)
     # 3 Calibration -----------------------------------------------------------
