@@ -99,6 +99,7 @@ class IDTrackerAiReader(SessionReader):
     # per-animal body length the default 'bodylength' calibration needs.
     verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "real_sample"
     provides_body_length: ClassVar[bool] = True
+    provides_identification_quality: ClassVar[bool] = True
 
     # ── SessionReader protocol ─────────────────────────────────────────────────
 

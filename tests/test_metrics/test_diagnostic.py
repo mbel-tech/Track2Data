@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from track2data import readers
 from track2data.core.models import Session, VideoInfo
 from track2data.metrics.diagnostic import (
     CrossingRate,
@@ -22,6 +24,7 @@ from track2data.metrics.diagnostic import (
     TrackingCoverage,
     compute_all_diagnostics,
 )
+from track2data.readers.base import SessionReader
 
 
 def make_session(**kwargs):  # type: ignore[no-untyped-def]
@@ -507,6 +510,83 @@ class TestIdentityStability:
         m = IdentityStability()
         assert m.id == "D-5"
         assert m.level == "diagnostic"
+
+
+class _NoQualityReader(SessionReader):
+    """A registered reader whose software has no identification-quality metric."""
+
+    name = "d5_no_quality"
+
+    @classmethod
+    def detect(cls, folder: Path) -> bool:
+        return False
+
+    def read(self, folder: Path) -> Session:  # pragma: no cover - never read
+        raise NotImplementedError
+
+
+class _QualityReader(_NoQualityReader):
+    name = "d5_quality"
+    provides_identification_quality = True
+
+
+@pytest.fixture
+def d5_readers() -> Iterator[None]:
+    for cls in (_NoQualityReader, _QualityReader):
+        readers.register(cls)
+    yield
+    for cls in (_NoQualityReader, _QualityReader):
+        readers._REGISTRY.remove(cls)
+
+
+class TestIdentityStabilityForOtherReaders:
+    """D-5 rests on idtracker.ai's own fraction_identified. A tracker with no such metric cannot
+    be rated 'weak' for lacking it: before this, every non-idtracker.ai session read 'weak'."""
+
+    def test_no_quality_metric_means_not_assessed_not_weak(self, d5_readers: None) -> None:
+        sess = make_session(reader="d5_no_quality", has_stable_identities=True, quality=None)
+        df = IdentityStability().compute(sess)
+        assert df["identity_stability_status"].values[0] == "not_assessed"
+
+    def test_a_missing_key_is_also_not_assessed(self, d5_readers: None) -> None:
+        sess = make_session(
+            reader="d5_no_quality", has_stable_identities=True, quality={"other": 1.0}
+        )
+        df = IdentityStability().compute(sess)
+        assert df["identity_stability_status"].values[0] == "not_assessed"
+
+    @pytest.mark.parametrize(("fraction", "expected"), [(0.9, "stable"), (0.2, "weak")])
+    def test_a_value_the_reader_does_supply_is_still_used(
+        self, d5_readers: None, fraction: float, expected: str
+    ) -> None:
+        sess = make_session(
+            reader="d5_no_quality",
+            has_stable_identities=True,
+            quality={"fraction_identified": fraction},
+        )
+        df = IdentityStability().compute(sess)
+        assert df["identity_stability_status"].values[0] == expected
+
+    def test_a_reader_that_provides_quality_keeps_the_old_reading_of_missing(
+        self, d5_readers: None
+    ) -> None:
+        sess = make_session(reader="d5_quality", has_stable_identities=True, quality=None)
+        df = IdentityStability().compute(sess)
+        assert df["identity_stability_status"].values[0] == "weak"
+
+    def test_an_unregistered_reader_keeps_the_old_reading_of_missing(self) -> None:
+        sess = make_session(reader="not_registered", has_stable_identities=True, quality=None)
+        df = IdentityStability().compute(sess)
+        assert df["identity_stability_status"].values[0] == "weak"
+
+    def test_the_idtracker_readers_declare_that_they_provide_it(self) -> None:
+        for name in ("idtrackerai", "idtrackerai_v5"):
+            assert readers.get_reader(name).provides_identification_quality
+
+    def test_identity_free_is_unaffected(self, d5_readers: None) -> None:
+        sess = make_session(reader="d5_no_quality", has_stable_identities=False, quality=None)
+        df = IdentityStability().compute(sess)
+        assert df["identity_stability_status"].values[0] == "identity_free"
 
 
 # ── D-10: Physical-Plausibility Violation Rate ──────────────────────────────

@@ -96,6 +96,7 @@ class IDTrackerAiV5Reader(SessionReader):
     # The legacy layout was designed from idtracker.ai v5 sessions; body_length_px stays None.
     verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "real_sample"
     provides_body_length: ClassVar[bool] = False
+    provides_identification_quality: ClassVar[bool] = True
 
     # ── detect ────────────────────────────────────────────────────────────────
 

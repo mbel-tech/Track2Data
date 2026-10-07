@@ -902,7 +902,7 @@ selection, and exported alongside the metrics CSV in a separate
 | **Level** | Session summary |
 | **Priority** | Diagnostic |
 | **Inputs** | `Session.has_stable_identities`, `Session.quality["fraction_identified"]` |
-| **Formula** | `identity_free` if `has_stable_identities=False`; else `stable` if `fraction_identified >= 0.5` (default 0.0 when missing); else `weak` |
+| **Formula** | `identity_free` if `has_stable_identities=False`; else `not_assessed` if `fraction_identified` is missing and the session's reader is registered with `provides_identification_quality = False` (a tracker with no such metric); else `stable` if `fraction_identified >= 0.5` (default 0.0 when missing); else `weak` |
 | **Output columns** | `identity_stability_status` |
 | **Reference** | Track2Data engineering threshold on idtracker.ai's own fraction_identified (PRD §5.2, FR-IMP-3); not an external scientific result |
 | **Supporting references** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) (DOI: 10.1038/s41592-018-0295-5) |

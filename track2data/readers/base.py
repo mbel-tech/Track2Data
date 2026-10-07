@@ -50,6 +50,10 @@ class SessionReader(ABC):
     )
     #: Whether the reader supplies per-animal body length (the default calibration needs it).
     provides_body_length: ClassVar[bool] = False
+    #: Whether the tracker reports how well it kept identities (idtracker.ai's
+    #: ``fraction_identified``). The D-5 identity-stability diagnostic is built on it, so for a
+    #: tracker without one the diagnostic reports "not assessed" instead of "weak".
+    provides_identification_quality: ClassVar[bool] = False
 
     @classmethod
     @abstractmethod
