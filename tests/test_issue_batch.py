@@ -376,3 +376,68 @@ def test_d16_distortion(tiny_real_session: Path) -> None:
     assert r0["frac_frames_altered"] == pytest.approx(1 / 10)
     assert r0["path_length_ratio"] > 1.5 and r0["distortion_index"] > 1
     assert out.iloc[1]["path_length_ratio"] == pytest.approx(1.0)
+
+
+# ── #76 calibration spread feeds session-mode calibration ────────────────────
+
+_NOISY = [
+    {"point_A": [0, 0], "point_B": [10, 0], "distance": 1.0},
+    {"point_A": [0, 0], "point_B": [0, 12], "distance": 1.0},
+]
+
+
+def _psess(tiny: Path, clicks):
+    s = read_session(tiny, allow_pickle=True).model_copy(update={"length_calibrations": clicks})
+    return PreprocessedSession(
+        session=s, xy=s.raw_xy, kinematics=None,  # type: ignore[arg-type]
+        report=PreprocessReport(),
+    )
+
+
+def test_session_mode_records_click_spread(tiny_real_calibrated: Path) -> None:
+    out = apply_session_calibration(
+        _psess(tiny_real_calibrated, _NOISY), CalibrationConfig(mode="session")
+    )
+    assert out.px_per_cm_rel_sd == pytest.approx(0.1286, abs=1e-3)
+
+
+def test_session_mode_warns_on_noisy_clicks_only(
+    tiny_real_calibrated: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = CalibrationConfig(mode="session")
+    with caplog.at_level(logging.WARNING):
+        apply_session_calibration(_psess(tiny_real_calibrated, _NOISY), cfg)
+    assert "disagree" in caplog.text
+    caplog.clear()
+    tight = [_NOISY[0], {**_NOISY[0]}]
+    with caplog.at_level(logging.WARNING):
+        out = apply_session_calibration(_psess(tiny_real_calibrated, tight), cfg)
+    assert "disagree" not in caplog.text and out.px_per_cm_rel_sd == 0.0
+
+
+def test_single_click_has_no_spread_estimate(tiny_real_calibrated: Path) -> None:
+    out = apply_session_calibration(
+        _psess(tiny_real_calibrated, _NOISY[:1]), CalibrationConfig(mode="session")
+    )
+    assert out.px_per_cm_rel_sd is None
+
+
+def test_calibration_spread_warning_scoped_to_session_mode() -> None:
+    from track2data.core.session_consistency import calibration_spread_warnings, sessions_table
+
+    noisy = _summary("a", calibration_mode="session", length_calibration_n=2,
+                     length_calibration_rel_sd=0.13)
+    assert "a (13.0%)" in calibration_spread_warnings([noisy])[0]   # one session is enough
+    scalar = _summary("a", calibration_mode="scalar", length_calibration_rel_sd=0.13)
+    assert calibration_spread_warnings([scalar]) == []
+    df = sessions_table([noisy])
+    assert df["length_calibration_rel_sd"].iloc[0] == pytest.approx(0.13)
+    assert df["length_calibration_n"].iloc[0] == 2
+
+
+def test_summary_from_session_reads_the_clicks(tiny_real_session: Path) -> None:
+    s = read_session(tiny_real_session, allow_pickle=True).model_copy(
+        update={"length_calibrations": _NOISY}
+    )
+    summ = SessionSummary.from_session(s, calibration_mode="session")
+    assert summ.length_calibration_n == 2 and summ.length_calibration_rel_sd > 0.1

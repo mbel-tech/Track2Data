@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Calibration-click spread in session mode.** The Validator's
+  length-calibration clicks behind `length_unit` now yield a relative SD that
+  session mode records (`PreprocessedSession.px_per_cm_rel_sd`), writes to
+  `sessions.csv` (`length_calibration_n`, `length_calibration_rel_sd`, appended
+  after the existing columns) and warns about above 5%, in pre-flight and in
+  the run log, even for a one-session project. `None` means "no estimate"
+  (fewer than two clicks), never zero error.
 - **Locate Video… on the Sessions screen.** A Video column shows Found / Not
   found / Located, and a button points the selected session at its video file
   when the path idtracker.ai recorded does not exist on this machine. The

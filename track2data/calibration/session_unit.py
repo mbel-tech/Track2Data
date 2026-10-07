@@ -11,11 +11,20 @@ apply_session_calibration  -- set psess.px_per_cm from the session's own
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 from typing import Any
 
 from track2data.core.errors import CalibrationError
 from track2data.core.models import CalibrationConfig, PreprocessedSession
+
+logger = logging.getLogger(__name__)
+
+#: Relative SD between calibration clicks above which every *_cm value of the
+#: session is flagged as carrying a visible calibration error. 5% means the
+#: clicks disagree by more than the difference between an exact and a sloppy
+#: ruler placement; Track2Data's choice, not an idtracker.ai constant.
+CALIBRATION_SPREAD_WARN = 0.05
 
 
 def apply_session_calibration(
@@ -75,7 +84,18 @@ def apply_session_calibration(
             ),
         )
 
-    return dataclasses.replace(psess, px_per_cm=session.length_unit)
+    n_clicks, rel_sd = length_calibration_spread(session.length_calibrations)
+    if rel_sd is not None and rel_sd > CALIBRATION_SPREAD_WARN:
+        logger.warning(
+            "Session '%s': its %d length-calibration clicks disagree by %.1f%% "
+            "(relative SD); every *_cm value inherits at least that error.",
+            session.session_id,
+            n_clicks,
+            100 * rel_sd,
+        )
+    return dataclasses.replace(
+        psess, px_per_cm=session.length_unit, px_per_cm_rel_sd=rel_sd
+    )
 
 
 def length_calibration_spread(

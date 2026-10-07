@@ -84,6 +84,11 @@ class SessionSummary:
     # calibration cannot run and the session is exported in pixels only. Defaults to True so a
     # summary built without the fact never raises that warning.
     has_body_length: bool = True
+    # Spread of the Validator's length-calibration clicks behind length_unit
+    # (see calibration/session_unit.length_calibration_spread). rel_sd is None
+    # with fewer than two usable clicks: no estimate, not zero error.
+    length_calibration_n: int = 0
+    length_calibration_rel_sd: float | None = None
 
     @property
     def duration_s(self) -> float:
@@ -107,7 +112,10 @@ class SessionSummary:
         trajectory_sha256: str = "",
     ) -> SessionSummary:
         """Build from a freshly-read engine ``Session``."""
+        from track2data.calibration.session_unit import length_calibration_spread
+
         source = session.trajectory_source
+        cal_n, cal_rel_sd = length_calibration_spread(session.length_calibrations)
         return cls(
             session_id=session.session_id,
             reader=session.reader,
@@ -128,6 +136,8 @@ class SessionSummary:
                 tuple(session.id_image_size) if session.id_image_size else None
             ),
             has_body_length=session.body_length_px is not None,
+            length_calibration_n=cal_n,
+            length_calibration_rel_sd=cal_rel_sd,
         )
 
 
@@ -243,6 +253,35 @@ def heterogeneity_warnings(summaries: Sequence[SessionSummary]) -> list[str]:
     return warnings
 
 
+def calibration_spread_warnings(summaries: Sequence[SessionSummary]) -> list[str]:
+    """Flag sessions whose length-calibration clicks disagree with each other.
+
+    Unlike :func:`heterogeneity_warnings` this is about one session at a
+    time, so it applies to a one-session project too. Only sessions whose
+    ``*_cm`` values actually come from ``length_unit`` are reported (session
+    mode); in scalar mode the clicks are not what produced the numbers.
+    """
+    from track2data.calibration.session_unit import CALIBRATION_SPREAD_WARN
+
+    noisy = {
+        s.session_id: f"{100 * s.length_calibration_rel_sd:.1f}%"
+        for s in summaries
+        if s.calibration_mode == "session"
+        and s.length_calibration_rel_sd is not None
+        and s.length_calibration_rel_sd > CALIBRATION_SPREAD_WARN
+    }
+    if not noisy:
+        return []
+    listed = ", ".join(f"{sid} ({sd})" for sid, sd in sorted(noisy.items()))
+    return [
+        "The length-calibration clicks disagree within some sessions "
+        f"(relative SD over {CALIBRATION_SPREAD_WARN:.0%}): {listed}. Every "
+        "*_cm value for these sessions inherits at least that error; "
+        "recalibrate them in the idtracker.ai Validator, or compare their "
+        "pixel columns instead."
+    ]
+
+
 def _segmentation_key(s: SessionSummary) -> str:
     """Canonical, order-independent label for a session's segmentation params."""
     if not s.segmentation_params:
@@ -300,6 +339,8 @@ def sessions_table(
             "trajectory_source": s.trajectory_source,
             "trajectory_sha256": s.trajectory_sha256 or None,
             "error": errors.get(s.session_id),
+            "length_calibration_n": s.length_calibration_n,
+            "length_calibration_rel_sd": s.length_calibration_rel_sd,
         }
         for s in summaries
     ]
@@ -316,5 +357,6 @@ def sessions_table(
             "width_px", "height_px", "calibration_mode", "length_unit",
             "px_per_cm", "is_calibrated", "is_identity_free",
             "trajectory_source", "trajectory_sha256", "error",
+            "length_calibration_n", "length_calibration_rel_sd",
         ],
     )

@@ -602,6 +602,11 @@ class PreprocessedSession:
     xy: np.ndarray                            # (n_frames, n_animals, 2) preprocessed
     kinematics: KinematicsArrays
     px_per_cm: float | None = None            # set by calibration.scalar
+    # Relative SD of the Validator's length-calibration clicks behind
+    # px_per_cm. Only session mode derives px_per_cm from them, so only it
+    # sets this; None means "no spread estimate" (other modes, or fewer than
+    # two usable clicks), never "zero uncertainty".
+    px_per_cm_rel_sd: float | None = None
     # (n_animals,) — set by calibration.bodylength. Historic misnomer: in
     # bodylength mode this holds pixel values (see calibration/bodylength.py).
     body_length_cm: np.ndarray | None = None

@@ -216,6 +216,7 @@ def test_sessions_table_column_order_is_stable() -> None:
         "width_px", "height_px", "calibration_mode", "length_unit",
         "px_per_cm", "is_calibrated", "is_identity_free",
         "trajectory_source", "trajectory_sha256", "error",
+        "length_calibration_n", "length_calibration_rel_sd",
     ]
 
 
