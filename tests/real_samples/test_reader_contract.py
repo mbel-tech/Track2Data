@@ -26,7 +26,13 @@ import pytest
 pytest.importorskip("track2data", reason="install Track2Data or put it on PYTHONPATH to run contract tests")
 
 from tests.real_samples import oracles as O
-from tests.real_samples.fixtures import build_folder, fetch, provide_video_info
+from tests.real_samples.fixtures import (
+    build_folder,
+    copy_options,
+    fetch,
+    provide_video_info,
+    read_with_options,
+)
 from track2data import readers as registry
 from track2data.core.errors import Track2DataError
 from track2data.core.models import Session
@@ -147,7 +153,7 @@ def loaded(request, tmp_path_factory) -> Loaded:
     session = error = None
     if claimants:
         try:
-            session = registry.detect_reader(folder)().read(folder)
+            session = read_with_options(registry.detect_reader(folder), folder)
         except BaseException as exc:         # surfaced by the tests, not swallowed
             error = exc
     return Loaded(case, folder, claimants, session, error, before, _tree_hash(folder))
@@ -252,6 +258,7 @@ def test_reading_does_not_modify_the_input_folder(loaded):
 def _damaged(ld: Loaded, tmp_path: Path, how: str) -> Path:
     folder = tmp_path / how
     shutil.copytree(ld.folder, folder)
+    copy_options(ld.folder, folder)  # a reader that needs fps must still reach the damaged file
     target = folder / ld.case.primary
     data = target.read_bytes()
     target.write_bytes(b"" if how == "empty" else data[: len(data) // 2])
@@ -264,7 +271,7 @@ def _assert_clean_failure(folder: Path):
         cls = registry.detect_reader(folder)
         if cls is None:
             return
-        cls().read(folder)
+        read_with_options(cls, folder)
     except Track2DataError as exc:
         assert exc.code != "UNKNOWN" and exc.remediation, "structured error needs a code and a remediation hint"
         return

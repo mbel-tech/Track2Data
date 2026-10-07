@@ -23,10 +23,13 @@ import shutil
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 HERE = Path(__file__).resolve().parent
+#: Options recorded per resolved session folder by ``provide_video_info``.
+_OPTIONS: dict[Path, dict[str, Any]] = {}
 MANIFEST = json.loads((HERE / "fixtures_manifest.json").read_text(encoding="utf8"))["files"]
 OFFLINE = os.environ.get("T2D_FIXTURES_OFFLINE") == "1"
 
@@ -103,7 +106,41 @@ def provide_video_info(folder: Path, info: dict) -> None:
     saved on the SessionRef, passed to ``read``). Writing a sidecar into the input folder is
     rejected: readers must not modify it (FR-IMP-5).
 
-    Until the first real reader replaces the scaffolding readers, this still writes the sidecar
-    that ``reference_readers.py`` reads. The options path is added with the reader contract.
+    The values are recorded as options for ``read_with_options``. While the scaffolding readers
+    in ``reference_readers.py`` still exist, a sidecar is also written for them (they predate
+    options); it disappears with the last of them.
     """
+    _OPTIONS[Path(folder).resolve()] = dict(info)
     (folder / "video_info.json").write_text(json.dumps(info))
+
+
+def options_for(folder: Path) -> dict[str, Any] | None:
+    """The options recorded for *folder* by ``provide_video_info``, if any."""
+    return _OPTIONS.get(Path(folder).resolve())
+
+
+def copy_options(src: Path, dst: Path) -> None:
+    """Carry the recorded options over to a copy of a session folder.
+
+    The damaged-file tests read a copy; without its options a reader that needs fps would stop
+    at READER_OPTION_MISSING and never open the damaged file.
+    """
+    options = options_for(src)
+    if options is not None:
+        _OPTIONS[Path(dst).resolve()] = dict(options)
+
+
+def read_with_options(cls: Any, folder: Path) -> Any:
+    """Read *folder* with reader class *cls*, handing it the recorded options.
+
+    Options go only to readers that declare parameters. Readers that do not (the scaffolding
+    readers read a sidecar instead) are called exactly as the original contract says.
+    """
+    from track2data import readers
+
+    return readers._call_read(
+        cls,
+        folder,
+        allow_pickle=False,
+        options=options_for(folder) if cls.parameters else None,
+    )
