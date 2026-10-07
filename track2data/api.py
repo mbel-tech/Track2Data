@@ -41,12 +41,16 @@ from track2data.core.models import (
     SessionRef,
     SessionRunResult,
 )
-from track2data.core.progress import ProgressCallback, ProgressEvent, emit
-from track2data.readers import read_session
+from track2data.core.progress import CancellationToken, ProgressCallback, ProgressEvent, emit
+from track2data.readers import find_reader, read_session
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from track2data.core.session_consistency import SessionSummary
     from track2data.metrics.base import Metric
+    from track2data.readers.index import ScanBudget
+    from track2data.readers.scan import ScanResult
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +182,28 @@ class Engine:
         return {k: v for k, v in fields.items() if k not in ("session_id", "individual_id")}
 
     # ── session import ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def scan(
+        roots: Sequence[Path],
+        *,
+        budget: ScanBudget | None = None,
+        progress: ProgressCallback | None = None,
+        token: CancellationToken | None = None,
+    ) -> ScanResult:
+        """Look at the folder(s) a user pointed at and report what is in them.
+
+        Which tracking software wrote the output, with what confidence and on what evidence,
+        and which sessions it holds -- ranked, so the first group is the best guess. The first
+        step of adding sessions: nothing is read into a session and nothing is added to a
+        project until the user has confirmed the result.
+
+        Static because it needs no project (it is how a project gets its first sessions).
+        Read-only: never writes, and never unpickles. Raises only ``OperationCancelled``.
+        """
+        from track2data.readers.scan import scan
+
+        return scan(roots, budget=budget, progress=progress, token=token)
 
     def import_session(self, folder: Path) -> Session:
         """Auto-detect reader and return a Session for *folder*.
@@ -720,8 +746,20 @@ class Engine:
             identity_free_source = "tracker"
         else:
             identity_free_source = "not reported"
+        # What the export says about the software behind the numbers. The reader class knows its
+        # display name and whether it was ever tested on real output; the manifest entry knows
+        # who chose it and with which options. A reader that is no longer registered has neither.
+        reader_cls = find_reader(session.reader)
         provenance = SessionProvenance(
             reader=session.reader,
+            source_software=(reader_cls.display_name or reader_cls.name) if reader_cls else None,
+            reader_verification=reader_cls.verification if reader_cls else None,
+            reader_options=dict(ref.reader_options) if ref is not None else {},
+            reader_chosen_by=ref.reader_chosen_by if ref is not None else None,
+            detection_confidence=ref.reader_confidence if ref is not None else None,
+            source_files=(
+                (str(session.trajectory_source),) if session.trajectory_source else ()
+            ),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,
             trajectory_variant=session.trajectory_variant,
@@ -978,6 +1016,7 @@ class Engine:
             heterogeneity_warnings,
             sessions_table,
         )
+        from track2data.readers.advisories import reader_advisories
 
         if not results:
             return []
@@ -985,9 +1024,12 @@ class Engine:
         summaries = [r.summary for r in results if r.summary is not None]
         errors = {r.session_id: r.error for r in results if r.error}
         warnings = heterogeneity_warnings(summaries)
+        advisories = reader_advisories(summaries)
 
         for warning in warnings:
             logger.warning("Session consistency: %s", warning)
+        for advisory in advisories:
+            logger.warning("Reader: %s", advisory)
 
         written: list[Path] = []
         try:
@@ -1001,7 +1043,7 @@ class Engine:
 
             readme_path = out_dir / "PROJECT_SUMMARY.md"
             readme_path.write_text(
-                self._project_readme_text(results, warnings), encoding="utf-8"
+                self._project_readme_text(results, warnings, advisories), encoding="utf-8"
             )
             written.append(readme_path)
 
@@ -1021,7 +1063,10 @@ class Engine:
         return written
 
     def _project_readme_text(
-        self, results: list[SessionRunResult], warnings: list[str]
+        self,
+        results: list[SessionRunResult],
+        warnings: list[str],
+        advisories: Sequence[str] = (),
     ) -> str:
         """Run-root project summary: what ran, what failed, what not to pool.
 
@@ -1075,6 +1120,18 @@ class Engine:
                 "recording setup implies a cross-session correction.",
                 "",
             ]
+
+        # Kept apart from the pooling warnings above: these say how the sessions were read, not
+        # that they disagree, and filing them under "not interchangeable" would mislead.
+        if advisories:
+            lines += [
+                "## Notes on the readers",
+                "",
+                "What the numbers rest on, which is not visible in them:",
+                "",
+            ]
+            lines += [f"{i}. {a}" for i, a in enumerate(advisories, start=1)]
+            lines.append("")
 
         if failed:
             lines += ["## Sessions that failed", ""]
@@ -1250,10 +1307,18 @@ class Engine:
         something called on every keystroke, so a complete report is worth
         the I/O. Unreadable sessions are skipped silently here; ``validate()``
         and the run itself both report them.
+
+        Also carries the reader advisories (a reader that was never checked
+        against real output; body-length calibration for a tracker that
+        reports no body length). They are not disagreements between
+        sessions, but they are the same kind of fact: true of the project,
+        invisible in the numbers, and worth knowing before pooling them.
         """
         from track2data.core.session_consistency import heterogeneity_warnings
+        from track2data.readers.advisories import reader_advisories
 
-        return heterogeneity_warnings(self._session_summaries())
+        summaries = self._session_summaries()
+        return [*heterogeneity_warnings(summaries), *reader_advisories(summaries)]
 
     def _session_summaries(self) -> list[SessionSummary]:
         """Read every session in the manifest and summarise it.

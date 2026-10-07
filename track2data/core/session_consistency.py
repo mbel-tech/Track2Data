@@ -74,6 +74,10 @@ class SessionSummary:
     # every session and only the run itself needs the provenance record.
     trajectory_sha256: str = ""
     trajectory_source: str | None = None
+    # Whether the reader supplied a body length. Without one, the default "bodylength"
+    # calibration cannot run and the session is exported in pixels only. Defaults to True so a
+    # summary built without the fact never raises that warning.
+    has_body_length: bool = True
 
     @property
     def duration_s(self) -> float:
@@ -112,6 +116,7 @@ class SessionSummary:
             is_identity_free=is_identity_free,
             trajectory_sha256=trajectory_sha256,
             trajectory_source=source.name if source is not None else None,
+            has_body_length=session.body_length_px is not None,
         )
 
 

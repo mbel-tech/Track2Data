@@ -856,6 +856,7 @@ and headless CLI report the same identifier. The full list:
 | `IDT_VIDEO_PATH_UNREACHABLE` | 2 | warning | "`video_paths` `<p>` unreachable on this machine. Use 'Locate video…' to rebase." |
 | `IDT_RESOURCE_FORK_IGNORED` | 2 | info | "Ignored `<count>` macOS resource-fork files (`._*`)." |
 | `READER_UNKNOWN` | 2 | error | "No reader named '<name>' is registered." Fix: check the spelling (`track2data list-readers`) or install the plug-in that provides it. |
+| `READER_NOT_AVAILABLE` | 2 | error | "Session '<id>' was added with reader '<name>', which is not available here." Fix: install the plug-in that provides it, or remove the session and add it again so a reader is detected afresh. The session is never read by a different reader: another reader could turn the same files into different numbers. |
 | `READER_OPTION_MISSING` | 2 | error | "Reader '<reader>' needs option '<name>' (<label>); the files do not record it." Never defaulted: a made-up frame rate would corrupt every speed metric. |
 | `READER_OPTION_INVALID` | 2 | error | "Reader '<reader>': option '<name>' <reason>." Raised for an unknown option name, a wrong type, a value outside its range or choices, or any option given to a reader that takes none. |
 
@@ -897,7 +898,20 @@ resolution, calibration state, and the error for any session that failed.
 `PROJECT_SUMMARY.md` is the human half, and leads with anything that makes
 the sessions non-interchangeable (mixed frame rates, mixed group sizes,
 mixed calibration), because a result pooled across those without
-accounting for them will be wrong.
+accounting for them will be wrong. A separate "Notes on the readers"
+section says what the numbers rest on: a reader that was written from a
+format's documentation and never checked against real tracker output, and
+body-length calibration chosen for a tracker that reports no body length
+(those sessions are exported in pixels only). Neither stops the run, and the
+same notes are shown before it starts.
+
+Each session's `README.md` and `manifest.json` say which software produced
+its trajectories. For idtracker.ai that is the "idtracker.ai provenance"
+section (version, tracking-run status, quality scores). For any other tracker
+it is a "Source software provenance" section: the software and reader, whether
+the reader was tested against real output, whether it was detected or chosen
+by the user (and with what confidence), the options it was given (frame rate,
+frame size, which keypoint), and the name of the file it read.
 
 `codebook.csv` documents the schema itself: one row per exported column
 with its unit, level, originating metric and DOI. Read it before trusting

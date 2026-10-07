@@ -1333,19 +1333,24 @@ In `test_reader_contract.py` replace `registry.detect_reader(folder)().read(fold
 
 ---
 
-## PR T0-5: persist the reader
+## PR T0-5: persist the reader (built)
 
-**Branch:** `feat/persisted-reader` · **Expanded when T0-4 has merged.**
+**Branch:** `feat/persisted-reader` · **Status:** implemented in `15e2a39`, `9c272c6`, `d9cdd16` and the provenance commit that follows them; this section records the design as built.
 
-**Interfaces.**
+**What was built.**
 
-- `SessionRef.reader: str | None = None`, `reader_options: dict[str, Any] = {}`, `reader_chosen_by: Literal["detected", "user"] | None = None`. Manifest `schema_version` stays 1; `project_hash` changes once.
-- `Engine._import_ref(ref) -> Session`: when `ref.reader is None` it calls exactly `self.import_session(ref.folder)` (the legacy shape the tests patch); otherwise `read_session(ref.folder, reader=ref.reader, options=ref.reader_options, allow_pickle=…)`. It ends with `session.model_copy(update={"session_id": ref.session_id})`. `import_sessions`, `_run_one_session` and `validate` all go through it. `READER_UNKNOWN` becomes `READER_NOT_AVAILABLE`, with no fall-back to detection.
-- `Engine.scan(roots, …)` as a static facade over `readers.scan.scan`.
-- `SessionProvenance` gains `source_software`, `reader_verification`, `reader_options`, `reader_chosen_by`, `detection_confidence`, `source_files`; the README gets a generic "Source software" section for non-idtracker readers and the idtracker.ai block is unchanged. New fields go into the README and `manifest.json` only, so pp3's unit schema is not triggered.
-- `metrics/diagnostic.py`: D-5 returns `not_assessed` when the reader never supplies `quality`, and its documentation says so.
+- `SessionRef` gains `reader: str | None`, `reader_options: dict[str, Any]`, `reader_chosen_by: Literal["detected", "user"] | None` and `reader_confidence: str | None` (the detection confidence, kept as text so a manifest does not depend on the enum). Manifest `schema_version` stays 1; `project_hash` changes once, because the new keys enter the hashed dump.
+- `Engine.import_ref(ref) -> Session` (public, not `_import_ref`: the UI and CLI call it too). With `ref.reader is None` it calls exactly `self.import_session(ref.folder)`, the legacy shape the tests patch. Otherwise it calls `read_session(ref.folder, reader=ref.reader, options=ref.reader_options, allow_pickle=…)`. It ends with `session.model_copy(update={"session_id": ref.session_id})`. `import_sessions`, `_run_one_session`, the pre-flight summaries, `validate` and the CLI all go through it. `READER_UNKNOWN` becomes `READER_NOT_AVAILABLE`, with no fall-back to detection.
+- `Engine.scan(roots, *, budget, progress, token)`: a static facade over `readers.scan.scan`. It needs no project, which is how a project gets its first sessions.
+- `SessionProvenance` gains `source_software`, `reader_verification`, `reader_options`, `reader_chosen_by`, `detection_confidence`, `source_files`. `Engine.build_payload` fills them from the reader class (`find_reader`: display name and verification) and the manifest entry (who chose it, options, confidence); `source_files` is the session's `trajectory_source`.
+- The README gets a "Source software provenance" section for any session whose reader is not idtracker.ai: software, reader, verification, how the reader was chosen, options, source file names (names only, never directories, because a README is meant to be shared), counts, identity status, calibration factor. A provenance with no reader, or an `idtrackerai*` reader, keeps the idtracker.ai section byte-for-byte. The new fields reach `manifest.json` through `asdict`; they carry no unit, so pp3's unit schema is not triggered.
+- `readers/advisories.py`: `reader_advisories(summaries)` gives one plain-language warning per reader that was never checked against real output (it names the sessions), and one for `bodylength` calibration on sessions that carry no body length. `SessionSummary` gains `has_body_length` for that, taken from the data (`body_length_px is not None`) rather than from the reader's declared flag, so it is right for an idtracker.ai session that lacks the key too. `Engine.consistency_warnings()` returns them after the heterogeneity warnings, and `PROJECT_SUMMARY.md` records them in their own "Notes on the readers" section, apart from "Read before pooling these sessions": they say how the sessions were read, not that they disagree. Neither blocks `validate()` or a run.
+- `readers.find_reader(name)` returns the registered class or `None`; `get_reader` raises `READER_UNKNOWN` through it.
+- D-5 returns `not_assessed` when the reader never supplies identification quality, and its documentation says so.
 
-**Tests.** A legacy manifest loads and gives byte-identical metrics on `tiny_real` and `tiny_v5` (only `project_hash` differs); an unregistered persisted reader raises `READER_NOT_AVAILABLE` and never auto-detects; the id stamp holds when the reader derives a different id; existing `test_api.py` lambdas pass untouched; the README default-provenance tests pass; D-5 gives `not_assessed` for a stable session with `quality=None` and is unchanged for idtracker.ai.
+**Deviation from the outline.** The outline put the body-length advisory on the reader's `provides_body_length` flag. The flag remains a declaration for the dialog, but the advisory is driven by whether the session really has a body length: it is what decides whether calibration runs.
+
+**Verified.** A toy non-idtracker reader runs `Engine.run` end to end from its saved options (`tests/test_integration/test_non_idtracker_reader.py`): README, `manifest.json`, D-5, advisories and the project summary. Ten mutations of the new logic (the idtracker/other switch, the verified-reader skip, the calibration-mode test, the verification field, pipe escaping, name-only file listing, the body-length flag, both consistency surfaces, the "+N more" cut) are each caught by a test.
 
 ---
 

@@ -26,6 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   loaded before still loads. The design and rollout plan are in
   `docs/tracker-formats/`.
 
+- **A session remembers which reader read it, and the export says so.** A project
+  entry now records the reader chosen for it (by detection or by the user) and
+  that reader's options, and every later use replays the choice instead of
+  detecting again. A session whose reader is not installed fails with
+  `READER_NOT_AVAILABLE`; it is never read by a different reader, which could
+  turn the same files into different numbers. Projects saved before this still
+  load and give the same metrics; only the project hash changes, once.
+
+  For a session from any tracker other than idtracker.ai, the per-session
+  `README.md` and `manifest.json` carry a "Source software provenance" section:
+  the software and reader, whether the reader was tested against real tracker
+  output, whether it was detected or chosen, its options, and the name of the
+  file it read. The idtracker.ai section is unchanged. Two cautions are shown
+  before a run (`validate`, the GUI) and in `PROJECT_SUMMARY.md`, and never block
+  it: a reader written from documentation and never checked against real output,
+  and body-length calibration chosen for sessions that carry no body length
+  (they are exported in pixels only). `Engine.scan` looks at a folder and reports
+  which software wrote it.
+
 - **`track2data sensitivity` — recompute metrics across a grid of
   preprocessing settings.** The strongest methodological objection this class
   of tool attracts is that the preprocessing choices, not the animals, drive
@@ -692,6 +711,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and it joins to `codebook.csv` on `column`.
 
 ### Fixed
+
+- **The D-5 identity-stability diagnostic no longer calls a tracker "weak" for
+  not reporting identification quality.** With no `fraction_identified` it
+  defaulted to 0.0, so any session from a tracker that does not report one
+  (everything but idtracker.ai) would have read "weak" however well it kept
+  identities. It now reports `not_assessed`.
 
 - **PP-3 identity-switch correction now corrects identity switches.** The
   step was unsound in three compounding ways, all of which changed data

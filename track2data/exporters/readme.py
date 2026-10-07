@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from track2data.exporters.base import Exporter, ExportPayload
+from track2data.exporters.base import Exporter, ExportPayload, SessionProvenance
 
 
 class ReadmeExporter(Exporter):
@@ -140,6 +140,20 @@ class ReadmeExporter(Exporter):
 
     @staticmethod
     def _provenance_lines(prov: object) -> list[str]:
+        """Render how a session was tracked and read: its values, not just their names.
+
+        A session from idtracker.ai (or one whose reader was never recorded, which is every
+        payload built before other trackers could be read) gets the idtracker.ai section. A
+        session from any other tracker gets the source-software section, which claims nothing
+        about idtracker.ai.
+        """
+        p: SessionProvenance = prov  # type: ignore[assignment]
+        if _is_idtracker(p):
+            return ReadmeExporter._idtracker_lines(p)
+        return ReadmeExporter._source_software_lines(p)
+
+    @staticmethod
+    def _idtracker_lines(p: SessionProvenance) -> list[str]:
         """
         Render idtracker.ai-derived quality/provenance values, not just
         their names.
@@ -151,12 +165,6 @@ class ReadmeExporter(Exporter):
         trajectory format was read or whether the tracking run itself
         succeeded.
         """
-        from track2data.exporters.base import SessionProvenance
-
-        def _tri(v: bool | None) -> str:
-            return "*(not reported)*" if v is None else str(v)
-
-        p: SessionProvenance = prov  # type: ignore[assignment]
         lines = [
             "## idtracker.ai provenance",
             "",
@@ -187,20 +195,15 @@ class ReadmeExporter(Exporter):
             f"| Fragment connectivity | {_fmt(p.fragment_connectivity)} |",
         ]
 
-        if p.length_unit is not None:
-            confirmation = (
-                "confirmed by user" if p.length_unit_confirmed_by_user
-                else "**default, not confirmed** -- idtracker.ai does not "
-                     "record which physical unit the Validator's Length "
-                     "Calibration tool actually used; verify before "
-                     f"trusting any *_{p.length_unit_label} column"
+        lines.append(
+            _calibration_row(
+                p,
+                unconfirmed="**default, not confirmed** -- idtracker.ai does not "
+                "record which physical unit the Validator's Length "
+                "Calibration tool actually used; verify before "
+                f"trusting any *_{p.length_unit_label} column",
             )
-            lines.append(
-                f"| Length calibration factor | {p.length_unit:.6g} px per "
-                f"{p.length_unit_label} ({confirmation}) |"
-            )
-        else:
-            lines.append("| Length calibration factor | *(not calibrated)* |")
+        )
 
         reliability = (
             "acknowledged reliable" if p.body_length_reliable
@@ -221,6 +224,114 @@ class ReadmeExporter(Exporter):
 
         lines.append("")
         return lines
+
+    @staticmethod
+    def _source_software_lines(p: SessionProvenance) -> list[str]:
+        """Render what is known about a session from any tracker other than idtracker.ai.
+
+        Says which software and reader produced the numbers, whether that reader has been
+        tested against real output, who chose it and with which options, and which file it
+        read -- the facts a Methods section needs and the numbers do not show. Only file
+        *names* are listed: a path would put the user's directory layout into a document that
+        is meant to be shared.
+        """
+        return [
+            "## Source software provenance",
+            "",
+            "| Field | Value |",
+            "|-------|-------|",
+            f"| Software | {_cell(p.source_software or p.reader or '*(unknown)*')} |",
+            f"| Reader | {_cell(p.reader or '*(unknown)*')} |",
+            f"| Reader verification | {_verification_cell(p.reader_verification)} |",
+            f"| Reader chosen | {_chosen_cell(p.reader_chosen_by, p.detection_confidence)} |",
+            f"| Reader options | {_options_cell(p.reader_options)} |",
+            f"| Source file(s) | {_files_cell(p.source_files)} |",
+            f"| Frames / animals | {p.n_frames} / {p.n_animals} |",
+            f"| Stable identities | {p.has_stable_identities} |",
+            f"| Tracked without identification | {_tri(p.track_wo_identities)} |",
+            f"| Treated as identity-free | {p.identity_free_effective} "
+            f"({p.identity_free_source}) |",
+            _calibration_row(
+                p,
+                unconfirmed="**not confirmed** -- check the physical unit before "
+                f"trusting any *_{p.length_unit_label} column",
+            ),
+            "",
+        ]
+
+
+# ── Provenance cells ──────────────────────────────────────────────────────────
+
+# How many source files a README lists before counting the rest.
+_MAX_FILES_SHOWN = 5
+
+_VERIFICATION = {
+    "real_sample": "tested against real tracker output",
+    "synthetic_only": (
+        "**unverified** -- written from the format's documentation and tested on synthetic "
+        "files only; compare a few trajectories with the tracker's own output before "
+        "relying on the numbers"
+    ),
+}
+
+_CHOSEN_BY = {"detected": "detected automatically", "user": "chosen by the user"}
+
+
+def _is_idtracker(p: SessionProvenance) -> bool:
+    """Whether to describe *p* with the idtracker.ai section.
+
+    A provenance with no reader recorded is read as idtracker.ai: that is every payload built
+    before another tracker could be read, and their README must not change.
+    """
+    return not p.reader or p.reader.startswith("idtrackerai")
+
+
+def _tri(v: bool | None) -> str:
+    return "*(not reported)*" if v is None else str(v)
+
+
+def _cell(text: str) -> str:
+    """Make *text* safe inside a Markdown table cell."""
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def _verification_cell(verification: str | None) -> str:
+    if verification is None:
+        return "*(not recorded)*"
+    return _VERIFICATION.get(verification, _cell(verification))
+
+
+def _chosen_cell(chosen_by: str | None, confidence: str | None) -> str:
+    if not chosen_by:
+        return "*(not recorded)*"
+    who = _CHOSEN_BY.get(chosen_by, chosen_by)
+    return _cell(f"{who} (detection confidence {confidence})" if confidence else who)
+
+
+def _options_cell(options: dict[str, object]) -> str:
+    if not options:
+        return "*(none)*"
+    return _cell(", ".join(f"{name}={value}" for name, value in sorted(options.items())))
+
+
+def _files_cell(files: tuple[str, ...]) -> str:
+    if not files:
+        return "*(not recorded)*"
+    names = [f"`{Path(f).name or f}`" for f in files[:_MAX_FILES_SHOWN]]
+    if len(files) > _MAX_FILES_SHOWN:
+        names.append(f"+{len(files) - _MAX_FILES_SHOWN} more")
+    return _cell(", ".join(names))
+
+
+def _calibration_row(p: SessionProvenance, *, unconfirmed: str) -> str:
+    """The calibration-factor row; *unconfirmed* says why an unconfirmed factor is not trusted."""
+    if p.length_unit is None:
+        return "| Length calibration factor | *(not calibrated)* |"
+    confirmation = "confirmed by user" if p.length_unit_confirmed_by_user else unconfirmed
+    return (
+        f"| Length calibration factor | {p.length_unit:.6g} px per "
+        f"{p.length_unit_label} ({confirmation}) |"
+    )
 
 
 # ── Registration ──────────────────────────────────────────────────────────────

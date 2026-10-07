@@ -62,11 +62,23 @@ def detect_reader(folder: Path) -> type[SessionReader] | None:
     return None
 
 
-def get_reader(name: str) -> type[SessionReader]:
-    """Return the registered reader called *name*."""
+def find_reader(name: str) -> type[SessionReader] | None:
+    """Return the registered reader called *name*, or None.
+
+    For callers that only want to describe a reader (its display name, whether it was verified).
+    Use :func:`get_reader` when a missing reader is an error.
+    """
     for cls in _REGISTRY:
         if cls.name == name:
             return cls
+    return None
+
+
+def get_reader(name: str) -> type[SessionReader]:
+    """Return the registered reader called *name*."""
+    cls = find_reader(name)
+    if cls is not None:
+        return cls
     raise ImportError_(
         f"No reader named {name!r} is registered",
         code="READER_UNKNOWN",
@@ -141,6 +153,7 @@ __all__ = [
     "IDTrackerAiV5Reader",
     "SessionReader",
     "detect_reader",
+    "find_reader",
     "get_reader",
     "read_session",
     "reader_names",
