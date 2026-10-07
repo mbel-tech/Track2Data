@@ -18,6 +18,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
+from track2data.core.ids import default_session_id
 from track2data.core.models import (
     CalibrationConfig,
     ExportTarget,
@@ -240,7 +241,7 @@ class ProjectStore(QObject):
             return
         from track2data.readers import read_session
 
-        session_id = folder.name
+        session_id = default_session_id(folder)
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
         sessions = [*list(self._manifest.sessions), ref]
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})

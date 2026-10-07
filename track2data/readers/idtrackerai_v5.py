@@ -51,6 +51,7 @@ from typing import Any, ClassVar, Literal
 import numpy as np
 
 from track2data.core.errors import DataValidationError, ImportError_
+from track2data.core.ids import default_session_id
 from track2data.core.models import Session, VideoInfo
 from track2data.readers.base import SessionReader
 
@@ -133,7 +134,7 @@ class IDTrackerAiV5Reader(SessionReader):
         has_stable = self._check_stability(raw_xy, track_wo_identities)
 
         return Session(
-            session_id=folder.name,
+            session_id=default_session_id(folder),
             folder=folder,
             reader=self.name,
             video=video_info,

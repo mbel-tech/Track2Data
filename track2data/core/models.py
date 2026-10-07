@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 if TYPE_CHECKING:
     # Type-only: session_consistency imports Session from here, so a runtime
@@ -398,6 +398,15 @@ class SessionRef(BaseModel):
     # is user-authored project state that cannot be re-derived from the
     # session folder.
     identity_free_override: bool | None = None
+
+    @field_validator("session_id")
+    @classmethod
+    def _id_is_a_safe_path_segment(cls, value: str) -> str:
+        """An id is used as a directory name (out_dir/<session_id>/): reject only what could
+        escape it, so every id that loaded before still loads."""
+        if not value or value in {".", ".."} or any(c in value for c in ("/", "\\", "\x00")):
+            raise ValueError(f"unsafe session id: {value!r}")
+        return value
 
     def is_identity_free(self) -> bool:
         """Whether per-individual metrics are meaningless for this session.
