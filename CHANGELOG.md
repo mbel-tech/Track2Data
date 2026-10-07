@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Zone canvas is usable.** Selected vertices are joined by edges and
+  shaded once they form a polygon; saved zones are shown shaded with their
+  names; the wheel zooms, middle-drag pans and Fit resets; Ctrl+Z / Undo
+  point removes the last vertex; Rectangle and Circle tools create a zone by
+  dragging; custom vertices can be dragged. A polygon is still finished with
+  Save Zone (the old right-click-to-finish handling never existed here).
+
 - **Wizard sidebar shows stage status and Next is gated.** Each stage gets
   ✓ / ⚠ / ✗ / ○ with a tooltip explaining it (`ui/store/stage_status.py`);
   Next stays disabled, with a reason, while Project, Sessions or Metrics are

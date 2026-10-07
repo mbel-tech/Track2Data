@@ -406,3 +406,35 @@ def test_clear_zones_empties_the_manifest(qtbot, tmp_path: Path) -> None:
     screen._clear_zones()
 
     assert store.manifest.zones.rois == []
+
+
+def test_saved_zones_appear_on_the_canvas(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import ROI, ZoneSet
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._canvas.saved_zone_names() == []
+
+    store.update_zones(
+        ZoneSet(rois=[ROI(name="arena", vertices=[(0, 0), (10, 0), (10, 10)])])
+    )
+    assert screen._canvas.saved_zone_names() == ["arena"]
+
+
+def test_rectangle_tool_button_drives_the_canvas_and_enables_save(
+    qtbot, tmp_path: Path
+) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._tool_buttons["rect"].click()
+    screen._canvas.drag_shape((10, 10), (60, 50))
+    assert screen._save_zone_btn.isEnabled()
+    assert len(screen._canvas.selected_points()) == 4
+
+    screen._undo_btn.click()
+    assert len(screen._canvas.selected_points()) == 3
