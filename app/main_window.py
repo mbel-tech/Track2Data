@@ -47,8 +47,8 @@ from ui.zones_screen import ZonesScreen
 
 APP_NAME = "Track2Data"
 APP_VERSION = __version__
-#: Step-by-step guide with screenshots (docs/guide/ in the repository).
-GUIDE_URL = "https://github.com/mbel-tech/Track2Data/tree/main/docs/guide"
+#: Step-by-step guide with screenshots (docs/guide/USER_GUIDE.md in the repository).
+GUIDE_URL = "https://github.com/mbel-tech/Track2Data/blob/main/docs/guide/USER_GUIDE.md"
 
 
 class RunLogDock(QWidget):
