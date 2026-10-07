@@ -71,6 +71,10 @@ class SessionFacts:
     body_length_px: tuple[float, ...] | None = None
     # idtracker.ai Validator identity labels (index-aligned with individual_id).
     identities_labels: tuple[str, ...] | None = None
+    # The video file, only when it exists on this machine (the reader sets
+    # None for an unreachable path). A "Locate video..." choice is stored on
+    # the manifest, not here: see ProjectStore.set_video_path.
+    video_path: Path | None = None
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -102,4 +106,5 @@ class SessionFacts:
                 else None
             ),
             background_image_path=session.background_image_path,
+            video_path=session.video.path,
         )

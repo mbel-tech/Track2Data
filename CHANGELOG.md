@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Locate Video… on the Sessions screen.** A Video column shows Found / Not
+  found / Located, and a button points the selected session at its video file
+  when the path idtracker.ai recorded does not exist on this machine. The
+  choice is stored in the project (`ProjectManifest.video_overrides`) and
+  applied on every import.
 - **Batch-comparability warnings.** `Engine.consistency_warnings()` now also
   flags sessions whose idtracker.ai segmentation parameters differ (body
   length and area are defined by them) or whose `resolution_reduction` /

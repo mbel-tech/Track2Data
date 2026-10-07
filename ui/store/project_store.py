@@ -402,6 +402,25 @@ class ProjectStore(QObject):
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
 
+    def set_video_path(self, session_id: str, path: Path) -> None:
+        """Remember where *session_id*'s video really is ("Locate video...").
+
+        idtracker.ai records the absolute path the video had on the machine it
+        was tracked on, which is usually unreachable elsewhere
+        (IDT_VIDEO_PATH_UNREACHABLE). Stored in the manifest, so the choice is
+        made once per project; Engine.import_session applies it.
+        """
+        if self._manifest is None:
+            return
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Video file not found: {path}")
+        if session_id not in {s.session_id for s in self._manifest.sessions}:
+            raise KeyError(f"No session {session_id!r} in this project")
+        overrides = {**self._manifest.video_overrides, session_id: path}
+        self._manifest = self._manifest.model_copy(update={"video_overrides": overrides})
+        self.sessionsChanged.emit()
+
     def set_session_identity_free(self, session_id: str, value: bool | None) -> None:
         """Set (or clear, via None) the user's identity-free override for one
         session.
