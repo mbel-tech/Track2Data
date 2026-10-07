@@ -35,7 +35,7 @@ A hash mismatch **fails** the test (upstream drift); a network failure **skips**
 
 | variable | effect |
 |---|---|
-| `T2D_FIXTURE_DIR` | cache location (default `%LOCALAPPDATA%	rack2dataixture_cache`, or `$XDG_CACHE_HOME/track2data/fixture_cache`) |
+| `T2D_FIXTURE_DIR` | cache location (default `%LOCALAPPDATA%\track2data\fixture_cache`, or `$XDG_CACHE_HOME/track2data/fixture_cache`) |
 | `T2D_FIXTURES_OFFLINE=1` | never use the network; skip what is not cached |
 | `T2D_REAL_SAMPLES=1` | run the suite without naming one of its markers in `-m` |
 | `T2D_REFERENCE_READERS=1` | register the test-only readers in `reference_readers.py`; leave unset when testing your own |
