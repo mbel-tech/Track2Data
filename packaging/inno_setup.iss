@@ -1,6 +1,7 @@
 ; Inno Setup script wrapping the PyInstaller-built Track2Data.exe into a
-; Windows installer (issue #44). Unsigned for v1.0 -- Authenticode signing
-; is deferred to v1.1, see docs/TECHNICAL_SPEC.md §10.3. Build with:
+; Windows installer (issue #44). Signed in CI when the Windows
+; signing secrets are configured (packaging/sign_windows.ps1), unsigned
+; otherwise; see docs/CODE_SIGNING.md. Build with:
 ;   iscc packaging\inno_setup.iss
 ; expects dist\Track2Data.exe (from packaging/track2data.spec) to already
 ; exist; run after the PyInstaller build step, not standalone.

@@ -187,10 +187,13 @@ implementation.
       required check, no review requirement, admins exempt) as though
       they were live, so this is a documentation/reality gap until the
       setting is turned on
-- [ ] Code signing — **not** a v1.0 blocker, and cannot be done before
-      the first release: SignPath Foundation's free OSS signing requires
-      an already-published release. Infrastructure is implemented and
-      activates on secrets alone — see [`./CODE_SIGNING.md`](CODE_SIGNING.md)
+- [ ] Code signing — **not** a v1.0 blocker. SignPath Foundation's free OSS
+      signing requires an already-published release. Infrastructure is
+      implemented and activates on secrets alone; readiness check, release
+      verification script and checklist are in place — see
+      [`./CODE_SIGNING.md`](CODE_SIGNING.md) and
+      [`./RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md). Still needs the
+      maintainer's certificates and a first real signed run.
 
 ---
 

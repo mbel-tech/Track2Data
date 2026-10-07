@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Signing readiness (no certificates needed):** `packaging/check_signing_readiness.py`
+  classifies each platform as sign / skip / partial from the secret names present, and
+  `release.yml` now uses it, so a half-configured platform (e.g. a macOS certificate
+  without its notarisation password) fails the job at once instead of mid-signing;
+  `packaging/verify_release.py` checks a download against `SHA256SUMS.txt` (and the
+  AppImage GPG signature); `docs/RELEASE_CHECKLIST.md` lists the steps and known risks;
+  CI now runs `actionlint` over the workflows.
 - **`scripts/benchmark_parallel.py`** times `Engine.run` for several worker counts
   and cache modes on synthetic (or real) sessions, with per-stage and per-metric
   breakdowns and per-configuration peak memory; `docs/BENCHMARKING.md` explains it

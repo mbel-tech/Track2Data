@@ -72,23 +72,21 @@ jobs:
       - name: Detect available signing credentials
         id: signing
         shell: bash
-        # Secrets are compared via env, never interpolated into the script
-        # body, so nothing can echo them into the log.
+        # Secrets reach the script via env only, never interpolated into its
+        # body, so nothing can echo them into the log. The checker prints
+        # names, never values, and fails on a partially configured platform.
         env:
-          MACOS_CERT: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          WINDOWS_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-        run: |
-          macos=false; windows=false; gpg=false
-          [ -n "$MACOS_CERT" ] && macos=true
-          [ -n "$WINDOWS_CERT" ] && windows=true
-          [ -n "$GPG_KEY" ] && gpg=true
-          {
-            echo "macos=$macos"
-            echo "windows=$windows"
-            echo "gpg=$gpg"
-          } >> "$GITHUB_OUTPUT"
-          echo "signing available -- macos:$macos windows:$windows gpg:$gpg"
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: python packaging/check_signing_readiness.py --github-output "$GITHUB_OUTPUT"
 
       - name: Sign the macOS .app bundle
         if: runner.os == 'macOS' && steps.signing.outputs.macos == 'true'
