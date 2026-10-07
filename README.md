@@ -11,6 +11,8 @@ reconstructed.
 It is a desktop application — a seven-step wizard, no scripting required —
 and a Python engine you can drive headlessly for batch or HPC work.
 
+**New here? Start with the [user guide](docs/guide/README.md)**: a step-by-step walkthrough of the app with screenshots.
+
 > **Status:** v0.1.0, pre-1.0. Usable, and its numbers are tested against
 > analytic ground truth and a reference R pipeline — but read the
 > [CHANGELOG](CHANGELOG.md) before upgrading, since metric definitions are
@@ -203,6 +205,7 @@ catalogue of all 45 metrics with their formulas, units and DOIs.
 
 **Using it**
 
+- [`docs/guide/`](docs/guide/README.md) — the user guide: every screen, with screenshots, plus the output-file reference and troubleshooting
 - [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md) — the wizard, screen by screen
 - [`docs/INTEROPERABILITY.md`](docs/INTEROPERABILITY.md) — where Track2Data sits in the ecosystem, and reading its output elsewhere
 - [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — every metric: formula, inputs, units, assumptions, citation

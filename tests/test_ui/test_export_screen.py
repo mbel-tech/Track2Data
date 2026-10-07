@@ -403,3 +403,29 @@ def test_cancel_button_stops_an_in_flight_export(
 
     qtbot.waitUntil(lambda: screen._export_btn.isEnabled(), timeout=5000)
     assert screen._cancel_btn.isEnabled() is False
+
+
+def test_snippets_appear_after_a_successful_export(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import RunResult, SessionRunResult
+    from ui.export_screen import ExportScreen
+
+    store = _make_empty_store(tmp_path)
+    screen = ExportScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._snippet_group.isHidden()
+
+    screen._current_task_id = "t"
+    screen._last_out_dir = tmp_path / "out"
+    screen._last_selected_exporters = ["csv_long"]
+    result = RunResult(
+        sessions=[SessionRunResult(session_id="s1"), SessionRunResult(session_id="s2", error="x")]
+    )
+    screen._on_task_finished("t", result)
+
+    assert not screen._snippet_group.isHidden()
+    assert screen._snippet_combo.count() == 2
+    code = screen._snippet_text.toPlainText()
+    assert "s1" in code and "s2" not in code  # failed sessions are not loaded
+
+    screen._snippet_combo.setCurrentIndex(1)
+    assert "import pandas" in screen._snippet_text.toPlainText()

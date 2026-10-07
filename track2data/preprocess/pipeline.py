@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 
 from track2data.core.models import (
@@ -35,7 +37,12 @@ def _replaced_mask(before: np.ndarray, after: np.ndarray) -> np.ndarray:
     return was_present & ~unchanged
 
 
-def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
+def run(
+    session: Session,
+    config: PreprocessConfig,
+    *,
+    check: Callable[[], None] | None = None,
+) -> PreprocessedSession:
     """Run the full preprocessing pipeline on a session.
 
     Steps applied in order:
@@ -56,6 +63,10 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
         Input session.  ``session.raw_xy`` is never mutated.
     config:
         Full preprocessing configuration.
+    check:
+        Optional zero-argument callable run before each step so a
+        cancellation request is noticed between steps; whatever it raises
+        (``OperationCancelled``) propagates.
 
     Returns
     -------
@@ -65,10 +76,15 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     """
     report = PreprocessReport()
 
+    def _checkpoint(_step: str) -> None:
+        if check is not None:
+            check()
+
     # Start from a copy of raw_xy so the original is never touched.
     xy: np.ndarray = session.raw_xy.copy()
 
     # 1. Gap fill
+    _checkpoint("gap fill")
     crossing_mask = None
     if session.fragments is not None:
         from track2data.readers.idtrackerai.fragments import crossing_frame_mask
@@ -77,6 +93,7 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # 2. Jump detection
+    _checkpoint("jump detection")
     # Captured by comparison, the same way PreprocessedSession.was_interpolated
     # compares raw_xy to the final array. It has to happen here rather than at
     # the end: smoothing (step 4) moves every position, so "differs from the
@@ -90,6 +107,7 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # 3. Identity-switch correction
+    _checkpoint("identity-switch correction")
     # Fragment boundaries are the only frames where a swap is physically
     # possible, so hand them over when the session carries them -- same
     # opportunistic pattern as the crossing mask above. Without them the
@@ -105,10 +123,12 @@ def run(session: Session, config: PreprocessConfig) -> PreprocessedSession:
     report.steps.append(step)
 
     # 4. Smoothing
+    _checkpoint("smoothing")
     xy, step = smooth_trajectories(xy, config.smoothing)
     report.steps.append(step)
 
     # 5. Coverage validation
+    _checkpoint("coverage validation")
     step = validate_coverage(xy, config.coverage, session_id=session.session_id)
     report.steps.append(step)
 

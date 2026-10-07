@@ -119,3 +119,32 @@ class TestCacheStore:
         # The shard directory should exist
         shard_dir = tmp_path / "cache" / key[:2]
         assert shard_dir.is_dir()
+
+
+class TestCacheObjects:
+    """PERF-02: PreprocessedSession-style objects (D-019)."""
+
+    def test_object_roundtrip(self, tmp_path: Path) -> None:
+        store = CacheStore(tmp_path / "cache")
+        obj = {"a": [1, 2, 3], "b": "x"}
+        store.put_object("k" * 64, obj)
+        assert store.has_object("k" * 64)
+        assert store.get_object("k" * 64) == obj
+
+    def test_object_miss_returns_none(self, tmp_path: Path) -> None:
+        assert CacheStore(tmp_path / "cache").get_object("z" * 64) is None
+
+    def test_corrupt_object_is_a_miss_and_removed(self, tmp_path: Path) -> None:
+        store = CacheStore(tmp_path / "cache")
+        store.put_object("k" * 64, {"a": 1})
+        path = store._object_path("k" * 64)
+        path.write_bytes(b"not a pickle")
+        assert store.get_object("k" * 64) is None
+        assert not path.exists()
+
+    def test_clear_removes_objects_too(self, tmp_path: Path) -> None:
+        store = CacheStore(tmp_path / "cache")
+        store.put_object("k" * 64, {"a": 1})
+        store.put("p" * 64, pd.DataFrame({"x": [1]}))
+        assert store.clear() == 2
+        assert not store.has_object("k" * 64)

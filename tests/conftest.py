@@ -44,6 +44,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import json
 import struct
 import zlib
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -444,3 +445,25 @@ def tiny_identity_free_session(tmp_path_factory: pytest.TempPathFactory) -> Path
     base = tmp_path_factory.mktemp("tiny_identity_free")
     _build_tiny_real_session(base, track_wo_identities=True)
     return base
+
+
+# ── a reader for a tracker that is not idtracker.ai ───────────────────────────
+
+
+@pytest.fixture
+def toy_reader() -> Iterator[None]:
+    """Register the toy reader (tests/support/toy_reader.py) for the length of one test."""
+    from tests.support.toy_reader import ToyCsvReader
+    from track2data import readers
+
+    readers.register(ToyCsvReader)
+    yield
+    readers._REGISTRY.remove(ToyCsvReader)
+
+
+@pytest.fixture
+def toy_folder(tmp_path: Path) -> Path:
+    """A session folder the toy reader reads: two animals, 60 frames, no fps in the file."""
+    from tests.support.toy_reader import write_toy_session
+
+    return write_toy_session(tmp_path / "trial1")

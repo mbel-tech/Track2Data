@@ -12,6 +12,8 @@ tests/test_ui/test_processing_screen.py).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -456,3 +458,99 @@ def test_run_results_changed_rerenders_diagnostics_and_metrics_tabs(qtbot) -> No
     # The session combo must reflect the new RunResult's sessions, not the old one.
     assert screen._diag_session_combo.count() == 1
     assert screen._diag_session_combo.currentText() == "s2"
+
+
+# ── Trajectories tab (GUI-02) ────────────────────────────────────────────────
+
+
+def _trajectory_store(tmp_path: Path, folder: Path):
+    from datetime import UTC, datetime
+
+    from track2data.core.models import (
+        CalibrationConfig,
+        MetricSelection,
+        ProjectManifest,
+        SessionRef,
+    )
+    from ui.store.project_store import ProjectStore
+
+    now = datetime.now(tz=UTC)
+    store = ProjectStore()
+    store._manifest = ProjectManifest(
+        project_name="p",
+        created_at=now,
+        updated_at=now,
+        sessions=[SessionRef(session_id=folder.name, folder=folder, sha256="x")],
+        calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    store._project_dir = tmp_path
+    return store
+
+
+def test_load_trajectory_data_returns_raw_and_processed(tiny_real_session: Path, tmp_path) -> None:
+    from ui.preview_screen import load_trajectory_data
+
+    store = _trajectory_store(tmp_path, tiny_real_session)
+    data = load_trajectory_data(store.manifest, tiny_real_session.name, store.cache_dir)
+    assert data.raw_xy.shape == data.xy.shape
+    assert data.fps > 0
+    assert data.xy.ndim == 3
+
+
+def test_load_trajectory_data_uses_and_fills_the_cache(
+    tiny_real_session: Path, tmp_path, monkeypatch
+) -> None:
+    import track2data.preprocess.pipeline as pl
+    from ui.preview_screen import load_trajectory_data
+
+    calls = []
+    real = pl.run
+    monkeypatch.setattr(pl, "run", lambda *a, **k: calls.append(1) or real(*a, **k))
+    store = _trajectory_store(tmp_path, tiny_real_session)
+    load_trajectory_data(store.manifest, tiny_real_session.name, store.cache_dir)
+    load_trajectory_data(store.manifest, tiny_real_session.name, store.cache_dir)
+    assert len(calls) == 1
+
+
+def test_trajectories_tab_loads_a_session_into_the_view(
+    qtbot, tiny_real_session: Path, tmp_path
+) -> None:
+    from ui.preview_screen import PreviewScreen
+
+    store = _trajectory_store(tmp_path, tiny_real_session)
+    screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._traj_view.n_frames == 0
+    assert screen._traj_session_combo.currentText() == tiny_real_session.name
+
+    screen._traj_load_btn.click()
+    qtbot.waitUntil(lambda: screen._traj_view.n_frames > 0, timeout=15000)
+    assert screen._traj_slider.maximum() == screen._traj_view.n_frames - 1
+
+    screen._traj_slider.setValue(5)
+    assert screen._traj_view.current_frame == 5
+
+
+def test_trajectories_controls_drive_the_view(qtbot, tiny_real_session: Path, tmp_path) -> None:
+    from ui.preview_screen import PreviewScreen
+
+    screen = PreviewScreen(_trajectory_store(tmp_path, tiny_real_session))
+    qtbot.addWidget(screen)
+    screen._traj_load_btn.click()
+    qtbot.waitUntil(lambda: screen._traj_view.n_frames > 0, timeout=15000)
+
+    screen._traj_heatmap_check.setChecked(True)
+    assert screen._traj_view.heatmap_visible()
+    screen._traj_source_combo.setCurrentIndex(screen._traj_source_combo.findData("both"))
+    assert screen._traj_view._source == "both"
+    screen._traj_trail_spin.setValue(30)
+    assert screen._traj_view._trail == 30
+
+
+def test_trajectories_tab_without_sessions_says_so(qtbot) -> None:
+    from ui.preview_screen import PreviewScreen
+
+    screen = PreviewScreen()
+    qtbot.addWidget(screen)
+    assert not screen._traj_load_btn.isEnabled()

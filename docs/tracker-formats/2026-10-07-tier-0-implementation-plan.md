@@ -8,11 +8,23 @@
 
 **Tech Stack:** Python 3.11+, pydantic v2, numpy, h5py, scipy, click, PySide6 (UI only), pytest, hypothesis, ruff, mypy. Run everything with `py -3.14 -m …`.
 
-**Design:** [`2026-10-07-tracker-import-design.md`](2026-10-07-tracker-import-design.md). **Base:** pp3 (`2017cc8`).
+**Design:** [`2026-10-07-tracker-import-design.md`](2026-10-07-tracker-import-design.md). **Base:** pp3 (`2017cc8`), reconciled with `origin/main` after PR #100 (see *Integration with PR #100* below).
 
 **Status of this plan.** Tasks for T0-1 to T0-3 are written to code level because they are implemented next. T0-4 to T0-9 give files, interfaces, tests and acceptance, and are expanded to code level in the PR that implements them, so the plan never describes code that the earlier PRs have already changed. Where merged code and this plan differ, the merged code is authoritative.
 
 **Conventions for every task.** Strict TDD: failing test, see it fail for the stated reason, minimal code, see it pass, commit. Commit messages follow Conventional Commits and end with `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`. Before each commit run `py -3.14 -m ruff check .` and `py -3.14 -m mypy`. Never `pip install -e .` in this worktree: it would repoint the main checkout's editable install. Run pytest from the worktree root with `PYTHONDONTWRITEBYTECODE=1` and `-p no:cacheprovider` so the OneDrive-synced tree stays clean.
+
+---
+
+## Integration with PR #100
+
+The plan assumed pp3 was a strict superset of `main`. It was, until PR #100 merged 16 commits into `main` the day this work started: parallel session runs, the preprocessed-session cache, `SessionReader.probe`, the trajectory viewer and other GUI work, and the SCI-01 / SCI-02 metric fixes. pp3 conflicted with it in 13 files (not counting this work). The two were reconciled on their own branch (a merge commit, all tests green, CI's engine and GUI coverage floors held), and this work was then merged onto that. Three places needed more than a textual merge:
+
+- **`probe` and the pickle-consent gate.** A probe opens the same trajectory file a read does, so it needs the same consent, and the same saved options. `SessionReader.probe`, `IDTrackerAiReader.probe` and `readers.probe_session` now take `allow_pickle` and `options` exactly as `read` does; the default `probe` hands each on to `read` only if the reader declares it. `probe_session` takes `reader=` like `read_session`. `ProjectStore` probes a session with the reader and options it saved, never by detection.
+- **The preprocessed-session cache (D-019).** Its key was the detected reader, the folder fingerprint and the configs. It is now the entry's saved reader (detected only for an entry that saved none), its options, the fingerprint and the configs, because the same folder read at 25 fps and at 50 fps is two different sessions. A cache hit takes its `Session` from the cached result (a run needs it for the summary and the input hash) and stamps the entry's id on it, so a renamed session does not get another session's name. `Engine.preprocess_ref(ref)` is the cache-aware call for anything that has an entry (the trajectory viewer, `Engine.run`); `preprocess_folder(folder)` stays for callers without one.
+- **SCI-01.** The tracker's own body length is now propagated in `apply_calibration_and_zones`, so the sensitivity sweep, which calls it directly, gets it too.
+
+Two things to remember in T0-7: probes and scans share the single-thread `TaskRunner` pool with pipeline runs (D-018 lists it as not done), so a scan should not queue behind a run; and a parallel run (`n_workers > 1`) rebuilds its engine in spawned worker processes, where only built-in and entry-point readers are registered.
 
 ---
 
@@ -1347,6 +1359,7 @@ In `test_reader_contract.py` replace `registry.detect_reader(folder)().read(fold
 - `readers/advisories.py`: `reader_advisories(summaries)` gives one plain-language warning per reader that was never checked against real output (it names the sessions), and one for `bodylength` calibration on sessions that carry no body length. `SessionSummary` gains `has_body_length` for that, taken from the data (`body_length_px is not None`) rather than from the reader's declared flag, so it is right for an idtracker.ai session that lacks the key too. `Engine.consistency_warnings()` returns them after the heterogeneity warnings, and `PROJECT_SUMMARY.md` records them in their own "Notes on the readers" section, apart from "Read before pooling these sessions": they say how the sessions were read, not that they disagree. Neither blocks `validate()` or a run.
 - `readers.find_reader(name)` returns the registered class or `None`; `get_reader` raises `READER_UNKNOWN` through it.
 - D-5 returns `not_assessed` when the reader never supplies identification quality, and its documentation says so.
+- **After PR #100:** the cache key, `preprocess_ref` and the probe contract described in *Integration with PR #100* are part of this PR's behaviour. `tests/support/toy_reader.py` is the shared non-idtracker reader that the persisted-reader, provenance, advisory and cache tests use.
 
 **Deviation from the outline.** The outline put the body-length advisory on the reader's `provides_body_length` flag. The flag remains a declaration for the dialog, but the advisory is driven by whether the session really has a body length: it is what decides whether calibration runs.
 

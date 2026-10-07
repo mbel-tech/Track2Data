@@ -609,6 +609,12 @@ signature. The other class attributes added this way (`display_name`,
 `verification`, `coordinate_frame`, `provides_body_length`) all have defaults, so
 an older reader inherits them.
 
+`SessionReader.probe` (the cheap read the GUI uses to describe a folder) takes the
+same keywords as `read`, for the same reason: it opens the same trajectory file, so
+it needs the same consent and the same saved options. Its default hands each to
+`read` only if the reader declares it, so a reader that never overrides `probe`
+needs nothing; one that does must accept the keywords it declares.
+
 External plug-ins are loaded behind a `try/except` and **never crash
 the engine** — failures surface as a warning in the run log
 (ENGINE_DESIGN §5.3).

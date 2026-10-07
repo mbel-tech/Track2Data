@@ -69,7 +69,7 @@ def test_apply_persists_the_real_literal_not_the_display_label(qtbot, tmp_path: 
     assert idx2 >= 0
     screen._jump_method.setCurrentIndex(idx2)
 
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.preprocess.smoothing.method == "savgol"
     assert store.manifest.preprocess.jump.method == "percentile"
@@ -111,3 +111,110 @@ def test_group_boxes_are_not_independently_checkable(qtbot) -> None:
     assert screen._gap_group.isCheckable() is False
     assert screen._jump_group.isCheckable() is False
     assert screen._smooth_group.isCheckable() is False
+
+
+# ── GUI-01 / ENG-01: auto-commit, no clobbering, identity switch ────────────
+
+
+def test_no_apply_button_and_edit_autocommits_on_flush(qtbot, tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+
+    assert not [b for b in screen.findChildren(QPushButton) if b.text() == "Apply"]
+    screen._gap_max.setValue(77)
+    screen.flush()  # what MainWindow does when leaving the screen
+    assert store.manifest.preprocess.gap_fill.max_gap_frames == 77
+
+
+def test_edit_autocommits_after_debounce(qtbot, tmp_path: Path) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+    screen._smooth_window.setValue(9)
+    qtbot.waitUntil(lambda: store.manifest.preprocess.smoothing.window == 9, timeout=2000)
+
+
+def test_commit_preserves_fields_the_screen_does_not_expose(qtbot, tmp_path: Path) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    cfg = store.manifest.preprocess
+    store.update_preprocess(
+        cfg.model_copy(
+            update={
+                "jump": cfg.jump.model_copy(update={"pct_mult": 3.5}),
+                "smoothing": cfg.smoothing.model_copy(update={"polyorder": 3}),
+                "coverage": cfg.coverage.model_copy(update={"min_track_frames": 12}),
+            }
+        )
+    )
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+    screen._gap_max.setValue(11)
+    screen.flush()
+
+    pp = store.manifest.preprocess
+    assert pp.gap_fill.max_gap_frames == 11
+    assert pp.jump.pct_mult == 3.5
+    assert pp.smoothing.polyorder == 3
+    assert pp.coverage.min_track_frames == 12
+
+
+def test_identity_switch_controls_roundtrip_and_default_off(qtbot, tmp_path: Path) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._idsw_enabled.isChecked() is False
+
+    screen._idsw_enabled.setChecked(True)
+    screen._idsw_ratio.setValue(2.0)
+    screen._idsw_hungarian.setChecked(False)
+    screen._idsw_window.setValue(8)
+    screen.flush()
+
+    sw = store.manifest.preprocess.identity_switch
+    assert (sw.enabled, sw.tier1_ratio, sw.tier2_hungarian, sw.consolidate_window) == (
+        True,
+        2.0,
+        False,
+        8,
+    )
+
+
+def test_unapplied_identity_switch_is_not_reset_by_other_edits(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import IdSwitchCfg
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    cfg = store.manifest.preprocess
+    store.update_preprocess(
+        cfg.model_copy(update={"identity_switch": IdSwitchCfg(enabled=True, tier1_ratio=2.5)})
+    )
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+    screen._gap_max.setValue(12)
+    screen.flush()
+    assert store.manifest.preprocess.identity_switch.enabled is True
+    assert store.manifest.preprocess.identity_switch.tier1_ratio == 2.5
+
+
+def test_velocity_threshold_jump_method_is_selectable(qtbot, tmp_path: Path) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+    idx = screen._jump_method.findData("idtracker_velocity_threshold")
+    assert idx >= 0
+    screen._jump_method.setCurrentIndex(idx)
+    screen.flush()
+    assert store.manifest.preprocess.jump.method == "idtracker_velocity_threshold"

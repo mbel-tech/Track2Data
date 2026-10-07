@@ -244,7 +244,7 @@ support with no real fixture to test against would be speculation, not
 engineering. Revisit if v4 sample data becomes available; re-add the
 entry-point line at that point, not before.
 
-### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now
+### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now — CLOSED
 
 **Decision:** `Engine.run_all()` continues to loop over sessions
 sequentially rather than calling `core/parallel.map_sessions()`.
@@ -289,11 +289,14 @@ dataclasses directly, sidestepping Parquet) — an API design question,
 not a missing function call. Deferred until that's designed
 deliberately, with its own tests, rather than improvised here.
 
+
+**Closed (critical-issues audit):** the cache is wired in by D-019 and parallel runs by D-020.
+
 ---
 
 ## Phase 3 — GUI wiring (M3)
 
-### D-014 · `Engine.run()` accepts `n_workers` but only implements `n_workers=1`
+### D-014 · `Engine.run()` accepts `n_workers` but only implements `n_workers=1` — CLOSED
 
 **Decision:** `Engine.run(out_dir, exporters=None, *, progress=None,
 n_workers=1)` accepts an `n_workers` parameter (per issue #19's
@@ -323,3 +326,178 @@ as part of `Engine.run()`'s signature, and `ui/store/task_runner.py`
 (issue #20) is being built immediately after this and will call
 `Engine.run()`; adding the parameter now avoids a second signature
 change once parallel execution does land.
+
+
+**Closed (critical-issues audit):** `n_workers > 1` now runs in a spawn process pool; see D-020.
+
+---
+
+## Phase 4 — Critical-issues audit
+
+### D-015 · Body-length normalisation is computed in pixel space
+
+**Decision:** `*_bl` metric columns are `value_px / body_length_px[k]`
+and no longer depend on `px_per_cm`. `PreprocessedSession.body_length_px`
+is set by body-length calibration; `body_length_in_px()` falls back to
+`body_length_cm * px_per_cm` for sessions that only carry physical units.
+`body_length_cm` keeps its legacy behaviour (pixel values in bodylength
+mode) so existing consumers do not change.
+
+**Rationale:** Body Length mode is the recommended mode and leaves
+`px_per_cm` unset, so nesting `_bl` under `px_per_cm is not None` made
+every `_bl` column NaN. The old tests built sessions with both values,
+a combination no calibration path produces, and hid the defect.
+
+**Alternative considered:** Rename `body_length_cm` to pixels outright.
+Rejected for now — it touches exporters and the public `Session` contract;
+revisit in a separate change.
+
+---
+
+### D-016 · Zone metrics on identity-free sessions: pool occupancy, gate sequences
+
+**Decision:** Z-1, Z-2 and Z-8 set `pools_when_identity_free`; for an
+identity-free session `Engine.compute_metrics` runs them on
+`metrics.zone.pooled_view()` (all slots stacked into one track) and drops
+`individual_id`. Z-3, Z-4, Z-5, Z-6, Z-7 and Z-9 become
+`requires_identity = True` and are skipped by the existing gate.
+
+**Rationale:** On such a session the row index is a detection slot, so
+anything built from visits, events or sequences per slot is an artefact
+of slot swaps. ROADMAP had planned to pool Z-3, Z-5 and Z-9 too, but
+visit counts, events and dwell times are sequence-based, not occupancy,
+so pooling them would still publish artefacts. Pure occupancy is exact
+under pooling.
+
+**Alternative considered:** Pool every zone metric (the earlier ROADMAP
+plan). Rejected for the reason above.
+
+---
+
+### D-017 · Parameter screens auto-commit; no Apply buttons
+
+**Decision:** `ui/widgets/autocommit.py::AutoCommit` debounces widget
+changes (200 ms) into the screen's commit method. Screens expose
+`flush()`; `MainWindow._go_to_page` and `_action_validate` call it on the
+outgoing screen. Screens populate from the store when built and suppress
+triggers while populating. Commits use `model_copy` on the current config
+and are skipped when nothing changed.
+
+**Rationale:** An unclicked Apply button silently dropped edits. A
+dirty-bar ("Apply / Discard") was the alternative, but every setting here
+is cheap and reversible, so saving continuously is simpler and safer.
+
+**Alternative considered:** Warn on leave with Apply/Discard. Rejected as
+more friction for no safety gain.
+
+---
+
+### D-018 · Cheap session probe via `SessionReader.probe()`
+
+**Decision:** `SessionReader.probe(folder)` (default: `read()`) returns the
+facts the GUI shows. The unified idtracker.ai reader overrides it to skip
+bbox tables, matching results, inconsistent frames, fragments and the
+log. `ProjectStore` probes through `readers.probe_session` on import and on
+project open.
+
+**Rationale:** The trajectory payload is still read: `has_stable_identities`
+falls back to NaN coverage, so identity status needs it, and the pickled
+`.npy` payload cannot be memory-mapped. Skipping the other artefacts is the
+safe saving; a payload-free probe would need format-specific work and a
+different identity heuristic.
+
+**Not done:** probes still share the single-thread `TaskRunner` pool with
+pipeline runs.
+
+---
+
+### D-019 · Preprocessed sessions are cached as pickled dataclasses (closes D-013's cache half)
+
+**Decision:** `CacheStore` gets `get_object`/`put_object` (atomic pickle,
+`.pkl`). `Engine` caches the whole `PreprocessedSession` after
+preprocess + calibration + zones, keyed by reader name, a folder
+fingerprint (relative path, size, mtime of every file) and a hash of the
+preprocess, calibration and zone configs plus a schema number and app
+version. It is opt-in via `Engine(cache_dir=...)`; the GUI passes
+`<project>/.t2d_cache`. A cache hit skips import, preprocessing,
+calibration and zone assignment.
+
+**Rationale:** D-013 left a choice of Parquet or a pickled dataclass; the
+dataclass holds ragged arrays, zone object arrays and a nested pydantic
+`Session`, which Parquet would force into an invented schema. The folder
+is fingerprinted rather than hashed because reading gigabytes to decide
+whether to read them defeats the point.
+
+**Trade-offs:** mtime/size can miss an edit that preserves both (rare);
+bump `Engine._CACHE_SCHEMA` when `PreprocessedSession` changes. Metrics
+and exports are still recomputed on every run. Pickles are only loaded from
+the project's own cache directory.
+
+**Alternative considered:** Parquet per array. Rejected for the schema
+cost above.
+
+---
+
+### D-020 · Parallel session runs and in-session cancellation (closes D-013/D-014's parallel half)
+
+**Decision:** `Engine.run(n_workers=N>1)` uses a `ProcessPoolExecutor` with
+the `spawn` context on every OS. Workers receive only the manifest JSON, a
+session index, the output directory, exporter names and the cache path;
+they rebuild an `Engine`, send `ProgressEvent`s through a `multiprocessing`
+queue and read a shared cancel `Event`. The calling process drains the
+queue and invokes the caller's `progress` callback, so Qt closures never
+cross the process boundary. A worker that is cancelled returns `None`
+(custom exceptions do not reliably unpickle). Results come back in manifest
+order. Default stays `n_workers=1`.
+
+Cancellation is a separate `cancel_check: Callable[[], None]` argument, not
+extra progress events: existing tests and the GUI bar rely on progress being
+sparse and stage-boundary only. The engine calls it between sessions,
+preprocessing steps and metrics; in a parallel run the parent polls it and
+sets the workers' flag. `TaskRunner.submit_with_progress(fn, cancel_check=True)`
+passes the task's token.
+
+**Trade-offs:** start-up per worker is roughly 0.6 s (imports), so small
+sessions get slower; the benefit is for sessions taking many seconds each.
+Not yet benchmarked on the real corpus. Memory is per-worker. A step inside
+one numpy/shapely call still cannot be interrupted. `Engine` now holds the
+run's `cancel_check` on the instance for the duration of `run()`, so one
+Engine must not run two `run()` calls concurrently.
+
+**Alternative considered:** Threads. Rejected: the metrics and shapely loops
+hold the GIL.
+
+---
+
+### D-021 · Stage status is computed from the manifest; only required pages gate Next
+
+**Decision:** `ui/store/stage_status.py::compute_stage_statuses` derives a
+status per page from the manifest (and whether results exist). `MainWindow`
+recomputes it on every store change, paints the sidebar and enables Next
+only if `next_blocker()` is None. Required pages are Project, Sessions and
+Metrics (when empty); a `blocked` page (invalid calibration) always blocks.
+Sidebar clicks stay ungated.
+
+**Rationale:** Zones, metadata and export targets are optional, and result
+pages are produced by running; gating them would trap users. Keeping the
+rules in a Qt-free function makes them unit-testable.
+
+**Alternative considered:** Gate sidebar clicks too. Rejected: users need
+to jump back to fix a problem shown by a badge.
+
+---
+
+### D-022 · Trajectory viewer is drawn with Qt graphics items, not pyqtgraph
+
+**Decision:** `ui/widgets/trajectory_view.py` renders trails, markers, zones
+and the heatmap with `QGraphicsView`, the same stack as the zone canvas.
+No plotting dependency is added.
+
+**Rationale:** The audit proposed pyqtgraph. The viewer needs paths over an
+image with a scrubber, which graphics items already do, and a new
+dependency would also need PyInstaller hidden-import work on three
+platforms. Trails are strided to at most 1500 points each.
+
+**Trade-off:** no built-in axes, ROI tools or GPU acceleration. If time
+series plots (e.g. speed vs time with a live filter preview) are added
+later, pyqtgraph can be reconsidered for those alone.

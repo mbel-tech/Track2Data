@@ -319,3 +319,90 @@ def test_close_event_shuts_down_the_task_runner(
     win.close()
 
     assert calls == [5000]
+
+
+def test_leaving_a_parameter_screen_commits_pending_edits(qtbot, tmp_path: Path) -> None:
+    """GUI-01: an edit made just before navigating must not be lost."""
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("p", tmp_path)
+
+    pre = win._stack.widget(5)  # Preprocessing
+    win._go_to_page(5)
+    pre._gap_max.setValue(91)
+    assert win._store.manifest.preprocess.gap_fill.max_gap_frames != 91  # still debounced
+
+    win._go_to_page(6)  # leave without waiting for the debounce
+    assert win._store.manifest.preprocess.gap_fill.max_gap_frames == 91
+
+
+# ── GUI-03: stage badges, Next gating, advance after create ──────────────────
+
+
+def test_creating_a_project_advances_to_sessions(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win._stack.currentIndex() == 0
+    win._store.new_project("p", tmp_path)
+    assert win._stack.currentIndex() == 1
+
+
+def test_next_is_disabled_until_the_page_is_complete(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert not win._next_action.isEnabled()  # no project yet
+    assert "project" in win._next_action.toolTip().lower()
+
+    win._store.new_project("p", tmp_path)  # now on Sessions, which is empty
+    assert not win._next_action.isEnabled()
+    assert "session" in win._next_action.toolTip().lower()
+
+    ref = SessionRef(session_id="s1", folder=tmp_path, sha256="x")
+    win._store.update_sessions([ref])
+    assert win._next_action.isEnabled()
+
+
+def test_sidebar_shows_status_badges(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win._sidebar.status(1) == "blocked"  # no project
+    win._store.new_project("p", tmp_path)
+    assert win._sidebar.status(0) == "valid"
+    assert win._sidebar.status(1) == "empty"
+    assert win._sidebar.item(0).text().startswith("✓")
+    win._store.update_sessions([SessionRef(session_id="s1", folder=tmp_path, sha256="x")])
+    assert win._sidebar.status(1) == "valid"
+
+
+def test_status_bar_session_count_follows_added_sessions(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("p", tmp_path)
+    assert "Sessions: 0" in win._status_project.text()
+    win._store.update_sessions([SessionRef(session_id="s1", folder=tmp_path, sha256="x")])
+    assert "Sessions: 1" in win._status_project.text()
+
+
+def test_help_menu_opens_the_user_guide(qtbot, monkeypatch) -> None:
+    from app import main_window
+    from app.main_window import GUIDE_URL, MainWindow
+
+    opened = []
+    monkeypatch.setattr(
+        main_window.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url))
+    )
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._action_open_guide()
+    assert opened[0].toString() == GUIDE_URL
+    assert GUIDE_URL.endswith("/docs/guide")

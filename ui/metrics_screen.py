@@ -22,11 +22,14 @@ from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -39,9 +42,18 @@ from PySide6.QtWidgets import (
 from track2data import metrics
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
+from ui.widgets.autocommit import AutoCommit
 
 _COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
 _COL_INCLUDE, _COL_NAME, _COL_INFO, _COL_CONFIG = range(4)
+
+#: Quick selections. Ids only; the screen ticks exactly these (None = all).
+PRESETS: dict[str, list[str] | None] = {
+    "Standard locomotor": ["IL-1", "IL-2", "IL-4"],
+    "Thigmotaxis & space use": ["IL-3", "IL-14", "Z-1", "Z-8"],
+    "Social dynamics": ["GL-1", "GL-2", "GL-4", "GL-6"],
+    "All metrics": None,
+}
 _ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
 _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
 
@@ -81,12 +93,15 @@ class MetricsScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        self._auto = AutoCommit(self._apply, self)
         self._build_ui()
+        self._update_counter()
         if store is not None:
             store.metricsChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
             store.sessionsChanged.connect(self._update_identity_graying)
             store.zonesChanged.connect(self._update_zone_tab_enabled)
+            self._load_from_store()
             self._update_identity_graying()
             self._update_zone_tab_enabled()
 
@@ -105,6 +120,25 @@ class MetricsScreen(QWidget):
         subtitle.setStyleSheet("font-size: 14px; color: #555;")
         root.addWidget(subtitle)
 
+        # ── search + presets ─────────────────────────────────────────────
+        tools = QHBoxLayout()
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search metrics by name or ID…")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._apply_search)
+        tools.addWidget(self._search, 1)
+        self._preset_combo = QComboBox()
+        self._preset_combo.addItem("Presets…")
+        for name in PRESETS:
+            self._preset_combo.addItem(name)
+        self._preset_combo.setToolTip("Replace the current selection with a preset")
+        self._preset_combo.activated.connect(self._on_preset_chosen)
+        tools.addWidget(self._preset_combo)
+        root.addLayout(tools)
+        self._search_hint = QLabel("")
+        self._search_hint.setStyleSheet("font-size: 12px; color: #777;")
+        root.addWidget(self._search_hint)
+
         self._tabs = QTabWidget()
 
         self._ind_table = self._make_table("individual")
@@ -117,6 +151,17 @@ class MetricsScreen(QWidget):
 
         root.addWidget(self._tabs, 1)
 
+        self._counter = QLabel("")
+        self._counter.setStyleSheet("font-size: 13px; color: #2c3e50; font-weight: bold;")
+        root.addWidget(self._counter)
+        self._diag_note = QLabel(
+            "Diagnostic metrics (D-1 … D-10: coverage, accuracy, identity stability, …) "
+            "are always computed and are not listed here."
+        )
+        self._diag_note.setWordWrap(True)
+        self._diag_note.setStyleSheet("font-size: 12px; color: #777;")
+        root.addWidget(self._diag_note)
+
         qform = QFormLayout()
         self._quality_spin = QDoubleSpinBox()
         self._quality_spin.setRange(0.0, 1.0)
@@ -126,10 +171,82 @@ class MetricsScreen(QWidget):
         qform.addRow("Quality threshold:", self._quality_spin)
         root.addLayout(qform)
 
-        apply_btn = QPushButton("Apply selection")
-        apply_btn.setFixedWidth(130)
-        apply_btn.clicked.connect(self._apply)
-        root.addWidget(apply_btn)
+        # No Apply button: edits auto-commit after a pause; MainWindow
+        # calls flush() when the screen is left.
+        for table in (self._ind_table, self._grp_table, self._zone_table):
+            table.itemChanged.connect(self._on_item_changed)
+        self._quality_spin.valueChanged.connect(
+            lambda _v: self._auto.trigger() if self._differs_from_store() else None
+        )
+
+    def flush(self) -> None:
+        """Commit any pending edit now (called when the screen is left)."""
+        self._auto.flush()
+
+    def _differs_from_store(self) -> bool:
+        if self._store is None or self._store.manifest is None:
+            return False
+        current = self._store.manifest.metrics
+        return self._selection_from_widgets(current) != current
+
+    def _tables(self) -> list[tuple[str, QTableWidget]]:
+        return [
+            ("Individual", self._ind_table),
+            ("Group", self._grp_table),
+            ("Zone", self._zone_table),
+        ]
+
+    def _apply_search(self, text: str) -> None:
+        needle = text.strip().lower()
+        tabs_with_hits: list[str] = []
+        for tab_name, table in self._tables():
+            hits = 0
+            for row in range(table.rowCount()):
+                include = table.item(row, _COL_INCLUDE)
+                name = table.item(row, _COL_NAME)
+                haystack = f"{include.data(_ROLE_METRIC_ID)} {name.text() if name else ''}".lower()
+                visible = not needle or needle in haystack
+                table.setRowHidden(row, not visible)
+                hits += visible
+            if needle and hits:
+                tabs_with_hits.append(f"{tab_name} ({hits})")
+        if not needle:
+            self._search_hint.setText("")
+        elif tabs_with_hits:
+            self._search_hint.setText("Matches in: " + ", ".join(tabs_with_hits))
+        else:
+            self._search_hint.setText("No metrics match.")
+
+    def _on_preset_chosen(self, index: int) -> None:
+        if index > 0:
+            self.apply_preset(self._preset_combo.itemText(index))
+        self._preset_combo.setCurrentIndex(0)
+
+    def apply_preset(self, name: str) -> None:
+        """Tick exactly the metrics of preset *name* (all others unticked)."""
+        ids = PRESETS[name]
+        for _tab, table in self._tables():
+            for row in range(table.rowCount()):
+                item = table.item(row, _COL_INCLUDE)
+                wanted = ids is None or item.data(_ROLE_METRIC_ID) in ids
+                item.setCheckState(Qt.CheckState.Checked if wanted else Qt.CheckState.Unchecked)
+
+    def _update_counter(self) -> None:
+        n_ind = len(self._checked_ids(self._ind_table))
+        n_grp = len(self._checked_ids(self._grp_table))
+        n_zone = len(self._checked_ids(self._zone_table))
+        total = sum(t.rowCount() for _n, t in self._tables())
+        self._counter.setText(
+            f"Selected: {n_ind + n_grp + n_zone} / {total} metrics "
+            f"({n_ind} individual · {n_grp} group · {n_zone} zone)"
+        )
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        self._update_counter()
+        # itemChanged also fires for flag/tooltip updates (identity graying);
+        # only a selection that differs from the store is an edit to commit.
+        if item.column() == _COL_INCLUDE and self._differs_from_store():
+            self._auto.trigger()
 
     def _make_table(self, level: str) -> QTableWidget:
         metric_classes = sorted(metrics.list_for_level(level), key=_natural_sort_key)
@@ -254,9 +371,10 @@ class MetricsScreen(QWidget):
 
     def _apply(self) -> None:
         if self._store is None or self._store.manifest is None:
-            QMessageBox.information(self, "Info", "No project open.")
             return
         sel = self._selection_from_widgets(self._store.manifest.metrics)
+        if sel == self._store.manifest.metrics:
+            return
         try:
             self._store.update_metrics(sel)
         except Exception as exc:
@@ -265,13 +383,17 @@ class MetricsScreen(QWidget):
     def _load_from_store(self) -> None:
         if self._store is None or self._store.manifest is None:
             return
+        if self._auto.pending:
+            return  # keep the user's not-yet-committed edit; it commits next
         sel = self._store.manifest.metrics
-        self._set_checked(self._ind_table, sel.individual)
-        self._set_checked(self._grp_table, sel.group)
-        self._set_checked(self._zone_table, sel.zone)
-        self._quality_spin.setValue(sel.quality_threshold)
+        with self._auto.suppressed():
+            self._set_checked(self._ind_table, sel.individual)
+            self._set_checked(self._grp_table, sel.group)
+            self._set_checked(self._zone_table, sel.zone)
+            self._quality_spin.setValue(sel.quality_threshold)
         self._update_identity_graying()
         self._update_zone_tab_enabled()
+        self._update_counter()
 
     def _update_identity_graying(self) -> None:
         """Reflect each session's identity-free status onto the rows.

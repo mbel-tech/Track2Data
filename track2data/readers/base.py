@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from track2data.core.ids import default_session_id
 from track2data.core.models import Session
@@ -113,3 +114,31 @@ class SessionReader(ABC):
         :attr:`accepts_allow_pickle` to True, refusing those formats with
         ``IDT_PICKLE_REFUSED`` unless the caller opts in.
         """
+
+    def probe(
+        self,
+        folder: Path,
+        *,
+        allow_pickle: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> Session:
+        """
+        Read only what the GUI needs to describe *folder* (frame count, fps,
+        animals, identity flags, calibration/ROI hints, background image).
+
+        Readers override this to skip expensive optional artefacts; the
+        default falls back to a full ``read()`` so every reader stays valid.
+
+        ``allow_pickle`` and ``options`` are what ``read`` takes: a probe opens
+        the same trajectory file, so it must be refused pickled data exactly as
+        a read is, and a reader whose files do not record its frame rate needs
+        the same answer. The default hands each on to ``read`` only if the reader
+        declares it (:attr:`accepts_allow_pickle`, :attr:`parameters`); a reader
+        that overrides ``probe`` must accept the keywords it declares.
+        """
+        kwargs: dict[str, Any] = {}
+        if self.accepts_allow_pickle:
+            kwargs["allow_pickle"] = allow_pickle
+        if self.parameters:
+            kwargs["options"] = options
+        return self.read(folder, **kwargs)

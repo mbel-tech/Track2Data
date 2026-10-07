@@ -93,14 +93,10 @@ def reader_names() -> list[str]:
     return [cls.name for cls in _REGISTRY]
 
 
-def _call_read(
-    cls: type[SessionReader],
-    path: Path,
-    *,
-    allow_pickle: bool,
-    options: Mapping[str, Any] | None,
-) -> Session:
-    """Call ``cls().read(path)``, passing each keyword only to readers that declare it.
+def _reader_kwargs(
+    cls: type[SessionReader], *, allow_pickle: bool, options: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """The keywords ``cls`` declares it takes, and only those.
 
     This is what keeps the contract additive: a reader written against the original
     one-argument ``read(folder)`` never sees ``allow_pickle`` or ``options``.
@@ -112,7 +108,44 @@ def _call_read(
     resolved = resolve_options(cls.name, cls.parameters, options)
     if cls.parameters:
         kwargs["options"] = resolved
-    return cls().read(path, **kwargs)
+    return kwargs
+
+
+def _call_read(
+    cls: type[SessionReader],
+    path: Path,
+    *,
+    allow_pickle: bool,
+    options: Mapping[str, Any] | None,
+) -> Session:
+    """Call ``cls().read(path)``, passing each keyword only to readers that declare it."""
+    return cls().read(path, **_reader_kwargs(cls, allow_pickle=allow_pickle, options=options))
+
+
+def _call_probe(
+    cls: type[SessionReader],
+    path: Path,
+    *,
+    allow_pickle: bool,
+    options: Mapping[str, Any] | None,
+) -> Session:
+    """Call ``cls().probe(path)`` with exactly the keywords ``read`` would get."""
+    return cls().probe(path, **_reader_kwargs(cls, allow_pickle=allow_pickle, options=options))
+
+
+def _choose(folder: Path, reader: str | None) -> type[SessionReader]:
+    """The reader named *reader*, else the one that detects *folder*; an error if neither."""
+    if reader is not None:
+        return get_reader(reader)
+    cls = detect_reader(folder)
+    if cls is None:
+        raise ImportError_(
+            f"No reader recognised the session folder: {folder}",
+            code="NO_READER",
+            subject=str(folder),
+            remediation="Ensure the folder is a valid idtracker.ai output directory.",
+        )
+    return cls
 
 
 def read_session(
@@ -137,15 +170,28 @@ def read_session(
     also never see the flag, so a third-party reader that unpickles is trusting whatever
     it is pointed at, and should opt in.
     """
-    cls = get_reader(reader) if reader is not None else detect_reader(folder)
-    if cls is None:
-        raise ImportError_(
-            f"No reader recognised the session folder: {folder}",
-            code="NO_READER",
-            subject=str(folder),
-            remediation="Ensure the folder is a valid idtracker.ai output directory.",
-        )
-    return _call_read(cls, folder, allow_pickle=allow_pickle, options=options)
+    return _call_read(
+        _choose(folder, reader), folder, allow_pickle=allow_pickle, options=options
+    )
+
+
+def probe_session(
+    folder: Path,
+    *,
+    allow_pickle: bool = False,
+    reader: str | None = None,
+    options: Mapping[str, Any] | None = None,
+) -> Session:
+    """Like ``read_session`` but via ``SessionReader.probe`` -- the cheap path
+    the GUI uses to describe a folder without loading every artefact.
+
+    ``allow_pickle``, ``reader`` and ``options`` mean what they mean for ``read_session``:
+    a probe opens the same trajectory file, so it needs the project's consent, and a session
+    whose reader was chosen is probed by that reader with its saved options.
+    """
+    return _call_probe(
+        _choose(folder, reader), folder, allow_pickle=allow_pickle, options=options
+    )
 
 
 __all__ = [
@@ -155,6 +201,7 @@ __all__ = [
     "detect_reader",
     "find_reader",
     "get_reader",
+    "probe_session",
     "read_session",
     "reader_names",
     "register",

@@ -11,7 +11,7 @@ Widgets:
   • readiness_list       QListWidget     (Session calibration mode only) --
                           per-session length_unit readiness, from
                           ProjectStore.session_facts()
-  • apply_btn            QPushButton → store.update_calibration
+  • edits auto-commit (debounced) → store.update_calibration; flush() on leave
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.autocommit import AutoCommit
+
 _UNIT_CHOICES = ["cm", "mm", "m"]
 
 
@@ -41,6 +43,7 @@ class CalibrationScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        self._auto = AutoCommit(self._apply, self)
         self._build_ui()
         if store is not None:
             store.calibrationChanged.connect(self._on_calibration_changed)
@@ -102,6 +105,12 @@ class CalibrationScreen(QWidget):
         self._px_spin.setDecimals(4)
         self._px_spin.setSuffix(" px per unit")
         scalar_form.addRow("Pixels per unit:", self._px_spin)
+        self._measure_btn = QPushButton("Measure on frame…")
+        self._measure_btn.setToolTip(
+            "Click both ends of an object of known length on a session frame"
+        )
+        self._measure_btn.clicked.connect(self._measure_on_frame)
+        scalar_form.addRow("", self._measure_btn)
         root.addWidget(self._scalar_widget)
 
         # ── session calibration controls ────────────────────────────────
@@ -139,12 +148,6 @@ class CalibrationScreen(QWidget):
 
         root.addWidget(self._session_widget)
 
-        # ── apply button ──────────────────────────────────────────────────
-        apply_btn = QPushButton("Apply")
-        apply_btn.setFixedWidth(100)
-        apply_btn.clicked.connect(self._apply)
-        root.addWidget(apply_btn)
-
         root.addStretch()
 
         # wire radio changes
@@ -153,6 +156,17 @@ class CalibrationScreen(QWidget):
         self._radio_session.toggled.connect(self._update_mode_visibility)
         self._update_mode_visibility()
         self._refresh_readiness()
+
+        # auto-commit (no Apply button): every edit is saved after a pause
+        for radio in (self._radio_bl, self._radio_scalar, self._radio_session):
+            radio.toggled.connect(self._auto.trigger)
+        self._px_spin.valueChanged.connect(self._auto.trigger)
+        self._unit_combo.currentIndexChanged.connect(self._auto.trigger)
+        self._confirm_check.toggled.connect(self._auto.trigger)
+
+    def flush(self) -> None:
+        """Commit any pending edit now (called when the screen is left)."""
+        self._auto.flush()
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -170,7 +184,6 @@ class CalibrationScreen(QWidget):
 
     def _apply(self) -> None:
         if self._store is None or self._store.manifest is None:
-            QMessageBox.information(self, "Info", "No project open.")
             return
         mode = self._current_mode()
         # model_copy(update=...) against the manifest's current
@@ -188,12 +201,18 @@ class CalibrationScreen(QWidget):
             updates["length_unit_label"] = self._unit_combo.currentText()
             updates["length_unit_confirmed_by_user"] = self._confirm_check.isChecked()
         cfg = current.model_copy(update=updates)
+        if cfg == current:
+            return
         try:
             self._store.update_calibration(cfg)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to apply calibration:\n{exc}")
 
     def _on_calibration_changed(self) -> None:
+        with self._auto.suppressed():
+            self._populate()
+
+    def _populate(self) -> None:
         if self._store is not None and self._store.manifest is not None:
             cfg = self._store.manifest.calibration
             if cfg.mode == "scalar":
@@ -210,7 +229,48 @@ class CalibrationScreen(QWidget):
         self._update_mode_visibility()
         self._refresh_readiness()
 
+    def _measure_on_frame(self) -> None:
+        """Open the two-point ruler on the first session with facts and, if
+        accepted, put its pixels-per-unit into the spin box."""
+        from ui.widgets.ruler_dialog import RulerDialog
+
+        background, size = None, (640.0, 480.0)
+        if self._store is not None and self._store.manifest is not None:
+            for ref in self._store.manifest.sessions:
+                facts = self._store.session_facts(ref.session_id)
+                if facts is not None:
+                    background = facts.background_image_path
+                    size = (float(facts.width_px), float(facts.height_px))
+                    break
+        dialog = RulerDialog(background, size, parent=self)
+        if dialog.exec() == RulerDialog.DialogCode.Accepted:
+            scale = dialog.px_per_unit()
+            if scale is not None:
+                self._px_spin.setValue(min(scale, self._px_spin.maximum()))
+
+    def body_length_summary(self) -> str:
+        """Median / range of the sessions' per-animal body lengths (pixels)."""
+        values: list[float] = []
+        n_sessions = 0
+        if self._store is not None and self._store.manifest is not None:
+            for ref in self._store.manifest.sessions:
+                facts = self._store.session_facts(ref.session_id)
+                if facts is not None and facts.body_length_px:
+                    n_sessions += 1
+                    values.extend(v for v in facts.body_length_px if v == v)
+        if not values:
+            return "Body length will be derived from session bounding boxes."
+        import statistics
+
+        return (
+            f"Body length from {len(values)} animal(s) in {n_sessions} session(s): "
+            f"median {statistics.median(values):.1f} px "
+            f"(range {min(values):.1f} to {max(values):.1f} px). "
+            "Distances are reported in body lengths; physical units need a scale."
+        )
+
     def _refresh_readiness(self) -> None:
+        self._bl_label.setText(self.body_length_summary())
         self._readiness_list.clear()
         if self._store is None or self._store.manifest is None:
             return

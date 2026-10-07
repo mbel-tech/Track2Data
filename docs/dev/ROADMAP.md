@@ -31,7 +31,10 @@ The engine, the GUI, and the packaging pipeline are all built and green.
 | Metadata join wired into `Engine` | ✅ Implemented |
 | Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |
 | Standalone binaries (Windows / macOS / Linux) | ✅ Built + validated in CI |
-| Test suite | ✅ ~1170 passing (plus `r_parity` and `corpus_local` gates) |
+| Test suite | ✅ ~1760 passing (plus `r_parity` and `corpus_local` gates) |
+| Preprocessed-session cache, parallel runs, in-session cancel | ✅ Implemented (D-019, D-020); parallel not yet benchmarked on the real corpus |
+| Trajectory viewer, zone tools, calibration ruler, stage status / Next gating | ✅ Implemented (D-021, D-022) |
+| User guide with screenshots (`docs/guide/`) | ✅ Generated from the real app |
 | CI workflow | ✅ Green across a 6-cell OS × Python matrix |
 
 Remaining work is release mechanics, not implementation — see **M5** below.
@@ -120,33 +123,36 @@ re-reading why each was deferred:
 | GL-14 | Directional correlation delay / leadership ranking | D-7 measured a **median individual-fragment length of 3 frames** on a real corpus session; lag correlation needs identity to hold across seconds, which this corpus does not support. |
 | GL-16 | Group spatial correlation length | Cavagna's method is validated on flocks of hundreds; on shoals of 5-20 animals the correlation length is not estimable. |
 
-### Deferred: identity-free zone metrics
+### Done: identity-free zone metrics (SCI-02, D-016)
 
-`Engine.compute_metrics` refuses every `requires_identity` metric for a
-session tracked without identification, and `docs/METRICS_SPEC.md` §4.5
-carries the full classification. One inconsistency is knowingly left
-open: all nine Z-* metrics declare `requires_identity = False` and so
-still run on such a session, yet every one emits an `individual_id`
-column and indexes by animal slot `k`.
-
-| Z-4, Z-6, Z-7 | Transitions, latency to first entry, transition matrix / sequence entropy | Genuinely need the animal to be the same throughout; no valid reading on an identity-free session. |
-| Z-1, Z-2, Z-3, Z-5, Z-8, Z-9 | Occupancy-style | Correct once summed over individuals, meaningless per row. |
-
-The fix is not to flip the flags -- that would make *all* zone analysis
-unavailable for an identity-free session, which is worse than the status
-quo. It is to emit pooled rows instead of per-individual rows in that
-case, changing the output shape of six metrics. Same family of problem as
-GL-14 and GL-17 above: identity is assumed by the output schema, not just
-by the arithmetic.
+Z-1, Z-2 and Z-8 (pure occupancy) are emitted pooled, without
+`individual_id`, on identity-free sessions. Z-3, Z-4, Z-5, Z-6, Z-7 and
+Z-9 follow a slot across frames, so they now declare
+`requires_identity = True` and are skipped. Classification in
+`docs/METRICS_SPEC.md` section 4.5.
 
 ---
 
----
+## Open after the critical-issues audit
+
+Tracked in [`docs/CRITICAL_ISSUES.md`](../CRITICAL_ISSUES.md):
+
+- **Per-animal metadata** (SCI-03): needs a composite `(session_id, individual_id)` join, which reverses D-010.
+- **Timepoint binning**: `MetricSelection.timepoint_minutes` is stored but never used by the engine.
+- **Parallel benchmark**: measure `n_workers > 1` on real, long sessions (D-020).
+- **Probe pool**: session probes still share the single-thread `TaskRunner` pool with pipeline runs (D-018).
+- **Signed binaries**: infrastructure exists; needs certificates and a published release (`docs/CODE_SIGNING.md`).
 
 ## Repository visibility
 
-Private until v1.0 release. Switch to public after M5 tag is cut.
+The repository is public (see M5).
 
 ---
 
----
+## See also
+
+- [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — dev setup, TDD workflow, branch policy
+- [`docs/TECHNICAL_SPEC.md`](../TECHNICAL_SPEC.md) — system architecture, testing strategy
+- [`docs/ENGINE_DESIGN.md`](../ENGINE_DESIGN.md) — engine internals and module layout
+- [`docs/METRICS_SPEC.md`](../METRICS_SPEC.md) — 45 behavioural metrics with formulas and citations
+- [`docs/dev/UI_DESIGN.md`](UI_DESIGN.md) — 14-screen PySide6 GUI specification

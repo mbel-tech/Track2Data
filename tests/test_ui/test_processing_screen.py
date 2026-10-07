@@ -252,3 +252,37 @@ def test_cancel_button_stops_an_in_flight_run(
 
     qtbot.waitUntil(lambda: screen._run_btn.isEnabled(), timeout=5000)
     assert screen._cancel_btn.isEnabled() is False
+
+
+def test_workers_spinbox_is_passed_to_engine_run(
+    qtbot, tmp_path: Path, tiny_real_session: Path
+) -> None:
+    from ui.processing_screen import ProcessingScreen
+
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._workers.value() == 1  # sequential by default
+
+    submitted = []
+    store.tasks.submit_with_progress = lambda fn, **kw: submitted.append(fn) or "t1"  # type: ignore[method-assign]
+    screen._workers.setMaximum(4)
+    screen._workers.setValue(3)
+    screen.start_run()
+    assert submitted[0].keywords["n_workers"] == 3
+
+
+def test_parallel_run_bar_follows_session_events_only(qtbot) -> None:
+    from track2data.core.progress import ProgressEvent
+    from ui.processing_screen import ProcessingScreen
+
+    screen = ProcessingScreen()
+    qtbot.addWidget(screen)
+    screen._current_task_id = "t"
+    screen._parallel_run = True
+    screen._progress.setValue(0)
+
+    screen._on_task_progress("t", 75)  # a per-session stage percent: ignored
+    assert screen._progress.value() == 0
+    screen._on_task_event("t", ProgressEvent(stage="session", current=1, total=4))
+    assert screen._progress.value() == 25

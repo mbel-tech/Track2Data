@@ -118,6 +118,11 @@ class TestApplyBodylengthCalibrationPixelMode:
         out = apply_bodylength_calibration(psess_with_bl, cfg)
         assert out.body_length_cm is not None
 
+    def test_body_length_px_set_in_pixels(self, psess_with_bl: PreprocessedSession) -> None:
+        cfg = CalibrationConfig(mode="bodylength", bl_min_samples=10)
+        out = apply_bodylength_calibration(psess_with_bl, cfg)
+        np.testing.assert_allclose(out.body_length_px, psess_with_bl.session.body_length_px)
+
     def test_body_length_cm_length_matches_n_animals(
         self, psess_with_bl: PreprocessedSession
     ) -> None:

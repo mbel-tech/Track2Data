@@ -570,7 +570,13 @@ class PreprocessedSession:
     xy: np.ndarray                            # (n_frames, n_animals, 2) preprocessed
     kinematics: KinematicsArrays
     px_per_cm: float | None = None            # set by calibration.scalar
-    body_length_cm: np.ndarray | None = None  # (n_animals,) — set by calibration.bodylength
+    # (n_animals,) — set by calibration.bodylength. Historic misnomer: in
+    # bodylength mode this holds pixel values (see calibration/bodylength.py).
+    body_length_cm: np.ndarray | None = None
+    # (n_animals,) body length in pixels — set by calibration.bodylength.
+    # Body-length-normalised metrics divide pixel quantities by this, so they
+    # do not depend on px_per_cm.
+    body_length_px: np.ndarray | None = None
     # Zone assignments: object arrays of zone-name strings; None if zones not configured.
     main_zone: np.ndarray | None = None       # (n_frames, n_animals)
     sec_zone: np.ndarray | None = None        # (n_frames, n_animals)
@@ -592,6 +598,19 @@ class PreprocessedSession:
     @property
     def n_frames(self) -> int:
         return int(self.xy.shape[0])
+
+    def body_length_in_px(self) -> np.ndarray | None:
+        """Per-animal body length in pixels, or None when unavailable.
+
+        Prefers ``body_length_px`` (set by body-length calibration). Falls back
+        to ``body_length_cm * px_per_cm`` when both are known in physical
+        units, so ``*_bl`` metrics never depend on ``px_per_cm`` alone.
+        """
+        if self.body_length_px is not None:
+            return self.body_length_px
+        if self.body_length_cm is not None and self.px_per_cm is not None:
+            return self.body_length_cm * self.px_per_cm
+        return None
 
     @property
     def n_animals(self) -> int:
