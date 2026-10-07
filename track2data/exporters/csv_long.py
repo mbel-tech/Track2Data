@@ -17,10 +17,43 @@ _CSV_KWARGS: dict[str, object] = {
 }
 
 
-def _write_csv(df: pd.DataFrame, path: Path) -> Path:
-    """Write *df* to *path* as UTF-8 CSV with LF line endings."""
-    df.to_csv(path, **_CSV_KWARGS)  # type: ignore[arg-type]
+#: Rows per write for the per-frame table. A 1 h, 60 fps, 10-animal session is
+#: 2.16 M rows; chunking keeps pandas' text buffer to a slice of that instead
+#: of materialising the whole CSV in memory first. Output is byte-identical.
+_CHUNK_ROWS = 200_000
+
+
+def _write_csv(df: pd.DataFrame, path: Path, chunksize: int | None = None) -> Path:
+    """Write *df* to *path* as UTF-8 CSV with LF line endings.
+
+    With *chunksize*, rows are written in slices (header once) so peak memory
+    stays bounded for very long tables.
+    """
+    if chunksize is None or len(df) <= chunksize:
+        df.to_csv(path, **_CSV_KWARGS)  # type: ignore[arg-type]
+        return path
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        for start in range(0, len(df), chunksize):
+            df.iloc[start : start + chunksize].to_csv(
+                fh,
+                header=start == 0,
+                index=False,
+                lineterminator="\n",
+            )
     return path
+
+
+def _sorted_by(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+    """*df* ordered by *keys*, without copying when it already is.
+
+    ``Engine.build_fish_by_frame`` returns the table pre-sorted, so the common
+    case needs neither a copy nor a re-sort of millions of rows.
+    """
+    if not keys or df.empty:
+        return df
+    if df.set_index(keys).index.is_monotonic_increasing:
+        return df
+    return df.sort_values(keys)
 
 
 _KEY_COLS = ("session_id", "individual_id")
@@ -99,11 +132,12 @@ class CsvLongExporter(Exporter):
         written: list[Path] = []
 
         # ── master per-frame CSV ───────────────────────────────────────────────
-        fish_df = p.fish_by_frame.copy()
+        fish_df = p.fish_by_frame
         sort_keys = [k for k in ("session_id", "individual_id", "frame") if k in fish_df.columns]
-        if sort_keys:
-            fish_df = fish_df.sort_values(sort_keys).reset_index(drop=True)
-        written.append(_write_csv(fish_df, out_dir / "master_fish_by_frame.csv"))
+        fish_df = _sorted_by(fish_df, sort_keys)
+        written.append(
+            _write_csv(fish_df, out_dir / "master_fish_by_frame.csv", chunksize=_CHUNK_ROWS)
+        )
 
         # ── individual metrics summary ─────────────────────────────────────────
         indiv_summary = _merge_metric_dfs(p.individual_metrics)

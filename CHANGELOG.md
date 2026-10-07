@@ -155,6 +155,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`master_fish_by_frame.csv` is written in chunks** without the extra
+  `copy()` and unconditional re-sort, halving traced peak memory on a
+  2.16 M-row table (133 MB to 67 MB; output byte-identical, same speed).
+  The Excel exporter continues the per-frame table on "Fish by Frame 2", ...
+  instead of failing past Excel's 1,048,576-row sheet limit.
+
 - **Second reference-audit pass: primary citations corrected on 11
   metrics, supporting references added to ~20 more.** An external
   audit resolved every DOI in the repo against Crossref and found none

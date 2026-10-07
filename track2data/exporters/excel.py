@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -33,6 +34,31 @@ def _merge_zone_dfs(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
     if not dfs:
         return pd.DataFrame()
     return pd.concat(dfs, ignore_index=True)
+
+logger = logging.getLogger(__name__)
+
+
+#: One header row leaves this many data rows per worksheet (Excel's hard limit
+#: is 1,048,576 rows); openpyxl refuses to write past it.
+EXCEL_MAX_DATA_ROWS = 1_048_575
+
+
+def _write_fish_by_frame(writer: pd.ExcelWriter, df: pd.DataFrame) -> None:
+    """Write the per-frame table, continuing on "Fish by Frame 2", ... when it
+    exceeds a worksheet. A 1 h, 60 fps, 10-animal session is 2.16 M rows; the
+    full table is always available in the CSV/Feather exports."""
+    limit = EXCEL_MAX_DATA_ROWS
+    n_sheets = max(1, -(-len(df) // limit))
+    if n_sheets > 1:
+        logger.warning(
+            "Fish-by-frame table has %d rows, over Excel's per-sheet limit; "
+            "splitting across %d sheets.",
+            len(df),
+            n_sheets,
+        )
+    for i in range(n_sheets):
+        name = "Fish by Frame" if i == 0 else f"Fish by Frame {i + 1}"
+        df.iloc[i * limit : (i + 1) * limit].to_excel(writer, sheet_name=name, index=False)
 
 
 class ExcelExporter(Exporter):
@@ -77,7 +103,7 @@ class ExcelExporter(Exporter):
         quality_df = _merge_zone_dfs(p.diagnostic_metrics)
 
         with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
-            p.fish_by_frame.to_excel(writer, sheet_name="Fish by Frame", index=False)
+            _write_fish_by_frame(writer, p.fish_by_frame)
             activity_df.to_excel(writer, sheet_name="Activity Summary", index=False)
             group_df.to_excel(writer, sheet_name="Group Dynamics", index=False)
             zone_df.to_excel(writer, sheet_name="Zone Occupancy", index=False)
