@@ -97,7 +97,7 @@ def test_table_shows_dash_placeholders_before_facts_are_cached(qtbot, tmp_path: 
     row = [screen._table.item(0, c).text() for c in range(screen._table.columnCount())]
     # Trailing "" is the Identity-free checkbox cell, which carries a
     # check state rather than text.
-    assert row == ["session_a", "—", "—", "—", "—", "—", ""]
+    assert row == ["session_a", "—", "—", "—", "—", "—", "", "—"]
 
 
 def test_table_shows_session_facts_once_cached(qtbot, tmp_path: Path) -> None:
@@ -128,7 +128,7 @@ def test_table_shows_session_facts_once_cached(qtbot, tmp_path: Path) -> None:
     qtbot.addWidget(screen)
 
     row = [screen._table.item(0, c).text() for c in range(screen._table.columnCount())]
-    assert row == ["session_a", "idtrackerai", "30.0", "1000", "4", "Stable", ""]
+    assert row == ["session_a", "idtrackerai", "30.0", "1000", "4", "Stable", "", "Not found"]
 
 
 def test_table_refreshes_when_facts_arrive_after_construction(qtbot, tmp_path: Path) -> None:
@@ -537,3 +537,108 @@ def test_a_later_probe_result_does_not_undo_the_override(
 
     assert store.manifest.sessions[0].identity_free_override is True
     assert _free_cell(screen).checkState() == Qt.CheckState.Checked
+
+
+# ── Locate video ─────────────────────────────────────────────────────────────
+
+
+class _FakeOpenFile:
+    """Stands in for QFileDialog's static getOpenFileName."""
+
+    def __init__(self, chosen: Path | None) -> None:
+        self._chosen = chosen
+
+    def getOpenFileName(self, *_a, **_k):  # noqa: N802 -- mirrors Qt's QFileDialog API
+        return (str(self._chosen) if self._chosen else "", "")
+
+
+def _video_cell(screen) -> tuple[str, str]:
+    from ui.import_screen import _COL_VIDEO
+
+    item = screen._table.item(0, _COL_VIDEO)
+    return item.text(), item.toolTip()
+
+
+def test_video_column_reports_missing_found_and_located(qtbot, tmp_path: Path) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+
+    _cache_facts(store, "s1", video_path=None)
+    store.sessionFactsChanged.emit()
+    text, tip = _video_cell(screen)
+    assert text == "Not found" and "Locate Video" in tip
+
+    video = tmp_path / "real.mp4"
+    video.write_bytes(b"x")
+    _cache_facts(store, "s1", video_path=video)
+    store.sessionFactsChanged.emit()
+    assert _video_cell(screen) == ("Found", str(video))
+
+
+def test_locate_button_needs_exactly_one_selected_session(qtbot, tmp_path: Path) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    _add_ref(store, "s2", tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+
+    assert not screen._locate_btn.isEnabled()
+    screen._table.selectRow(0)
+    assert screen._locate_btn.isEnabled()
+    screen._table.selectAll()
+    assert not screen._locate_btn.isEnabled()
+
+
+def test_locate_video_stores_the_choice_and_updates_the_row(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    from ui.import_screen import ImportScreen
+
+    video = tmp_path / "real.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr("ui.import_screen.QFileDialog", _FakeOpenFile(video))
+
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    _cache_facts(store, "s1", video_path=None)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._table.selectRow(0)
+
+    screen._locate_video()
+
+    assert store.manifest.video_overrides == {"s1": video}
+    assert _video_cell(screen) == ("Located", str(video))
+
+
+def test_locate_video_cancelled_changes_nothing(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from ui.import_screen import ImportScreen
+
+    monkeypatch.setattr("ui.import_screen.QFileDialog", _FakeOpenFile(None))
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._table.selectRow(0)
+
+    screen._locate_video()
+
+    assert store.manifest.video_overrides == {}
+
+
+def test_store_rejects_a_missing_file_or_unknown_session(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    with pytest.raises(FileNotFoundError):
+        store.set_video_path("s1", tmp_path / "nope.mp4")
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    with pytest.raises(KeyError):
+        store.set_video_path("ghost", video)
+    assert store.manifest.video_overrides == {}

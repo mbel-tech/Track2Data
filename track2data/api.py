@@ -1427,6 +1427,7 @@ class Engine:
         reported as failed because a bookkeeping file could not be written.
         """
         from track2data.core.session_consistency import (
+            calibration_spread_warnings,
             heterogeneity_warnings,
             sessions_table,
         )
@@ -1437,7 +1438,10 @@ class Engine:
 
         summaries = [r.summary for r in results if r.summary is not None]
         errors = {r.session_id: r.error for r in results if r.error}
-        warnings = heterogeneity_warnings(summaries)
+        warnings = [
+            *heterogeneity_warnings(summaries),
+            *calibration_spread_warnings(summaries),
+        ]
         advisories = reader_advisories(summaries)
 
         for warning in warnings:
@@ -1828,11 +1832,18 @@ class Engine:
         sessions, but they are the same kind of fact: true of the project,
         invisible in the numbers, and worth knowing before pooling them.
         """
-        from track2data.core.session_consistency import heterogeneity_warnings
+        from track2data.core.session_consistency import (
+            calibration_spread_warnings,
+            heterogeneity_warnings,
+        )
         from track2data.readers.advisories import reader_advisories
 
         summaries = self._session_summaries()
-        return [*heterogeneity_warnings(summaries), *reader_advisories(summaries)]
+        return [
+            *heterogeneity_warnings(summaries),
+            *calibration_spread_warnings(summaries),
+            *reader_advisories(summaries),
+        ]
 
     def _session_summaries(self) -> list[SessionSummary]:
         """Read every session in the manifest and summarise it.

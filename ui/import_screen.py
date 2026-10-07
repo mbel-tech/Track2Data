@@ -4,10 +4,12 @@ Stage 2 — Session import screen (M3 real widgets).
 Widgets:
   • session_table  QTableWidget, one row per imported session
                     (session_id | reader | fps | frames | animals |
-                    identity | identity-free), ExtendedSelection so
+                    identity | identity-free | video), ExtendedSelection so
                     multiple rows can be removed at once
   • add_btn        QPushButton → multi-select folder dialog
   • remove_btn     QPushButton → remove every selected row
+  • locate_btn     QPushButton → pick the video file for the selected session
+                    (stored as ProjectManifest.video_overrides)
   • status_label   QLabel  "{n} sessions imported"
 
 Also accepts folders dropped directly onto the screen (setAcceptDrops)
@@ -51,6 +53,7 @@ from PySide6.QtWidgets import (
 
 _COLUMN_HEADERS = [
     "Session ID", "Reader", "FPS", "Frames", "Animals", "Identity", "Identity-free",
+    "Video",
 ]
 (
     _COL_SESSION_ID,
@@ -60,7 +63,9 @@ _COLUMN_HEADERS = [
     _COL_ANIMALS,
     _COL_IDENTITY,
     _COL_IDENTITY_FREE,
-) = range(7)
+    _COL_VIDEO,
+) = range(8)
+_VIDEO_FILTER = "Video files (*.mp4 *.avi *.mov *.mkv *.m4v *.mpg *.mpeg *.wmv);;All files (*)"
 _ROLE_SESSION_ID = Qt.ItemDataRole.UserRole
 _PLACEHOLDER = "—"
 
@@ -140,10 +145,19 @@ class ImportScreen(QWidget):
         add_btn.clicked.connect(self._add_folders)
         remove_btn = QPushButton("Remove Selected")
         remove_btn.clicked.connect(self._remove_selected)
+        self._locate_btn = QPushButton("Locate Video…")
+        self._locate_btn.setToolTip(
+            "Point the selected session at its video file. idtracker.ai records the path "
+            "the video had on the machine it was tracked on, which is often not valid here."
+        )
+        self._locate_btn.clicked.connect(self._locate_video)
+        self._table.itemSelectionChanged.connect(self._update_locate_enabled)
         btn_row.addWidget(add_btn)
         btn_row.addWidget(remove_btn)
+        btn_row.addWidget(self._locate_btn)
         btn_row.addStretch()
         root.addLayout(btn_row)
+        self._update_locate_enabled()
 
         # ── status ─────────────────────────────────────────────────────
         self._status_label = QLabel("0 sessions imported")
@@ -241,6 +255,56 @@ class ImportScreen(QWidget):
                 if s.session_id not in ids_to_remove
             ]
             self._store.update_sessions(sessions)
+
+    def _selected_session_id(self) -> str | None:
+        """The session id of the single selected row, else None."""
+        rows = {index.row() for index in self._table.selectionModel().selectedIndexes()}
+        if len(rows) != 1:
+            return None
+        item = self._table.item(next(iter(rows)), _COL_SESSION_ID)
+        return None if item is None else item.data(_ROLE_SESSION_ID)
+
+    def _update_locate_enabled(self) -> None:
+        self._locate_btn.setEnabled(
+            self._store is not None and self._selected_session_id() is not None
+        )
+
+    def _locate_video(self) -> None:
+        session_id = self._selected_session_id()
+        if self._store is None or session_id is None:
+            return
+        ref = next(
+            (s for s in self._store.manifest.sessions if s.session_id == session_id), None
+        )
+        start = str(ref.folder) if ref is not None else ""
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, f"Locate video for {session_id}", start, _VIDEO_FILTER
+        )
+        if not chosen:
+            return
+        try:
+            self._store.set_video_path(session_id, Path(chosen))
+        except (OSError, KeyError) as exc:
+            QMessageBox.warning(self, "Locate video", str(exc))
+
+    def _video_cell(self, ref, facts) -> tuple[str, str]:
+        """(text, tooltip) for the Video column."""
+        override = (
+            self._store.manifest.video_overrides.get(ref.session_id)
+            if self._store is not None and self._store.manifest is not None
+            else None
+        )
+        if override is not None and Path(override).exists():
+            return "Located", str(override)
+        if facts is None:
+            return _PLACEHOLDER, "Reading the session folder…"
+        if facts.video_path is not None:
+            return "Found", str(facts.video_path)
+        return (
+            "Not found",
+            "The video path idtracker.ai recorded does not exist on this machine. "
+            "Select the session and use Locate Video… to point at the file.",
+        )
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         """Write an Identity-free toggle back to the store.
@@ -346,5 +410,9 @@ class ImportScreen(QWidget):
             free_item.setFlags(flags)
             free_item.setToolTip(self._identity_free_tooltip(ref, facts))
             self._table.setItem(row, _COL_IDENTITY_FREE, free_item)
+            text, tip = self._video_cell(ref, facts)
+            video_item = QTableWidgetItem(text)
+            video_item.setToolTip(tip)
+            self._table.setItem(row, _COL_VIDEO, video_item)
         n = len(sessions)
         self._status_label.setText(f"{n} session{'s' if n != 1 else ''} imported")

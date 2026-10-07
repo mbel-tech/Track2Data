@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
+  `session_*` folders to settle what the synthetic tests cannot: how far the
+  blob-derived body length sits from the session-wide value (issue #72), how
+  fully fragment `identity`/`certainty` are populated and how D-14 moves with
+  its certainty cut, and whether `identity_corrected_solving_jumps` exists and
+  fires in real blob pickles (D-15). Writes a per-session CSV and a Markdown
+  summary; the blob part needs `--allow-pickle`.
+- **Calibration-click spread in session mode.** The Validator's
+  length-calibration clicks behind `length_unit` now yield a relative SD that
+  session mode records (`PreprocessedSession.px_per_cm_rel_sd`), writes to
+  `sessions.csv` (`length_calibration_n`, `length_calibration_rel_sd`, appended
+  after the existing columns) and warns about above 5%, in pre-flight and in
+  the run log, even for a one-session project. `None` means "no estimate"
+  (fewer than two clicks), never zero error.
+- **Locate Video… on the Sessions screen.** A Video column shows Found / Not
+  found / Located, and a button points the selected session at its video file
+  when the path idtracker.ai recorded does not exist on this machine. The
+  choice is stored in the project (`ProjectManifest.video_overrides`) and
+  applied on every import.
 - **Batch-comparability warnings.** `Engine.consistency_warnings()` now also
   flags sessions whose idtracker.ai segmentation parameters differ (body
   length and area are defined by them) or whose `resolution_reduction` /
