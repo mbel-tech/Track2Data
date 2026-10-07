@@ -26,10 +26,9 @@ about *how*, not *what*: it reports a speed, but re-matches detections
 between each frame pair by nearest neighbour instead of trusting the row
 index, so it stays identity-free.
 
-Known gap, deliberately not encoded here: every Z-* metric emits an
-``individual_id`` column yet declares ``requires_identity = False``. See
-the module docstring of track2data/metrics/zone.py for why they are left
-ungated and what fixing them properly requires.
+Zone metrics: the sequence-based ones (Z-3..Z-7, Z-9) require identity;
+the occupancy ones (Z-1, Z-2, Z-8) are pooled on identity-free sessions
+(see metrics/zone.py).
 """
 
 from __future__ import annotations
@@ -52,6 +51,9 @@ IDENTITY_REQUIRING = {
     # Always computed regardless (diagnostics bypass the gate), but the
     # flag is what it claims to be.
     "D-3",
+    # Sequence-based zone metrics: follow one slot across frames
+    # (SCI-02, D-016). Z-1/Z-2/Z-8 are pure occupancy and are pooled instead.
+    "Z-3", "Z-4", "Z-5", "Z-6", "Z-7", "Z-9",
 }
 
 

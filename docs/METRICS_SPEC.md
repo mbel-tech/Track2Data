@@ -799,15 +799,15 @@ three together.
 | GL-11 Order-State Classification | ❌ | Thresholds GL-3 against GL-8; inherits both |
 | GL-13 Topological k-NN Counts | ✅ | Per-frame k-nearest-neighbour counts |
 | GL-15 Group Elongation / Anisotropy | ✅ | Per-frame covariance of the point set |
-| Z-1 Time in zone | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-2 Area-Corrected Occupancy | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-3 Zone visit count | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-4 Zone Transitions | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-5 Zone Entry/Exit Events | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-6 Latency to First Entry | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-7 Zone Transition Matrix & Sequence Entropy | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-8 Zone Preference Index (Jacobs' D) | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
-| Z-9 Zone Dwell-Time Distribution | ✅ | **Known gap** — emits per-`individual_id` rows; see below |
+| Z-1 Time in zone | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
+| Z-2 Area-Corrected Occupancy | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
+| Z-3 Zone visit count | ❌ | Follows one slot across frames (visits / events / sequences) \|
+| Z-4 Zone Transitions | ❌ | Follows one slot across frames (visits / events / sequences) \|
+| Z-5 Zone Entry/Exit Events | ❌ | Follows one slot across frames (visits / events / sequences) \|
+| Z-6 Latency to First Entry | ❌ | Follows one slot across frames (visits / events / sequences) \|
+| Z-7 Zone Transition Matrix & Sequence Entropy | ❌ | Follows one slot across frames (visits / events / sequences) \|
+| Z-8 Zone Preference Index (Jacobs' D) | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
+| Z-9 Zone Dwell-Time Distribution | ❌ | Follows one slot across frames (visits / events / sequences) \|
 | D-1 Tracking Coverage | ✅ | Per-slot non-NaN fraction |
 | D-2 Tracking Accuracy | ✅ | Per-frame / session-level only |
 | D-3 ID-Probability Distribution | ❌ | Reports idtracker.ai's per-identity id_probabilities |
@@ -819,19 +819,15 @@ three together.
 | D-9 Identity Swap Opportunity Count | ✅ | Reads fragment boundaries, not trajectories |
 | D-10 Physical-Plausibility Violation Rate | ✅ | Assumes a fixed row index *by design* — it measures how badly that assumption fails, so it must keep running on identity-free sessions |
 
-**Known gap — zone metrics.** All nine Z-* metrics are listed ✅ above and
-are therefore still computed for an identity-free session, yet every one
-emits an `individual_id` column and indexes by animal slot `k`. The
-occupancy-style ones (Z-1, Z-2, Z-3, Z-5, Z-8, Z-9) remain correct once
-summed over individuals; Z-4 (transitions), Z-6 (latency to first entry)
-and Z-7 (transition matrix / sequence entropy) need the animal to be the
-same throughout and have no such reading. They are left ungated
-deliberately, not by oversight: correcting them means emitting pooled rows
-instead of per-individual rows on identity-free sessions, which changes
-the output shape of six metrics. Do not "fix" this by flipping the flags
-alone — that would simply make all zone analysis unavailable for such a
-session. See `track2data/metrics/zone.py`'s module docstring and
-`docs/ROADMAP.md`.
+**Zone metrics (SCI-02, D-016).** Z-1, Z-2 and Z-8 are pure occupancy:
+on an identity-free session the engine computes them on a pooled view in
+which every detection slot is stacked into one long track and emits one
+row per zone **without an `individual_id` column** (Z-1 `time_s` is
+animal-seconds summed over slots; `time_pct` is the mean occupancy).
+Z-3 (visits), Z-4 (transitions), Z-5 (entry/exit events), Z-6 (latency),
+Z-7 (transition matrix / entropy) and Z-9 (dwell times) follow a slot
+across frames, so a slot swap fabricates or splits their events; they
+require identity and are skipped, like the IL-* metrics.
 
 ### 4.6 Tracking-quality diagnostics
 

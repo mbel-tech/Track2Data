@@ -7,7 +7,7 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 | ID | Area | Sev | Status at 0b9b860 | Notes |
 |---|---|:-:|---|---|
 | SCI-01 | Science | P0 | **Open** (audit wrongly said fixed) | `calibration/bodylength.py` stores px in `body_length_cm` and leaves `px_per_cm=None`; `*_bl` outputs sit under `if px_per_cm is not None` (`metrics/individual.py`, `metrics/group.py`) so they are always NaN. Tests build sessions with both values, which no real path produces. |
-| SCI-02 | Science | P1 | Open, documented gap | All nine Z-* metrics emit per-slot rows on identity-free sessions (`metrics/zone.py`, `docs/ROADMAP.md` "Deferred: identity-free zone metrics"). |
+| SCI-02 | Science | P1 | **Fixed** (D-016) | All nine Z-* metrics emit per-slot rows on identity-free sessions (`metrics/zone.py`, `docs/ROADMAP.md` "Deferred: identity-free zone metrics"). |
 | SCI-03 | Science | P2 | Open, by design (D-010) | Metadata join is session-level only. |
 | PERF-01 | Engine | P1 | Open, deferred (D-013/D-014) | `Engine.run` forces `n_workers=1`; `core/parallel.py` unused. |
 | PERF-02 | Engine | P1 | Open, deferred (D-013) | `CacheStore` stores flat DataFrames; `PreprocessedSession` needs a serialisation design. |

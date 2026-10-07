@@ -345,3 +345,23 @@ a combination no calibration path produces, and hid the defect.
 **Alternative considered:** Rename `body_length_cm` to pixels outright.
 Rejected for now — it touches exporters and the public `Session` contract;
 revisit in a separate change.
+
+---
+
+### D-016 · Zone metrics on identity-free sessions: pool occupancy, gate sequences
+
+**Decision:** Z-1, Z-2 and Z-8 set `pools_when_identity_free`; for an
+identity-free session `Engine.compute_metrics` runs them on
+`metrics.zone.pooled_view()` (all slots stacked into one track) and drops
+`individual_id`. Z-3, Z-4, Z-5, Z-6, Z-7 and Z-9 become
+`requires_identity = True` and are skipped by the existing gate.
+
+**Rationale:** On such a session the row index is a detection slot, so
+anything built from visits, events or sequences per slot is an artefact
+of slot swaps. ROADMAP had planned to pool Z-3, Z-5 and Z-9 too, but
+visit counts, events and dwell times are sequence-based, not occupancy,
+so pooling them would still publish artefacts. Pure occupancy is exact
+under pooling.
+
+**Alternative considered:** Pool every zone metric (the earlier ROADMAP
+plan). Rejected for the reason above.

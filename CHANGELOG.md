@@ -279,6 +279,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Zone metrics no longer fabricate per-animal results on identity-free
+  sessions.** Z-3, Z-4, Z-5, Z-6, Z-7 and Z-9 follow an animal across
+  frames, so they now require identity and are skipped; Z-1, Z-2 and Z-8
+  (pure occupancy) are emitted pooled, with no `individual_id` column.
+
 - **Body-length-normalised metrics (`path_length_bl`, `mean_speed_bl_s`,
   `mean_nnd_bl`) were always NaN** under the recommended Body Length
   calibration, because they were computed only when `px_per_cm` was set

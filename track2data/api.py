@@ -440,7 +440,13 @@ class Engine:
                     continue
                 try:
                     cfg = self._effective_cfg(cls, psess)
-                    results[mid] = cls().compute(psess, cfg)
+                    if is_identity_free and cls.pools_when_identity_free:
+                        from track2data.metrics.zone import pooled_view
+
+                        df = cls().compute(pooled_view(psess), cfg)
+                        results[mid] = df.drop(columns=["individual_id"], errors="ignore")
+                    else:
+                        results[mid] = cls().compute(psess, cfg)
                 except Exception:
                     logger.exception("Metric %s failed; skipping.", mid)
 

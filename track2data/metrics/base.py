@@ -124,6 +124,9 @@ class Metric(ABC):
     level: Literal["individual", "group", "zone", "diagnostic"]
     priority: Literal["primary", "optional", "advanced", "diagnostic"]
     requires_identity: bool
+    # Zone metrics that stay meaningful on an identity-free session when
+    # computed on a pooled view of all slots (see metrics/zone.py).
+    pools_when_identity_free: ClassVar[bool] = False
     output_columns: list[str]
     documentation: MetricDocumentation
     # Most metrics (24 of 44 today) take no configuration at all --
