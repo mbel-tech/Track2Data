@@ -103,8 +103,10 @@ class _EngineTask(QRunnable):
 #: Task lanes. "run": pipeline runs, exports, previews -- serialised so two
 #: triggers can't race on one output directory. "probe": cheap session reads
 #: made when a folder is added, kept off the run lane so they are never queued
-#: behind a long run, and silent on the generic task signals (see below).
-LANES = ("run", "probe")
+#: behind a long run, and silent on the generic task signals (see below). "scan":
+#: looking at a folder before adding it, which can take seconds on a large tree; it
+#: reports progress, can be cancelled, and likewise never touches the generic signals.
+LANES = ("run", "probe", "scan")
 
 
 class TaskRunner(QObject):
@@ -117,7 +119,8 @@ class TaskRunner(QObject):
     Cancelled, which the main window uses to drive its Cancel button and
     failure dialog. Probe-lane tasks report only on probeFinished/
     probeFailed/probeCancelled, so a session probe can neither flash Cancel
-    nor pop a "pipeline run failed" dialog.
+    nor pop a "pipeline run failed" dialog. Scan-lane tasks report only on
+    scanProgress/scanFinished/scanFailed/scanCancelled, for the same reason.
     """
 
     taskStarted = Signal(str)
@@ -130,6 +133,10 @@ class TaskRunner(QObject):
     probeFinished = Signal(str, object)
     probeFailed = Signal(str, str, str)
     probeCancelled = Signal(str)
+    scanProgress = Signal(str, object)   # task_id, ProgressEvent
+    scanFinished = Signal(str, object)
+    scanFailed = Signal(str, str, str)
+    scanCancelled = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -158,7 +165,7 @@ class TaskRunner(QObject):
         return self._submit(fn, progress_enabled=False, lane=lane)
 
     def submit_with_progress(
-        self, fn: Callable[..., Any], *, cancel_check: bool = False
+        self, fn: Callable[..., Any], *, cancel_check: bool = False, lane: str = "run"
     ) -> str:
         """Submit a callable that accepts progress=<ProgressCallback>,
         e.g. a functools.partial(engine.run, out_dir, exporters=...).
@@ -166,7 +173,9 @@ class TaskRunner(QObject):
         ``cancel_check=<Callable[[], None]>`` (as ``Engine.run`` does).
         Explicit rather than magic-detected: mixing the call shapes
         silently would be a subtle bug, not a convenience."""
-        return self._submit(fn, progress_enabled=True, cancel_check_enabled=cancel_check)
+        return self._submit(
+            fn, progress_enabled=True, cancel_check_enabled=cancel_check, lane=lane
+        )
 
     def _submit(
         self,
@@ -188,6 +197,11 @@ class TaskRunner(QObject):
             signals.finished.connect(self.probeFinished)
             signals.failed.connect(self.probeFailed)
             signals.cancelled.connect(self.probeCancelled)
+        elif lane == "scan":
+            signals.event.connect(self.scanProgress)
+            signals.finished.connect(self.scanFinished)
+            signals.failed.connect(self.scanFailed)
+            signals.cancelled.connect(self.scanCancelled)
         else:
             signals.started.connect(self.taskStarted)
             signals.event.connect(self.taskEvent)

@@ -541,3 +541,202 @@ def test_a_session_added_without_a_reader_is_still_detected(
         store.add_session(folder)
     qtbot.waitUntil(lambda: bool(seen), timeout=3000)
     assert seen[-1].get("reader") is None
+
+
+# ── scanning a folder before adding it ──────────────────────────────────────
+
+
+def _idtracker_root(tiny_real_session: Path, tmp_path: Path, names=("s1", "s2")) -> Path:
+    import shutil
+
+    root = tmp_path / "root"
+    for name in names:
+        shutil.copytree(tiny_real_session, root / name)
+    return root
+
+
+def test_scan_folders_reports_what_it_found_on_scan_finished(
+    qtbot, store, tiny_real_session: Path, tmp_path: Path
+) -> None:
+    root = _idtracker_root(tiny_real_session, tmp_path)
+    with qtbot.waitSignal(store.scanFinished, timeout=5000) as blocker:
+        task_id = store.scan_folders([root])
+    finished_id, result = blocker.args
+    assert finished_id == task_id
+    assert [g.best.reader for g in result.groups] == ["idtrackerai"]
+    assert len(result.groups[0].best.sessions) == 2
+
+
+def test_a_scan_reports_progress_on_its_own_signal(
+    qtbot, store, tiny_real_session: Path, tmp_path: Path
+) -> None:
+    root = _idtracker_root(tiny_real_session, tmp_path)
+    stages: list[str] = []
+    store.scanProgress.connect(lambda tid, event: stages.append(event.stage))
+    with qtbot.waitSignal(store.scanFinished, timeout=5000):
+        store.scan_folders([root])
+    assert set(stages) <= {"scan"}
+
+
+def test_a_scan_that_fails_says_so_quietly(qtbot, monkeypatch, store, tmp_path: Path) -> None:
+    from track2data.api import Engine
+
+    def broken(roots, **kwargs):
+        raise RuntimeError("the disk went away")
+
+    monkeypatch.setattr(Engine, "scan", staticmethod(broken))
+    generic: list[object] = []
+    store.taskFinished.connect(lambda tid, res: generic.append(res))
+
+    with qtbot.waitSignal(store.scanFinished, timeout=3000) as blocker:
+        store.scan_folders([tmp_path])
+    result = blocker.args[1]
+    assert isinstance(result, Exception) and "disk went away" in str(result)
+    assert hasattr(result, "traceback")
+    assert generic == []  # MainWindow shows its modal failure dialog on this signal
+
+
+def test_a_scan_can_be_cancelled_quickly(qtbot, monkeypatch, store, tmp_path: Path) -> None:
+    import threading
+    import time
+
+    from track2data.api import Engine
+
+    started = threading.Event()
+
+    def spinning(roots, *, progress=None, token=None, **kwargs):
+        started.set()
+        while True:
+            token.raise_if_cancelled()
+            time.sleep(0.01)
+
+    monkeypatch.setattr(Engine, "scan", staticmethod(spinning))
+    finished: list[object] = []
+    store.scanFinished.connect(lambda tid, res: finished.append(res))
+    task_id = store.scan_folders([tmp_path])
+    assert started.wait(2)
+    begin = time.monotonic()
+    with qtbot.waitSignal(store.scanCancelled, timeout=2000) as blocker:
+        store.cancel_scan(task_id)
+    assert blocker.args == [task_id]
+    assert time.monotonic() - begin < 1.0
+    assert finished == []  # a cancelled scan has no result
+
+
+def test_a_new_project_drops_a_scan_in_flight(qtbot, monkeypatch, store, tmp_path: Path) -> None:
+    import threading
+
+    from track2data.api import Engine
+
+    gate, started = threading.Event(), threading.Event()
+
+    def slow(roots, **kwargs):
+        started.set()
+        gate.wait(5)  # does not poll for cancellation, so it will "finish" after the switch
+        return "late result"
+
+    monkeypatch.setattr(Engine, "scan", staticmethod(slow))
+    finished: list[object] = []
+    store.scanFinished.connect(lambda tid, res: finished.append(res))
+    store.scan_folders([tmp_path])
+    assert started.wait(2)  # really running, not merely queued
+    store.new_project("other", tmp_path)
+    gate.set()
+    qtbot.wait(300)
+    assert finished == []
+
+
+def test_a_running_scan_does_not_hold_up_a_probe(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    import threading
+
+    from track2data.api import Engine
+
+    gate = threading.Event()
+    monkeypatch.setattr(Engine, "scan", staticmethod(lambda roots, **kw: gate.wait(5)))
+    monkeypatch.setattr("track2data.readers.probe_session", _fake_session)
+    store.scan_folders([tmp_path])
+
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    store.add_session(folder)
+    qtbot.waitUntil(lambda: store.session_facts("session_a") is not None, timeout=3000)
+    assert not gate.is_set()
+    gate.set()
+
+
+# ── adding what the user confirmed ──────────────────────────────────────────
+
+
+def _ref(tmp_path: Path, name: str, **fields) -> SessionRef:
+    folder = tmp_path / name
+    folder.mkdir(exist_ok=True)
+    return SessionRef(session_id=name, folder=folder, sha256="", **fields)
+
+
+def test_add_confirmed_adds_every_session_and_probes_each_with_its_saved_reader(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    seen: list[dict[str, object]] = []
+
+    def recording(folder: Path, **kwargs: object) -> Session:
+        seen.append({"folder": folder.name, **kwargs})
+        return _fake_session(folder)
+
+    monkeypatch.setattr("track2data.readers.probe_session", recording)
+    refs = [
+        _ref(tmp_path, "a", reader="toy", reader_options={"fps": 25.0}),
+        _ref(tmp_path, "b", reader="toy", reader_options={"fps": 25.0}),
+    ]
+    sizes: list[int] = []
+    store.sessionsChanged.connect(lambda: sizes.append(len(store.manifest.sessions)))
+    added = store.add_confirmed(refs)
+    assert sizes == [2]  # announced as soon as they are added, not when the probes finish
+    assert [r.session_id for r in added] == ["a", "b"]
+    assert [s.session_id for s in store.manifest.sessions] == ["a", "b"]
+    assert {s.reader for s in store.manifest.sessions} == {"toy"}
+
+    qtbot.waitUntil(lambda: len(seen) == 2, timeout=3000)
+    assert {(s["folder"], s["reader"]) for s in seen} == {("a", "toy"), ("b", "toy")}
+    assert all(s["options"] == {"fps": 25.0} for s in seen)
+
+
+def test_add_confirmed_does_not_add_the_same_folder_and_reader_twice(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("track2data.readers.probe_session", _fake_session)
+    store.add_confirmed([_ref(tmp_path, "a", reader="toy")])
+    again = store.add_confirmed([_ref(tmp_path, "a", reader="toy")])
+    assert again == []
+    assert len(store.manifest.sessions) == 1
+
+
+def test_the_same_folder_under_another_reader_is_another_session(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("track2data.readers.probe_session", _fake_session)
+    store.add_confirmed([_ref(tmp_path, "a", reader="toy")])
+    other = _ref(tmp_path, "a", reader="other").model_copy(update={"session_id": "a_other"})
+    assert [r.session_id for r in store.add_confirmed([other])] == ["a_other"]
+    assert len(store.manifest.sessions) == 2
+
+
+def test_an_id_that_clashes_is_made_unique_rather_than_replacing_a_session(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("track2data.readers.probe_session", _fake_session)
+    store.add_confirmed([_ref(tmp_path, "a", reader="toy")])
+    (tmp_path / "elsewhere").mkdir()
+    clash = SessionRef(session_id="a", folder=tmp_path / "elsewhere", sha256="", reader="toy")
+    (added,) = store.add_confirmed([clash])
+    assert added.session_id != "a"
+    assert [s.session_id for s in store.manifest.sessions] == ["a", added.session_id]
+
+
+def test_add_confirmed_without_a_project_does_nothing(qtbot, tmp_path: Path) -> None:
+    from ui.store.project_store import ProjectStore
+
+    empty = ProjectStore()
+    assert empty.add_confirmed([_ref(tmp_path, "a", reader="toy")]) == []
+    empty.tasks.shutdown(1000)
