@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Per-animal metadata.** A metadata CSV with one row per animal (map its
+  animal column to *Individual ID*) now gives each animal its own values, matched
+  by validator label or 0-based position. Further columns (weight, sex, ...) are
+  carried via *Also include these columns*. Values constant across a session also
+  reach group tables; per-animal values never do. Identity-free sessions get none,
+  unmatched animals and keys are reported on the Metadata screen and logged once.
+  Supersedes D-010. The Metadata screen also stopped resetting `join_keys` and
+  `join_regex` whenever a mapping was edited.
+
 - **Timepoint binning.** Setting *Time bins* on the Metrics screen
   (`MetricSelection.timepoint_minutes`, previously stored but ignored) computes
   each metric per bin of true video time and adds `bin_index`, `bin_start_s`,

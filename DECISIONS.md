@@ -159,7 +159,7 @@ display server.
 
 ## Phase 2 — Metadata + remaining metrics (M2)
 
-### D-010 · Metadata join excludes `individual_id` and `session_id`
+### D-010 · Metadata join excludes `individual_id` and `session_id` — SUPERSEDED by D-025
 
 **Decision:** `Engine._metadata_fields_for()` never merges a
 metadata-sourced `individual_id` or `session_id` value into
@@ -552,3 +552,34 @@ canonical metadata field (metadata/schema.py) and the two must coexist.
 from bin start; `timepoint_minutes` became a float so tests and short sessions
 can use sub-minute bins. Binning multiplies metric time by the number of bins
 only for the slicing overhead, not for the computation itself.
+
+---
+
+### D-025 · Per-animal metadata (supersedes D-010)
+
+**Decision:** When the mapping gives `individual_id`, the join becomes
+per-animal. `metadata/join.py` groups a session's rows by normalised animal key
+(`1`, `1.0` and `" 1 "` are the same animal); a repeated animal is a conflict
+(the first row is kept), several animals per session are not. Fields constant
+across the session's rows are session-level (`JoinResult.matched`, applied to
+every frame); everything else is per-animal (`matched_individuals`, applied only
+to frames with an `individual_id` column, NaN for an animal without a row).
+Keys are matched to animals per loaded session (`resolve_animal`): by the
+validator's identity label (case-insensitive) or, with no labels or with
+`MappingRule.individual_match="index"`, by 0-based position.
+`MappingRule.extra_columns` carries further columns by name; a metadata column
+never overwrites a column the frame already has, and names the engine writes
+itself are refused at mapping time. Identity-free sessions get no per-animal
+values (a row index there is a detection slot).
+
+**Rationale:** D-010 rejected this only because no call site needed it; the
+Metadata screen now does, and per-animal covariates (weight, sex) were the main
+thing users had to join by hand. The hazard D-010 named (an `individual_id` from
+metadata overwriting the real index) is avoided because the metadata key is
+never written to `individual_id`; it only selects which animal's values to use.
+
+**Trade-offs:** With default labels `1..N` and a CSV counting from 0, "label"
+mode matches the wrong animals silently, so the screen names the mode and the
+guide says when to use each. A column constant across a session is treated as
+session-level, so for an animal without a row it is still set from the session.
+Unmatched animals and keys are logged once per session, not per frame.

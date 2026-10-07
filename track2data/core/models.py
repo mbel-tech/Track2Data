@@ -359,6 +359,14 @@ class MappingRule(BaseModel):
     rules: dict[str, str] = {}   # canonical_field -> source_column
     join_keys: list[str] = ["session_id"]
     join_regex: str | None = None
+    # Further metadata columns to carry through under their own (lower-cased)
+    # names, e.g. weight or sex. Anything not listed is dropped, as before.
+    extra_columns: list[str] = []
+    # Only used when ``rules`` maps ``individual_id`` (one metadata row per
+    # animal): how a row's individual_id is matched to an animal. "label" uses
+    # the validator's identity labels, falling back to the 0-based position
+    # when a session has none; "index" always uses the 0-based position.
+    individual_match: Literal["label", "index"] = "label"
 
 
 class ExportTarget(BaseModel):

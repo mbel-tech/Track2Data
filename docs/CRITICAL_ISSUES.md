@@ -9,7 +9,7 @@ numbers below in `DECISIONS.md`.
 |---|---|:-:|---|---|---|
 | SCI-01 | Science | P0 | Audit said "fixed"; it was **not**. Body-length calibration stored pixels in `body_length_cm` and left `px_per_cm` unset, and every `*_bl` output sat under `if px_per_cm is not None`, so it was always NaN. Tests built sessions with both values, which no real path produces. | **Fixed** (D-015) | `*_bl = value_px / body_length_px`, independent of `px_per_cm` and of the calibration mode. New `PreprocessedSession.body_length_px`. |
 | SCI-02 | Science | P1 | All nine zone metrics emitted per-slot rows on identity-free sessions. | **Fixed** (D-016) | Z-1, Z-2, Z-8 (pure occupancy) are pooled without `individual_id`; Z-3, Z-4, Z-5, Z-6, Z-7, Z-9 follow a slot across frames and now require identity. |
-| SCI-03 | Science | P2 | Metadata join is per session; a per-animal value would be copied onto every animal (D-010). | **Open by design** | Needs a composite `(session_id, individual_id)` join, which reverses D-010. The Metadata screen shows *Individual ID* disabled and the guide says to join per-animal data after export. |
+| SCI-03 | Science | P2 | Metadata join was per session; a per-animal value would have been copied onto every animal (D-010). | **Fixed** (D-025) | One metadata row per animal, matched by validator label or position, with extra columns carried. Identity-free sessions get none; engine columns are never overwritten. |
 | PERF-01 | Engine | P1 | `Engine.run` forced `n_workers=1`. | **Fixed** (D-020) | Spawn process pool; workers get the manifest JSON, progress returns over a queue. **Not benchmarked on real long sessions**; on tiny test sessions it is slower because start-up dominates. Default stays 1. |
 | PERF-02 | Engine | P1 | `CacheStore` stored flat DataFrames and was unused (a documented deferral, not a bug). | **Fixed** (D-019) | Preprocessed sessions cached on disk, keyed by a folder fingerprint and the preprocessing/calibration/zone settings. |
 | PERF-03 | Engine | P2 | Importing a session ran a full `read_session`. | **Partly fixed** (D-018) | `SessionReader.probe()` skips bbox tables, matching results, fragments and the log; reopening a project re-probes. The trajectory payload is still read (identity status needs it). Probes still share the single-thread task pool. |
@@ -38,7 +38,6 @@ numbers below in `DECISIONS.md`.
 
 ## Still open
 
-- Per-animal metadata (SCI-03).
 - Benchmark parallel runs on real data (PERF-01).
 - Give session probes their own thread pool (PERF-03).
 - idtracker.ai v4 reader (ENG-02) and signed binaries (DIST-01).

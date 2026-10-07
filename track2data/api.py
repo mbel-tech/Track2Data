@@ -160,6 +160,9 @@ class Engine:
         self._cache_dir = Path(cache_dir) if cache_dir is not None else None
         # Set for the duration of run(); see run()'s cancel_check.
         self._cancel_check: Callable[[], None] | None = None
+        # (session_id, identity_free) -> per-animal metadata, so its warnings
+        # are logged once per session rather than once per result frame.
+        self._individual_metadata: dict[tuple[str, bool], dict[int, dict[str, Any]]] = {}
 
     @property
     def manifest(self) -> ProjectManifest:
@@ -207,6 +210,90 @@ class Engine:
             return {}
         fields = join.matched.get(session_id, {})
         return {k: v for k, v in fields.items() if k not in ("session_id", "individual_id")}
+
+    def _metadata_individual_fields_for(
+        self, psess: PreprocessedSession, identity_free: bool
+    ) -> dict[int, dict[str, Any]]:
+        """Per-animal metadata for one loaded session: animal index -> fields.
+
+        Only when the mapping gives ``individual_id`` (one metadata row per
+        animal). Keys are matched to animals per session, so the validator's
+        identity labels are available; see ``MappingRule.individual_match``.
+        Empty for identity-free sessions, where the row index is a detection
+        slot rather than an animal, so a per-animal value would be attached to
+        whichever animal happened to occupy the slot.
+        """
+        cache_key = (psess.session_id, bool(identity_free))
+        if cache_key not in self._individual_metadata:
+            self._individual_metadata[cache_key] = self._resolve_individual_metadata(
+                psess, identity_free
+            )
+        return self._individual_metadata[cache_key]
+
+    def _resolve_individual_metadata(
+        self, psess: PreprocessedSession, identity_free: bool
+    ) -> dict[int, dict[str, Any]]:
+        from track2data.metadata.join import resolve_animal
+
+        join = self._metadata_join
+        rule = self._manifest.mapping
+        keyed = join.matched_individuals.get(psess.session_id) if join is not None else None
+        if not keyed or rule is None:
+            return {}
+        if identity_free:
+            logger.warning(
+                "Session %s is identity-free: per-animal metadata is ignored for it "
+                "(animals cannot be told apart); session-level metadata still applies.",
+                psess.session_id,
+            )
+            return {}
+        n_animals = psess.n_animals
+        labels = [str(x).strip().lower() for x in (psess.session.identities_labels or [])]
+        out: dict[int, dict[str, Any]] = {}
+        for key, fields in keyed.items():
+            idx = resolve_animal(key, labels, rule.individual_match, n_animals)
+            if idx is None:
+                logger.warning(
+                    "Session %s: metadata individual '%s' matches no animal (%s); ignored.",
+                    psess.session_id, key,
+                    f"labels {labels}" if labels and rule.individual_match == "label"
+                    else f"{n_animals} animals, 0-based",
+                )
+                continue
+            out.setdefault(idx, fields)
+        for k in range(n_animals):
+            if k not in out:
+                logger.warning(
+                    "Session %s: no metadata row for animal %d; its metadata is left empty.",
+                    psess.session_id, k,
+                )
+        return out
+
+    def _attach_metadata(self, df: Any, psess: PreprocessedSession, identity_free: bool) -> None:
+        """Add this session's metadata columns to *df* in place.
+
+        Session-level fields go on every frame. Per-animal fields go only on
+        frames that have an ``individual_id`` column (never on group or pooled
+        frames), NaN for an animal with no metadata row. A metadata column
+        never overwrites a column the frame already has.
+        """
+        if df is None or len(df.columns) == 0:
+            return
+        attached: set[str] = set()
+        for col, val in self._metadata_fields_for(psess.session_id).items():
+            if col not in df.columns:
+                df[col] = val
+                attached.add(col)
+        if "individual_id" not in df.columns:
+            return
+        per_animal = self._metadata_individual_fields_for(psess, identity_free)
+        if not per_animal:
+            return
+        columns = list(dict.fromkeys(c for f in per_animal.values() for c in f))
+        for col in columns:
+            if col in df.columns and col not in attached:
+                continue  # an engine column: never overwritten
+            df[col] = df["individual_id"].map({k: f.get(col) for k, f in per_animal.items()})
 
     # ── session import ─────────────────────────────────────────────────────
 
@@ -652,15 +739,14 @@ class Engine:
         _run(sel.zone)
         _run(sel.diagnostic, binned=False)
 
-        meta_fields = self._metadata_fields_for(psess.session_id)
-        if meta_fields:
-            for df in results.values():
-                for col, val in meta_fields.items():
-                    df[col] = val
+        for df in results.values():
+            self._attach_metadata(df, psess, is_identity_free)
 
         return results
 
-    def build_fish_by_frame(self, psess: PreprocessedSession) -> Any:
+    def build_fish_by_frame(
+        self, psess: PreprocessedSession, *, identity_free: bool | None = None
+    ) -> Any:
         """
         Build the master per-frame DataFrame for *psess*.
 
@@ -781,8 +867,9 @@ class Engine:
             ]
             df.loc[below, masked_cols] = np.nan
 
-        for col, val in self._metadata_fields_for(psess.session_id).items():
-            df[col] = val
+        self._attach_metadata(
+            df, psess, self.identity_free_for(psess.session, identity_free)
+        )
 
         return df.sort_values(["session_id", "individual_id", "frame"]).reset_index(
             drop=True
@@ -809,7 +896,7 @@ class Engine:
         """
         from track2data.exporters.base import ExportPayload, SessionProvenance
 
-        fish_by_frame = self.build_fish_by_frame(psess)
+        fish_by_frame = self.build_fish_by_frame(psess, identity_free=identity_free)
 
         individual_metrics = {k: v for k, v in metric_results.items()
                                if k.startswith("IL-")}

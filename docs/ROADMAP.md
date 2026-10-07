@@ -239,7 +239,6 @@ Z-9 follow a slot across frames, so they now declare
 
 Tracked in [`docs/CRITICAL_ISSUES.md`](CRITICAL_ISSUES.md):
 
-- **Per-animal metadata** (SCI-03): needs a composite `(session_id, individual_id)` join, which reverses D-010.
 - **Parallel benchmark**: measure `n_workers > 1` on real, long sessions (D-020).
 - **Probe pool**: session probes still share the single-thread `TaskRunner` pool with pipeline runs (D-018).
 - **idtracker.ai v4 reader**: stub; needs sample data (D-012).
