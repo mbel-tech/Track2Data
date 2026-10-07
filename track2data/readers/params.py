@@ -48,8 +48,9 @@ class ProposedValue(BaseModel):
 
 
 def _invalid(reader: str, name: str, why: str) -> ImportError_:
+    where = f"Reader {reader!r}: option" if reader else "Option"
     return ImportError_(
-        f"Reader {reader!r}: option {name!r} {why}",
+        f"{where} {name!r} {why}",
         code="READER_OPTION_INVALID",
         subject=name,
         remediation=f"Correct option {name!r} in the confirm dialog or with --option.",
@@ -120,3 +121,75 @@ def resolve_options(
         else:
             resolved[spec.name] = _check(reader, spec, value)
     return resolved
+
+
+_TRUE = frozenset({"true", "yes", "1", "on"})
+_FALSE = frozenset({"false", "no", "0", "off"})
+
+
+def parse_value(spec: ReaderParameter, text: str, *, reader: str = "") -> Any:
+    """Turn the text of a command-line option into the value *spec* declares.
+
+    Only the *form* is checked here (a number is a number, a choice is one of the choices);
+    ranges and requiredness stay with :func:`resolve_options`, which every read goes through
+    anyway. A text that is not of the declared kind raises READER_OPTION_INVALID.
+    """
+    name, kind = spec.name, spec.kind
+    if kind == "str":
+        return text
+    if kind == "path":
+        return Path(text)
+    raw = text.strip()
+    if not raw:
+        raise _invalid(reader, name, "needs a value")
+    if kind in ("int", "float"):
+        try:
+            value = int(raw) if kind == "int" else float(raw)
+            if not math.isfinite(value):
+                raise ValueError(raw)
+        except ValueError:
+            what = "a whole number" if kind == "int" else "a finite number"
+            raise _invalid(reader, name, f"must be {what}, got {text!r}") from None
+        return value
+    if kind == "bool":
+        word = raw.lower()
+        if word in _TRUE:
+            return True
+        if word in _FALSE:
+            return False
+        raise _invalid(reader, name, f"must be true or false, got {text!r}")
+    if kind == "choice":
+        if raw not in spec.choices:
+            raise _invalid(reader, name, f"must be one of {list(spec.choices)}, got {text!r}")
+        return raw
+    items = [item.strip() for item in raw.split(",") if item.strip()]
+    extra = [item for item in items if item not in spec.choices]
+    if extra:
+        raise _invalid(reader, name, f"has unknown choices {extra}")
+    return items
+
+
+def parse_assignments(
+    parameters: Sequence[ReaderParameter], assignments: Sequence[str], *, reader: str = ""
+) -> dict[str, Any]:
+    """Parse ``name=value`` strings (the CLI's ``--option``) against a reader's parameters.
+
+    Split on the first ``=`` only, so a value may contain one. A malformed assignment, an
+    unknown name, or the same name twice is READER_OPTION_INVALID: a typo must not be
+    silently ignored, and "last one wins" would hide a mistake.
+    """
+    by_name = {spec.name: spec for spec in parameters}
+    parsed: dict[str, Any] = {}
+    for item in assignments:
+        name, separator, text = item.partition("=")
+        name = name.strip()
+        if not separator or not name:
+            raise _invalid(reader, item, "is not of the form name=value")
+        spec = by_name.get(name)
+        if spec is None:
+            raise _invalid(reader, name, "is not an option of this reader")
+        if name in parsed:
+            raise _invalid(reader, name, "was given more than once")
+        parsed[name] = parse_value(spec, text, reader=reader)
+    return parsed
+

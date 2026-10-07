@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from track2data.core.errors import ImportError_
-from track2data.readers.params import ReaderParameter, resolve_options
+from track2data.readers.params import (
+    ReaderParameter,
+    parse_assignments,
+    parse_value,
+    resolve_options,
+)
 
 PARAMS = (
     ReaderParameter(name="fps", label="Frame rate", kind="float", required=True, minimum=0.001),
@@ -85,3 +92,91 @@ def test_the_error_message_names_the_reader() -> None:
     with pytest.raises(ImportError_) as err:
         resolve_options("deeplabcut", PARAMS, {})
     assert "deeplabcut" in str(err.value)
+
+
+# ── text to typed values (the CLI's --option name=value) ─────────────────────
+
+
+def _spec(name: str) -> ReaderParameter:
+    return next(p for p in PARAMS if p.name == name)
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "expected"),
+    [
+        ("n", "30", 30),
+        ("fps", "25", 25.0),
+        ("fps", " 2.5e1 ", 25.0),
+        ("keep", "true", True),
+        ("keep", "No", False),
+        ("keep", "1", True),
+        ("keep", "off", False),
+        ("variant", "filtered", "filtered"),
+        ("parts", "a,b", ["a", "b"]),
+        ("parts", " a , c ", ["a", "c"]),
+    ],
+)
+def test_text_becomes_the_value_the_parameter_declares(
+    name: str, text: str, expected: object
+) -> None:
+    assert parse_value(_spec(name), text) == expected
+
+
+def test_text_and_path_parameters_keep_their_text() -> None:
+    free_text = ReaderParameter(name="s", label="S", kind="str")
+    a_path = ReaderParameter(name="p", label="P", kind="path")
+    assert parse_value(free_text, "a b") == "a b"
+    assert parse_value(a_path, "x/y.csv") == Path("x/y.csv")
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("n", "3.5"),  # not whole
+        ("n", "three"),
+        ("fps", "fast"),
+        ("fps", "nan"),
+        ("fps", "inf"),
+        ("fps", ""),
+        ("keep", "maybe"),
+        ("variant", "weird"),
+        ("parts", "a,z"),
+    ],
+)
+def test_text_that_is_not_that_kind_of_value_is_invalid_and_names_the_option(
+    name: str, text: str
+) -> None:
+    with pytest.raises(ImportError_) as err:
+        parse_value(_spec(name), text)
+    assert err.value.code == "READER_OPTION_INVALID"
+    assert err.value.subject == name
+    assert err.value.remediation
+
+
+def test_a_range_is_checked_after_parsing_not_before() -> None:
+    # parse_value only turns text into a value; resolve_options owns the range rule
+    assert parse_value(_spec("fps"), "0") == 0.0
+    with pytest.raises(ImportError_):
+        resolve_options("t", PARAMS, {"fps": parse_value(_spec("fps"), "0")})
+
+
+def test_assignments_are_split_on_the_first_equals_sign_only() -> None:
+    out = parse_assignments(PARAMS, ["fps=30", "variant=raw"])
+    assert out == {"fps": 30.0, "variant": "raw"}
+    free = (ReaderParameter(name="label", label="L", kind="str"),)
+    assert parse_assignments(free, ["label=a=b"]) == {"label": "a=b"}
+
+
+@pytest.mark.parametrize("bad", ["fps", "=30", "nope=1"])
+def test_an_assignment_that_is_malformed_or_names_no_option_is_invalid(bad: str) -> None:
+    with pytest.raises(ImportError_) as err:
+        parse_assignments(PARAMS, [bad])
+    assert err.value.code == "READER_OPTION_INVALID"
+
+
+def test_the_same_option_given_twice_is_invalid_rather_than_last_one_wins() -> None:
+    with pytest.raises(ImportError_) as err:
+        parse_assignments(PARAMS, ["fps=30", "fps=60"])
+    assert err.value.code == "READER_OPTION_INVALID"
+    assert err.value.subject == "fps"
+
