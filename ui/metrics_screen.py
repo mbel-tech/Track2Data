@@ -169,6 +169,18 @@ class MetricsScreen(QWidget):
         self._quality_spin.setDecimals(2)
         self._quality_spin.setValue(0.0)
         qform.addRow("Quality threshold:", self._quality_spin)
+        self._timepoint_spin = QDoubleSpinBox()
+        self._timepoint_spin.setRange(0.0, 100000.0)
+        self._timepoint_spin.setDecimals(2)
+        self._timepoint_spin.setSingleStep(1.0)
+        self._timepoint_spin.setSuffix(" min")
+        self._timepoint_spin.setSpecialValueText("Whole session")
+        self._timepoint_spin.setToolTip(
+            "Split each session into time bins of this length and report every "
+            "metric per bin (adds bin_index, bin_start_s, bin_end_s columns). "
+            "Whole-track metrics such as tortuosity stay one row per animal."
+        )
+        qform.addRow("Time bins:", self._timepoint_spin)
         root.addLayout(qform)
 
         # No Apply button: edits auto-commit after a pause; MainWindow
@@ -176,6 +188,9 @@ class MetricsScreen(QWidget):
         for table in (self._ind_table, self._grp_table, self._zone_table):
             table.itemChanged.connect(self._on_item_changed)
         self._quality_spin.valueChanged.connect(
+            lambda _v: self._auto.trigger() if self._differs_from_store() else None
+        )
+        self._timepoint_spin.valueChanged.connect(
             lambda _v: self._auto.trigger() if self._differs_from_store() else None
         )
 
@@ -366,6 +381,7 @@ class MetricsScreen(QWidget):
                 "group": self._checked_ids(self._grp_table),
                 "zone": self._checked_ids(self._zone_table),
                 "quality_threshold": self._quality_spin.value(),
+                "timepoint_minutes": self._timepoint_spin.value() or None,
             }
         )
 
@@ -391,6 +407,7 @@ class MetricsScreen(QWidget):
             self._set_checked(self._grp_table, sel.group)
             self._set_checked(self._zone_table, sel.zone)
             self._quality_spin.setValue(sel.quality_threshold)
+            self._timepoint_spin.setValue(sel.timepoint_minutes or 0.0)
         self._update_identity_graying()
         self._update_zone_tab_enabled()
         self._update_counter()

@@ -14,6 +14,7 @@ from pathlib import Path
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
 from track2data.readers.idtrackerai.reader import IDTrackerAiReader
+from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
 
 log = logging.getLogger(__name__)
@@ -41,7 +42,10 @@ def _load_entry_points() -> None:
 
 
 # Register built-ins — the unified reader has the highest priority (20) so it
-# wins over the legacy v5 reader (10) when a folder is detected by both.
+# wins over the legacy v5 reader (10) when a folder is detected by both. The v4
+# placeholder is deliberately not registered: its detect() is always False, so it
+# could never be selected, and a registered class that only raises is worse than
+# an absent one (DECISIONS D-012). Its module only supplies ``looks_like_v4``.
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
 _load_entry_points()
@@ -58,6 +62,31 @@ def detect_reader(folder: Path) -> type[SessionReader] | None:
     return None
 
 
+def _require_reader(folder: Path) -> type[SessionReader]:
+    """The reader for *folder*, or a specific ``ImportError_`` explaining why none."""
+    from track2data.core.errors import ImportError_
+
+    cls = detect_reader(folder)
+    if cls is not None:
+        return cls
+    if looks_like_v4(folder):
+        raise ImportError_(
+            f"This looks like idtracker.ai v4 output, which Track2Data cannot read yet: {folder}",
+            code="V4_NOT_SUPPORTED",
+            subject=str(folder),
+            remediation=(
+                "Only idtracker.ai v5 output is supported. To help add v4, follow "
+                "docs/IDTRACKERAI_V4_SAMPLES.md (IDTRACKERAI_V4_SAMPLES)."
+            ),
+        )
+    raise ImportError_(
+        f"No reader recognised the session folder: {folder}",
+        code="NO_READER",
+        subject=str(folder),
+        remediation="Ensure the folder is a valid idtracker.ai output directory.",
+    )
+
+
 def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
     """Auto-detect the reader for *folder* and return a Session.
 
@@ -71,7 +100,7 @@ def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
     they also never see the flag, so a third-party reader that unpickles is
     trusting whatever it is pointed at, and should opt in.
     """
-    cls = _detect_or_raise(folder)
+    cls = _require_reader(folder)
     reader = cls()
     if cls.accepts_allow_pickle:
         return reader.read(folder, allow_pickle=allow_pickle)
@@ -85,25 +114,11 @@ def probe_session(folder: Path, *, allow_pickle: bool = False) -> Session:
     ``allow_pickle`` is the project's consent, passed on exactly as
     ``read_session`` passes it: a probe opens the same trajectory file.
     """
-    cls = _detect_or_raise(folder)
+    cls = _require_reader(folder)
     reader = cls()
     if cls.accepts_allow_pickle:
         return reader.probe(folder, allow_pickle=allow_pickle)
     return reader.probe(folder)
-
-
-def _detect_or_raise(folder: Path) -> type[SessionReader]:
-    from track2data.core.errors import ImportError_
-
-    cls = detect_reader(folder)
-    if cls is None:
-        raise ImportError_(
-            f"No reader recognised the session folder: {folder}",
-            code="NO_READER",
-            subject=str(folder),
-            remediation="Ensure the folder is a valid idtracker.ai output directory.",
-        )
-    return cls
 
 
 __all__ = [

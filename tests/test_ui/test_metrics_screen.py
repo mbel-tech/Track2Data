@@ -896,3 +896,57 @@ def test_diagnostics_note_explains_they_always_run(qtbot) -> None:
     screen = MetricsScreen(store=_make_store())
     qtbot.addWidget(screen)
     assert "diagnostic" in screen._diag_note.text().lower()
+
+
+# ── timepoint binning control ────────────────────────────────────────────────
+
+
+def test_timepoint_spin_defaults_to_whole_session(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    assert screen._timepoint_spin.value() == 0
+    assert "whole session" in screen._timepoint_spin.specialValueText().lower()
+
+
+def test_timepoint_spin_autocommits_to_the_manifest(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    screen._timepoint_spin.setValue(5)
+    qtbot.waitUntil(lambda: store.manifest.metrics.timepoint_minutes == 5, timeout=2000)
+
+    screen._timepoint_spin.setValue(0)  # back to whole session -> None
+    qtbot.waitUntil(lambda: store.manifest.metrics.timepoint_minutes is None, timeout=2000)
+
+
+def test_timepoint_is_loaded_from_the_store(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"metrics": MetricSelection(timepoint_minutes=2.5)}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    assert screen._timepoint_spin.value() == pytest.approx(2.5)
+
+
+def test_timepoint_preserved_when_other_fields_are_applied(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"metrics": MetricSelection(timepoint_minutes=10)}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0).setCheckState(
+        Qt.CheckState.Checked
+    )
+    screen.flush()
+    assert store.manifest.metrics.timepoint_minutes == 10
+    assert store.manifest.metrics.individual == ["IL-1"]

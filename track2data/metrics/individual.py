@@ -45,6 +45,18 @@ def _bl_px(session: PreprocessedSession, k: int) -> float:
     return float(bl[k]) if bl is not None else np.nan
 
 
+def _activity_threshold(speed: np.ndarray, cfg: dict | None) -> float:
+    """IL-4 / IL-7 activity threshold: ``cfg['threshold_px_s']`` verbatim, else
+    ``mean(speed) * threshold_multiplier`` (default 0.1) over all valid frames."""
+    if cfg is not None and "threshold_px_s" in cfg:
+        return float(cfg["threshold_px_s"])
+    multiplier = 0.1
+    if cfg is not None and "threshold_multiplier" in cfg:
+        multiplier = float(cfg["threshold_multiplier"])
+    valid = speed[~np.isnan(speed)]
+    return float(np.mean(valid) * multiplier) if len(valid) > 0 else 0.0
+
+
 # ── IL-1: PathLength ──────────────────────────────────────────────────────────
 
 
@@ -481,6 +493,11 @@ class Activity(Metric):
         ),
     ]
 
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        speed = session.kinematics.speed_px_s  # type: ignore[attr-defined]
+        return {"threshold_px_s": _activity_threshold(speed, cfg)}
+
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute activity / freezing fractions for every individual.
 
@@ -502,16 +519,7 @@ class Activity(Metric):
         speed = session.kinematics.speed_px_s  # (n_frames, n_animals)
 
         # Determine threshold
-        if cfg is not None and "threshold_px_s" in cfg:
-            threshold = float(cfg["threshold_px_s"])
-        else:
-            threshold_multiplier = 0.1
-            if cfg is not None and "threshold_multiplier" in cfg:
-                threshold_multiplier = float(cfg["threshold_multiplier"])
-            all_valid = speed[~np.isnan(speed)]
-            threshold = (
-                float(np.mean(all_valid) * threshold_multiplier) if len(all_valid) > 0 else 0.0
-            )
+        threshold = _activity_threshold(speed, cfg)
 
         n_animals = session.n_animals
         records: list[dict] = []
@@ -549,6 +557,7 @@ class Tortuosity(Metric):
     """IL-5 — Path tortuosity (path length / straight-line distance) per individual."""
 
     id = "IL-5"
+    window_safe = False
     name = "tortuosity"
     label = "Tortuosity"
     level = "individual"
@@ -870,6 +879,26 @@ class FreezingBouts(Metric):
         ),
     ]
 
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        """Activity threshold and (when derived) the bout criterion, both fit on
+        the whole session so windows stay comparable."""
+        speed = session.kinematics.speed_px_s  # type: ignore[attr-defined]
+        threshold = _activity_threshold(speed, cfg)
+        out: dict = {"threshold_px_s": threshold}
+        if cfg is not None and cfg.get("derive_bout_criterion", False):
+            pooled = [
+                length
+                for k in range(speed.shape[1])
+                for length in _true_run_lengths((speed[:, k] <= threshold) & ~np.isnan(speed[:, k]))
+            ]
+            bci = compute_bout_criterion_interval(pooled)
+            if bci.converged:
+                out["_bout"] = (int(bci.threshold_frames), "log_survivorship")
+            else:
+                out["_bout"] = (cls._FIXED_DEFAULT_MIN_BOUT_FRAMES, "fixed_fallback")
+        return out
+
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute freezing-bout statistics for every individual in *session*.
 
@@ -900,16 +929,7 @@ class FreezingBouts(Metric):
         # different thresholds in the same export, with nothing saying so.
         # The two are set independently -- one metric's config never
         # reaches another's cfg -- so both must be changed together.
-        if cfg is not None and "threshold_px_s" in cfg:
-            threshold = float(cfg["threshold_px_s"])
-        else:
-            threshold_multiplier = 0.1
-            if cfg is not None and "threshold_multiplier" in cfg:
-                threshold_multiplier = float(cfg["threshold_multiplier"])
-            all_valid = speed[~np.isnan(speed)]
-            threshold = (
-                float(np.mean(all_valid) * threshold_multiplier) if len(all_valid) > 0 else 0.0
-            )
+        threshold = _activity_threshold(speed, cfg)
 
         fps = session.fps
         n_animals = session.n_animals
@@ -928,7 +948,11 @@ class FreezingBouts(Metric):
 
         derive = bool(cfg.get("derive_bout_criterion", False)) if cfg is not None else False
 
-        if derive:
+        if cfg is not None and cfg.get("_bout") is not None:
+            # Pre-resolved on the whole session (timepoint binning): every
+            # window reports the same criterion instead of refitting its own.
+            min_bout_frames, bout_criterion_effective = cfg["_bout"]
+        elif derive:
             # The switch wins over an explicit min_bout_frames: ticking it
             # means "let the data decide", which a typed threshold would
             # contradict. The typed value is not discarded -- it is still
@@ -1148,6 +1172,7 @@ class HomeBaseOccupancy(Metric):
     """IL-9 — Highest-occupancy grid locus and its share of total time."""
 
     id = "IL-9"
+    window_safe = False
     name = "home_base_occupancy"
     label = "Home-Base Occupancy"
     level = "individual"

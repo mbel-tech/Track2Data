@@ -14,13 +14,25 @@ import pandas as pd
 from track2data.core.models import MappingRule
 from track2data.metadata.schema import ALIASES, CANONICAL
 
+#: Output columns written by the engine itself. A metadata column with one of
+#: these names would overwrite real data, so it is never carried.
+RESERVED_COLUMNS = frozenset(
+    {
+        "metric_id", "frame", "time_s", "in_tracking_interval", "x_px", "y_px", "x_cm", "y_cm",
+        "was_interpolated", "speed_px_s", "speed_cm_s", "heading_rad", "main_zone", "sec_zone",
+        "individual_label", "individual_color", "bin_index", "bin_start_s", "bin_end_s",
+        "zone_name",
+    }
+)
+
 
 def apply_mapping(df: pd.DataFrame, rule: MappingRule) -> pd.DataFrame:
     """
     Rename source columns to canonical names using *rule.rules*.
 
     Columns not referenced in *rule.rules* and not already canonical are
-    dropped.  Canonical columns already present are kept as-is.
+    dropped, except those named in *rule.extra_columns*.  Canonical columns
+    already present are kept as-is.
 
     Parameters
     ----------
@@ -50,8 +62,14 @@ def apply_mapping(df: pd.DataFrame, rule: MappingRule) -> pd.DataFrame:
 
     df2 = df.rename(columns=rename)
 
-    # Keep only columns that are canonical or were explicitly mapped to canonical.
+    # Keep only columns that are canonical or were explicitly mapped to canonical,
+    # plus the extra columns the rule asks for (skipping any whose name would
+    # collide with a column the engine writes itself).
     keep = [c for c in df2.columns if c in CANONICAL]
+    for extra in rule.extra_columns:
+        name = extra.strip().lower()
+        if name in df2.columns and name not in keep and name not in RESERVED_COLUMNS:
+            keep.append(name)
     return df2[keep].copy()
 
 

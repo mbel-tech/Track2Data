@@ -83,12 +83,13 @@ implementation.
       required check, no review requirement, admins exempt) as though
       they were live, so this is a documentation/reality gap until the
       setting is turned on
-- [ ] Code signing — **not** a v1.0 blocker, and cannot be done before
-      the first release: SignPath Foundation's free OSS signing requires
-      an already-published release. Infrastructure is implemented and
-      activates on secrets alone — see [`./CODE_SIGNING.md`](../CODE_SIGNING.md)
-
----
+- [ ] Code signing — **not** a v1.0 blocker. SignPath Foundation's free OSS
+      signing requires an already-published release. Infrastructure is
+      implemented and activates on secrets alone; readiness check, release
+      verification script and checklist are in place — see
+      [`./CODE_SIGNING.md`](../CODE_SIGNING.md) and
+      [`./RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). Still needs the
+      maintainer's certificates and a first real signed run.
 
 ---
 
@@ -137,10 +138,8 @@ Z-9 follow a slot across frames, so they now declare
 
 Tracked in [`docs/CRITICAL_ISSUES.md`](../CRITICAL_ISSUES.md):
 
-- **Per-animal metadata** (SCI-03): needs a composite `(session_id, individual_id)` join, which reverses D-010.
-- **Timepoint binning**: `MetricSelection.timepoint_minutes` is stored but never used by the engine.
-- **Parallel benchmark**: measure `n_workers > 1` on real, long sessions (D-020).
-- **Probe pool**: session probes still share the single-thread `TaskRunner` pool with pipeline runs (D-018).
+- **Parallel benchmark on real data**: `scripts/benchmark_parallel.py` exists (see `docs/BENCHMARKING.md`; one local data point: 3.2x on 4 cores for 4 sessions of 20k frames); run it on real, long sessions before recommending a worker count.
+- **idtracker.ai v4 reader**: stub; needs sample data (D-012). Prep done: specific error for v4-looking folders, `scripts/inspect_idtrackerai_output.py`, and [`IDTRACKERAI_V4_SAMPLES.md`](../IDTRACKERAI_V4_SAMPLES.md) saying what to send.
 - **Signed binaries**: infrastructure exists; needs certificates and a published release (`docs/CODE_SIGNING.md`).
 
 ## Repository visibility

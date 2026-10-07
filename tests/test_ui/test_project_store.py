@@ -321,10 +321,12 @@ def test_an_ordinary_probe_failure_does_not_ask_about_pickles(
     folder = tmp_path / "session_a"
     folder.mkdir()
 
+    logged: list[str] = []
+    store.runLogAppended.connect(logged.append)
+
     with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
         store.add_session(folder)
-    with qtbot.waitSignal(store.taskFinished, timeout=2000):
-        pass
+    qtbot.waitUntil(lambda: any("Identity probe failed" in line for line in logged), timeout=3000)
 
     assert asked == []
 
@@ -366,8 +368,7 @@ def test_probe_passes_the_project_setting_to_the_reader(
     folder.mkdir()
     with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
         store.add_session(folder)
-    with qtbot.waitSignal(store.taskFinished, timeout=2000):
-        pass
+    qtbot.waitUntil(lambda: store.session_facts("session_a") is not None, timeout=3000)
 
     assert seen == [True]
 
@@ -402,3 +403,82 @@ def test_open_project_reprobes_existing_session_folders(
     assert store.session_facts("session_a") is None  # cleared until re-probed
     qtbot.waitUntil(lambda: store.session_facts("session_a") is not None, timeout=2000)
     assert probed == ["session_a"]
+
+
+# ── probes run in their own lane (PERF-03) ──────────────────────────────────
+
+
+def _fake_session(folder: Path, **_kwargs: object) -> Session:
+    return Session(
+        session_id=folder.name,
+        folder=folder,
+        reader="fake",
+        video=VideoInfo(fps=25.0, n_frames=10, width_px=100, height_px=100),
+        n_animals=1,
+        trajectory_variant="wo_gaps",
+        has_stable_identities=True,
+        raw_xy=np.zeros((10, 1, 2)),
+    )
+
+
+def test_probe_is_not_queued_behind_a_running_task(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    import threading
+
+    monkeypatch.setattr("track2data.readers.probe_session", _fake_session)
+    release = threading.Event()
+    store.tasks.submit(lambda: release.wait(5))  # a long run occupying the run lane
+
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    store.add_session(folder)
+    qtbot.waitUntil(lambda: store.session_facts("session_a") is not None, timeout=3000)
+    assert not release.is_set()
+    release.set()
+
+
+def test_a_failed_probe_does_not_emit_task_finished(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    def boom(folder: Path, **kwargs: object) -> Session:
+        raise RuntimeError("not a session")
+
+    monkeypatch.setattr("track2data.readers.probe_session", boom)
+    generic: list[object] = []
+    store.taskFinished.connect(lambda tid, res: generic.append(res))
+    logged: list[str] = []
+    store.runLogAppended.connect(logged.append)
+
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    store.add_session(folder)
+    qtbot.waitUntil(lambda: any("Identity probe failed" in line for line in logged), timeout=3000)
+    assert generic == []  # MainWindow shows its failure dialog on this signal
+
+
+def test_new_project_cancels_queued_probes(qtbot, monkeypatch, store, tmp_path: Path) -> None:
+    import threading
+
+    gate = threading.Event()
+    ran: list[str] = []
+
+    def slow_probe(folder: Path, **kwargs: object) -> Session:
+        ran.append(folder.name)
+        gate.wait(5)
+        return _fake_session(folder)
+
+    monkeypatch.setattr("track2data.readers.probe_session", slow_probe)
+    folders = []
+    for name in ("a", "b"):
+        f = tmp_path / name
+        f.mkdir()
+        folders.append(f)
+        store.add_session(f)
+    qtbot.waitUntil(lambda: ran == ["a"], timeout=3000)  # first is running, second queued
+
+    store.new_project("other", tmp_path)
+    gate.set()
+    qtbot.wait(300)
+    assert ran == ["a"]  # the queued probe never started
+    assert store.session_facts("b") is None

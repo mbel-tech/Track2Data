@@ -25,7 +25,7 @@ Enable the repo's hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-This turns on a `pre-commit` hook that runs [`actionlint`](https://github.com/rhysd/actionlint) over `.github/workflows/` whenever a commit touches a workflow file. A malformed workflow is otherwise only discoverable by pushing it and letting a run die at parse time -- and this repo is private, so those Actions minutes are metered. actionlint also type-checks `${{ }}` expressions, including the `fromJSON` matrix selector in `ci.yml`, which a plain YAML parse accepts happily.
+This turns on a `pre-commit` hook that runs [`actionlint`](https://github.com/rhysd/actionlint) over `.github/workflows/` whenever a commit touches a workflow file. A malformed workflow is otherwise only discoverable by pushing it and letting a run die at parse time -- and failed runs burn Actions minutes (metered on private repositories). actionlint also type-checks `${{ }}` expressions, including the `fromJSON` matrix selector in `ci.yml`, which a plain YAML parse accepts happily.
 
 Install actionlint itself:
 

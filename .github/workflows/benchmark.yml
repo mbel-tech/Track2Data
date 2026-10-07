@@ -1,0 +1,54 @@
+name: Benchmark (manual)
+
+# Manual only. Never part of the required checks: shared GitHub runners are
+# noisy and have few cores, so these numbers are a smoke test of the tooling,
+# not a performance claim. Run scripts/benchmark_parallel.py on the machine and
+# session sizes you care about for real data.
+on:
+  workflow_dispatch:
+    inputs:
+      sessions:
+        description: Number of synthetic sessions
+        default: "4"
+      frames:
+        description: Frames per session
+        default: "20000"
+      animals:
+        description: Animals per session
+        default: "10"
+      workers:
+        description: Comma-separated worker counts
+        default: "1,2,4"
+      cache:
+        description: Comma-separated cache modes (off, cold, warm)
+        default: "off,warm"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Run benchmark
+        env:
+          SESSIONS: ${{ inputs.sessions }}
+          FRAMES: ${{ inputs.frames }}
+          ANIMALS: ${{ inputs.animals }}
+          WORKERS: ${{ inputs.workers }}
+          CACHE: ${{ inputs.cache }}
+        run: |
+          python scripts/benchmark_parallel.py \
+            --sessions "$SESSIONS" --frames "$FRAMES" --animals "$ANIMALS" \
+            --workers "$WORKERS" --cache "$CACHE" --json benchmark.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark.json

@@ -207,6 +207,7 @@ catalogue of all 45 metrics with their formulas, units and DOIs.
 
 - [`docs/guide/`](docs/guide/USER_GUIDE.md) — the user guide (also as a [PDF](docs/guide/Track2Data_User_Guide.pdf)): every screen, with screenshots, plus the output-file reference and troubleshooting
 - [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md) — the wizard, screen by screen
+- [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) — how to time sequential vs parallel runs on your own machine and data
 - [`docs/INTEROPERABILITY.md`](docs/INTEROPERABILITY.md) — where Track2Data sits in the ecosystem, and reading its output elsewhere
 - [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — every metric: formula, inputs, units, assumptions, citation
 - [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) — why releases are unsigned, and the plan

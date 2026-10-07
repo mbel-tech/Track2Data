@@ -69,6 +69,8 @@ class SessionFacts:
     # Per-animal body length in pixels (Session.body_length_px), when the
     # tracker provided it; used for the calibration summary.
     body_length_px: tuple[float, ...] | None = None
+    # idtracker.ai Validator identity labels (index-aligned with individual_id).
+    identities_labels: tuple[str, ...] | None = None
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -93,6 +95,11 @@ class SessionFacts:
                 None
                 if session.body_length_px is None
                 else tuple(float(v) for v in session.body_length_px)
+            ),
+            identities_labels=(
+                tuple(str(x) for x in session.identities_labels)
+                if session.identities_labels
+                else None
             ),
             background_image_path=session.background_image_path,
         )

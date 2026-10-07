@@ -229,7 +229,7 @@ class MetricSelection(BaseModel):
     group:      list[str] = []
     zone:       list[str] = []
     diagnostic: list[str] = []             # D-* IDs; auto-computed, always exported
-    timepoint_minutes: int | None = None   # 20 in the choice-exp pipeline
+    timepoint_minutes: float | None = None  # minutes per bin; None/0 = whole session
     quality_threshold: float = 0.0         # mask frames below this id_probability
 ```
 
@@ -243,7 +243,7 @@ tests against the R pipeline can pin names exactly.
 |---|---|---|---|
 | key | `session_id` | str | — |
 | key | `trial_id` | int | — |
-| key | `timepoint` | int | bin index |
+| key | `bin_index` | int | bin number in true video time (only when binned; `timepoint` is a metadata label) |
 | key | `individual_id` | int | nullable (identity-free) |
 | key | `frame` | int | — |
 | key | `time_s` | float | seconds since session start |
@@ -341,7 +341,9 @@ class SessionReader(ABC):
 
 - **`idtrackerai_v5`** — legacy reader (priority 10). Kept for backwards
   compatibility with pre-6.x data using `video_object.npy`.
-- **`idtrackerai_v4`** — legacy fallback (priority 5).
+- **`idtrackerai_v4`** — placeholder (priority 5), `detect()` always False. `looks_like_v4()`
+  only lets `read_session`/`probe_session` raise `V4_NOT_SUPPORTED` instead of `NO_READER`;
+  see `docs/IDTRACKERAI_V4_SAMPLES.md`.
 
 ### 5.3 Discovery
 
