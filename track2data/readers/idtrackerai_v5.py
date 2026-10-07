@@ -54,6 +54,10 @@ from track2data.core.errors import DataValidationError, ImportError_
 from track2data.core.ids import default_session_id
 from track2data.core.models import Session, VideoInfo
 from track2data.readers.base import SessionReader
+from track2data.readers.detection import Confidence, Detection, SessionCandidate
+from track2data.readers.discovery import claim_sessions
+from track2data.readers.index import ScanIndex
+from track2data.readers.peek import Peeker
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +108,52 @@ class IDTrackerAiV5Reader(SessionReader):
         has_traj = any((traj_dir / name).exists() for name in _TRAJ_NAMES)
         has_video_obj = (folder / _VIDEO_OBJ_NAME).exists()
         return has_traj and has_video_obj
+
+    @classmethod
+    def discover(cls, index: ScanIndex, peek: Peeker) -> list[Detection]:
+        """Find v5 sessions in a scan index (the same rule as :meth:`detect`).
+
+        HIGH when the folder cannot be a 6.x session: it has ``trajectories_wo_gaps.npy``, or its
+        ``trajectories.npy`` is a raw array. A ``trajectories.npy`` that is a pickled dict beside
+        a ``video_object.npy`` could be read by the unified reader as well, which ranks higher,
+        so this reader reports MEDIUM there and stays available as an alternative.
+        """
+        certain: list[bool] = []
+
+        def accept(folder: Path) -> SessionCandidate | None:
+            traj = index.child(folder, _TRAJ_SUBDIR)
+            if traj is None or not traj.is_dir:
+                return None
+            present = [n for n in _TRAJ_NAMES if index.child(traj.path, n) is not None]
+            if not present or index.child(folder, _VIDEO_OBJ_NAME) is None:
+                return None
+            if "trajectories_wo_gaps.npy" in present:
+                certain.append(True)
+            else:
+                header = peek.npy_header(traj.path / "trajectories.npy")
+                certain.append(header is not None and not header.is_object)
+            return SessionCandidate(
+                session_id=default_session_id(folder),
+                source=folder,
+                files=(*(traj.path / n for n in present), folder / _VIDEO_OBJ_NAME),
+            )
+
+        sessions = claim_sessions(index, accept)
+        if not sessions:
+            return []
+        return [
+            Detection(
+                reader=cls.name,
+                display_name=cls.display_name,
+                confidence=Confidence.HIGH if all(certain) else Confidence.MEDIUM,
+                evidence=(
+                    f"{len(sessions)} folder(s) with trajectories/ and a {_VIDEO_OBJ_NAME} "
+                    "(the legacy v5 layout)",
+                ),
+                sessions=tuple(sessions),
+                verification=cls.verification,
+            )
+        ]
 
     # ── read ──────────────────────────────────────────────────────────────────
 

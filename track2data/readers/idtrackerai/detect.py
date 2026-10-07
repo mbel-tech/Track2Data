@@ -18,6 +18,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from track2data.readers.index import ScanIndex
+from track2data.readers.peek import Peeker
+
+#: Trajectory artefacts inside ``<session>/trajectories/``, in priority order: (format, name).
+TRAJECTORY_ARTEFACTS: tuple[tuple[str, str], ...] = (
+    ("h5", "trajectories.h5"),
+    ("parquet", "trajectories.parquet"),
+    ("npy", "trajectories.npy"),
+    ("pickle", "trajectories.pickle"),
+    ("csv_tidy", "trajectories_tidy.csv"),
+    ("csv", "trajectories_csv"),
+)
+
+#: The v5 layout keeps its video metadata in a pickled object next to ``trajectories/``.
+VIDEO_OBJECT_NAME = "video_object.npy"
+
 
 @dataclass
 class ReaderHit:
@@ -41,17 +57,10 @@ def detect(folder: Path) -> ReaderHit | None:
     if not traj_dir.is_dir():
         return None
 
-    candidates = [
-        ("h5",       traj_dir / "trajectories.h5"),
-        ("parquet",  traj_dir / "trajectories.parquet"),
-        ("npy",      traj_dir / "trajectories.npy"),
-        ("pickle",   traj_dir / "trajectories.pickle"),
-        ("csv_tidy", traj_dir / "trajectories_tidy.csv"),
-        ("csv",      traj_dir / "trajectories_csv"),
-    ]
-
     found: list[tuple[str, Path]] = [
-        (fmt, path) for fmt, path in candidates if path.exists()
+        (fmt, traj_dir / name)
+        for fmt, name in TRAJECTORY_ARTEFACTS
+        if (traj_dir / name).exists()
     ]
 
     if not found:
@@ -59,3 +68,36 @@ def detect(folder: Path) -> ReaderHit | None:
 
     best_fmt, best_path = found[0]
     return ReaderHit(format=best_fmt, path=best_path, all_present=found)
+
+
+def hit_from_index(index: ScanIndex, folder: Path) -> ReaderHit | None:
+    """The same answer as :func:`detect`, read from a scan index instead of the file system."""
+    traj = index.child(folder, "trajectories")
+    if traj is None or not traj.is_dir:
+        return None
+    found = [
+        (fmt, traj.path / name)
+        for fmt, name in TRAJECTORY_ARTEFACTS
+        if index.child(traj.path, name) is not None
+    ]
+    if not found:
+        return None
+    best_fmt, best_path = found[0]
+    return ReaderHit(format=best_fmt, path=best_path, all_present=found)
+
+
+def is_v5_layout(hit: ReaderHit, *, has_video_object: bool, peek: Peeker) -> bool:
+    """True when *hit* is the legacy v5 layout rather than idtracker.ai 6's.
+
+    Both keep ``trajectories/trajectories.npy``. In 6.x it is a pickled dict (an object array);
+    in the v5 layout it is a raw float array and ``video_object.npy`` sits next to
+    ``trajectories/``. The two are told apart from the ``.npy`` header alone, so nothing is
+    unpickled.
+
+    A raw array with no ``video_object.npy`` is deliberately *not* v5: the unified reader keeps
+    claiming it so that reading it explains what is wrong, instead of "no reader recognised".
+    """
+    if [fmt for fmt, _ in hit.all_present] != ["npy"] or not has_video_object:
+        return False
+    header = peek.npy_header(hit.path)
+    return header is not None and not header.is_object

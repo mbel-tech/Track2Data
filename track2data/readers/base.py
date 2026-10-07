@@ -6,8 +6,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import ClassVar, Literal
 
+from track2data.core.ids import default_session_id
 from track2data.core.models import Session
+from track2data.readers.detection import Confidence, Detection, SessionCandidate
+from track2data.readers.discovery import claim_sessions
+from track2data.readers.index import ScanIndex
 from track2data.readers.params import ReaderParameter
+from track2data.readers.peek import Peeker
 
 
 class SessionReader(ABC):
@@ -50,6 +55,42 @@ class SessionReader(ABC):
     @abstractmethod
     def detect(cls, folder: Path) -> bool:
         """Return True if this reader can handle *folder*."""
+
+    @classmethod
+    def discover(cls, index: ScanIndex, peek: Peeker) -> list[Detection]:
+        """Report the sessions this reader finds in a scanned tree.
+
+        The default wraps :meth:`detect` for readers written before scanning existed: it asks
+        ``detect(folder)`` about each directory in the index, breadth-first, and does not look
+        inside a folder it has already claimed. A boolean says nothing about how sure the reader
+        is, so it can only report MEDIUM confidence, and it probes the file system once per
+        directory. A reader should override this with a pure function of *index* and *peek*.
+
+        Must not raise for any tree; a reader that does is reported as a warning and skipped.
+        """
+
+        def accept(folder: Path) -> SessionCandidate | None:
+            try:
+                if not cls.detect(folder):
+                    return None
+            except Exception:  # a reader's detect() must never break a scan
+                return None
+            return SessionCandidate(session_id=default_session_id(folder), source=folder)
+
+        sessions = claim_sessions(index, accept)
+        if not sessions:
+            return []
+        return [
+            Detection(
+                reader=cls.name,
+                display_name=cls.display_name or cls.name,
+                confidence=Confidence.MEDIUM,
+                evidence=(f"{cls.name}.detect() accepted {len(sessions)} folder(s)",),
+                sessions=tuple(sessions),
+                parameters=cls.parameters,
+                verification=cls.verification,
+            )
+        ]
 
     @abstractmethod
     def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
