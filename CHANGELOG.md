@@ -9,6 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **User guide with screenshots** in `docs/guide/` (one page per screen, output
+  file reference, troubleshooting). Screenshots come from the real app via
+  `scripts/generate_guide_screenshots.py`; `tests/test_docs/test_guide.py`
+  fails if a page, link or image goes missing. **Help ▸ Open user guide**
+  opens it.
+
+- **Calibration "Measure on frame"** (Custom mode): click both ends of an
+  object of known length on a session frame, enter its real length, and the
+  pixels-per-unit scale is filled in. Body Length mode now shows the median
+  and range of the sessions' body lengths instead of a generic sentence.
+- **Export screen shows R and Python code** to load the files just written
+  (feather, CSV or Excel), with a Copy button.
+
+- **Trajectory viewer** (Preview ▸ Trajectories). Load a session (reusing the
+  project cache) and scrub or play its tracked paths with per-animal
+  trails, raw vs processed overlays (to see what gap filling, jump removal
+  and smoothing changed), saved zones and an occupancy heatmap. Previously
+  no screen drew a single trajectory.
+
+- **Metadata screen** offers every canonical field (Trial, Group, Timepoint
+  as well as the original four), auto-matches column aliases ("date",
+  "condition", "tank", …), shows "N of M sessions matched" with the
+  unmatched session names, and repopulates after reopening a project.
+  Individual ID is shown disabled: the join is per session (D-010).
+- **Metrics screen** gained a search box (name or ID), presets (standard
+  locomotor, thigmotaxis & space use, social dynamics, all), a
+  "Selected n / 34" counter, and a note that diagnostics always run.
+
+- **Zone canvas is usable.** Selected vertices are joined by edges and
+  shaded once they form a polygon; saved zones are shown shaded with their
+  names; the wheel zooms, middle-drag pans and Fit resets; Ctrl+Z / Undo
+  point removes the last vertex; Rectangle and Circle tools create a zone by
+  dragging; custom vertices can be dragged. A polygon is still finished with
+  Save Zone (the old right-click-to-finish handling never existed here).
+
+- **Wizard sidebar shows stage status and Next is gated.** Each stage gets
+  ✓ / ⚠ / ✗ / ○ with a tooltip explaining it (`ui/store/stage_status.py`);
+  Next stays disabled, with a reason, while Project, Sessions or Metrics are
+  empty or Calibration is invalid. Creating or opening a project now moves
+  on to Sessions. `WizardSidebar.mark_complete` was never called before.
+
+- **`Engine.run(n_workers=N)` now runs sessions in parallel** (spawned
+  processes; workers rebuild the Engine from the serialised manifest and
+  stream progress events back over a queue). The Processing screen has a
+  Workers control (default 1). On the four-session test fixture the pool
+  is slower than sequential because process start-up dominates, so use it
+  for long sessions.
+- **Cancel now takes effect inside a session.** `Engine.run(cancel_check=...)`
+  is polled between sessions, preprocessing steps and metrics; the GUI's
+  Cancel button passes it (previously it was only noticed at stage
+  boundaries, so a long session ran to completion).
+
+- **Preprocessed-session cache is now wired in.** `Engine(manifest,
+  cache_dir=...)` stores each session's `PreprocessedSession` and reuses it
+  when the session files (path, size, mtime) and the preprocessing,
+  calibration and zone settings are unchanged, so previewing and then
+  exporting no longer re-imports and re-preprocesses every session. The GUI
+  uses `<project>/.t2d_cache`; the CLI opts in with `track2data run
+  --cache-dir`. `CacheStore` gained pickled object entries; corrupt entries
+  are treated as misses.
+
 - **Opt-in data-derived bout/visit/dwell thresholds (Sibly et al. 1990
   log-survivorship bout-criterion interval).** New module
   `track2data/metrics/bouts.py` fits a two-segment ("broken-stick") line
@@ -155,6 +216,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`master_fish_by_frame.csv` is written in chunks** without the extra
+  `copy()` and unconditional re-sort, halving traced peak memory on a
+  2.16 M-row table (133 MB to 67 MB; output byte-identical, same speed).
+  The Excel exporter continues the per-frame table on "Fish by Frame 2", ...
+  instead of failing past Excel's 1,048,576-row sheet limit.
+
 - **Second reference-audit pass: primary citations corrected on 11
   metrics, supporting references added to ~20 more.** An external
   audit resolved every DOI in the repo against Crossref and found none
@@ -278,6 +345,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   user confirmation step.
 
 ### Fixed
+
+- **Parameter screens no longer lose edits.** Calibration, Preprocessing,
+  Metadata mapping and Metrics had "Apply" buttons; changing a value and
+  navigating away silently discarded it. Edits now auto-commit after a
+  200 ms pause and `MainWindow` flushes the outgoing screen on navigation.
+  Preprocessing also stopped resetting `identity_switch`, `jump.pct_mult`,
+  `smoothing.polyorder` and `coverage.min_track_frames` to defaults on
+  every apply, and screens now read the store when constructed.
+- **Preprocessing screen exposes identity-switch correction** (default OFF,
+  with a risk warning) and the `idtracker_velocity_threshold` jump method.
+
+- **Zone metrics no longer fabricate per-animal results on identity-free
+  sessions.** Z-3, Z-4, Z-5, Z-6, Z-7 and Z-9 follow an animal across
+  frames, so they now require identity and are skipped; Z-1, Z-2 and Z-8
+  (pure occupancy) are emitted pooled, with no `individual_id` column.
+
+- **`*_bl` columns no longer depend on the calibration mode.** The tracker's
+  body length is now carried into every mode, so Custom and Session
+  calibration also report body lengths.
+- **Body-length-normalised metrics (`path_length_bl`, `mean_speed_bl_s`,
+  `mean_nnd_bl`) were always NaN** under the recommended Body Length
+  calibration, because they were computed only when `px_per_cm` was set
+  and that mode leaves it unset. They are now `value_px / body_length_px`,
+  independent of `px_per_cm`. `PreprocessedSession` gains `body_length_px`
+  and `body_length_in_px()`; `*_cm` columns stay NaN without `px_per_cm`.
 
 The following were found by a review of the metrics work above, before
 any of it shipped in a release. The first six produced wrong numbers or

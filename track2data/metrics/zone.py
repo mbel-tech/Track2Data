@@ -1,22 +1,17 @@
 """Zone metrics (Z-1 Time-in-zone, Z-3 Zone-visit-count).
 
-KNOWN GAP -- every metric in this module declares
-``requires_identity = False``, yet all nine emit an ``individual_id``
-column and index by animal slot ``k``. On an identity-free session that
-slot is a per-frame detection index rather than an animal, so the
-per-individual breakdown does not mean what the column name says. The
-occupancy-style metrics (Z-1, Z-2, Z-3, Z-5, Z-8, Z-9) at least stay
-correct once summed over individuals; Z-4 (transitions), Z-6 (latency to
-first entry) and Z-7 (transition matrix / sequence entropy) need the
-animal to be the same throughout and have no such reading.
+Identity-free sessions -- on such a session the row index is a per-frame
+detection slot, not an animal. Only pure occupancy survives that:
 
-They are left ungated on purpose, as a scoped decision rather than an
-oversight: correcting them properly means emitting pooled rows instead of
-per-individual rows on identity-free sessions, which changes the output
-shape of six metrics. Tracked in docs/ROADMAP.md and
-docs/METRICS_SPEC.md section 4.5; do not "fix" this by flipping the flags
-alone, which would simply make all zone analysis unavailable for such a
-session.
+* Z-1, Z-2 and Z-8 set ``pools_when_identity_free``: the engine computes
+  them on a ``pooled_view`` (every slot treated as one long track) and
+  emits one row per zone with no ``individual_id``.
+* Z-3, Z-4, Z-5, Z-6, Z-7 and Z-9 follow a slot across frames (visits,
+  transitions, events, latency, dwell), so a slot swap fabricates or
+  breaks them; they declare ``requires_identity = True`` and the engine
+  skips them for such sessions.
+
+See DECISIONS.md D-016 and docs/METRICS_SPEC.md section 4.5.
 """
 
 from __future__ import annotations
@@ -43,6 +38,30 @@ from track2data.metrics.references import (
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 _EMPTY_ZONE_VALUE = ""
+
+
+class _PooledView:
+    """Read-only stand-in for a PreprocessedSession with all slots stacked.
+
+    Each detection slot's zone column is appended in time, giving one
+    pseudo-animal of ``n_frames * n_animals`` frames, so occupancy
+    fractions computed on it equal the mean over slots.
+    """
+
+    def __init__(self, psess: object) -> None:
+        self.session_id: str = psess.session_id  # type: ignore[attr-defined]
+        self.fps: float = psess.fps  # type: ignore[attr-defined]
+        n_animals: int = psess.n_animals  # type: ignore[attr-defined]
+        self.n_animals = 1
+        self.n_frames: int = psess.n_frames * n_animals  # type: ignore[attr-defined]
+        for attr in ("main_zone", "sec_zone"):
+            arr = getattr(psess, attr, None)
+            setattr(self, attr, None if arr is None else arr.T.reshape(-1, 1))
+
+
+def pooled_view(psess: object) -> _PooledView:
+    """Pooled single-track view of *psess* for identity-free zone metrics."""
+    return _PooledView(psess)
 
 
 def _collect_zone_arrays(psess: object) -> list[np.ndarray]:
@@ -202,6 +221,7 @@ class TimeInZone(Metric):
     level = "zone"
     priority = "primary"
     requires_identity = False
+    pools_when_identity_free = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",
@@ -296,7 +316,7 @@ class ZoneVisitCount(Metric):
     label = "Zone visit count"
     level = "zone"
     priority = "primary"
-    requires_identity = False
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",
@@ -458,6 +478,7 @@ class AreaCorrectedOccupancy(Metric):
     level = "zone"
     priority = "primary"
     requires_identity = False
+    pools_when_identity_free = True
     # Z-8 (Jacobs' D) is a bias-corrected, bounded [-1, +1] form of the
     # same use-vs-availability idea; this raw ratio stays unbounded and
     # asymmetric, so it can't be meaningfully averaged across animals or
@@ -611,7 +632,7 @@ class ZoneTransitions(Metric):
     label = "Zone Transitions"
     level = "zone"
     priority = "primary"
-    requires_identity = False
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "from_zone",
@@ -778,7 +799,7 @@ class Z5EntryExitEvents(Metric):
     label = "Zone Entry/Exit Events"
     level = "zone"
     priority = "optional"
-    requires_identity = False
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",
@@ -951,7 +972,7 @@ class Z6LatencyToFirstEntry(Metric):
     label = "Latency to First Entry"
     level = "zone"
     priority = "optional"
-    requires_identity = False
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",
@@ -1077,7 +1098,7 @@ class ZoneTransitionMatrix(Metric):
     label = "Zone Transition Matrix & Sequence Entropy"
     level = "zone"
     priority = "primary"
-    requires_identity = False
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "individual_id",
@@ -1230,6 +1251,7 @@ class ZonePreferenceIndex(Metric):
     level = "zone"
     priority = "primary"
     requires_identity = False
+    pools_when_identity_free = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",
@@ -1362,7 +1384,7 @@ class ZoneDwellTimeDistribution(Metric):
     label = "Zone Dwell-Time Distribution"
     level = "zone"
     priority = "optional"
-    requires_identity = False
+    requires_identity = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "zone_name",

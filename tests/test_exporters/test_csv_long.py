@@ -339,3 +339,47 @@ class TestCsvLongMetricMergeKeys:
         assert len(df) == 1
         assert df.iloc[0]["mean_nnd_px"] == pytest.approx(5.0)
         assert df.iloc[0]["mean_polarisation"] == pytest.approx(0.5)
+
+
+# ── PERF-04: bounded-memory per-frame export ──────────────────────────────────
+
+
+def _big_fish_df(n: int) -> pd.DataFrame:
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    return pd.DataFrame(
+        {
+            "session_id": ["s"] * n,
+            "individual_id": np.repeat([0, 1], n // 2),
+            "frame": np.tile(np.arange(n // 2), 2),
+            "x": rng.random(n),
+            "y": rng.random(n),
+        }
+    )
+
+
+def test_chunked_write_is_byte_identical_to_single_write(tmp_path: Path) -> None:
+    from track2data.exporters.csv_long import _write_csv
+
+    df = _big_fish_df(1000)
+    a = _write_csv(df, tmp_path / "a.csv")
+    b = _write_csv(df, tmp_path / "b.csv", chunksize=100)
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_export_does_not_mutate_the_payload_frame(tmp_path: Path) -> None:
+    fish = _make_fish_frame_df()
+    before = fish.copy()
+    from track2data.exporters.csv_long import _sorted_by
+
+    out = _sorted_by(fish, ["session_id", "individual_id", "frame"])
+    pd.testing.assert_frame_equal(fish, before)  # unsorted input left untouched
+    assert list(out["frame"]) == [0, 1, 2]
+
+
+def test_already_sorted_frame_is_not_copied() -> None:
+    from track2data.exporters.csv_long import _sorted_by
+
+    df = _big_fish_df(10)
+    assert _sorted_by(df, ["session_id", "individual_id", "frame"]) is df

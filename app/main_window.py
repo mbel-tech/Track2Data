@@ -12,8 +12,8 @@ Implements the QMainWindow shell described in UI_DESIGN.md §3:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -47,6 +47,8 @@ from ui.zones_screen import ZonesScreen
 
 APP_NAME = "Track2Data"
 APP_VERSION = __version__
+#: Step-by-step guide with screenshots (docs/guide/ in the repository).
+GUIDE_URL = "https://github.com/mbel-tech/Track2Data/tree/main/docs/guide"
 
 
 class RunLogDock(QWidget):
@@ -135,6 +137,20 @@ class MainWindow(QMainWindow):
         # ── wire signals ──────────────────────────────────────────────────
         self._sidebar.stage_page_selected.connect(self._go_to_page)
         self._store.projectChanged.connect(self._update_statusbar)
+        self._store.sessionsChanged.connect(self._update_statusbar)
+        self._store.projectChanged.connect(self._on_project_opened)
+        for sig in (
+            self._store.projectChanged,
+            self._store.sessionsChanged,
+            self._store.calibrationChanged,
+            self._store.zonesChanged,
+            self._store.metadataChanged,
+            self._store.preprocessChanged,
+            self._store.metricsChanged,
+            self._store.exportChanged,
+            self._store.runResultsChanged,
+        ):
+            sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
         # taskStarted/taskCancelled are deliberately NOT forwarded onto
         # ProjectStore's own signals (see ProjectStore's docstring) --
@@ -145,6 +161,7 @@ class MainWindow(QMainWindow):
 
         # Start on page 0.
         self._go_to_page(0)
+        self._refresh_stage_status()
 
     # ── sidebar header ──────────────────────────────────────────────────────
 
@@ -222,7 +239,7 @@ class MainWindow(QMainWindow):
             QAction("&About Track2Data", self, triggered=self._action_about)
         )
         help_menu.addAction(
-            QAction("Open &documentation", self)  # Phase 4: open browser
+            QAction("Open &user guide", self, triggered=self._action_open_guide)
         )
 
     # ── toolbar ─────────────────────────────────────────────────────────────
@@ -271,10 +288,45 @@ class MainWindow(QMainWindow):
         n = self._stack.count()
         if not (0 <= page_index < n):
             return
+        self._flush_current_page()
         self._stack.setCurrentIndex(page_index)
         self._sidebar.sync_to_page(page_index)
         self._back_action.setEnabled(page_index > 0)
-        self._next_action.setEnabled(page_index < n - 1)
+        self._update_next_action()
+
+    def _on_project_opened(self) -> None:
+        """Creating/opening a project moves on to Sessions instead of leaving
+        the user on a screen whose only change is a small status label."""
+        if self._store.has_project and self._stack.currentIndex() == 0:
+            self._go_to_page(1)
+
+    def _refresh_stage_status(self) -> None:
+        from app.navigation import STAGES
+        from ui.store.stage_status import compute_stage_statuses
+
+        self._page_statuses = compute_stage_statuses(
+            self._store.manifest, has_run_results=self._store.run_results is not None
+        )
+        for stage_index, (_label, first_page) in enumerate(STAGES):
+            info = self._page_statuses[first_page]
+            self._sidebar.set_status(stage_index, info.status, info.message)
+        self._update_next_action()
+
+    def _update_next_action(self) -> None:
+        from ui.store.stage_status import next_blocker
+
+        page = self._stack.currentIndex()
+        last = self._stack.count() - 1
+        statuses = getattr(self, "_page_statuses", None)
+        reason = next_blocker(statuses, page) if statuses else None
+        self._next_action.setEnabled(page < last and reason is None)
+        self._next_action.setToolTip(reason or "Go to the next step")
+
+    def _flush_current_page(self) -> None:
+        """Commit the outgoing screen's debounced edits before leaving it."""
+        flush = getattr(self._stack.currentWidget(), "flush", None)
+        if callable(flush):
+            flush()
 
     def _go_back(self) -> None:
         self._go_to_page(self._stack.currentIndex() - 1)
@@ -320,6 +372,7 @@ class MainWindow(QMainWindow):
         if not self._store.has_project:
             QMessageBox.warning(self, "Validate pipeline", "No project is open.")
             return
+        self._flush_current_page()
 
         from track2data.api import Engine
 
@@ -354,6 +407,9 @@ class MainWindow(QMainWindow):
     def _action_export(self) -> None:
         # Phase 2+: calls exporters
         self._go_to_page(9)  # jump to Export screen
+
+    def _action_open_guide(self) -> None:
+        QDesktopServices.openUrl(QUrl(GUIDE_URL))
 
     def _action_about(self) -> None:
         QMessageBox.about(

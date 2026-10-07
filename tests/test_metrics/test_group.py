@@ -49,6 +49,7 @@ def make_psess(
     n_animals: int = 2,
     px_per_cm: float | None = None,
     body_length_cm: np.ndarray | None = None,
+    body_length_px: np.ndarray | None = None,
     fps: float = 25.0,
 ) -> PreprocessedSession:
     """Build a minimal PreprocessedSession for group metric tests."""
@@ -84,6 +85,7 @@ def make_psess(
         kinematics=kine,
         px_per_cm=px_per_cm,
         body_length_cm=body_length_cm,
+        body_length_px=body_length_px,
         report=PreprocessReport(),
     )
 
@@ -166,6 +168,14 @@ class TestNearestNeighbourDistance:
         psess = make_psess(xy=xy, px_per_cm=10.0, body_length_cm=np.array([5.0, 5.0]))
         df = NearestNeighbourDistance().compute(psess)
         assert df["mean_nnd_bl"].values[0] == pytest.approx(2.0, rel=1e-3)
+
+    def test_nnd_bl_without_px_per_cm(self) -> None:
+        xy = np.zeros((10, 2, 2), dtype=np.float64)
+        xy[:, 1, 0] = 100.0
+        psess = make_psess(xy=xy, body_length_px=np.array([50.0, 50.0]))
+        df = NearestNeighbourDistance().compute(psess)
+        assert df["mean_nnd_bl"].values[0] == pytest.approx(2.0, rel=1e-3)
+        assert np.isnan(df["mean_nnd_cm"].values[0])
 
     def test_single_animal_returns_nan(self) -> None:
         """With only 1 animal, NND is undefined — output should be NaN or empty."""

@@ -47,7 +47,7 @@ def test_add_session_registers_ref_immediately(qtbot, store, tmp_path: Path) -> 
 def test_add_session_fills_in_has_stable_identities_on_probe_success(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_probe_session(folder: Path) -> Session:
         return Session(
             session_id=folder.name,
             folder=folder,
@@ -59,7 +59,7 @@ def test_add_session_fills_in_has_stable_identities_on_probe_success(
             raw_xy=np.zeros((10, 1, 2)),
         )
 
-    monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
 
     folder = tmp_path / "session_a"
     folder.mkdir()
@@ -76,10 +76,10 @@ def test_add_session_fills_in_has_stable_identities_on_probe_success(
 def test_add_session_leaves_has_stable_identities_none_on_probe_failure(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_probe_session(folder: Path) -> Session:
         raise RuntimeError("not a real session folder")
 
-    monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
 
     logged: list[str] = []
     store.runLogAppended.connect(logged.append)
@@ -133,7 +133,7 @@ def test_session_facts_unknown_id_returns_none(store) -> None:
 def test_session_facts_populated_on_probe_success(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_probe_session(folder: Path) -> Session:
         return Session(
             session_id=folder.name,
             folder=folder,
@@ -150,7 +150,7 @@ def test_session_facts_populated_on_probe_success(
             background_image_path=folder / "preprocessing" / "background.png",
         )
 
-    monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
 
     folder = tmp_path / "session_a"
     folder.mkdir()
@@ -179,10 +179,10 @@ def test_session_facts_populated_on_probe_success(
 def test_session_facts_stays_none_on_probe_failure(
     qtbot, monkeypatch, store, tmp_path: Path
 ) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_probe_session(folder: Path) -> Session:
         raise RuntimeError("not a real session folder")
 
-    monkeypatch.setattr("track2data.readers.read_session", fake_read_session)
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
 
     folder = tmp_path / "session_a"
     folder.mkdir()
@@ -197,7 +197,7 @@ def test_session_facts_stays_none_on_probe_failure(
 
 
 def test_session_facts_cleared_on_new_project(store, tmp_path: Path) -> None:
-    def fake_read_session(folder: Path) -> Session:
+    def fake_probe_session(folder: Path) -> Session:
         return Session(
             session_id=folder.name,
             folder=folder,
@@ -210,7 +210,7 @@ def test_session_facts_cleared_on_new_project(store, tmp_path: Path) -> None:
         )
 
     store._session_facts["session_a"] = SessionFacts.from_session(
-        fake_read_session(tmp_path / "session_a")
+        fake_probe_session(tmp_path / "session_a")
     )
 
     store.new_project("new_project", tmp_path)
@@ -268,3 +268,35 @@ def test_identity_probes_cleared_on_open_project(store, tmp_path: Path) -> None:
 
     # Verify probes are cleared
     assert store._identity_probes == {}
+
+
+def test_open_project_reprobes_existing_session_folders(
+    qtbot, monkeypatch, store, tmp_path: Path
+) -> None:
+    probed: list[str] = []
+
+    def fake_probe_session(folder: Path) -> Session:
+        probed.append(folder.name)
+        return Session(
+            session_id=folder.name,
+            folder=folder,
+            reader="fake",
+            video=VideoInfo(fps=25.0, n_frames=10, width_px=100, height_px=100),
+            n_animals=1,
+            trajectory_variant="wo_gaps",
+            has_stable_identities=True,
+            raw_xy=np.zeros((10, 1, 2)),
+        )
+
+    monkeypatch.setattr("track2data.readers.probe_session", fake_probe_session)
+    folder = tmp_path / "session_a"
+    folder.mkdir()
+    store.add_session(folder)
+    qtbot.waitUntil(lambda: store.session_facts("session_a") is not None, timeout=2000)
+    path = store.save_project()
+
+    probed.clear()
+    store.open_project(path)
+    assert store.session_facts("session_a") is None  # cleared until re-probed
+    qtbot.waitUntil(lambda: store.session_facts("session_a") is not None, timeout=2000)
+    assert probed == ["session_a"]

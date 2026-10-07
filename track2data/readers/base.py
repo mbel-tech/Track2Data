@@ -35,3 +35,13 @@ class SessionReader(ABC):
         Must not modify any file inside *folder* (FR-IMP-5).
         Raises DataValidationError on unrecoverable format problems.
         """
+
+    def probe(self, folder: Path) -> Session:
+        """
+        Read only what the GUI needs to describe *folder* (frame count, fps,
+        animals, identity flags, calibration/ROI hints, background image).
+
+        Readers override this to skip expensive optional artefacts; the
+        default falls back to a full ``read()`` so every reader stays valid.
+        """
+        return self.read(folder)

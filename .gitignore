@@ -54,3 +54,9 @@ docs_from_idtracker.ai/
 
 # GUI driver screenshots (.claude/skills/run-track2data/driver.py smoke)
 artifacts/
+
+# Local git worktrees
+.worktrees/
+
+# Per-project preprocessed-session cache
+.t2d_cache/

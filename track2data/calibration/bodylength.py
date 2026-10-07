@@ -114,4 +114,6 @@ def apply_bodylength_calibration(
     # module's docstring for why length_unit is never consumed for
     # conversion in this mode.
     body_length_cm = body_length_px.copy()
-    return dataclasses.replace(psess, body_length_cm=body_length_cm)
+    return dataclasses.replace(
+        psess, body_length_cm=body_length_cm, body_length_px=body_length_px.copy()
+    )

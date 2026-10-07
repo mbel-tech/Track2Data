@@ -32,6 +32,7 @@ Widgets:
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -166,7 +167,8 @@ class ZonesScreen(QWidget):
 
         # ── interactive canvas: click points to build a zone polygon ────
         canvas_label = QLabel(
-            "Click points below to select them as zone vertices, in order:"
+            "Click points (or use the Rectangle / Circle tools) to outline a zone. "
+            "Saved zones are shown shaded."
         )
         canvas_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
         root.addWidget(canvas_label)
@@ -180,6 +182,32 @@ class ZonesScreen(QWidget):
         self._custom_point_btn.setCheckable(True)
         self._custom_point_btn.toggled.connect(self._canvas.set_custom_point_mode)
         canvas_btn_row.addWidget(self._custom_point_btn)
+
+        # Shape tools: markers (default), or drag a rectangle / circle.
+        self._tool_buttons: dict[str, QPushButton] = {}
+        tool_group = QButtonGroup(self)
+        tool_group.setExclusive(True)
+        for tool, text, tip in (
+            ("points", "Points", "Click markers in order to build a polygon"),
+            ("rect", "Rectangle", "Drag from one corner to the opposite corner"),
+            ("circle", "Circle", "Drag from the centre outwards"),
+        ):
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setToolTip(tip)
+            btn.setChecked(tool == "points")
+            btn.clicked.connect(lambda _checked=False, t=tool: self._canvas.set_tool(t))
+            tool_group.addButton(btn)
+            canvas_btn_row.addWidget(btn)
+            self._tool_buttons[tool] = btn
+        self._undo_btn = QPushButton("Undo point")
+        self._undo_btn.setToolTip("Remove the last vertex (Ctrl+Z)")
+        self._undo_btn.clicked.connect(self._canvas.undo_last_point)
+        canvas_btn_row.addWidget(self._undo_btn)
+        self._fit_btn = QPushButton("Fit")
+        self._fit_btn.setToolTip("Fit the image to the view. Wheel = zoom, middle-drag = pan.")
+        self._fit_btn.clicked.connect(self._canvas.fit_to_view)
+        canvas_btn_row.addWidget(self._fit_btn)
         canvas_btn_row.addStretch()
         root.addLayout(canvas_btn_row)
 
@@ -274,6 +302,7 @@ class ZonesScreen(QWidget):
         self._zone_list.clear()
         if self._store is None or self._store.manifest is None:
             self._count_label.setText("0 zones loaded")
+            self._canvas.set_saved_zones([])
             return
         rois = self._store.manifest.zones.rois
         for roi in rois:
@@ -286,6 +315,7 @@ class ZonesScreen(QWidget):
             self._zone_list.addItem(f"{roi.name}  [{label_for(roi.level)}]")
         n = len(rois)
         self._count_label.setText(f"{n} zone{'s' if n != 1 else ''} loaded")
+        self._canvas.set_saved_zones(rois)
 
     def _refresh_mismatch_warning(self) -> None:
         if self._store is None or self._store.manifest is None:

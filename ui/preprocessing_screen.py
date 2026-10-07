@@ -1,12 +1,14 @@
 """
 Stage 6 — Preprocessing configuration screen (M3 real widgets).
 
-Four QGroupBox sections:
-  Gap Fill · Jump Detection · Smoothing · Coverage Gate
+Five QGroupBox sections:
+  Gap Fill · Jump Detection · Identity Switch · Smoothing · Coverage Gate
 Each group's own "Enabled" QCheckBox is the single source of truth for
 whether that step runs -- the QGroupBox itself is not checkable (see
 _apply()'s comment for why).
-Apply button → store.update_preprocess(PreprocessConfig(...))
+Edits auto-commit (debounced) → store.update_preprocess(...); MainWindow
+calls flush() when the screen is left. Fields the screen has no widget for
+are preserved via model_copy.
 """
 
 from __future__ import annotations
@@ -18,21 +20,13 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QLabel,
-    QMessageBox,
-    QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from track2data.core.models import (
-    GapFillCfg,
-    JumpCfg,
-    PreprocessConfig,
-    SmoothCfg,
-    ValidateCfg,
-)
+from ui.widgets.autocommit import AutoCommit
 
 #: engine literal -> pretty label. Every value is enumerated explicitly
 #: (no ui.widgets.labels.label_for() fallback needed) since both
@@ -46,6 +40,7 @@ from track2data.core.models import (
 _JUMP_METHOD_LABELS = {
     "sd_multiple": "Standard-deviation multiple",
     "percentile": "Percentile",
+    "idtracker_velocity_threshold": "idtracker.ai velocity threshold",
 }
 _SMOOTH_METHOD_LABELS = {
     "none": "None",
@@ -60,10 +55,13 @@ class PreprocessingScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        self._auto = AutoCommit(self._apply, self)
         self._build_ui()
+        self._wire_autocommit()
         if store is not None:
             store.preprocessChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
+            self._load_from_store()
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -124,6 +122,34 @@ class PreprocessingScreen(QWidget):
         jump_form.addRow("Percentile:", self._jump_pct)
         layout.addWidget(self._jump_group)
 
+        # ── Identity Switch ───────────────────────────────────────────────
+        self._idsw_group = QGroupBox("Identity Switch Correction")
+        idsw_form = QFormLayout(self._idsw_group)
+        warn = QLabel(
+            "Experimental and OFF by default. It re-assigns identities from "
+            "geometry alone and, on real idtracker.ai recordings, can re-permute "
+            "a large share of frames and inflate path length. Enable only if you "
+            "understand and accept that risk."
+        )
+        warn.setWordWrap(True)
+        warn.setStyleSheet("color: #b45309;")
+        self._idsw_enabled = QCheckBox("Enabled")
+        self._idsw_ratio = QDoubleSpinBox()
+        self._idsw_ratio.setRange(1.0, 100.0)
+        self._idsw_ratio.setSingleStep(0.1)
+        self._idsw_ratio.setValue(1.5)
+        self._idsw_hungarian = QCheckBox("Tier 2: Hungarian assignment")
+        self._idsw_hungarian.setChecked(True)
+        self._idsw_window = QSpinBox()
+        self._idsw_window.setRange(1, 500)
+        self._idsw_window.setValue(5)
+        idsw_form.addRow(warn)
+        idsw_form.addRow("", self._idsw_enabled)
+        idsw_form.addRow("Tier 1 ratio:", self._idsw_ratio)
+        idsw_form.addRow("", self._idsw_hungarian)
+        idsw_form.addRow("Consolidation window:", self._idsw_window)
+        layout.addWidget(self._idsw_group)
+
         # ── Smoothing ─────────────────────────────────────────────────────
         self._smooth_group = QGroupBox("Smoothing")
         smooth_form = QFormLayout(self._smooth_group)
@@ -155,55 +181,83 @@ class PreprocessingScreen(QWidget):
         scroll.setWidget(inner_w)
         outer.addWidget(scroll, 1)
 
-        # ── Apply button ──────────────────────────────────────────────────
-        apply_btn = QPushButton("Apply")
-        apply_btn.setFixedWidth(100)
-        apply_btn.clicked.connect(self._apply)
-        outer.addWidget(apply_btn)
+    def _wire_autocommit(self) -> None:
+        for w in (
+            self._gap_enabled, self._jump_enabled, self._idsw_enabled,
+            self._idsw_hungarian, self._smooth_enabled,
+        ):
+            w.toggled.connect(self._auto.trigger)
+        for w in (
+            self._gap_max, self._jump_sd, self._jump_pct, self._idsw_ratio,
+            self._idsw_window, self._smooth_window, self._cov_max_nan,
+        ):
+            w.valueChanged.connect(self._auto.trigger)
+        for w in (self._jump_method, self._smooth_method):
+            w.currentIndexChanged.connect(self._auto.trigger)
+
+    def flush(self) -> None:
+        """Commit any pending edit now (called when the screen is left)."""
+        self._auto.flush()
 
     # ── slots ──────────────────────────────────────────────────────────────
 
     def _apply(self) -> None:
         # Reads each group's own inner "Enabled" QCheckBox, never a
-        # QGroupBox.isChecked() -- the three QGroupBoxes above used to
-        # also be setCheckable(True), giving each section *two*
-        # checkboxes (the group's own title checkbox, and this inner
-        # one) that could show disagreeing states, since only the
-        # inner one was ever read here. Removed the redundant one
-        # rather than start reading a second control for the same
-        # value.
-        if self._store is None:
-            QMessageBox.information(self, "Info", "No project open.")
+        # QGroupBox.isChecked() -- the groups are deliberately not
+        # checkable (two checkboxes per section could disagree).
+        # model_copy() on the current config so fields with no widget
+        # here (jump.pct_mult/replacement, smoothing.polyorder,
+        # coverage.min_track_frames) are never reset to defaults.
+        if self._store is None or self._store.manifest is None:
             return
-        try:
-            cfg = PreprocessConfig(
-                gap_fill=GapFillCfg(
-                    enabled=self._gap_enabled.isChecked(),
-                    max_gap_frames=self._gap_max.value(),
+        cur = self._store.manifest.preprocess
+        cfg = cur.model_copy(
+            update={
+                "gap_fill": cur.gap_fill.model_copy(
+                    update={
+                        "enabled": self._gap_enabled.isChecked(),
+                        "max_gap_frames": self._gap_max.value(),
+                    }
                 ),
-                jump=JumpCfg(
-                    enabled=self._jump_enabled.isChecked(),
-                    method=self._jump_method.currentData(),  # type: ignore[arg-type]
-                    sd_mult=self._jump_sd.value(),
-                    percentile=self._jump_pct.value(),
+                "jump": cur.jump.model_copy(
+                    update={
+                        "enabled": self._jump_enabled.isChecked(),
+                        "method": self._jump_method.currentData(),
+                        "sd_mult": self._jump_sd.value(),
+                        "percentile": self._jump_pct.value(),
+                    }
                 ),
-                smoothing=SmoothCfg(
-                    enabled=self._smooth_enabled.isChecked(),
-                    method=self._smooth_method.currentData(),  # type: ignore[arg-type]
-                    window=self._smooth_window.value(),
+                "identity_switch": cur.identity_switch.model_copy(
+                    update={
+                        "enabled": self._idsw_enabled.isChecked(),
+                        "tier1_ratio": self._idsw_ratio.value(),
+                        "tier2_hungarian": self._idsw_hungarian.isChecked(),
+                        "consolidate_window": self._idsw_window.value(),
+                    }
                 ),
-                coverage=ValidateCfg(
-                    max_pct_na_per_individual=self._cov_max_nan.value(),
+                "smoothing": cur.smoothing.model_copy(
+                    update={
+                        "enabled": self._smooth_enabled.isChecked(),
+                        "method": self._smooth_method.currentData(),
+                        "window": self._smooth_window.value(),
+                    }
                 ),
-            )
+                "coverage": cur.coverage.model_copy(
+                    update={"max_pct_na_per_individual": self._cov_max_nan.value()}
+                ),
+            }
+        )
+        if cfg != cur:
             self._store.update_preprocess(cfg)
-        except Exception as exc:
-            QMessageBox.critical(self, "Error", f"Failed to apply preprocessing config:\n{exc}")
 
     def _load_from_store(self) -> None:
         if self._store is None or self._store.manifest is None:
             return
         cfg = self._store.manifest.preprocess
+        with self._auto.suppressed():
+            self._populate(cfg)
+
+    def _populate(self, cfg) -> None:
         self._gap_enabled.setChecked(cfg.gap_fill.enabled)
         self._gap_max.setValue(cfg.gap_fill.max_gap_frames)
         self._jump_enabled.setChecked(cfg.jump.enabled)
@@ -218,3 +272,8 @@ class PreprocessingScreen(QWidget):
             self._smooth_method.setCurrentIndex(idx2)
         self._smooth_window.setValue(cfg.smoothing.window)
         self._cov_max_nan.setValue(cfg.coverage.max_pct_na_per_individual)
+        sw = cfg.identity_switch
+        self._idsw_enabled.setChecked(sw.enabled)
+        self._idsw_ratio.setValue(sw.tier1_ratio)
+        self._idsw_hungarian.setChecked(sw.tier2_hungarian)
+        self._idsw_window.setValue(sw.consolidate_window)
