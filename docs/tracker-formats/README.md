@@ -60,5 +60,9 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 | 7 | AnimalTA CSV | 4 | planned | `animalta_fixed_csv` |
 
 Tier 0 (the scan, detect, confirm and persist foundation, including
-idtracker.ai folder-of-folders) comes first. Everything else, such as FastTrack,
+idtracker.ai folder-of-folders) comes first. **Built so far:** the reader contract
+(options, verification, `discover`), the read-only scan, the persisted reader with
+provenance and pre-flight notes, `ConfirmDraft` and the `list-readers` / `scan` / `add`
+commands. **Still to build in Tier 0:** the store and task runner, the confirm dialog,
+and the GUI driver verbs. The decisions are D-026 to D-031 in `docs/dev/DECISIONS.md`. Everything else, such as FastTrack,
 OCTRON, WCON and the fragment-ID formats, is backlog ordered by ease.

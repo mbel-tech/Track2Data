@@ -1374,16 +1374,19 @@ In `test_reader_contract.py` replace `registry.detect_reader(folder)().read(fold
 
 ---
 
-## PR T0-6: confirm draft and CLI
+## PR T0-6: confirm draft and CLI (built)
 
-**Branch:** `feat/confirm-cli` · **Expanded when T0-5 has merged.**
+**Branch:** `feat/confirm-cli` · **Status:** implemented; this section records the design as built.
 
-**Interfaces.**
+**What was built.**
 
-- `readers/confirm.py`: `ConfirmDraft(result)` with `groups`, `select_reader(name)`, `set_option(key, value)`, `set_session_option(session_id, key, value)`, `set_included(session_id, included)`, `rename(session_id, new_id)`, `problems() -> list[Problem]` (missing required options, duplicate or unsafe ids, nothing selected), and `to_session_refs() -> list[SessionRef]`.
-- CLI: `track2data scan ROOT [--max-depth N] [--json]`, `track2data list-readers [--json]`, `track2data add PROJECT ROOT [--reader NAME] [--option k=v]... [--yes]`; and `track2data/__main__.py` so `py -3.14 -m track2data` works (the console script runs the main checkout's code).
+- `readers/params.py`: `parse_value(spec, text)` and `parse_assignments(parameters, ["name=value", ...])` turn command-line text into typed values. Only the form is checked (a number is a number, a choice is one of the choices); ranges and requiredness stay with `resolve_options`. A malformed assignment, an unknown name or the same name twice is `READER_OPTION_INVALID`, so a typo is never ignored and "last one wins" never hides a mistake.
+- `readers/confirm.py`: `ConfirmDraft(result, existing=...)`, Qt-free. It starts on the best reader of the first group with every session included and the options pre-filled from `Detection.proposed` (each value remembers where it came from). `select_group`, `select_reader` (only a reader that recognised the group; choosing another marks the choice as the user's and starts that reader's options afresh), `set_option` / `set_session_option` (shared or per-session, by the parameter's `scope`; `None` clears), `set_included`, `rename`. `rows` are `SessionRow`s with the original id as the stable handle. `problems()` lists everything between the user and "Add": `NOTHING_SELECTED`, `OPTION_MISSING`, `OPTION_INVALID` (by the reader's own validation), `ID_UNSAFE`, `ID_DUPLICATE` (against the other chosen sessions and against the project). A session already in the project under the same reader (or a legacy entry with none) is left out and flagged; the same folder under another reader is another session. `to_session_refs()` saves the reader, the options that were *given* (not the defaults), who chose it and the confidence.
+- CLI: `track2data list-readers [--json]`, `track2data scan ROOT... [--max-depth N] [--json]`, `track2data add PROJECT ROOT... [--group N] [--reader NAME] [--option NAME=VALUE] [--exclude ID] [--rename OLD=NEW] [--max-depth N] [--yes] [--dry-run]`, and `track2data/__main__.py` so `python -m track2data` runs the code on the current path. `add` shows the suggestion, applies the amendments, refuses with the reader's own wording while a required option is missing, asks for confirmation (`--yes` skips it, `--dry-run` shows the plan), and writes the project only after that. Nothing recognised exits non-zero and lists the file types it did see, and says how to look deeper.
 
-**Tests.** `ConfirmDraft` is plain pytest (no Qt). The CLI uses `click.testing.CliRunner`: a headless scan, confirm and add on a synthetic root writes the right `SessionRef`s into a `.t2d.json`.
+**Deferred.** `lenient_detection` (offering a reader that did *not* recognise the files, reusing the group's candidates) arrives with the first reader that needs it (Tier 1): with only idtracker.ai readers there is nothing meaningful to offer, and a forced reader on files it cannot read only moves the error.
+
+**Verified.** 45 `ConfirmDraft` tests and 29 CLI tests; mutations of the draft (the dedupe rule, `chosen_by`, option reset on a reader change, defaults frozen into the entries, excluded sessions still added, duplicate and unsafe ids, per-session options) and of the commands (no confirmation, ignored flags, a dry run that writes, ...) are each caught.
 
 ---
 
