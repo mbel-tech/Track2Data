@@ -1,6 +1,6 @@
-# Fixing `extract_bboxes.py`
+# Fixing `scripts/extract_bboxes.py`
 
-This is a standalone guide for correcting `extract_bboxes.py` — the script
+This is a standalone guide for correcting `scripts/extract_bboxes.py` — the script
 at this repo's root that extracts per-(frame, identity) bounding-box body
 lengths from an idtracker.ai session's `preprocessing/list_of_blobs.pickle`.
 It is written to be applied to **a copy of the script wherever you actually

@@ -74,13 +74,33 @@ class PathLength(Metric):
         "metric_id",
         "individual_id",
         "path_length_px",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "path_length_cm",
+        "path_length_bl",
     ]
     documentation = MetricDocumentation(
         definition="Total distance travelled by each individual over the session.",
         formula_plain="sum of ||xy[t+1,k] - xy[t,k]|| for non-NaN consecutive frame pairs",
         inputs=["PreprocessedSession.xy"],
-        assumptions=["Post-smoothing xy is used; gaps produce no displacement"],
-        warnings=["Under-smoothed data inflates path length"],
+        assumptions=[
+            "Post-smoothing xy is used; gaps produce no displacement",
+            "Interpolated frames contribute a straight line, which understates "
+            "the real path across a gap -- see D-11's frac_interpolated for how "
+            "much of this value rests on them",
+        ],
+        warnings=[
+            "Under-smoothed data inflates path length. This is not a rounding "
+            "effect but a systematic bias: summing step lengths sums "
+            "|dx| rather than dx, and E[|dx|] > |E[dx]| whenever there is "
+            "positional noise, so the inflation is always upward and grows "
+            "with frame rate (more, shorter steps means a larger share of "
+            "each step is noise). Comparing path length across sessions "
+            "recorded at different frame rates is therefore comparing "
+            "different amounts of inflation -- see sessions.csv.",
+        ],
         citation="Standard kinematics",
         supporting_references=[MARTIN_BATESON_2007],
     )
@@ -150,6 +170,12 @@ class Speed(Metric):
         "mean_speed_px_s",
         "median_speed_px_s",
         "max_speed_px_s",
+        # Emitted unconditionally: NaN when the session is uncalibrated,
+        # rather than absent. A column that appears and disappears with
+        # the project's calibration state cannot be a stable contract for
+        # the exporters, the UI or a downstream script.
+        "mean_speed_cm_s",
+        "mean_speed_bl_s",
     ]
     documentation = MetricDocumentation(
         definition="Mean, median, and maximum speed of each individual over the session.",
@@ -646,8 +672,24 @@ class Acceleration(Metric):
             "max = max(|a[t,k]|) — all NaN frames excluded"
         ),
         inputs=["PreprocessedSession.kinematics.accel_px_s2"],
-        assumptions=["accel_px_s2 is pre-computed by the kinematics pipeline"],
-        warnings=["Remaining jump artefacts inflate max acceleration"],
+        assumptions=[
+            "accel_px_s2 is pre-computed by the kinematics pipeline",
+            "This is the TANGENTIAL acceleration -- the rate of change of "
+            "speed, d|v|/dt -- not the magnitude of the acceleration vector. "
+            "An animal turning at constant speed reports zero here, because "
+            "its speed is not changing; the centripetal component belongs to "
+            "the turning metrics (IL-8, IL-11).",
+            "Undefined, and reported as NaN, while an animal is stationary: "
+            "with no direction of travel there is no tangent to project onto.",
+        ],
+        warnings=[
+            "Remaining jump artefacts inflate max acceleration",
+            "Values depend on PreprocessConfig.kinematics.method. The default "
+            "'savgol' takes one filtered derivative per quantity; the retained "
+            "'forward_difference' differences an already-differenced series, "
+            "which amplifies positional noise twice over and inflates max "
+            "acceleration in particular.",
+        ],
         citation="Standard kinematics",
     )
 
@@ -994,9 +1036,19 @@ class TurnRate(Metric):
             "turn_rate = mean(|dtheta|) * fps (median computed analogously)"
         ),
         inputs=["PreprocessedSession.kinematics.heading_rad"],
-        assumptions=["Heading is well-defined (i.e. speed > small ε)"],
+        assumptions=[
+            "Heading is well-defined (i.e. speed > small ε)",
+            "Frames where the animal did not move carry no heading, so they "
+            "are absent from the denominator rather than counted as a zero "
+            "turn. The reported rate therefore describes moving frames only.",
+        ],
         warnings=[
-            "Stationary frames produce undefined heading; these are skipped",
+            "Stationary frames produce undefined heading; these are skipped. "
+            "This silently thins the sample: an animal that spends most of a "
+            "session still contributes few frames here, and its turn rate is "
+            "estimated from a small and non-random subset of its behaviour. "
+            "Check D-11's frac_measured and IL-4's activity fraction before "
+            "comparing turn rates between animals of very different activity.",
             "Reports only turn RATE (magnitude), discarding direction -- see "
             "IL-11 for a directional / circular-statistics treatment that "
             "also reveals left/right bias",

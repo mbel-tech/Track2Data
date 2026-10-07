@@ -167,7 +167,7 @@ parameterise the following steps, in this order:
 
 ### 5.6 Metric extraction
 
-> **Canonical spec:** see [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md)
+> **Canonical spec:** see [`docs/METRICS_SPEC.md`](../METRICS_SPEC.md)
 > for the implementation-ready definition of every metric ID below
 > (formulas, inputs, outputs, units, edge cases, citations) plus newer
 > IDs (IL-6 acceleration, IL-7 freezing-bout stats, IL-8 turn rate,
@@ -405,7 +405,7 @@ The MVP metric catalogue, all selectable per project:
 
 > The full user-facing workflow — wireframes, per-stage decision
 > branches, exact validation messages, and save/resume behaviour —
-> lives in [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md). The
+> lives in [`docs/USER_WORKFLOW.md`](../USER_WORKFLOW.md). The
 > summary below is the high-level structure only.
 
 **Top-level layout** — a left-rail wizard with seven stages, plus a

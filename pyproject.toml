@@ -12,6 +12,22 @@ dynamic = ["version"]
 description = "Open-source desktop app that turns idtracker.ai output folders into analysis-ready behavioural datasets."
 readme = "README.md"
 license = { text = "MIT" }
+authors = [{ name = "Martina Bellio", email = "m.bellio2199@gmail.com" }]
+keywords = [
+    "animal-behaviour", "behavioural-phenotyping", "collective-behaviour",
+    "idtrackerai", "trajectory-analysis", "zebrafish", "ethology",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Typing :: Typed",
+]
+
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
@@ -32,6 +48,7 @@ dependencies = [
 video = ["av>=12.0"]            # pyav for frame extraction
 zones = ["shapely>=2.0"]        # polygon geometry
 export = ["openpyxl>=3.1", "pyarrow>=15.0"]
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.24"]
 ui = ["PySide6>=6.6"]           # desktop GUI (LGPL — safe for MIT distribution)
 build = ["pyinstaller>=6.0"]    # packaging/track2data.spec (issue #42) -- not needed for
                                  # regular dev/test, only for producing standalone binaries
@@ -40,6 +57,7 @@ dev = [
     "pytest-cov>=5.0",
     "pytest-qt>=4.0",
     "hypothesis>=6.0",
+    "mypy>=1.10",
     "ruff>=0.4",
     "numpy>=1.26",
     "pandas>=2.0",
@@ -59,6 +77,12 @@ dev = [
 [project.scripts]
 track2data     = "track2data.cli:main"
 track2data-gui = "app.main:main"
+
+[project.urls]
+Homepage = "https://github.com/mbel-tech/Track2Data"
+Repository = "https://github.com/mbel-tech/Track2Data"
+Issues = "https://github.com/mbel-tech/Track2Data/issues"
+Changelog = "https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md"
 
 [project.entry-points."track2data.readers"]
 idtrackerai    = "track2data.readers.idtrackerai.reader:IDTrackerAiReader"
@@ -84,6 +108,10 @@ path = "track2data/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["track2data", "app", "ui"]
+# PEP 561 marker. Without it a downstream type checker ignores every
+# annotation in this package, however complete they are -- which was the
+# situation despite ruff's ANN rules requiring them throughout.
+artifacts = ["track2data/py.typed"]
 
 # ── Ruff ───────────────────────────────────────────────────────────────────────
 [tool.ruff]
@@ -100,7 +128,7 @@ ignore = [
 "tests/**" = ["ANN", "S", "RUF012"]  # RUF012: ClassVar annotation not required in test ABC subclasses
 "track2data/core/errors.py" = ["N801", "N818"]  # ImportError_ uses trailing _ to avoid shadowing built-in
 "track2data/core/progress.py" = ["N818"]  # OperationCancelled is a control-flow signal, not an "error"
-"extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
+"scripts/extract_bboxes.py" = ["ANN"]  # utility script; public-API type-annotation policy does not apply
 ".claude/skills/**" = ["ANN"]  # agent tooling (GUI driver), not product surface -- same
                                 # rationale as extract_bboxes.py above. Only ANN is relaxed,
                                 # so real errors (F, E, B, SIM, ...) still gate normally.
@@ -119,9 +147,32 @@ markers = [
     "network: marks tests that call a third-party API (Crossref DOI resolution); excluded in CI, since an outage there is not a defect here. Run with: pytest -m network",
 ]
 
+# ── mypy ───────────────────────────────────────────────────────────────────────
+# Engine only. app/ and ui/ are excluded because PySide6's stubs would
+# dominate the signal, and tests because their fixtures deliberately build
+# partial objects. Ruff's ANN rules already require annotations everywhere;
+# this is what checks they are *correct* -- nothing did before, and
+# `# type: ignore` comments were accumulating unchecked.
+[tool.mypy]
+files = ["track2data"]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
 [tool.coverage.run]
-source = ["track2data"]
+# The whole shipped package, not just the engine. Measuring only
+# track2data/ meant the reported number was widely read as whole-project
+# coverage when tests/test_ui/ and tests/test_app/ ran against no floor at
+# all -- see docs/TECHNICAL_SPEC.md §11 for the policy and the two
+# thresholds CI actually enforces.
+source = ["track2data", "app", "ui"]
 omit = ["track2data/cli.py"]
 
 [tool.coverage.report]
-fail_under = 80
+# The floor for a plain `pytest --cov` run. CI additionally holds the
+# engine and the GUI to their own thresholds from the same coverage data
+# (`coverage report --include=...`), because a well-covered GUI must not
+# be able to mask an engine regression, and the two carry very different
+# consequences when they break.
+fail_under = 85

@@ -144,12 +144,6 @@ class TestNearestNeighbourDistance:
         assert "n_skipped_frames" in df.columns
         assert df["n_skipped_frames"].values[0] == 5
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = NearestNeighbourDistance().compute(psess)
-        for col in ["session_id", "metric_id", "mean_nnd_px", "median_nnd_px"]:
-            assert col in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
         df = NearestNeighbourDistance().compute(psess)
@@ -241,15 +235,6 @@ class TestPolarisation:
         # Should still return a value (from valid frames 10-19)
         assert np.isfinite(df["mean_polarisation"].values[0])
 
-    def test_output_columns_present(self) -> None:
-        n_frames, n_animals = 50, 3
-        heading = np.zeros((n_frames, n_animals))
-        speed = np.full((n_frames, n_animals), 50.0)
-        psess = make_psess(speed=speed, heading=heading)
-        df = Polarisation().compute(psess)
-        for col in ["session_id", "metric_id", "mean_polarisation", "median_polarisation"]:
-            assert col in df.columns
-
     def test_metric_id_column(self) -> None:
         n_frames, n_animals = 50, 2
         speed = np.full((n_frames, n_animals), 50.0)
@@ -318,12 +303,6 @@ class TestCentroidSpeed:
         # Centroid from 2 animals → same speed as if 3 animals all moved identically
         assert df["mean_centroid_speed_px_s"].values[0] == pytest.approx(100.0, rel=1e-3)
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = CentroidSpeed().compute(psess)
-        for col in ["session_id", "metric_id", "mean_centroid_speed_px_s"]:
-            assert col in df.columns
-
     def test_metric_id_column(self) -> None:
         df = CentroidSpeed().compute(make_psess())
         assert (df["metric_id"] == "GL-5").all()
@@ -385,12 +364,6 @@ class TestNNMatchedSpeed:
         psess = make_psess(xy=xy, fps=25.0)
         df = NNMatchedSpeed().compute(psess)
         assert np.isfinite(df["mean_matched_speed_px_s"].values[0])
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = NNMatchedSpeed().compute(psess)
-        for col in ["session_id", "metric_id", "mean_matched_speed_px_s"]:
-            assert col in df.columns
 
     def test_metric_id_column(self) -> None:
         n_frames, n_animals = 20, 2

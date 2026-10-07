@@ -103,3 +103,81 @@ def test_windows_installer_version_is_not_a_hardcoded_literal() -> None:
     assert not re.fullmatch(
         r"\d+\.\d+\.\d+", fallback
     ), f"the #ifndef fallback ({fallback}) looks like a real version; make it obviously local"
+
+
+def test_package_ships_a_py_typed_marker() -> None:
+    """PEP 561: without this file a downstream type checker ignores every
+    annotation in the package, however complete they are.
+
+    Ruff's ANN rules have required annotations throughout since early on, so
+    the work was already done -- it just never reached anyone importing the
+    engine.
+    """
+    import track2data
+
+    marker = Path(track2data.__file__).parent / "py.typed"
+    assert marker.exists(), "track2data/py.typed is missing"
+
+
+def test_py_typed_is_declared_as_a_build_artifact() -> None:
+    """A marker that is not packaged is a marker that does nothing.
+
+    hatchling includes package data by directory, but py.typed is empty and
+    easy to lose in a build reconfiguration, so the declaration is pinned
+    here rather than assumed.
+    """
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject.open("rb") as fh:
+        config = tomllib.load(fh)
+
+    artifacts = config["tool"]["hatch"]["build"]["targets"]["wheel"].get("artifacts", [])
+    assert "track2data/py.typed" in artifacts
+
+
+def test_citation_cff_version_matches() -> None:
+    """CITATION.cff is what GitHub's "Cite this repository" button and Zenodo
+    both read. A stale version there makes every citation of this software
+    name a release that did not produce the results being cited."""
+    text = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    match = re.search(r"^version:\s*(\S+)\s*$", text, re.MULTILINE)
+    assert match, "CITATION.cff has no top-level version field"
+    assert match.group(1) == __version__, (
+        f"CITATION.cff says {match.group(1)}, _version.py says {__version__}"
+    )
+
+
+def test_citation_cff_cites_idtrackerai() -> None:
+    """Track2Data reads idtracker.ai's output and does no tracking of its own.
+    A paper citing this tool without citing the tracker misattributes the
+    part of the pipeline that did the hard work."""
+    text = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    assert "10.1038/s41592-018-0295-5" in text
+
+
+def test_the_docs_site_builder_covers_every_page_the_nav_lists() -> None:
+    """A nav entry with no page is a 404 in a published site, and mkdocs
+    --strict only catches it at build time in CI. This catches it here."""
+    import yaml
+
+    config = yaml.safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+    nav_pages = {
+        page for entry in config["nav"] for page in entry.values()
+    }
+
+    import scripts.build_docs_site as builder
+
+    produced = set(builder.PAGES.values()) | {"api.md", "metrics.md"}
+    assert nav_pages <= produced, (
+        f"mkdocs.yml lists pages the builder does not produce: {nav_pages - produced}"
+    )
+
+
+def test_the_docs_site_sources_all_exist() -> None:
+    """The builder copies from the repo's real documentation. A rename that
+    misses it produces an empty site page rather than an error."""
+    import scripts.build_docs_site as builder
+
+    missing = [str(src) for src in builder.PAGES if not src.exists()]
+    assert not missing, f"build_docs_site.py reads files that do not exist: {missing}"

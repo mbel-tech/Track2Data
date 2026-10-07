@@ -180,3 +180,195 @@ def test_pipeline_passes_velocity_threshold_to_jump_detect() -> None:
     psess = run(session, cfg)
     jump_step = next(s for s in psess.report.steps if s.step_name == "jump_detect")
     assert jump_step.affected_frames >= 1
+
+
+# ── Fragment-guided identity-switch wiring ────────────────────────────────────
+
+
+def _fragments_with_boundary_at(end_frame: int, n_animals: int) -> dict:
+    """Minimal list_of_fragments.json payload with one swap boundary.
+
+    Shaped the way readers/idtrackerai/fragments.py documents the real file:
+    'end_frame' is exclusive, 'identity' is 1-based, and only the keys in
+    FRAGMENT_ALWAYS_PRESENT may be assumed. A fragment whose
+    identity_is_fixed is not True contributes its end_frame as a frame where
+    a swap is physically possible.
+    """
+    return {
+        "n_animals": n_animals,
+        "fragments": [
+            {
+                "identifier": 0,
+                "start_frame": 0,
+                "end_frame": end_frame,
+                "is_an_individual": True,
+                "identity": 1,
+            },
+            {
+                "identifier": 1,
+                "start_frame": end_frame,
+                "end_frame": 60,
+                "is_an_individual": True,
+                "identity_is_fixed": True,
+                "identity": 2,
+            },
+        ],
+    }
+
+
+def _crossing_with_persistent_switch(switch_at: int = 21) -> tuple[np.ndarray, np.ndarray]:
+    """Two animals crossing, labels swapped from *switch_at* onward."""
+    t = np.arange(60, dtype=np.float64)
+    a = np.stack([t * 2.0, np.full(60, 100.0)], axis=1)
+    b = np.stack([120.0 - t * 2.0, np.full(60, 100.0)], axis=1)
+    truth = np.stack([a, b], axis=1)
+    obs = truth.copy()
+    obs[switch_at:, 0, :] = truth[switch_at:, 1, :]
+    obs[switch_at:, 1, :] = truth[switch_at:, 0, :]
+    return truth, obs
+
+
+def test_identity_switch_receives_fragment_boundaries() -> None:
+    """Session.fragments must reach correct_switches, the way the crossing mask
+    already reaches fill_gaps.
+
+    A swap is physically possible only at a fragment boundary, so this is the
+    difference between correcting the real switch and scanning every frame
+    hoping to find it.
+    """
+    switch_at = 21
+    truth, obs = _crossing_with_persistent_switch(switch_at)
+
+    session = _make_session(obs)
+    session = session.model_copy(
+        update={"fragments": _fragments_with_boundary_at(switch_at, n_animals=2)}
+    )
+    cfg = PreprocessConfig(
+        gap_fill=GapFillCfg(enabled=False),
+        jump=JumpCfg(enabled=False),
+        identity_switch=IdSwitchCfg(enabled=True),
+        smoothing=SmoothCfg(enabled=False),
+    )
+
+    psess = run(session, cfg)
+
+    step = next(s for s in psess.report.steps if s.step_name == "identity_switch")
+    assert step.affected_frames > 0
+    np.testing.assert_allclose(psess.xy, truth)
+
+
+def test_identity_switch_without_fragments_still_runs() -> None:
+    """Fragment data is a bonus, never a requirement -- same policy as gap_fill."""
+    switch_at = 21
+    truth, obs = _crossing_with_persistent_switch(switch_at)
+
+    session = _make_session(obs)
+    assert session.fragments is None
+    cfg = PreprocessConfig(
+        gap_fill=GapFillCfg(enabled=False),
+        jump=JumpCfg(enabled=False),
+        identity_switch=IdSwitchCfg(enabled=True),
+        smoothing=SmoothCfg(enabled=False),
+    )
+
+    psess = run(session, cfg)
+
+    np.testing.assert_allclose(psess.xy, truth)
+
+
+# ── jump-replacement mask ─────────────────────────────────────────────────────
+
+
+def test_pipeline_records_which_frames_jump_detect_replaced() -> None:
+    """Previously visible only as an aggregate count in PreprocessReport, so
+    no reviewer could tell which rows the step touched."""
+    xy = np.zeros((60, 1, 2), dtype=np.float64)
+    frames = np.arange(60, dtype=np.float64)
+    xy[:, 0, 0] = frames * 3.0
+    xy[30, 0, 0] += 500.0  # injected jump
+
+    session = _make_session(xy)
+    session = session.model_copy(update={"velocity_threshold_px_frame": 20.0})
+    cfg = PreprocessConfig(
+        gap_fill=GapFillCfg(enabled=False),
+        jump=JumpCfg(
+            enabled=True, method="idtracker_velocity_threshold", replacement="nan"
+        ),
+        identity_switch=IdSwitchCfg(enabled=False),
+        smoothing=SmoothCfg(enabled=False),
+    )
+
+    psess = run(session, cfg)
+
+    assert psess.jump_replaced is not None
+    assert psess.jump_replaced.shape == (60, 1)
+    assert psess.jump_replaced[30, 0]
+    assert psess.jump_replaced.sum() >= 1
+
+
+def test_jump_mask_is_empty_when_jump_detection_is_off() -> None:
+    xy = np.zeros((30, 1, 2), dtype=np.float64)
+    xy[:, 0, 0] = np.arange(30, dtype=np.float64) * 3.0
+
+    psess = run(
+        _make_session(xy),
+        PreprocessConfig(
+            gap_fill=GapFillCfg(enabled=False),
+            jump=JumpCfg(enabled=False),
+            identity_switch=IdSwitchCfg(enabled=False),
+            smoothing=SmoothCfg(enabled=False),
+        ),
+    )
+
+    assert psess.jump_replaced is not None
+    assert not psess.jump_replaced.any()
+
+
+def test_jump_mask_excludes_pre_existing_gaps() -> None:
+    """A frame that was already NaN was not replaced by this step -- the mask
+    must not claim credit for gap_fill's policy."""
+    xy = np.zeros((40, 1, 2), dtype=np.float64)
+    xy[:, 0, 0] = np.arange(40, dtype=np.float64) * 3.0
+    xy[10:15, 0, :] = np.nan
+
+    psess = run(
+        _make_session(xy),
+        PreprocessConfig(
+            gap_fill=GapFillCfg(enabled=False),
+            jump=JumpCfg(enabled=True, method="sd_multiple", replacement="nan"),
+            identity_switch=IdSwitchCfg(enabled=False),
+            smoothing=SmoothCfg(enabled=False),
+        ),
+    )
+
+    assert psess.jump_replaced is not None
+    assert not psess.jump_replaced[10:15, 0].any()
+
+
+def test_jump_mask_is_captured_before_smoothing_moves_everything() -> None:
+    """Smoothing moves every position, so a mask derived at the end of the
+    pipeline would flag the whole session."""
+    xy = np.zeros((60, 1, 2), dtype=np.float64)
+    frames = np.arange(60, dtype=np.float64)
+    xy[:, 0, 0] = frames * 3.0
+    xy[30, 0, 0] += 500.0
+
+    session = _make_session(xy)
+    session = session.model_copy(update={"velocity_threshold_px_frame": 20.0})
+    psess = run(
+        session,
+        PreprocessConfig(
+            gap_fill=GapFillCfg(enabled=False),
+            jump=JumpCfg(
+                enabled=True,
+                method="idtracker_velocity_threshold",
+                replacement="linear_interp",
+            ),
+            identity_switch=IdSwitchCfg(enabled=False),
+            smoothing=SmoothCfg(enabled=True, method="savgol", window=5, polyorder=2),
+        ),
+    )
+
+    assert psess.jump_replaced is not None
+    # A handful of frames, not all 60.
+    assert 0 < int(psess.jump_replaced.sum()) < 10

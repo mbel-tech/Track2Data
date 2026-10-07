@@ -14,7 +14,7 @@ from pathlib import Path
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
 from track2data.readers.idtrackerai.reader import IDTrackerAiReader
-from track2data.readers.idtrackerai_v4 import IDTrackerAiV4Reader, looks_like_v4
+from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
 
 log = logging.getLogger(__name__)
@@ -41,11 +41,13 @@ def _load_entry_points() -> None:
         log.debug("Entry-point discovery failed: %s", exc)
 
 
-# Register built-ins — unified reader has highest priority (20) so it wins
-# over the legacy v5 (10) and v4 (5) readers when the folder is detected.
+# Register built-ins — the unified reader has the highest priority (20) so it
+# wins over the legacy v5 reader (10) when a folder is detected by both. The v4
+# placeholder is deliberately not registered: its detect() is always False, so it
+# could never be selected, and a registered class that only raises is worse than
+# an absent one (DECISIONS D-012). Its module only supplies ``looks_like_v4``.
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
-register(IDTrackerAiV4Reader)
 _load_entry_points()
 
 
@@ -85,22 +87,42 @@ def _require_reader(folder: Path) -> type[SessionReader]:
     )
 
 
-def read_session(folder: Path) -> Session:
-    """Auto-detect the reader for *folder* and return a Session."""
+def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
+    """Auto-detect the reader for *folder* and return a Session.
+
+    ``allow_pickle`` permits trajectory formats whose deserialisation
+    executes code from the file (idtracker.ai's ``trajectories.npy``).
+    Defaults to False.
+
+    The keyword is forwarded only to readers that declare
+    ``accepts_allow_pickle``. External readers written against the original
+    one-argument ``read(folder)`` signature therefore keep working -- but
+    they also never see the flag, so a third-party reader that unpickles is
+    trusting whatever it is pointed at, and should opt in.
+    """
     cls = _require_reader(folder)
-    return cls().read(folder)
+    reader = cls()
+    if cls.accepts_allow_pickle:
+        return reader.read(folder, allow_pickle=allow_pickle)
+    return reader.read(folder)
 
 
-def probe_session(folder: Path) -> Session:
+def probe_session(folder: Path, *, allow_pickle: bool = False) -> Session:
     """Like ``read_session`` but via ``SessionReader.probe`` -- the cheap path
-    the GUI uses to describe a folder without loading every artefact."""
+    the GUI uses to describe a folder without loading every artefact.
+
+    ``allow_pickle`` is the project's consent, passed on exactly as
+    ``read_session`` passes it: a probe opens the same trajectory file.
+    """
     cls = _require_reader(folder)
-    return cls().probe(folder)
+    reader = cls()
+    if cls.accepts_allow_pickle:
+        return reader.probe(folder, allow_pickle=allow_pickle)
+    return reader.probe(folder)
 
 
 __all__ = [
     "IDTrackerAiReader",
-    "IDTrackerAiV4Reader",
     "IDTrackerAiV5Reader",
     "SessionReader",
     "detect_reader",

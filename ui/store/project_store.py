@@ -34,6 +34,17 @@ from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
 
+def _is_pickle_refusal(exc: object) -> bool:
+    """Whether *exc* is the reader declining to execute code from a file.
+
+    Matches on the error code rather than the message: the refusal can
+    surface either directly from the loader or wrapped by the reader's
+    format-fallback walk once nothing inert remains.
+    """
+    code = getattr(exc, "code", "") or ""
+    return code == "IDT_PICKLE_REFUSED" or "IDT_PICKLE_REFUSED" in str(exc)
+
+
 class ProjectStore(QObject):
     """
     Reactive project state container.
@@ -68,6 +79,11 @@ class ProjectStore(QObject):
     taskProgress       = Signal(str, int)      # task_id, percent 0-100
     taskFinished       = Signal(str, object)   # task_id, result-or-exception
     sessionFactsChanged = Signal()             # a SessionFacts entry was added/removed
+    # A session folder could only be read by unpickling, which this project
+    # has not consented to. Carries (session_id, folder) so the view can name
+    # the file it is asking about -- "do you trust this folder?" is not a
+    # question anyone can answer in the abstract.
+    pickleConsentRequired = Signal(str, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -258,7 +274,15 @@ class ProjectStore(QObject):
     def _submit_probe(self, session_id: str, folder: Path) -> None:
         from track2data.readers import probe_session
 
-        task_id = self._tasks.submit(partial(probe_session, folder), lane="probe")
+        # The project's consent travels with the probe: it opens the same
+        # trajectory file a read would, so a pickled-only session must be
+        # refused (and prompt the user) here exactly as it is when it runs.
+        allow_pickle = (
+            self._manifest.security.allow_pickle_trajectories if self._manifest else False
+        )
+        task_id = self._tasks.submit(
+            partial(probe_session, folder, allow_pickle=allow_pickle), lane="probe"
+        )
         self._identity_probes[task_id] = session_id
 
     def _on_identity_probe_finished(self, task_id: str, result: object) -> None:
@@ -267,15 +291,77 @@ class ProjectStore(QObject):
             return  # not an identity-probe task (e.g. a pipeline run/preview)
         if isinstance(result, Exception):
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
+            if _is_pickle_refusal(result):
+                # Not a broken folder -- a folder whose only trajectory format
+                # executes code on load. Ask, naming the file, rather than
+                # leaving the user with an import that simply failed.
+                folder = next(
+                    (
+                        str(ref.folder)
+                        for ref in (self._manifest.sessions if self._manifest else [])
+                        if ref.session_id == session_id
+                    ),
+                    "",
+                )
+                self.pickleConsentRequired.emit(session_id, folder)
             return
         self._set_session_identity(
             session_id, result.has_stable_identities, result.track_wo_identities
         )
+        self._set_session_input_hash(session_id, result)
         # The probe already read the full Session for that one boolean --
         # cache the rest of it too rather than discard it (see
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
+
+    def set_allow_pickle_trajectories(self, allowed: bool) -> None:
+        """Record the project's answer to the unpickling question.
+
+        Persisted in the manifest rather than held in memory so the user is
+        asked once per project, not once per launch -- a question repeated
+        every session stops being read.
+        """
+        if self._manifest is None:
+            return
+        security = self._manifest.security.model_copy(
+            update={"allow_pickle_trajectories": allowed}
+        )
+        self._manifest = self._manifest.model_copy(update={"security": security})
+        state = "enabled" if allowed else "disabled"
+        self.append_log(f"_Loading pickled trajectories {state} for this project._\n")
+        self.projectChanged.emit()
+
+    def _set_session_input_hash(self, session_id: str, session: object) -> None:
+        """Record the SHA-256 of the trajectory file this session was read from.
+
+        Persisted (unlike SessionFacts) because it is the project's record of
+        *which* input it was configured against: Engine.run() compares against
+        it and says so when the source folder has changed underneath. Without
+        it, `SessionRef.sha256` stayed "" forever and the manifest's central
+        provenance claim was unverifiable.
+
+        Best-effort. A folder that cannot be hashed must not stop it being
+        added -- the run reports the missing checksum itself.
+        """
+        if self._manifest is None:
+            return
+        source = getattr(session, "trajectory_source", None)
+        if source is None:
+            return
+        from track2data.core.hashing import file_sha256
+
+        try:
+            digest = file_sha256(Path(source))
+        except OSError as exc:
+            self.append_log(f"_Could not hash `{source}` for `{session_id}`: {exc}_\n")
+            return
+
+        sessions = [
+            s.model_copy(update={"sha256": digest}) if s.session_id == session_id else s
+            for s in self._manifest.sessions
+        ]
+        self._manifest = self._manifest.model_copy(update={"sessions": sessions})
 
     def _set_session_identity(
         self,

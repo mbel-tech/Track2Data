@@ -116,14 +116,21 @@ class MetricParameter(BaseModel):
 
 
 class Metric(ABC):
-    """Abstract base for every Track2Data metric (see METRICS_SPEC.md §5)."""
+    """Abstract base for every Track2Data metric (see METRICS_SPEC.md §5).
 
-    id: str
-    name: str
-    label: str
-    level: Literal["individual", "group", "zone", "diagnostic"]
-    priority: Literal["primary", "optional", "advanced", "diagnostic"]
-    requires_identity: bool
+    Every attribute below is a ``ClassVar``: a metric's identity, level and
+    declared schema are properties of the class, not of an instance, and
+    every concrete metric sets them with a plain class-body assignment.
+    Declaring them as instance variables here made each of those 45
+    assignments a type error.
+    """
+
+    id: ClassVar[str]
+    name: ClassVar[str]
+    label: ClassVar[str]
+    level: ClassVar[Literal["individual", "group", "zone", "diagnostic"]]
+    priority: ClassVar[Literal["primary", "optional", "advanced", "diagnostic"]]
+    requires_identity: ClassVar[bool]
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False
@@ -131,9 +138,9 @@ class Metric(ABC):
     # session (whole-track tortuosity; a half-vs-half stability check). With
     # timepoint binning on, such a metric stays one whole-session row per animal.
     window_safe: ClassVar[bool] = True
-    output_columns: list[str]
-    documentation: MetricDocumentation
-    # Most metrics (24 of 44 today) take no configuration at all --
+    output_columns: ClassVar[list[str]]
+    documentation: ClassVar[MetricDocumentation]
+    # Most metrics (25 of 45 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.
@@ -159,5 +166,17 @@ class Metric(ABC):
         return {}
 
     @abstractmethod
-    def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
-        ...
+    def compute(self, session: Any, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute this metric and return one DataFrame.
+
+        ``session`` is deliberately ``Any``: the D-1..D-10 diagnostics
+        describe the tracker's own output and take a ``Session``, while every
+        other metric -- including D-11 -- takes a ``PreprocessedSession``.
+        That split is real rather than accidental (a diagnostic that read the
+        preprocessed array could not report on preprocessing), so the base
+        class does not pretend to a single parameter type it would then have
+        to violate 36 times.
+
+        The returned frame's columns must match :attr:`output_columns`
+        exactly -- see tests/test_metrics/test_output_schema_contract.py.
+        """

@@ -44,14 +44,17 @@ aliases; add new ones here as needed.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
 from track2data.core.errors import DataValidationError, ImportError_
 from track2data.core.models import Session, VideoInfo
 from track2data.readers.base import SessionReader
+
+logger = logging.getLogger(__name__)
 
 _SENTINEL = object()
 
@@ -82,6 +85,7 @@ class IDTrackerAiV5Reader(SessionReader):
     """Reader for the current (v5) idtracker.ai output format."""
 
     name = "idtrackerai_v5"
+    accepts_allow_pickle: ClassVar[bool] = True
     priority = 10
 
     # ── detect ────────────────────────────────────────────────────────────────
@@ -98,16 +102,26 @@ class IDTrackerAiV5Reader(SessionReader):
 
     # ── read ──────────────────────────────────────────────────────────────────
 
-    def read(self, folder: Path) -> Session:
+    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
+        """Parse *folder* and return a Session.
+
+        The trajectory arrays here load with ``allow_pickle=False`` already;
+        the gate covers ``video_object.npy``, which is a pickled object and
+        so executes code on load. It is metadata only (fps, resolution, frame
+        count), and every field it supplies has a session.json fallback, so
+        refusing it degrades the import rather than failing it.
+        """
         folder = Path(folder)
         # Load video object first so n_frames hint is available for shape detection.
-        video_obj = self._load_video_object(folder)
+        video_obj = self._load_video_object(folder, allow_pickle=allow_pickle)
         n_frames_hint = int(
             _get_field(video_obj, "frame_number", "total_frames", "n_frames") or 0
         )
         traj_path, variant = self._find_trajectory(folder)
         raw_xy = self._load_trajectory(traj_path, n_frames_hint=n_frames_hint)
-        video_info = self._load_video_info(folder, raw_xy, video_obj=video_obj)
+        video_info = self._load_video_info(
+            folder, raw_xy, video_obj=video_obj, allow_pickle=allow_pickle
+        )
         # The v5 session json was already being loaded elsewhere in this
         # reader but track_wo_identities was never looked at, so a legacy
         # session tracked without identification came out "stable"
@@ -133,16 +147,23 @@ class IDTrackerAiV5Reader(SessionReader):
 
     # ── private helpers ───────────────────────────────────────────────────────
 
-    def _find_trajectory(self, folder: Path) -> tuple[Path, str]:
+    def _find_trajectory(
+        self, folder: Path
+    ) -> tuple[Path, Literal["with_gaps", "wo_gaps"]]:
         """
         Return (path, variant_label).  Prefers wo_gaps; falls back to with_gaps.
         Raises DataValidationError if neither file exists.
+
+        The return type is the same Literal ``Session.trajectory_variant``
+        accepts, so the two cannot drift apart -- a plain ``str`` here let a
+        typo reach the model as a runtime validation error instead.
         """
         traj_dir = folder / _TRAJ_SUBDIR
-        for name, variant in (
+        candidates: tuple[tuple[str, Literal["with_gaps", "wo_gaps"]], ...] = (
             ("trajectories_wo_gaps.npy", "wo_gaps"),
             ("trajectories.npy", "with_gaps"),
-        ):
+        )
+        for name, variant in candidates:
             candidate = traj_dir / name
             if candidate.exists():
                 return candidate, variant
@@ -222,7 +243,12 @@ class IDTrackerAiV5Reader(SessionReader):
         return arr  # assume canonical
 
     def _load_video_info(
-        self, folder: Path, raw_xy: np.ndarray, video_obj: Any = None
+        self,
+        folder: Path,
+        raw_xy: np.ndarray,
+        video_obj: Any = None,
+        *,
+        allow_pickle: bool = False,
     ) -> VideoInfo:
         """
         Build VideoInfo from video_object.npy with fallback to session_progress.json.
@@ -232,7 +258,9 @@ class IDTrackerAiV5Reader(SessionReader):
         n_frames_from_traj = int(raw_xy.shape[0])
 
         # Primary: video_object.npy (ASSUMPTION 4)
-        obj = video_obj if video_obj is not None else self._load_video_object(folder)
+        obj = video_obj if video_obj is not None else self._load_video_object(
+            folder, allow_pickle=allow_pickle
+        )
 
         fps = float(_get_field(obj, "fps", "frames_per_second") or 1.0)
         height = int(_get_field(obj, "height", "original_height", "video_height") or 0)
@@ -268,7 +296,23 @@ class IDTrackerAiV5Reader(SessionReader):
         )
 
     @staticmethod
-    def _load_video_object(folder: Path) -> Any:
+    def _load_video_object(folder: Path, *, allow_pickle: bool = False) -> Any:
+        """Load video_object.npy, or None when unpickling is not permitted.
+
+        Unpickling this executes arbitrary code from the file. It carries
+        metadata only (fps, resolution, frame count), all of which
+        session.json can also supply, so a refusal degrades the import
+        rather than failing it -- unlike the trajectory itself, where there
+        is nothing to fall back to.
+        """
+        if not allow_pickle:
+            logger.info(
+                "IDT_PICKLE_REFUSED: not unpickling %s; falling back to "
+                "session.json for video metadata. Enable "
+                "security.allow_pickle_trajectories to load it.",
+                _VIDEO_OBJ_NAME,
+            )
+            return None
         path = folder / _VIDEO_OBJ_NAME
         raw = np.load(path, allow_pickle=True)
         return raw.item() if raw.ndim == 0 else raw

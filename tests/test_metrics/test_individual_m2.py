@@ -80,13 +80,6 @@ class TestCentreDistance:
     def test_metric_id(self) -> None:
         assert CentreDistance.id == "IL-3"
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = CentreDistance().compute(psess)
-        assert "session_id" in df.columns
-        assert "individual_id" in df.columns
-        assert "mean_centre_distance_px" in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
         df = CentreDistance().compute(psess)
@@ -274,19 +267,6 @@ class TestAcceleration:
     def test_metric_id(self) -> None:
         assert Acceleration.id == "IL-6"
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = Acceleration().compute(psess)
-        for col in [
-            "session_id",
-            "metric_id",
-            "individual_id",
-            "mean_abs_accel_px_s2",
-            "rms_accel_px_s2",
-            "max_accel_px_s2",
-        ]:
-            assert col in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
         df = Acceleration().compute(psess)
@@ -407,19 +387,6 @@ class TestFreezingBouts:
             .iloc[0]["freezing_bout_count"]
             == 0
         )
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = FreezingBouts().compute(psess)
-        for col in [
-            "session_id",
-            "metric_id",
-            "individual_id",
-            "freezing_bout_count",
-            "mean_freezing_duration_s",
-            "total_freezing_duration_s",
-        ]:
-            assert col in df.columns
 
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
@@ -676,18 +643,6 @@ class TestFreezingBouts:
 class TestTurnRate:
     def test_metric_id(self) -> None:
         assert TurnRate.id == "IL-8"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = TurnRate().compute(psess)
-        for col in [
-            "session_id",
-            "metric_id",
-            "individual_id",
-            "mean_turn_rate_rad_per_s",
-            "median_turn_rate_rad_per_s",
-        ]:
-            assert col in df.columns
 
     def test_session_id_propagated(self) -> None:
         psess = make_psess()

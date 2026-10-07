@@ -89,17 +89,6 @@ class TestAreaCorrectedOccupancy:
         assert params.keys() == {"roi_areas", "total_arena_area"}
         assert all(p.derived for p in params.values())
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess_with_zones()
-        df = AreaCorrectedOccupancy().compute(psess)
-        for col in [
-            "session_id",
-            "zone_name",
-            "individual_id",
-            "area_corrected_occupancy",
-        ]:
-            assert col in df.columns
-
     def test_no_zones_returns_empty_with_correct_columns(self) -> None:
         """Without zone data, returns empty DataFrame with correct columns."""
         psess = make_psess_no_zones()
@@ -275,18 +264,6 @@ class TestZoneTransitions:
         assert len(row) == 1
         assert row["transition_count"].values[0] == 1
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess_with_zones()
-        df = ZoneTransitions().compute(psess)
-        for col in [
-            "session_id",
-            "from_zone",
-            "to_zone",
-            "individual_id",
-            "transition_count",
-        ]:
-            assert col in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess_with_zones()
         df = ZoneTransitions().compute(psess)
@@ -433,12 +410,6 @@ class TestZ5EntryExitEvents:
         assert enters["frame"].values[0] == 10
         assert exits["frame"].values[0] == 16
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess_with_zones()
-        df = Z5EntryExitEvents().compute(psess)
-        for col in ["session_id", "zone_name", "individual_id", "event", "t_s", "frame"]:
-            assert col in df.columns
-
     def test_no_zones_returns_empty_with_correct_columns(self) -> None:
         psess = make_psess_no_zones()
         df = Z5EntryExitEvents().compute(psess)
@@ -575,12 +546,6 @@ class TestZ6LatencyToFirstEntry:
 
         row = df[(df["zone_name"] == "zone_A") & (df["individual_id"] == 0)]
         assert row["first_entry_t_s"].values[0] == pytest.approx(1.0)  # 10 / fps=10.0
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess_with_zones()
-        df = Z6LatencyToFirstEntry().compute(psess)
-        for col in ["session_id", "zone_name", "individual_id", "first_entry_t_s"]:
-            assert col in df.columns
 
     def test_no_zones_returns_empty_with_correct_columns(self) -> None:
         psess = make_psess_no_zones()

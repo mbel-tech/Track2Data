@@ -1,0 +1,66 @@
+# Publish the documentation site to GitHub Pages.
+#
+# 7,000+ lines of markdown existed in this repo with nothing rendering them.
+# The site is assembled from those files rather than duplicating any of
+# them -- a second hand-maintained copy would go stale, which is the failure
+# mode this project has hit before.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "SECURITY.md"
+      - "CONTRIBUTING.md"
+      - "mkdocs.yml"
+      - "scripts/build_docs_site.py"
+      - "scripts/generate_metric_catalogue.py"
+      # The metric catalogue is generated from the registry, so a metric
+      # change is a docs change.
+      - "track2data/metrics/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + docs deps
+        run: pip install -e ".[docs]"
+      - name: Assemble docs/site/ and generate the metric catalogue
+        run: python scripts/build_docs_site.py
+      - name: Build
+        # --strict so a broken internal link fails here rather than
+        # shipping a 404 to someone following a citation.
+        run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

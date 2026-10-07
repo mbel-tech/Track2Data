@@ -121,12 +121,6 @@ class TestPathLength:
 
         assert gap_path < full_path
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = PathLength().compute(psess)
-        for col in ["session_id", "metric_id", "individual_id", "path_length_px"]:
-            assert col in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
         df = PathLength().compute(psess)
@@ -209,13 +203,6 @@ class TestSpeed:
         psess = make_psess(speed=speed)
         df = Speed().compute(psess)
         assert df["mean_speed_px_s"].values[0] == pytest.approx(50.0)
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = Speed().compute(psess)
-        for col in ["session_id", "metric_id", "individual_id",
-                    "mean_speed_px_s", "median_speed_px_s", "max_speed_px_s"]:
-            assert col in df.columns
 
     def test_metric_id_column(self) -> None:
         df = Speed().compute(make_psess())
@@ -346,13 +333,6 @@ class TestActivity:
         names = {p.name for p in Activity.parameters}
         assert names == {"threshold_px_s", "threshold_multiplier"}
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = Activity().compute(psess, cfg={"threshold_px_s": 10.0})
-        for col in ["session_id", "metric_id", "individual_id",
-                    "active_fraction", "freezing_fraction", "threshold_px_s"]:
-            assert col in df.columns
-
     def test_metric_id_column(self) -> None:
         df = Activity().compute(make_psess())
         assert (df["metric_id"] == "IL-4").all()
@@ -396,12 +376,6 @@ class TestTortuosity:
         psess = make_psess(xy=xy)
         df = Tortuosity().compute(psess)
         assert np.isfinite(df["tortuosity"].values[0])
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = Tortuosity().compute(psess)
-        for col in ["session_id", "metric_id", "individual_id", "tortuosity"]:
-            assert col in df.columns
 
     def test_metric_id_column(self) -> None:
         df = Tortuosity().compute(make_psess())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import ClassVar
 
 from track2data.core.models import Session
 
@@ -21,6 +22,12 @@ class SessionReader(ABC):
     name: str = ""
     #: Higher priority wins when multiple readers detect the same folder.
     priority: int = 0
+    #: Whether ``read()`` accepts an ``allow_pickle`` keyword. Opt-in so that
+    #: external readers written against the original one-argument signature
+    #: keep working -- ``read_session`` only passes the keyword to readers
+    #: that declare they understand it. A reader that loads pickled data
+    #: without declaring this is trusting every file it is pointed at.
+    accepts_allow_pickle: ClassVar[bool] = False
 
     @classmethod
     @abstractmethod
@@ -28,20 +35,34 @@ class SessionReader(ABC):
         """Return True if this reader can handle *folder*."""
 
     @abstractmethod
-    def read(self, folder: Path) -> Session:
+    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """
         Parse *folder* and return a Session.
 
         Must not modify any file inside *folder* (FR-IMP-5).
         Raises DataValidationError on unrecoverable format problems.
+
+        A reader that can load formats which execute code on deserialisation
+        (anything unpickled) should accept a keyword-only
+        ``allow_pickle: bool = False`` and set
+        :attr:`accepts_allow_pickle` to True, refusing those formats with
+        ``IDT_PICKLE_REFUSED`` unless the caller opts in.
         """
 
-    def probe(self, folder: Path) -> Session:
+    def probe(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """
         Read only what the GUI needs to describe *folder* (frame count, fps,
         animals, identity flags, calibration/ROI hints, background image).
 
         Readers override this to skip expensive optional artefacts; the
         default falls back to a full ``read()`` so every reader stays valid.
+
+        ``allow_pickle`` is the same consent ``read`` takes: a probe opens the
+        same trajectory file, so it must be refused pickled data exactly as a
+        read is. The default hands it on to a reader that declares
+        :attr:`accepts_allow_pickle`; a reader that overrides ``probe`` and
+        declares it must accept the keyword itself.
         """
+        if self.accepts_allow_pickle:
+            return self.read(folder, allow_pickle=allow_pickle)
         return self.read(folder)

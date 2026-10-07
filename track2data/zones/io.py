@@ -88,7 +88,7 @@ def save_zones_csv(zone_set: ZoneSet, path: Path) -> None:
                 writer.writerow([roi.name, roi.level, x, y])
 
 
-def zone_set_from_dict(data: dict) -> ZoneSet:  # type: ignore[type-arg]
+def zone_set_from_dict(data: dict) -> ZoneSet:
     """Parse a ZoneSet from a plain dict (e.g. deserialised from JSON).
 
     This is a thin convenience wrapper around ``ZoneSet.model_validate``.
@@ -109,7 +109,7 @@ def zone_set_from_dict(data: dict) -> ZoneSet:  # type: ignore[type-arg]
 
 
 def zone_set_from_roi_list(
-    roi_list: list[dict] | None,  # type: ignore[type-arg]
+    roi_list: list[dict] | None,
     *,
     name: str = "arena",
     level: str = "main",

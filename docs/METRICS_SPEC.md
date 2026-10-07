@@ -5,10 +5,10 @@
 researchers wanting to know what each number means.
 **Companion docs:**
 
-- [`../PRD.md` §5.6](../PRD.md) — high-level catalogue
+- [`../PRD.md` §5.6](../docs/dev/PRD.md) — high-level catalogue
 - [`./ENGINE_DESIGN.md` §8](./ENGINE_DESIGN.md) — engine API
 - [`./USER_WORKFLOW.md` Stage 6](./USER_WORKFLOW.md) — wizard UI
-- [`./UI_DESIGN.md` Page 6](./UI_DESIGN.md) — PySide6 controls
+- [`./UI_DESIGN.md` Page 6](dev/UI_DESIGN.md) — PySide6 controls
 - [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) — provenance of diagnostic inputs
 
 > This document is the **canonical** definition of every metric that
@@ -55,9 +55,9 @@ When `Session.length_unit` is present, this is converted to real units by
 `calibration/bodylength.py`; otherwise it stays in pixels.
 
 **`Session.bbox_table` (the `<session>_bboxes.csv` produced by
-`extract_bboxes.py`) is deliberately NOT used for calibration**, and no
+`scripts/extract_bboxes.py`) is deliberately NOT used for calibration**, and no
 future revision of this spec should reintroduce it without re-reading
-`docs/EXTRACT_BBOXES_FIX.md` first. Measured on a real session, that
+`docs/dev/EXTRACT_BBOXES_FIX.md` first. Measured on a real session, that
 script's per-identity median overestimates the tracker's own
 `median_body_length` by **+27.8%**, with a **1.75×** spread between
 individual medians of the same species in the same arena -- because it
@@ -993,6 +993,26 @@ selection, and exported alongside the metrics CSV in a separate
 | **Reference** | Bjorneraas et al. 2010, J. Wildl. Manage. 74(6):1361-1366 (screening GPS location data for errors using animal movement characteristics) — DOI [10.2193/2009-405](https://doi.org/10.2193/2009-405) |
 | **Supporting references** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) (DOI: 10.1038/s41592-018-0295-5) |
 
+#### D-11 — Metric input provenance
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Metric input provenance |
+| **Level** | Per individual |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.was_interpolated`, `PreprocessedSession.jump_replaced` |
+| **Formula** | `n_frames_used = count(¬nan(xy[:,k,0]))`; `frac_interpolated = count(was_interpolated[:,k] ∧ used[:,k]) / n_frames_used`; `frac_jump_replaced = count(jump_replaced[:,k] ∧ used[:,k]) / n_frames_used`; `frac_measured = 1 − frac_interpolated − frac_jump_replaced` |
+| **Output columns** | `individual_id`, `n_frames_total`, `n_frames_used`, `frac_frames_used`, `n_interpolated`, `frac_interpolated`, `n_jump_replaced`, `frac_jump_replaced`, `frac_measured` |
+| **Units** | counts; dimensionless fractions |
+| **Assumptions** | The denominator is the frames the metrics actually used (non-NaN *after* preprocessing), not the session length — a metric cannot be affected by a frame it never saw. A frame counts in at most one of interpolated/jump-replaced: gap-fill acts on frames that were NaN, jump replacement on frames that were not. |
+| **Warnings** | Distinct from **D-1**, which reports coverage of `Session.raw_xy` — the tracker's own output. This reports what the *metrics* consumed. Without it, a session with 92 % real coverage and one with 41 % produce indistinguishable `path_length_px` rows. A high `frac_interpolated` means those values rest largely on interpolation rather than observation; path length and speed are most affected, since interpolating across a gap draws a straight line and understates both. `frac_jump_replaced` is zero whenever jump detection did not run, which is not the same as no jumps being present. |
+| **Parameters** | none |
+| **Reference** | Data-provenance convention for derived measures; no single originating work |
+
+Keyed on `(session_id, individual_id)` — the same key the exporters merge
+summary metrics on — so every metric row can be joined to the quality of the
+data behind it.
+
 ---
 
 ## 5. Engine implementation map
@@ -1288,7 +1308,7 @@ exposed so future per-user opt-outs are non-breaking.
    construction rather than by contributor discipline. The audit's 20
    proposed new metrics were triaged for actual feasibility against
    this codebase (rather than taken at face value) and 11 were built —
-   see §3/§4 above and `docs/ROADMAP.md`'s "Reserved metric IDs" table
+   see §3/§4 above and `docs/dev/ROADMAP.md`'s "Reserved metric IDs" table
    for the 9 that were not, and why.
 5. **Bout-criterion thresholds (2026-08)** — resolved, as an **opt-in**.
    IL-7's `min_bout_frames`, Z-3's `min_visit_frames`, and Z-4/Z-5's

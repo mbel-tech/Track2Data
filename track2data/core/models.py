@@ -17,10 +17,16 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    # Type-only: session_consistency imports Session from here, so a runtime
+    # import would close the cycle. SessionRunResult is a plain dataclass, not
+    # a pydantic model, so its annotations are never evaluated.
+    from track2data.core.session_consistency import SessionSummary
 
 # Imported from the module, not the package, to keep this import leaf-level:
 # track2data/__init__.py re-exports __version__ from here too, and models.py
@@ -147,6 +153,13 @@ class Session(BaseModel):
     # across sessions for identity matching to be valid), not for use here.
     resolution_reduction: float | None = None
     id_image_size: list[int] | None = None
+    # The trajectory file whose bytes produced raw_xy. Set by the reader,
+    # which is the only layer that knows: it falls back through the formats
+    # present in the folder, so the file actually read is not always the
+    # highest-ranked one and cannot be re-derived afterwards. Hashed into the
+    # export's provenance record -- "these bytes produced these numbers" is
+    # not a checkable claim without it.
+    trajectory_source: Path | None = None
     # Paths only, not decoded pixel data -- see
     # readers/idtrackerai/preprocessing.py's module docstring for why.
     roi_mask_path: Path | None = None
@@ -201,26 +214,57 @@ class JumpCfg(BaseModel):
 
 
 class IdSwitchCfg(BaseModel):
-    # Defaults to OFF. This corrector reasons about identity from raw
-    # geometry alone (nearest-neighbour + Hungarian assignment), with no
-    # knowledge of idtracker.ai's own fragment boundaries -- the only
-    # frames where an identity swap is even possible. Measured on the real
-    # idtracker.ai corpus (session_trial10_Segment1), it re-permutes 17.1%
-    # of the recording and injects ~640px single-frame teleports (a
+    # Defaults to OFF. The corrector predicts each identity's next position
+    # by constant velocity and reassigns against the observations at t+1,
+    # propagating an accepted permutation to the end of the segment -- and,
+    # when the session carries preprocessing/list_of_fragments.json, it only
+    # evaluates idtracker.ai's own fragment boundaries, the only frames
+    # where a swap is physically possible (see
+    # docs_from_idtracker.ai/fragment_idtrackerai.md).
+    #
+    # It stays off by default because that last clause is conditional: a
+    # session without fragment data falls back to scanning every frame, and
+    # geometry alone cannot tell "these two animals crossed and were
+    # relabelled" from "these two animals crossed". The earlier
+    # implementation, which reasoned from within-frame conspecific proximity
+    # and applied single-frame permutations, re-permuted 17.1% of a real
+    # recording (session_trial10_Segment1) and injected ~640px teleports (a
     # stationary animal's path length inflated from 218px to 11,639px,
-    # +5234%). See docs_from_idtracker.ai/fragment_idtrackerai.md and the
-    # format-alignment plan Fase 1.5b/6d: a fragment-boundary-aware
-    # replacement is planned; this pass is not safe to run unconditionally
-    # until then. Enable only if you understand and accept that risk.
+    # +5234%). That specific failure mode is fixed; enabling this on a
+    # fragment-less session still warrants reviewing the output.
     enabled: bool = False
+    # Margin by which a candidate permutation must beat the tracker's own
+    # labelling before it is accepted. Ties (two animals at the same point
+    # mid-crossing) are rejected, so a crossing alone never triggers a swap.
     tier1_ratio: float = 1.5
     tier2_hungarian: bool = True
+    # Retained for manifest backward-compatibility and no longer read: an
+    # identity switch is a persistent relabelling, so the correction runs to
+    # the end of the segment rather than for a fixed window. Applying it for
+    # a few frames and then reverting turned one discontinuity into two.
     consolidate_window: int = 5
 
 
 class SmoothCfg(BaseModel):
     enabled: bool = True
     method: Literal["none", "moving_avg", "savgol"] = "savgol"
+    window: int = 5
+    polyorder: int = 2
+
+
+class KinematicsCfg(BaseModel):
+    # "savgol" differentiates the trajectory with a Savitzky-Golay filter:
+    # centred (no half-frame offset) and one filtered derivative per
+    # quantity (no squared noise). "forward_difference" is the pre-0.2
+    # estimator, kept for one release so a project can reproduce older
+    # numbers -- it assigns each forward difference to the earlier frame and
+    # obtains acceleration by differencing an already-differenced series.
+    # Switching shifts every speed, acceleration and turning value.
+    method: Literal["savgol", "forward_difference"] = "savgol"
+    # Deliberately separate from SmoothCfg's window even though the defaults
+    # match: with smoothing on, the trajectory is filtered once for position
+    # and again for the derivative, and tying the two together would hide
+    # that rather than make it adjustable.
     window: int = 5
     polyorder: int = 2
 
@@ -235,6 +279,7 @@ class PreprocessConfig(BaseModel):
     jump: JumpCfg = JumpCfg()
     identity_switch: IdSwitchCfg = IdSwitchCfg()
     smoothing: SmoothCfg = SmoothCfg()
+    kinematics: KinematicsCfg = KinematicsCfg()
     coverage: ValidateCfg = ValidateCfg()
 
 
@@ -313,6 +358,27 @@ class MetricSelection(BaseModel):
     # covers non-derived parameters; a metric's derived values (e.g.
     # IL-3's arena centre) are never user-set, so never stored here.
     config: dict[str, dict[str, Any]] = {}
+
+
+# ── Security ──────────────────────────────────────────────────────────────────
+
+
+class SecurityConfig(BaseModel):
+    """Per-project consent for operations that can execute code from data.
+
+    ``npy`` is one of idtracker.ai's default trajectory output formats, and
+    loading one means ``np.load(..., allow_pickle=True)`` -- which runs
+    arbitrary code from the file. That matters more for a desktop app that
+    invites the user to point a file dialog at a folder than it would for a
+    library: any shared, downloaded or collaborator-supplied session folder
+    is otherwise an execution vector.
+
+    Defaults to off. When off, the reader refuses the pickled formats and
+    falls through to h5/csv if the folder has them, so an ordinary session
+    still imports; only a pickle-only folder needs the user to opt in.
+    """
+
+    allow_pickle_trajectories: bool = False
 
 
 # ── Manifest building blocks ──────────────────────────────────────────────────
@@ -394,6 +460,7 @@ class ProjectManifest(BaseModel):
     mapping: MappingRule | None = None
     preprocess: PreprocessConfig = PreprocessConfig()
     metrics: MetricSelection = MetricSelection()
+    security: SecurityConfig = SecurityConfig()
     export_targets: list[ExportTarget] = []
     run_log_path: Path | None = None
 
@@ -451,6 +518,11 @@ class SessionRunResult:
     preprocess_report: PreprocessReport | None = None
     duration_s: float = 0.0
     error: str | None = None
+    # Per-session facts (fps, group size, realised calibration) carried back
+    # so run() can write sessions.csv and report cross-session heterogeneity
+    # without re-reading 70 session folders. Small and frozen, so it does not
+    # compromise this class's picklability. None when import itself failed.
+    summary: SessionSummary | None = None
 
 
 @dataclass
@@ -501,6 +573,13 @@ class PreprocessedSession:
     main_zone: np.ndarray | None = None       # (n_frames, n_animals)
     sec_zone: np.ndarray | None = None        # (n_frames, n_animals)
     report: PreprocessReport = field(default_factory=PreprocessReport)
+    # (n_frames, n_animals) bool -- True where jump_detect replaced an
+    # anomalous position. Captured by the pipeline rather than derived like
+    # was_interpolated, because it cannot be recovered by comparing raw_xy to
+    # the final array: smoothing runs afterwards and moves every position, so
+    # "differs from raw" stops isolating this step the moment it is enabled.
+    # None when jump detection did not run.
+    jump_replaced: np.ndarray | None = None
 
     # ── convenience pass-throughs ─────────────────────────────────────────────
 

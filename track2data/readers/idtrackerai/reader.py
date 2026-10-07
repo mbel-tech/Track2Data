@@ -52,6 +52,7 @@ class IDTrackerAiReader(SessionReader):
     """
 
     name = "idtrackerai"
+    accepts_allow_pickle: ClassVar[bool] = True
     priority = 20  # Higher than the legacy v5 reader (priority=10).
 
     # ── SessionReader protocol ─────────────────────────────────────────────────
@@ -60,20 +61,30 @@ class IDTrackerAiReader(SessionReader):
     def detect(cls, folder: Path) -> bool:
         return detect(folder) is not None
 
-    def read(self, folder: Path) -> Session:
-        return self._read(folder, light=False)
+    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
+        """Parse *folder* and return a Session.
 
-    def probe(self, folder: Path) -> Session:
+        ``allow_pickle`` gates the formats whose deserialisation executes
+        code (npy). Defaults to False; when the folder also carries an
+        h5 or csv trajectory, the fallback walk in ``_load_payload`` uses
+        that instead and the refusal is invisible to the user.
+        """
+        return self._read(folder, light=False, allow_pickle=allow_pickle)
+
+    def probe(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """Session facts without the bulky opportunistic artefacts.
 
         Skips the bounding-box tables, matching results, inconsistent-frame
         list, fragment records and the tracking log -- none of which feed
         ``SessionFacts`` -- so importing a batch of folders does not pull
         all of them into memory just to fill in a table row.
-        """
-        return self._read(folder, light=True)
 
-    def _read(self, folder: Path, *, light: bool) -> Session:
+        ``allow_pickle`` is the same consent ``read`` takes: a probe loads the
+        same trajectory file, so it must be refused (or allowed) the same way.
+        """
+        return self._read(folder, light=True, allow_pickle=allow_pickle)
+
+    def _read(self, folder: Path, *, light: bool, allow_pickle: bool) -> Session:
         folder = Path(folder)
         hit = detect(folder)
         if hit is None:
@@ -89,7 +100,7 @@ class IDTrackerAiReader(SessionReader):
         # Load trajectory payload from the best available format, falling back
         # through hit.all_present when the highest-priority format (often h5,
         # idtracker.ai's own default) has no loader yet.
-        fmt_used, payload = self._load_payload(hit)
+        fmt_used, source_path, payload = self._load_payload(hit, allow_pickle=allow_pickle)
 
         # Load session.json once, up front: it is both a fallback source for
         # fps/width/height/version (some formats' payloads omit them -- see
@@ -140,22 +151,41 @@ class IDTrackerAiReader(SessionReader):
         if fragments_data is not None:
             session = session.model_copy(update={"fragments": fragments_data})
 
+        # Which file's bytes actually produced these numbers. Recorded rather
+        # than re-derived: _load_payload falls back through hit.all_present,
+        # so the file that was read is not always the highest-ranked one
+        # present, and nothing downstream could work it out from the folder.
+        session = session.model_copy(update={"trajectory_source": source_path})
+
         return session
 
     # ── private helpers ────────────────────────────────────────────────────────
 
     # Formats with a working loader. parquet/pickle/csv_tidy are detected by
     # detect.py but have no loader yet -- see _LOADERS below.
-    _LOADERS: ClassVar[dict[str, Callable[[Path], dict]]] = {
+    _LOADERS: ClassVar[dict[str, Callable[..., dict]]] = {
         "h5": load_h5,
         "npy": load_npy,
         "csv": load_csv_bundle,
     }
 
+    #: Formats whose deserialisation executes code from the file, and which
+    #: therefore take the allow_pickle gate. h5 and the csv bundle are inert
+    #: data formats and do not.
+    _PICKLE_FORMATS: ClassVar[frozenset[str]] = frozenset({"npy"})
+
     @classmethod
-    def _load_payload(cls, hit: ReaderHit) -> tuple[str, dict[str, Any]]:
+    def _load_payload(
+        cls, hit: ReaderHit, *, allow_pickle: bool = False
+    ) -> tuple[str, Path, dict[str, Any]]:
         """
         Load the trajectory payload from the best *readable* format in *hit*.
+
+        Returns the path as well as the format, because the file that was
+        actually read is the one whose bytes have to be hashed for the
+        export's provenance record. It is not always the highest-ranked
+        format -- see the fallback walk below -- so it cannot be re-derived
+        from the folder afterwards.
 
         detect() ranks formats by priority (h5 first, per idtracker.ai's own
         default `trajectories_formats`), but not every format has a loader
@@ -174,7 +204,14 @@ class IDTrackerAiReader(SessionReader):
                 skipped.append(fmt)
                 continue
             try:
-                result = loader(path)
+                # Only the pickled formats take the gate; passing it to every
+                # loader would make each one's signature carry a concern that
+                # is not theirs.
+                result = (
+                    loader(path, allow_pickle=allow_pickle)
+                    if fmt in cls._PICKLE_FORMATS
+                    else loader(path)
+                )
             except ImportError:
                 # Optional dependency for this format (e.g. h5py) isn't
                 # installed -- treat exactly like "no loader" and keep
@@ -200,16 +237,28 @@ class IDTrackerAiReader(SessionReader):
                     fmt,
                     path,
                 )
-            return fmt, result
+            return fmt, path, result
 
         available = ", ".join(fmt for fmt, _ in hit.all_present) or "none"
+        # Say why each format was passed over. Without this the user of a
+        # pickle-only folder is told "no readable trajectory format" and has
+        # no way to learn that the fix is a consent setting rather than a
+        # corrupt file -- the reasons were previously logged at INFO only,
+        # i.e. nowhere the person hitting the error would look.
+        why = f" Skipped: {'; '.join(skipped)}." if skipped else ""
+        refused_pickle = any("IDT_PICKLE_REFUSED" in s for s in skipped)
         raise ImportError_(
-            f"No readable trajectory format among: {available}.",
+            f"No readable trajectory format among: {available}.{why}",
             code="IDT_FORMAT_AMBIGUOUS",
             severity="error",
             subject=str(hit.path),
             remediation=(
-                "Convert to a readable format, e.g. "
+                "This folder's only trajectory formats execute code when "
+                "loaded. Enable security.allow_pickle_trajectories for this "
+                "project if you trust its source, or re-export it as h5: "
+                f"`idtrackerai_format {hit.path.parent.parent} --formats h5`."
+                if refused_pickle
+                else "Convert to a readable format, e.g. "
                 f"`idtrackerai_format {hit.path.parent.parent} --formats npy`."
             ),
         )

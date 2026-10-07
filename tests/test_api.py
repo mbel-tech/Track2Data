@@ -1096,7 +1096,7 @@ def test_validate_session_mode_clean_when_every_session_is_calibrated(
 ) -> None:
     from track2data.api import Engine
 
-    def fake_read_session(folder: Path) -> Session:
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
         return _make_session(session_id=folder.name).model_copy(update={"length_unit": 12.5})
 
     monkeypatch.setattr("track2data.api.read_session", fake_read_session)
@@ -1325,6 +1325,7 @@ def test_build_payload_buckets_metrics_by_level(tmp_path: Path) -> None:
     assert all(k.startswith("D-") for k in payload.diagnostic_metrics)
     assert set(payload.diagnostic_metrics) == {
         "D-1", "D-2", "D-3", "D-4", "D-5", "D-6", "D-7", "D-8", "D-9", "D-10",
+        "D-11",
     }
 
 
@@ -1721,6 +1722,227 @@ def test_a_null_override_does_not_silently_drop_the_metric(
     Engine(manifest).compute_metrics(_make_psess(_make_session(n_frames=5)))
 
     assert received == [{}], "a null override must be dropped, not passed through as None"
+
+
+# ── cross-session consistency (Engine.consistency_warnings / sessions.csv) ────
+
+
+def _ref(session_id: str) -> SessionRef:
+    return SessionRef(
+        session_id=session_id,
+        folder=Path("/tmp") / session_id,
+        sha256=hashlib.sha256(session_id.encode()).hexdigest(),
+    )
+
+
+def _patch_read_session(
+    monkeypatch: pytest.MonkeyPatch, sessions: dict[str, Session]
+) -> None:
+    """Serve a different Session per folder, keyed by folder name."""
+    import track2data.api as api_module
+
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
+        return sessions[Path(folder).name]
+
+    monkeypatch.setattr(api_module, "read_session", fake_read_session)
+
+
+def _session_at(session_id: str, fps: float, n_animals: int = 2) -> Session:
+    session = _make_session(session_id, n_animals=n_animals)
+    return session.model_copy(
+        update={"video": session.video.model_copy(update={"fps": fps})}
+    )
+
+
+def test_consistency_warnings_silent_for_a_homogeneous_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from track2data.api import Engine
+
+    _patch_read_session(
+        monkeypatch,
+        {"a": _session_at("a", 30.0), "b": _session_at("b", 30.0)},
+    )
+    manifest = _make_manifest(sessions=[_ref("a"), _ref("b")])
+
+    assert Engine(manifest).consistency_warnings() == []
+
+
+def test_consistency_warnings_flags_mixed_frame_rates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case the whole module exists for: 30 fps and 60 fps pooled."""
+    from track2data.api import Engine
+
+    _patch_read_session(
+        monkeypatch,
+        {"a": _session_at("a", 30.0), "b": _session_at("b", 60.0)},
+    )
+    manifest = _make_manifest(sessions=[_ref("a"), _ref("b")])
+
+    warnings = Engine(manifest).consistency_warnings()
+
+    assert len(warnings) == 1
+    assert "frame rate" in warnings[0]
+
+
+def test_consistency_warnings_do_not_block_validate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed frame rates are a deliberate design as often as an accident, so
+    they must warn without refusing the run."""
+    from track2data.api import Engine
+
+    _patch_read_session(
+        monkeypatch,
+        {"a": _session_at("a", 30.0), "b": _session_at("b", 60.0)},
+    )
+    manifest = _make_manifest(sessions=[_ref("a"), _ref("b")])
+    engine = Engine(manifest)
+
+    assert engine.consistency_warnings() != []
+    assert engine.validate() == []
+
+
+def test_consistency_warnings_skip_unreadable_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreadable session is validate()'s and the run's problem to report;
+    it must not abort the consistency report for the rest."""
+    import track2data.api as api_module
+    from track2data.api import Engine
+
+    good = {"a": _session_at("a", 30.0), "b": _session_at("b", 60.0)}
+
+    def fake_read_session(folder: Path, **kwargs: object) -> Session:
+        name = Path(folder).name
+        if name == "broken":
+            raise OSError("cannot read")
+        return good[name]
+
+    monkeypatch.setattr(api_module, "read_session", fake_read_session)
+    manifest = _make_manifest(sessions=[_ref("a"), _ref("broken"), _ref("b")])
+
+    warnings = Engine(manifest).consistency_warnings()
+
+    assert len(warnings) == 1
+    assert "frame rate" in warnings[0]
+
+
+def test_px_per_cm_resolution_follows_the_calibration_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scalar mode calibrates every session; session mode calibrates only
+    those with their own length_unit -- which is what makes a half-calibrated
+    project detectable."""
+    from track2data.api import Engine
+
+    with_unit = _session_at("a", 30.0).model_copy(update={"length_unit": 8.0})
+    without_unit = _session_at("b", 30.0)
+    _patch_read_session(monkeypatch, {"a": with_unit, "b": without_unit})
+    sessions = [_ref("a"), _ref("b")]
+
+    scalar = Engine(
+        _make_manifest(
+            sessions=sessions,
+            calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        )
+    )
+    assert scalar.consistency_warnings() == []
+
+    per_session = Engine(
+        _make_manifest(
+            sessions=sessions, calibration=CalibrationConfig(mode="session")
+        )
+    )
+    warnings = per_session.consistency_warnings()
+    assert any("calibrated" in w and "b" in w for w in warnings)
+
+
+def test_run_with_no_sessions_writes_no_project_summary(tmp_path: Path) -> None:
+    """An empty project has nothing to summarise, and must not leave a
+    misleading zero-session report behind."""
+    from track2data.api import Engine
+
+    result = Engine(_make_manifest(sessions=[])).run(tmp_path)
+
+    assert result.sessions == []
+    assert not (tmp_path / "sessions.csv").exists()
+    assert not (tmp_path / "PROJECT_SUMMARY.md").exists()
+
+
+def test_unwritable_project_summary_does_not_fail_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A run whose numbers were all computed must not be reported as failed
+    because a bookkeeping file could not be written."""
+    import logging
+
+    from track2data.api import Engine
+    from track2data.core.models import SessionRunResult
+    from track2data.core.session_consistency import SessionSummary
+
+    def explode(self: object, results: object, warnings: object) -> str:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Engine, "_project_readme_text", explode)
+
+    summary = SessionSummary(
+        session_id="s1", reader="test", fps=30.0, n_frames=10, n_animals=2,
+        width_px=100, height_px=100, length_unit=None,
+        calibration_mode="scalar", px_per_cm=10.0,
+    )
+    engine = Engine(_make_manifest(sessions=[_ref("s1")]))
+
+    with caplog.at_level(logging.ERROR):
+        written = engine._write_project_summary(
+            tmp_path, [SessionRunResult(session_id="s1", summary=summary)]
+        )
+
+    # The table it managed to write is kept; the failure is logged, not raised.
+    assert written == [tmp_path / "sessions.csv"]
+    assert (tmp_path / "sessions.csv").exists()
+    assert not (tmp_path / "PROJECT_SUMMARY.md").exists()
+    assert "Could not write the run summary" in caplog.text
+
+
+def test_unhashable_input_costs_provenance_not_results(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A trajectory file that cannot be re-read at hashing time must not fail
+    a run whose numbers were already computed."""
+    import logging
+
+    import track2data.core.hashing as hashing_module
+    from track2data.api import Engine
+
+    def unreadable(path: Path, chunk_size: int = 65536) -> str:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(hashing_module, "file_sha256", unreadable)
+
+    session = _make_session("s1").model_copy(
+        update={"trajectory_source": Path("/tmp/s1/trajectories/trajectories.npy")}
+    )
+    engine = Engine(_make_manifest(sessions=[_ref("s1")]))
+
+    with caplog.at_level(logging.WARNING):
+        digest = engine._hash_and_check_input(session, _ref("s1"))
+
+    assert digest == ""
+    assert "will record no input checksum" in caplog.text
+
+
+def test_session_with_no_recorded_source_hashes_to_nothing() -> None:
+    """A reader that does not report its source file yields no checksum
+    rather than a checksum of the wrong thing."""
+    from track2data.api import Engine
+
+    session = _make_session("s1")
+    assert session.trajectory_source is None
+
+    engine = Engine(_make_manifest(sessions=[_ref("s1")]))
+    assert engine._hash_and_check_input(session, _ref("s1")) == ""
 
 
 def test_body_length_px_is_available_in_every_calibration_mode() -> None:

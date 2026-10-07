@@ -20,17 +20,21 @@ def test_legacy_readers_registered() -> None:
     assert "idtrackerai_v5" in names, f"idtrackerai_v5 missing; registered: {names}"
 
 
-def test_v4_reader_not_advertised_as_entry_point() -> None:
+def test_v4_reader_is_gone_entirely() -> None:
     """
-    idtrackerai_v4's detect() unconditionally returns False (see its module
-    docstring: "not yet implemented" -- no v4 sample data exists to validate
-    against), so it can never actually be selected as a reader. Advertising
-    it as a live entry point would mislead anyone enumerating
-    track2data.readers expecting a working reader. See DECISIONS.md D-012.
-    It's still registered as a built-in directly in readers/__init__.py, just
-    not as a discoverable entry point.
+    IDTrackerAiV4Reader was a stub whose detect() always returned False and
+    whose read() raised NotImplementedError, so it could never be selected
+    and could only ever fail if it were. D-012 had already removed its entry
+    point; the class stayed registered as a built-in, where it did nothing
+    but violate the reader contract. A class that raises on use is worse
+    than an absent one -- the decision record keeps the history.
     """
     assert "idtrackerai_v4" not in _reader_names()
+
+    import track2data.readers as readers
+
+    assert not hasattr(readers, "IDTrackerAiV4Reader")
+    assert "idtrackerai_v4" not in {r.name for r in readers._REGISTRY}
 
 
 def test_unified_reader_loadable() -> None:

@@ -41,7 +41,8 @@ def test_written_session_loads_through_the_real_reader(bench, tmp_path) -> None:
     from track2data.api import Engine
 
     folder = bench.write_session(tmp_path / "s", n_frames=300, n_animals=3, seed=2)
-    session = Engine.__new__(Engine).import_session(folder)
+    engine = Engine(bench.build_manifest([folder], identity_switch=False, zones=False))
+    session = engine.import_session(folder)
     assert session.raw_xy.shape == (300, 3, 2)
     assert session.n_animals == 3 and session.video.fps == bench.FPS
     assert session.identities_labels == ["1", "2", "3"]

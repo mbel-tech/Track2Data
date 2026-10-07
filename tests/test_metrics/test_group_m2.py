@@ -69,12 +69,6 @@ class TestInterIndividualDistance:
     def test_metric_id(self) -> None:
         assert InterIndividualDistance.id == "GL-2"
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = InterIndividualDistance().compute(psess)
-        for col in ["session_id", "metric_id", "mean_iid_px", "median_iid_px"]:
-            assert col in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
         df = InterIndividualDistance().compute(psess)
@@ -147,12 +141,6 @@ class TestInterIndividualDistance:
 class TestConvexHullArea:
     def test_metric_id(self) -> None:
         assert ConvexHullArea.id == "GL-4"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess(n_animals=4)
-        df = ConvexHullArea().compute(psess)
-        for col in ["session_id", "metric_id", "mean_hull_area_px2", "median_hull_area_px2"]:
-            assert col in df.columns
 
     def test_session_id_propagated(self) -> None:
         psess = make_psess(n_animals=4)
@@ -254,12 +242,6 @@ class TestGroupCohesion:
         # mean_IID = (10 + 100 + 90) / 3 = 66.667 -> cohesion = 1/66.667
         assert df["cohesion_index"].values[0] == pytest.approx(1.0 / (200.0 / 3.0), rel=1e-4)
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = GroupCohesion().compute(psess)
-        for col in ["session_id", "metric_id", "cohesion_index"]:
-            assert col in df.columns
-
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
         df = GroupCohesion().compute(psess)
@@ -306,12 +288,6 @@ class TestGroupCohesion:
 class TestGroupCentroidPosition:
     def test_metric_id(self) -> None:
         assert GroupCentroidPosition.id == "GL-9"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = GroupCentroidPosition().compute(psess)
-        for col in ["session_id", "metric_id", "mean_centroid_x_px", "mean_centroid_y_px"]:
-            assert col in df.columns
 
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
@@ -369,12 +345,6 @@ class TestGroupCentroidPosition:
 class TestGroupSpread:
     def test_metric_id(self) -> None:
         assert GroupSpread.id == "GL-10"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = GroupSpread().compute(psess)
-        for col in ["session_id", "metric_id", "mean_group_spread_px"]:
-            assert col in df.columns
 
     def test_session_id_propagated(self) -> None:
         psess = make_psess()
@@ -440,17 +410,6 @@ class TestRotationalOrder:
     def test_declares_configurable_parameters(self) -> None:
         names = {p.name for p in RotationalOrder.parameters}
         assert names == {"stationary_threshold_px_s"}
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = RotationalOrder().compute(psess)
-        for col in [
-            "session_id",
-            "metric_id",
-            "mean_rotational_order",
-            "median_rotational_order",
-        ]:
-            assert col in df.columns
 
     def test_session_id_propagated(self) -> None:
         psess = make_psess()

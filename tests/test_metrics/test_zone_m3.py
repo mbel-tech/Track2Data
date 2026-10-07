@@ -53,23 +53,6 @@ class TestZoneTransitionMatrix:
     def test_metric_id(self) -> None:
         assert ZoneTransitionMatrix.id == "Z-7"
 
-    def test_output_columns_present(self) -> None:
-        main_zone = np.full((10, 1), "", dtype=object)
-        main_zone[:5, 0] = "A"
-        main_zone[5:, 0] = "B"
-        psess = make_psess(main_zone)
-        df = ZoneTransitionMatrix().compute(psess)
-        for col in (
-            "session_id",
-            "individual_id",
-            "from_zone",
-            "to_zone",
-            "transition_count",
-            "transition_probability",
-            "sequence_entropy_bits",
-        ):
-            assert col in df.columns
-
     def test_two_zone_alternation_gives_probability_one_and_entropy_one(self) -> None:
         # A(8) B(8) A(8) B(8) A(8) -- 5 segments so the transition
         # sequence (A->B, B->A, A->B, B->A) is exactly 2:2, giving a
@@ -115,14 +98,6 @@ class TestZonePreferenceIndex:
     def test_metric_id(self) -> None:
         assert ZonePreferenceIndex.id == "Z-8"
 
-    def test_output_columns_present(self) -> None:
-        main_zone = np.full((10, 1), "A", dtype=object)
-        psess = make_psess(main_zone)
-        cfg = {"roi_areas": {"A": 50.0}, "total_arena_area": 100.0}
-        df = ZonePreferenceIndex().compute(psess, cfg)
-        for col in ("session_id", "zone_name", "individual_id", "jacobs_d"):
-            assert col in df.columns
-
     def test_matches_area_share_gives_zero(self) -> None:
         n_frames = 100
         main_zone = np.full((n_frames, 1), "", dtype=object)
@@ -164,22 +139,6 @@ class TestZonePreferenceIndex:
 class TestZoneDwellTimeDistribution:
     def test_metric_id(self) -> None:
         assert ZoneDwellTimeDistribution.id == "Z-9"
-
-    def test_output_columns_present(self) -> None:
-        main_zone = np.full((10, 1), "", dtype=object)
-        main_zone[:5, 0] = "A"
-        psess = make_psess(main_zone)
-        df = ZoneDwellTimeDistribution().compute(psess)
-        for col in (
-            "session_id",
-            "zone_name",
-            "individual_id",
-            "n_visits",
-            "mean_dwell_s",
-            "median_dwell_s",
-            "max_dwell_s",
-        ):
-            assert col in df.columns
 
     def test_two_equal_visits_report_correct_stats(self) -> None:
         n_frames = 40

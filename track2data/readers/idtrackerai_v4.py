@@ -1,5 +1,10 @@
 """Stub reader for legacy idtracker.ai v4 output — not yet implemented.
 
+The class is **not registered** (see ``readers/__init__.py``): its ``detect()`` is
+always False, so registering it could never select it, and a registered class
+whose only behaviour is to raise is worse than an absent one (DECISIONS D-012).
+It stays here as the home of the v4 notes and ``looks_like_v4``.
+
 ``looks_like_v4`` is a deliberately conservative heuristic used only to give a
 clear "not supported yet" error instead of a generic "no reader" one. The file
 names it checks are from memory of the v4 layout, not from a verified sample
@@ -41,5 +46,5 @@ class IDTrackerAiV4Reader(SessionReader):
     def detect(cls, folder: Path) -> bool:
         return False  # disabled until implemented
 
-    def read(self, folder: Path) -> Session:
+    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         raise NotImplementedError("idtrackerai_v4 reader not yet implemented")

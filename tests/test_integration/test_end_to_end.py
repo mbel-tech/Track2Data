@@ -37,6 +37,7 @@ from track2data.core.models import (
     CalibrationConfig,
     MetricSelection,
     ProjectManifest,
+    SecurityConfig,
     SessionRef,
 )
 
@@ -50,7 +51,12 @@ _FPS = 25.0
 
 
 def _minimal_manifest(session_folder: Path) -> ProjectManifest:
-    """Return a minimal valid ProjectManifest pointing at *session_folder*."""
+    """Return a minimal valid ProjectManifest pointing at *session_folder*.
+
+    Opts into pickled trajectories: the tiny_real fixture is npy-only, and
+    these tests exercise the pipeline rather than the consent gate. The gate
+    itself is tested in test_pickle_gate.py.
+    """
     now = datetime.now(tz=UTC)
     sha = hashlib.sha256(str(session_folder).encode()).hexdigest()
     return ProjectManifest(
@@ -71,6 +77,7 @@ def _minimal_manifest(session_folder: Path) -> ProjectManifest:
             zone=[],
             diagnostic=[],
         ),
+        security=SecurityConfig(allow_pickle_trajectories=True),
     )
 
 
@@ -265,9 +272,9 @@ def test_identity_free_run_reports_the_skips_in_the_readme(
     engine = Engine(manifest)
     engine.run(tmp_path, exporters=["csv_long", "readme"])
 
-    readmes = list(tmp_path.rglob("README.md"))
-    assert readmes, "run wrote no README"
-    text = readmes[0].read_text(encoding="utf-8")
+    readme = tmp_path / tiny_identity_free_session.name / "README.md"
+    assert readme.exists(), "run wrote no per-session README"
+    text = readme.read_text(encoding="utf-8")
     assert "## Metrics skipped" in text
     assert "IL-1" in text
     assert "| Tracked without identification | True |" in text
@@ -699,3 +706,359 @@ def test_engine_validate_reports_no_metrics(tiny_real_session: Path) -> None:
     issues = Engine(manifest).validate()
 
     assert any("metric" in i.lower() for i in issues), issues
+
+
+# ── sessions.csv (cross-session provenance) ───────────────────────────────────
+
+
+def test_run_writes_sessions_csv_at_the_run_root(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """One row per session, at the run root rather than inside a session
+    folder -- it exists to let an analyst compare sessions to each other."""
+    import pandas as pd
+
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_real_session)
+    Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    path = tmp_path / "sessions.csv"
+    assert path.exists(), "run wrote no sessions.csv"
+
+    df = pd.read_csv(path)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["session_id"] == tiny_real_session.name
+    assert row["fps"] == _FPS
+    assert row["n_frames"] == _N_FRAMES
+    assert row["n_animals"] == _N_ANIMALS
+    assert row["duration_s"] == pytest.approx(_N_FRAMES / _FPS)
+
+
+def test_sessions_csv_records_the_calibration_actually_used(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """px_per_cm is what the run resolved, not what the manifest asked for --
+    so a reader can tell whether this session's *_cm columns are real."""
+    import pandas as pd
+
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_real_session)
+    Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    df = pd.read_csv(tmp_path / "sessions.csv")
+    assert df.iloc[0]["calibration_mode"] == "scalar"
+    assert df.iloc[0]["px_per_cm"] == 10.0
+    assert bool(df.iloc[0]["is_calibrated"]) is True
+
+
+def test_sessions_csv_keeps_a_row_for_a_failed_session(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """A session that failed must still appear, or a reader cannot tell
+    "excluded because it broke" from "never in the project"."""
+    import pandas as pd
+
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_real_session)
+    manifest = manifest.model_copy(
+        update={
+            "sessions": [
+                *manifest.sessions,
+                SessionRef(
+                    session_id="missing",
+                    folder=tmp_path / "does_not_exist",
+                    sha256="0" * 64,
+                ),
+            ]
+        }
+    )
+    result = Engine(manifest).run(tmp_path / "out", exporters=["csv_long"])
+
+    assert any(r.error for r in result.sessions)
+    df = pd.read_csv(tmp_path / "out" / "sessions.csv")
+
+    assert set(df["session_id"]) == {tiny_real_session.name, "missing"}
+    failed = df.loc[df["session_id"] == "missing"].iloc[0]
+    assert isinstance(failed["error"], str) and failed["error"]
+    # Nothing was measurable about it, and the row says so rather than
+    # guessing.
+    assert pd.isna(failed["fps"])
+
+    ran = df.loc[df["session_id"] == tiny_real_session.name].iloc[0]
+    assert pd.isna(ran["error"])
+
+
+def test_run_writes_a_project_summary_at_the_run_root(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """A homogeneous project says so explicitly, rather than staying silent
+    and leaving the reader to wonder whether anything was checked."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    text = (tmp_path / "PROJECT_SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Session consistency" in text
+    assert "Sessions processed: 1 of 1" in text
+    assert "sessions.csv" in text
+
+
+def test_project_summary_leads_with_heterogeneity_when_present(
+    tiny_real_session: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two sessions at different frame rates must produce a README that says
+    not to pool them, before anything else."""
+    import track2data.api as api_module
+    from track2data.api import Engine
+    from track2data.core.models import Session
+    from track2data.readers import read_session
+
+    manifest = _minimal_manifest(tiny_real_session)
+    manifest = manifest.model_copy(
+        update={
+            "sessions": [
+                manifest.sessions[0],
+                SessionRef(
+                    session_id="fast",
+                    folder=tiny_real_session,
+                    sha256="1" * 64,
+                ),
+            ]
+        }
+    )
+
+    calls = {"n": 0}
+    real_read = read_session
+
+    def doubled_fps_on_second_call(folder: Path, **kwargs: object) -> Session:
+        session = real_read(folder, **kwargs)  # type: ignore[arg-type]
+        calls["n"] += 1
+        if calls["n"] % 2 == 0:
+            return session.model_copy(
+                update={
+                    "session_id": "fast",
+                    "video": session.video.model_copy(update={"fps": _FPS * 2}),
+                }
+            )
+        return session
+
+    monkeypatch.setattr(api_module, "read_session", doubled_fps_on_second_call)
+
+    Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    text = (tmp_path / "PROJECT_SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Read before pooling these sessions" in text
+    assert "frame rate" in text
+    # The caveat comes before the run bookkeeping it qualifies.
+    caveat = text.index("Read before pooling")
+    assert caveat < text.index("sessions.csv", caveat)
+
+
+def test_project_summary_names_failed_sessions(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_real_session)
+    manifest = manifest.model_copy(
+        update={
+            "sessions": [
+                *manifest.sessions,
+                SessionRef(
+                    session_id="missing", folder=tmp_path / "nope", sha256="0" * 64
+                ),
+            ]
+        }
+    )
+    Engine(manifest).run(tmp_path / "out", exporters=["csv_long"])
+
+    text = (tmp_path / "out" / "PROJECT_SUMMARY.md").read_text(encoding="utf-8")
+    assert "## Sessions that failed" in text
+    assert "`missing`" in text
+    assert "Sessions processed: 1 of 2" in text
+
+
+# ── input provenance (trajectory SHA-256) ─────────────────────────────────────
+
+
+def test_run_records_the_input_checksum(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """"These bytes produced these numbers" is only a checkable claim if the
+    bytes are named and hashed."""
+    import pandas as pd
+
+    from track2data.api import Engine
+    from track2data.core.hashing import file_sha256
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    row = pd.read_csv(tmp_path / "sessions.csv").iloc[0]
+    assert row["trajectory_source"] == "trajectories.npy"
+    assert row["trajectory_sha256"] == file_sha256(
+        tiny_real_session / "trajectories" / "trajectories.npy"
+    )
+
+
+def test_reader_records_which_trajectory_file_it_read(
+    tiny_real_session: Path,
+) -> None:
+    """The reader falls back through formats, so only it knows."""
+    from track2data.api import Engine
+
+    session = Engine(_minimal_manifest(tiny_real_session)).import_session(
+        tiny_real_session
+    )
+
+    assert session.trajectory_source is not None
+    assert session.trajectory_source.name == "trajectories.npy"
+    assert session.trajectory_source.exists()
+
+
+def test_changed_input_since_the_project_was_configured_is_reported(
+    tiny_real_session: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A re-exported or swapped session folder must not silently change what a
+    "reproduced" run means."""
+    import logging
+
+    from track2data.api import Engine
+
+    manifest = _minimal_manifest(tiny_real_session)
+    # The manifest records a hash that does not match the folder's contents,
+    # exactly as it would after the source was re-exported.
+    manifest = manifest.model_copy(
+        update={"sessions": [manifest.sessions[0].model_copy(update={"sha256": "d" * 64})]}
+    )
+
+    with caplog.at_level(logging.WARNING):
+        Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    assert "has changed since this project recorded it" in caplog.text
+
+
+def test_matching_input_hash_is_silent(
+    tiny_real_session: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The staleness check must not cry wolf on an unchanged folder."""
+    import logging
+
+    from track2data.api import Engine
+    from track2data.core.hashing import file_sha256
+
+    digest = file_sha256(tiny_real_session / "trajectories" / "trajectories.npy")
+    manifest = _minimal_manifest(tiny_real_session)
+    manifest = manifest.model_copy(
+        update={"sessions": [manifest.sessions[0].model_copy(update={"sha256": digest})]}
+    )
+
+    with caplog.at_level(logging.WARNING):
+        Engine(manifest).run(tmp_path, exporters=["csv_long"])
+
+    assert "has changed since this project recorded it" not in caplog.text
+
+
+def test_per_frame_table_distinguishes_interpolated_from_jump_replaced(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """Two different reconstructions, two different columns. was_interpolated
+    covers frames that started as NaN; a jump-replaced frame started as a real
+    measurement the pipeline judged implausible."""
+    import pandas as pd
+
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    df = pd.read_csv(
+        tmp_path / tiny_real_session.name / "master_fish_by_frame.csv"
+    )
+    assert "was_interpolated" in df.columns
+    assert "was_jump_replaced" in df.columns
+
+
+def test_every_metric_row_can_be_joined_to_its_input_quality(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """D-11 is keyed on (session_id, individual_id) -- the same key the
+    exporters merge summary metrics on -- so a reader can always ask how much
+    of a path_length_px value rests on real observation."""
+
+    from track2data.api import Engine
+
+    engine = Engine(_minimal_manifest(tiny_real_session))
+    session = engine.import_session(tiny_real_session)
+    psess = engine.preprocess(session)
+    results = engine.compute_metrics(psess)
+
+    assert "D-11" in results
+    provenance = results["D-11"]
+    individual = results["IL-1"]
+
+    joined = individual.merge(provenance, on=["session_id", "individual_id"])
+    assert len(joined) == len(individual)
+    assert "path_length_px" in joined.columns
+    assert "frac_measured" in joined.columns
+    assert (joined["n_frames_used"] > 0).all()
+
+
+# ── long table and codebook ───────────────────────────────────────────────────
+
+
+def test_run_writes_a_genuinely_long_metric_table(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """trial_activity_summary.csv is wide whatever its name says. This is the
+    shape lme4/glmmTMB/statsmodels actually want."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    df = pd.read_csv(tmp_path / tiny_real_session.name / "metrics_long.csv")
+
+    assert list(df.columns) == [
+        "session_id", "individual_id", "zone_name", "from_zone", "to_zone",
+        "metric_id", "column", "value", "unit",
+    ]
+    # metric_id survives here, unlike the wide merge which drops it.
+    assert "IL-1" in set(df["metric_id"])
+    path_rows = df[df["column"] == "path_length_px"]
+    assert len(path_rows) == _N_ANIMALS
+    assert set(path_rows["unit"]) == {"px"}
+
+
+def test_run_writes_a_codebook_at_the_run_root(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """One row per exported column with its unit and DOI -- the machine-
+    readable half of "45 cited metrics"."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    codebook = pd.read_csv(tmp_path / "codebook.csv")
+
+    assert "path_length_px" in set(codebook["column"])
+    row = codebook[codebook["column"] == "path_length_cm"].iloc[0]
+    assert row["unit"] == "cm"
+    assert row["metric_id"] == "IL-1"
+
+
+def test_every_long_table_column_is_in_the_codebook(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    """The point of shipping a codebook is that it explains what shipped."""
+    from track2data.api import Engine
+
+    Engine(_minimal_manifest(tiny_real_session)).run(tmp_path, exporters=["csv_long"])
+
+    long_df = pd.read_csv(tmp_path / tiny_real_session.name / "metrics_long.csv")
+    codebook = pd.read_csv(tmp_path / "codebook.csv")
+
+    documented = set(codebook["column"])
+    assert set(long_df["column"]) <= documented
+    assert "unknown" not in set(codebook["unit"])

@@ -9,6 +9,236 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`track2data sensitivity` — recompute metrics across a grid of
+  preprocessing settings.** The strongest methodological objection this class
+  of tool attracts is that the preprocessing choices, not the animals, drive
+  the result. It is a fair objection, and nothing in a normal export answered
+  it. This does: re-run a session across a grid of smoothing windows and
+  `max_gap_frames`, and report per column how far the value moved.
+
+  The headline is a **coefficient of variation** (SD / |mean|), which is
+  unitless and so comparable between a path length in cm and a bounded
+  fraction. Computed per individual and then averaged, not pooled — pooling
+  would mix genuine between-animal variation into a number meant to measure
+  parameter sensitivity alone. No "is this robust?" verdict is printed:
+  where that line sits depends on the effect size being claimed, which the
+  tool cannot know.
+
+  On the shipped example it reports IL-7's freezing-bout count moving 6.7%
+  across the grid while IL-1's path length moves 1.2% — which is exactly the
+  kind of thing worth knowing before publishing either.
+
+- **A documentation site** at <https://mbel-tech.github.io/Track2Data/>,
+  built with `mkdocs-material` and published by a GitHub Pages workflow.
+  7,000+ lines of markdown existed in this repo with nothing rendering them.
+  The site is *assembled* from those files rather than duplicating them — a
+  second hand-maintained copy would go stale, which is the failure mode this
+  project has hit repeatedly.
+
+  The one generated page is the **metric catalogue**: all 45 metrics with
+  formula, per-column units, assumptions, warnings and DOI, built from the
+  registry so it cannot drift from the code. `mkdocs build --strict` runs in
+  CI, so a broken internal link fails there rather than shipping a 404 to
+  someone following a citation.
+
+- **`docs/INTEROPERABILITY.md`** — where Track2Data sits between the trackers
+  and the statistics, why it deliberately does neither, and a documented
+  mapping onto the `movement` package's xarray layout with a working snippet.
+  Documented before implementing, per the audit, and it surfaces two things
+  that do *not* map cleanly: `movement`'s `confidence` is a pose estimator's
+  positional confidence while idtracker.ai's `id_probabilities` is identity
+  confidence — the position can be exact while the identity is a coin flip —
+  and zones and calibration have no home in a pose schema at all.
+
+- **A runnable example** (`examples/`). A complete two-minute, four-fish
+  project — `cd examples && track2data run example.t2d.json -o out` — so a
+  new user can see the shape of the output before pointing the tool at their
+  own data.
+
+  The session is deliberately **simulated behaviour, not random noise**: two
+  fish hug the wall and two use the centre, with freezing bouts and short
+  tracking dropouts, so the exported metrics differ between individuals in a
+  way a reader can interpret. Random positions would exercise the code while
+  teaching nothing, since every metric would land on its null value. A test
+  asserts the thigmotaxis split actually shows up in Z-1.
+
+  It ships as an inert **CSV bundle, not a pickled `.npy`**. Committing a
+  pickle would hand out an execution vector as a "try this" example — and
+  Track2Data would refuse to open it without an opt-in, so the walkthrough's
+  first command would fail. `make_example_session.py` regenerates it, and a
+  test checks it still reproduces the committed bytes.
+
+  With starter analysis scripts for R (`lme4`/`glmmTMB`) and Python
+  (`statsmodels`) that both read `metrics_long.csv`, join the codebook for
+  units and D-11 for data quality, refuse to pool sessions that disagree on
+  frame rate, and explain the four traps specific to this data:
+  pseudo-replication across animals in one tank, unequal tracking durations,
+  ratios of small counts, and preprocessing choices being analysis choices.
+
+- **Analytic-truth tests** (`tests/test_metrics/test_analytic_truth.py`).
+  R-parity shows this pipeline agrees with a reference R pipeline; it cannot
+  show either is right, since two implementations of the same misreading
+  agree perfectly. These compute metrics from trajectories whose true value
+  is derivable on paper: a straight track of known step length (IL-1, IL-2),
+  a fixed lattice (GL-1, exactly), a square wave in and out of a zone (Z-1,
+  exactly 10 s), a closed circle (IL-1 circumference) and a half circle
+  (IL-5 tortuosity = π/2). Frame-rate scaling is pinned as an exact factor
+  of two, which is the arithmetic behind the mixed-frame-rate warning.
+
+  This is the acceptance criterion for the PP-3 rewrite. One test makes the
+  reason explicit: an identity swap leaves GL-1 *completely unchanged* while
+  destroying IL-1, so a group-level check would notice nothing.
+
+- **`CITATION.cff`, PyPI publishing, and a release checklist.** GitHub's
+  "Cite this repository" button now works, and it cites idtracker.ai
+  alongside this tool — a paper citing Track2Data without the tracker
+  misattributes the part of the pipeline that did the hard work, so a test
+  pins that reference. `tests/test_version_consistency.py` also pins the
+  version, which otherwise goes stale and makes every citation name a
+  release that did not produce the results being cited.
+
+  `release.yml` gains a `pypi` job publishing the engine wheel via **trusted
+  publishing** (OIDC — no API token stored anywhere), with `twine check`
+  first, because a PyPI version can never be re-uploaded. The desktop
+  binaries serve someone clicking through a wizard; a wheel serves the
+  headless and HPC cases a binary cannot.
+
+  Both Zenodo and PyPI need a **one-time manual setup** that cannot live in
+  a workflow file. `docs/dev/RELEASING.md` is the checklist for each,
+  including which of Zenodo's two DOIs goes where.
+
+  `pyproject.toml` gains the author, keywords, classifiers and project URLs
+  a PyPI page needs.
+
+- **`SECURITY.md` and `.github/dependabot.yml`.** For a project that ships
+  desktop binaries built from PyPI wheels, dependency updates are a real
+  supply-chain control rather than paperwork: a vulnerable transitive
+  dependency reaches users as a signed-looking executable rather than as
+  something they chose to install. Dependabot is grouped and monthly, because
+  an update stream nobody reads trains the maintainer to merge without
+  looking. `SECURITY.md` covers private reporting, scope, and — at length —
+  how to handle a session folder someone else sent you.
+
+- **Property-based invariants for every preprocessing step**
+  (`tests/test_preprocess/test_preprocess_invariants.py`). `hypothesis` was a
+  declared dev dependency with zero uses anywhere; it now pins the promises
+  each step makes: no step mutates its input, `gap_fill` never introduces a
+  NaN or fills a gap longer than `max_gap_frames`, `jump_detect` never fills
+  a gap it did not create (the generalised form of a real regression),
+  smoothing never changes which frames have a position, and
+  `identity_switch` only ever permutes — it never alters a coordinate.
+
+  The generator draws gaps as explicit runs rather than an independent coin
+  flip per frame. That matters: with per-cell flips only 2 examples in 200
+  contained a gap long enough to exercise `max_gap_frames`, and none
+  contained an animal that was never detected, so the headline property was
+  passing vacuously.
+
+- **`track2data/py.typed`, and mypy in CI.** Ruff's `ANN` rules have required
+  annotations throughout the engine since early on, but nothing verified they
+  were *correct*, and PEP 561 meant a downstream type checker ignored all of
+  them anyway for want of a marker file. Both are fixed: the marker ships in
+  the wheel, and `mypy` runs as part of the required `CI passed` gate.
+
+  Getting there fixed 87 real type errors, which fell into five patterns:
+  `Metric`'s class attributes were declared as instance variables, making all
+  45 concrete metrics' assignments errors (they are `ClassVar` now, which is
+  what they always were); `Metric.compute` declared its parameter as `object`
+  and every subclass narrowed it, an unsound override 36 times over (it is
+  `Any`, with the reason written down: D-1..D-10 take a `Session` and
+  everything else a `PreprocessedSession`, and that split is real);
+  `_effective_cfg` took a bare `type`; the reader contract did not carry
+  `allow_pickle`; and `idtrackerai_v5._find_trajectory` returned `str` where a
+  `Literal` was required.
+
+  `warn_unused_ignores` then found **8 stale `# type: ignore` comments** — the
+  accumulation the audit flagged — all now removed.
+
+
+- **Input provenance: the manifest's central claim is now checkable.**
+  `SessionRef.sha256` was always `""`, so "these bytes produced these
+  numbers" — the whole point of the manifest for a tool whose deliverable
+  ends up in a figure — could not be verified by anyone.
+
+  The reader now records which trajectory file it actually read
+  (`Session.trajectory_source`); it has to, because `_load_payload` falls
+  back through the formats present in a folder, so the file that was read
+  is not always the highest-ranked one and cannot be re-derived afterwards.
+  Every run hashes that file and records the digest and filename in
+  `sessions.csv`. The GUI fills `SessionRef.sha256` on import, which also
+  makes `ProjectManifest.project_hash()` cover the inputs rather than only
+  the parameters.
+
+  That in turn gives a **staleness check**: when a session folder's
+  trajectory file no longer matches the hash the project recorded, the run
+  says so loudly. Silently re-exporting a source folder used to change what
+  a "reproduced" run meant, with nothing anywhere to notice.
+
+  Never fatal — an input that cannot be hashed costs provenance, not
+  results.
+
+- **D-11 Metric Input Provenance, and a `was_jump_replaced` per-frame
+  column.** No summary metric said how much of its input was real. A
+  session with 92 % coverage and one with 41 % produced indistinguishable
+  `path_length_px` rows; D-1 was the only handle, and it measures the
+  tracker's raw output rather than what the metrics consumed.
+
+  D-11 reports, per individual: `n_frames_used` (frames non-NaN *after*
+  preprocessing — a metric cannot be affected by a frame it never saw),
+  plus `frac_interpolated`, `frac_jump_replaced` and `frac_measured`.
+  Keyed on `(session_id, individual_id)`, the same key the exporters merge
+  summary metrics on, so any metric row can be joined to the quality of the
+  data behind it.
+
+  Separately, `master_fish_by_frame.csv` gains `was_jump_replaced`. This is
+  **new information, not a split of `was_interpolated`**, which was already
+  gap-fill-only by design: a jump-replaced position started life as a real
+  measurement that `jump_detect` judged implausible, and was previously
+  visible only as an aggregate count in `PreprocessReport`. The mask is
+  captured mid-pipeline, since smoothing moves every position afterwards
+  and "differs from the input" stops isolating the step once it runs.
+
+- **Cross-session consistency reporting, and a `sessions.csv` in every
+  export.** Nothing previously guarded against pooling sessions that are
+  not interchangeable. `fps` alone reaches the numbers in four places —
+  `compute_kinematics` scales speed and acceleration by it, `JumpCfg`
+  thresholds are per *frame*, `SmoothCfg.window` is a frame count (5 frames
+  is 167 ms at 30 fps and 83 ms at 60 fps), and path length is a sum over
+  inter-frame steps — so a project pooling 30 fps and 60 fps sessions, a
+  normal consequence of a camera change mid-study, produced systematically
+  different metric values per group with nothing in the export to say so.
+
+  New `track2data.core.session_consistency` reports every way a project's
+  sessions disagree: frame rate, group size, video resolution, calibration
+  mode, and calibration availability. Each warning names the affected
+  sessions and the consequence, not just the discrepancy.
+
+  Surfaced in three places: `Engine.consistency_warnings()` for
+  programmatic use, the GUI's Validate action and the CLI's `validate`
+  command, and every run's output.
+
+  **These warn, they do not block.** A mixed-frame-rate design is
+  legitimate when the analyst knows and can model it; the failure being
+  prevented is not knowing. `Engine.validate()` keeps returning only
+  blocking issues.
+
+- **Two project-level files at the root of every run's output directory.**
+  `sessions.csv` — one row per session with `fps`, `n_frames`,
+  `duration_s`, `n_animals`, video resolution, calibration mode,
+  `length_unit`, the `px_per_cm` actually used, and identity-free state, so
+  a downstream analyst can filter or build a covariate directly. Sessions
+  that failed keep a row carrying their id and error, because a silently
+  shorter table reads as a smaller study.
+
+  `PROJECT_SUMMARY.md` — the human-readable counterpart, leading with
+  anything that makes the sessions non-poolable. Named `PROJECT_SUMMARY.md`
+  rather than `README.md` so it cannot be confused with the per-session
+  README the `readme` exporter writes into each session folder.
+
+  Both are built from summaries the run already collected, so they cost no
+  additional session reads, and neither can fail a run: a bookkeeping file
+  that cannot be written is logged, not raised.
+
 - **idtracker.ai v4 preparation:** folders that look like v4 output now fail with a specific
   `V4_NOT_SUPPORTED` message instead of the generic "no reader" one; `scripts/inspect_idtrackerai_output.py`
   describes any idtracker.ai folder (pickles are only opened with `--allow-pickle`);
@@ -164,7 +394,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Plausibility Violation Rate -- the only diagnostic independent of
   idtracker.ai's own self-report, screening `Session.raw_xy` directly
   for implausible steps and single-frame "teleport" jumps. Nine other
-  proposals were deliberately not built; see `docs/ROADMAP.md`'s
+  proposals were deliberately not built; see `docs/dev/ROADMAP.md`'s
   "Reserved metric IDs" table for which, and why.
 - **`track2data/metrics/references.py`**, a canonical bibliography of
   ~35 verified works. Metrics now cite a shared `Reference` object
@@ -253,6 +483,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   comment and clears the label once the author edits one in.
 
 ### Changed
+
+- **Coverage now measures the whole shipped package, with two floors.**
+  `[tool.coverage.run] source` listed `track2data` alone, so the single 80 %
+  figure measured the engine while `tests/test_ui/` (14 files) and
+  `tests/test_app/` ran against no floor at all — and the number was
+  naturally read as whole-project coverage. `app` and `ui` are now included,
+  and CI enforces two thresholds from the one coverage run: **90 % on the
+  engine** (~96 % today) and **85 % on the GUI** (~90 %). Two rather than
+  one, because a well-covered GUI must not be able to mask an engine
+  regression: an engine bug silently changes numbers that end up in a
+  figure, while a GUI bug is visible to the person hitting it. Policy
+  documented in `docs/TECHNICAL_SPEC.md` §11.1a.
+
+- **The README leads with the user path.** It opened with a list of eight
+  internal design documents, PRD first. It now opens with what the tool is
+  for, what it deliberately does not do (no tracking, no statistics), how to
+  install it, a five-line quickstart, an example of the output table, and
+  how to cite it. `PRD.md`, `DECISIONS.md`, `docs/ROADMAP.md` and
+  `docs/UI_DESIGN.md` moved to `docs/dev/`; `idtrackerai_output_structure.md`
+  moved into `docs/`; `extract_bboxes.py` moved to `scripts/`. Every internal
+  markdown link was repaired and is checked to resolve.
+
+- **`docs/dev/ROADMAP.md` cut to milestones** (258 → 149 lines). The
+  completed M1–M3 task lists were a third place recording what shipped,
+  alongside the CHANGELOG and the issue tracker; three places to update meant
+  two went stale.
+
+- **`scripts/extract_bboxes.py` is marked unmaintained and known-wrong.**
+  The audit recommended condensing `docs/EXTRACT_BBOXES_FIX.md` into a
+  CHANGELOG entry and deleting it. That would have been wrong: the four
+  defects it catalogues were **never applied to this copy** — `blob.contours`
+  is still there at line ~47 — so the document is a pending correction guide,
+  not a fix narrative. It moved to `docs/dev/` and the script now says so in
+  its module docstring, along with a pointer to the packaged blob reader,
+  which does the same job behind a restricted unpickler.
+
+- **Five metrics were returning columns they did not declare.**
+  `Metric.output_columns` is what the UI, the exporters and the generated
+  docs promise, and IL-1 (`path_length_cm`, `path_length_bl`), IL-2
+  (`mean_speed_cm_s`, `mean_speed_bl_s`), GL-1 (`mean_nnd_cm`,
+  `mean_nnd_bl`), GL-5 and GL-7 (`*_cm_s`) all under-declared. All are
+  emitted unconditionally — NaN when uncalibrated rather than absent — so
+  they are now declared.
+
+  The 33 per-metric `test_output_columns_present` tests could not catch
+  this: each asserted a hardcoded list of names was *present*, a subset
+  check against a literal that never read `output_columns` at all. They are
+  replaced by one parametrised test over the whole registry asserting set
+  **equality**, run against both a calibrated and an uncalibrated session —
+  which also pins that the calibration-dependent columns never change the
+  schema's shape. Metrics are run through the engine's effective config, so
+  derived parameters (IL-3's arena radius, which gates
+  `time_in_centre_pct`) are supplied as they are in a real run.
+
+- **Speed, acceleration and heading are now Savitzky–Golay derivatives.**
+  **Every speed, acceleration and turning value will change.** The previous
+  estimator had two compounding defects:
+
+  1. *A half-frame offset.* Speed was a forward difference assigned to frame
+     *t*, which actually estimates the derivative at *t + ½*. On a uniformly
+     accelerating trajectory the resulting bias is exactly `a·Δt/2`, every
+     frame, in the same direction — now pinned by a regression test.
+  2. *Squared noise.* Acceleration was a first difference **of that first
+     difference**, so positional noise was amplified twice over.
+
+  Both quantities now come from one filtered derivative of position each,
+  using the Savitzky–Golay filter family already applied to positions — no
+  new dependency, since `scipy` was already required.
+
+  Measured on a synthetic correlated random walk with realistic positional
+  noise (3000 frames at 30 fps; **not** corpus numbers — the embargoed
+  corpus was not available here — but they show the magnitude, not just the
+  direction): mean speed **−10.6 %**, max speed **−55.1 %**, mean |accel|
+  **−76.1 %**, max |accel| **−71.3 %**. The old maxima were largely noise.
+
+  Two further improvements fall out of the method: there is no longer a
+  special case at the end of a session (a forward difference had nowhere to
+  look, so the last frame's speed and the last two accelerations were NaN —
+  an artefact of the arithmetic, not a property of the data), and a single
+  missing position no longer destroys its neighbour's value, because
+  derivatives are taken per contiguous segment and never bridge a gap.
+
+  **The old estimator is retained** as
+  `PreprocessConfig.kinematics.method = "forward_difference"` for one
+  release, so a project can reproduce earlier numbers; its artefacts are
+  pinned by tests as known behaviour rather than as goals.
+
+- **IL-6 acceleration is documented as tangential**, i.e. the rate of change
+  of speed `d|v|/dt` — which is what it always was, and what the metric spec
+  says, but the distinction was never written down. It is obtained from the
+  exact identity `(v · a)/|v|` rather than by differencing a differenced
+  series. It is *not* the magnitude of the acceleration vector: an animal
+  circling at constant speed reports zero, and the centripetal component
+  belongs to the turning metrics. A test pins this, so the two can never be
+  swapped silently.
+
+- **Caveats the estimator cannot fix are now recorded on the metrics they
+  affect.** IL-1 records that summing step lengths sums `|dx|` rather than
+  `dx`, so `E[|dx|] > |E[dx]|` whenever there is positional noise: path
+  length is biased *upward*, always, and the bias grows with frame rate —
+  making path length non-comparable across the mixed-rate projects
+  `sessions.csv` now surfaces. IL-8 records that stationary frames carry no
+  heading and are therefore absent from its denominator, so a mostly-still
+  animal's turn rate is estimated from a small, non-random subset of its
+  behaviour.
+
+
+- **PP-3 is dramatically faster and no longer degrades quadratically.**
+  Measured on synthetic 8-animal sessions: an hour-long session (108k
+  frames) went from 47.8 s to 4.7 s on the full-scan path, and to 0.07 s
+  when fragment boundaries are available. The nested Python loop that
+  rebuilt a distance matrix already computable by broadcasting is gone.
+  A crowded session, where many permutations are accepted, previously did
+  not terminate in any useful time; the running permutation is now
+  materialised in one pass, keeping the whole step linear in frame count.
+  Performance guards with explicit budgets were added so either
+  regression fails in CI rather than in someone's afternoon.
+
+- **PP-3's tests now assert what the step did to the data.** Several
+  previously asserted only `out.shape == xy.shape` — including one that
+  injected a real identity swap and never checked whether it had been
+  corrected, which is how these defects survived. Added
+  `tests/test_preprocess/test_identity_switch_crossing_regression.py`
+  covering the canonical crossing cases.
 
 - **`master_fish_by_frame.csv` is written in chunks** without the extra
   `copy()` and unconditional re-sort, halving traced peak memory on a
@@ -382,7 +736,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   **"session" calibration mode** for the same ratio, now with an explicit
   user confirmation step.
 
+### Removed
+
+- **Agent planning artefacts** (`docs/superpowers/plans/`, `docs/superpowers/specs/`)
+  — 1,978 lines of working notes for one already-shipped UI redesign. They
+  are in the git history and in the PR that shipped it.
+
+- **`track2data/readers/idtrackerai_v4.py`.** A stub whose `detect()` always
+  returned `False` and whose `read()` raised `NotImplementedError`: it could
+  never be selected, and could only fail if it somehow were. D-012 had already
+  removed its entry point, but the class stayed registered as a built-in,
+  where it did nothing except violate the reader contract that `read()` returns
+  a `Session`. A class that raises on use is worse than an absent one. The
+  decision record keeps the history.
+
+- **`codebook.csv` in every export.** One row per exported column with its
+  unit, level, originating metric, definition, citation and DOI, generated
+  from the registry. That turns "45 cited metrics" from a README claim into
+  a machine-readable artefact shipped with the data.
+
+  It also fixes a unit trap nothing else records: **every `*_pct` column in
+  this project holds a fraction in [0, 1], not a percentage.** `time_pct =
+  0.42` means 42 %, and a reader trusting the suffix records 0.42 %. All
+  eight such columns (`time_pct`, `time_in_centre_pct`, `home_base_time_pct`,
+  `wall_contact_time_pct`, `polarised_time_pct`, `milling_time_pct`,
+  `swarm_time_pct`) are documented as fractions. The names are unchanged —
+  renaming them would break every existing analysis script — so the codebook
+  is where the units are stated truthfully.
+
+  A test asserts every column in the registry resolves to a known unit, so a
+  new metric cannot ship a codebook row reading "unknown".
+
+- **`metrics_long.csv` — a genuinely long table.** Despite its name, the
+  `csv_long` exporter only wrote *wide* tables: one row per session ×
+  individual with a column per metric, with `metric_id` dropped during the
+  merge. The new file is
+  `session_id, individual_id, zone_name, from_zone, to_zone, metric_id,
+  column, value, unit` — one row per measured value, across individual,
+  group, zone and diagnostic metrics at once. It keeps `metric_id`, so a
+  value can be traced back through the codebook to the work that defines it,
+  and it joins to `codebook.csv` on `column`.
+
 ### Fixed
+
+- **PP-3 identity-switch correction now corrects identity switches.** The
+  step was unsound in three compounding ways, all of which changed data
+  for the worse when enabled. It remains **off by default**, so no
+  existing project's numbers change unless it was deliberately switched
+  on in the manifest.
+
+  1. *Silent no-op for dyads.* The Tier-1 gate compared distances **among
+     conspecifics within a single frame**, so self-distance had to be
+     excluded — leaving one finite distance at `n_animals == 2` and a
+     ratio test that could never fire. On a synthetic dyadic crossing
+     with a persistent swap at frame 21, the step reported 0 frames
+     corrected and left mean absolute error at 16.0 px, unchanged. Dyads
+     are one of the commonest designs in the target literature.
+  2. *Corrections did not persist.* An identity switch is a **persistent**
+     relabelling, but the permutation was applied one frame at a time for
+     the 5 frames of `consolidate_window` and never propagated. On a
+     4-animal crossing this corrected 6 frames, moved mean absolute error
+     only from 8.00 px to 7.35 px, left 32 of 60 frames on the wrong
+     identity, and introduced a 14 px per-frame step where the true step
+     is 2 px — converting one discontinuity into several, which is worse
+     for speed, acceleration and IL-1 than leaving the switch alone.
+  3. *Implementation did not match its own docstring.* The documented
+     algorithm (predicted next positions extrapolated from *t-1* to *t*,
+     matched against observations at *t+1*) was never implemented; what
+     ran was a proximity detector that fired whenever two animals were
+     close relative to a third, regardless of whether the assignment was
+     actually ambiguous. Tier-2 assigned on a constant-*position*
+     prediction, which fails precisely in the moving-crossing case it
+     exists for. One computed cost matrix was never read.
+
+  The rewrite uses constant-velocity prediction, keeps an accepted
+  permutation in effect until something later supersedes it, and accepts
+  a permutation only when it beats the tracker's own labelling by
+  `tier1_ratio` — so a crossing on its own, where the two costs tie, no
+  longer triggers a swap.
+
+  **`consolidate_window` is retained for manifest compatibility and is no
+  longer read.** `tier1_ratio` keeps its name and default (1.5) but is now
+  the acceptance margin rather than a nearest-neighbour ratio.
+
+- **PP-3 uses idtracker.ai fragment boundaries when the session has them.**
+  `preprocess.pipeline` now passes `fragment_swap_boundaries(session.fragments)`
+  into `correct_switches`, mirroring how the crossing mask already reaches
+  `fill_gaps`. Fragment boundaries are the only frames where a swap is
+  physically possible, so everywhere else the search could only manufacture
+  false positives. Sessions without `preprocessing/list_of_fragments.json`
+  fall back to scanning every frame, as before — fragment data is a bonus,
+  never a requirement.
 
 - **Metadata screen scrolls** instead of squashing its rows once the per-animal controls were added.
 
@@ -534,6 +978,46 @@ robustness against inputs the code accepted but couldn't represent:
   places, and IL-3's `output_columns`, which omitted a column it always
   emits.
 
+### Security
+
+- **Loading a trajectory file no longer executes whatever code it contains.**
+  `formats/npy.py` called `np.load(..., allow_pickle=True)` unconditionally
+  while its own docstring claimed the GUI/CLI enforced a consent gate first.
+  No such gate existed anywhere — a fact `docs/IDTRACKERAI_FORMAT_ANALYSIS.md`
+  had already recorded. Since `npy` is one of idtracker.ai's default
+  trajectory output formats, that path was reached by importing an *ordinary*
+  session folder, which made any shared, downloaded or collaborator-supplied
+  folder an execution vector. That matters more for a desktop app that
+  invites the user to point a file dialog at data than it would for a library.
+
+  New `ProjectManifest.security.allow_pickle_trajectories`, **defaulting to
+  False**, is threaded from the manifest through `Engine.import_session()` →
+  `read_session()` → `IDTrackerAiReader.read()` → `_load_payload()` into the
+  loader, which now refuses with `IDT_PICKLE_REFUSED` — a documented error
+  code that had never been implemented (issue #77).
+
+  **A refusal is not an import failure.** The reader's existing
+  format-fallback walk treats it like any other unreadable format, so a
+  folder carrying an h5 or csv trajectory alongside the pickled one — which
+  a standard idtracker.ai session does — imports exactly as before and never
+  prompts. Only a pickle-only folder forces the question, and the error then
+  names consent as the cause rather than leaving the user thinking the file
+  is corrupt.
+
+  The GUI asks once per project, naming the folder, and persists the answer;
+  the CLI reports it. The audit named one ungated call site — there were
+  **two**: `idtrackerai_v5.py`'s `video_object.npy` load is a second,
+  separately reachable one. It carries metadata only, with a session.json
+  fallback, so refusing it degrades the import rather than failing it.
+
+  Third-party readers are unaffected: `read_session()` passes the keyword
+  only to readers that set `SessionReader.accepts_allow_pickle`, so one
+  written against the original `read(folder)` signature keeps working.
+
+  **Existing projects that import pickle-only session folders will need to
+  opt in once**, via the GUI prompt or by setting
+  `security.allow_pickle_trajectories` in the project file.
+
 ## [0.1.0] — 2026-08-24
 
 First public release: the engine, the wizard GUI, and the CLI, wired
@@ -625,6 +1109,6 @@ than as a diff.
   change. Releases remain unsigned until then — see
   [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md), which also explains why
   the first release necessarily cannot be signed.
-- `docs/EXTRACT_BBOXES_FIX.md` — a measured +27.8% body-length bias found in
-  `extract_bboxes.py` (a script used in an adjacent pipeline) and its root
+- `docs/dev/EXTRACT_BBOXES_FIX.md` — a measured +27.8% body-length bias found in
+  `scripts/extract_bboxes.py` (a script used in an adjacent pipeline) and its root
   causes.

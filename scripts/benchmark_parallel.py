@@ -133,6 +133,7 @@ def build_manifest(folders: list[Path], *, identity_switch: bool, zones: bool) -
         MetricSelection,
         PreprocessConfig,
         ProjectManifest,
+        SecurityConfig,
         SessionRef,
         ZoneSet,
     )
@@ -158,6 +159,10 @@ def build_manifest(folders: list[Path], *, identity_switch: bool, zones: bool) -
         updated_at=now,
         sessions=[SessionRef(session_id=f.name, folder=f, sha256="x") for f in folders],
         calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        # write_session() pickles its own synthetic trajectories, so the engine's pickle
+        # gate would otherwise refuse every session: this project trusts files this very
+        # script wrote.
+        security=SecurityConfig(allow_pickle_trajectories=True),
         zones=zone_set,
         preprocess=PreprocessConfig(identity_switch=IdSwitchCfg(enabled=identity_switch)),
         metrics=MetricSelection(individual=individual, group=group, zone=zone_ids),

@@ -1,0 +1,70 @@
+# Citation metadata (https://citation-file-format.github.io/).
+#
+# GitHub renders this as a "Cite this repository" button, and Zenodo reads it
+# when minting a DOI for a release. Keep `version` and `date-released` in step
+# with track2data/_version.py and the tag -- tests/test_version_consistency.py
+# checks the first of those.
+#
+# TODO(maintainer): add `orcid:` below, and the release DOI under
+# `identifiers:` once the Zenodo-GitHub integration is switched on. See
+# docs/dev/RELEASING.md.
+cff-version: 1.2.0
+title: "Track2Data: analysis-ready behavioural datasets from idtracker.ai output"
+message: >-
+  If you use this software in work you publish, please cite both this entry
+  and idtracker.ai (Romero-Ferrero et al. 2019), the tracker whose output it
+  consumes.
+type: software
+authors:
+  - family-names: Bellio
+    given-names: Martina
+    email: m.bellio2199@gmail.com
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+repository-code: "https://github.com/mbel-tech/Track2Data"
+url: "https://github.com/mbel-tech/Track2Data"
+abstract: >-
+  Track2Data converts idtracker.ai session folders into analysis-ready
+  behavioural datasets. It computes 45 individual-, group- and zone-level
+  metrics, each carrying a citation to the work defining it, alongside
+  tracking-quality diagnostics that report how much of every value rests on
+  measured rather than reconstructed positions. Exports ship a machine-
+  readable codebook of units and DOIs, per-session recording metadata, and a
+  manifest recording every parameter and an input checksum, so a result can
+  be traced back to the bytes that produced it.
+keywords:
+  - animal behaviour
+  - behavioural phenotyping
+  - collective behaviour
+  - idtracker.ai
+  - trajectory analysis
+  - zebrafish
+  - reproducibility
+license: MIT
+version: 0.1.0
+date-released: "2026-08-24"
+
+references:
+  - type: article
+    title: >-
+      idtracker.ai: tracking all individuals in small or large collectives of
+      unmarked animals
+    authors:
+      - family-names: Romero-Ferrero
+        given-names: Francisco
+      - family-names: Bergomi
+        given-names: Mattia G.
+      - family-names: Hinz
+        given-names: Robert C.
+      - family-names: Heras
+        given-names: Francisco J. H.
+      - family-names: de Polavieja
+        given-names: Gonzalo G.
+    journal: Nature Methods
+    volume: 16
+    start: 179
+    end: 182
+    year: 2019
+    doi: 10.1038/s41592-018-0295-5
+    notes: >-
+      The upstream tracker. Track2Data reads its session folders and does not
+      perform tracking itself.

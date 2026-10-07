@@ -35,7 +35,7 @@ from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -51,6 +51,10 @@ from track2data.core.models import (
 from track2data.core.progress import OperationCancelled, ProgressCallback, ProgressEvent, emit
 from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
 from track2data.readers import read_session
+
+if TYPE_CHECKING:
+    from track2data.core.session_consistency import SessionSummary
+    from track2data.metrics.base import Metric
 
 logger = logging.getLogger(__name__)
 
@@ -298,8 +302,17 @@ class Engine:
     # ── session import ─────────────────────────────────────────────────────
 
     def import_session(self, folder: Path) -> Session:
-        """Auto-detect reader and return a Session for *folder*."""
-        return read_session(Path(folder))
+        """Auto-detect reader and return a Session for *folder*.
+
+        Trajectory formats that execute code on load are refused unless this
+        project has opted in via ``security.allow_pickle_trajectories``. A
+        folder that also carries an h5 or csv trajectory imports normally
+        either way -- the reader falls through to it.
+        """
+        return read_session(
+            Path(folder),
+            allow_pickle=self._manifest.security.allow_pickle_trajectories,
+        )
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -412,12 +425,26 @@ class Engine:
         from track2data.preprocess.pipeline import run as pp_run
 
         psess = pp_run(session, self._manifest.preprocess, check=self._cancel_check)
+        return self.apply_calibration_and_zones(psess)
+
+    def apply_calibration_and_zones(
+        self, psess: PreprocessedSession
+    ) -> PreprocessedSession:
+        """Steps 2 and 3 of :meth:`preprocess`, on an already-preprocessed session.
+
+        Separated so a caller that ran the pipeline itself -- the
+        sensitivity sweep re-runs it once per grid point -- gets the same
+        calibration and zone treatment as a normal run rather than a
+        re-implementation of it that could drift.
+        """
+        session = psess.session
         # The tracker's own body length is calibration-independent, so *_bl
         # metrics work whichever mode is chosen. Body-length calibration below
-        # then applies its own validation on top of the same values.
+        # then applies its own validation on top of the same values. Done here
+        # rather than in preprocess() so a caller that ran the pipeline itself
+        # (the sensitivity sweep) gets it too.
         if session.body_length_px is not None:
             psess.body_length_px = np.asarray(session.body_length_px, dtype=np.float64).copy()
-
         try:
             # Calibration.
             cfg = self._manifest.calibration
@@ -465,7 +492,9 @@ class Engine:
 
     # ── metrics ────────────────────────────────────────────────────────────
 
-    def _effective_cfg(self, metric_cls: type, psess: PreprocessedSession) -> dict[str, Any]:
+    def _effective_cfg(
+        self, metric_cls: type[Metric], psess: PreprocessedSession
+    ) -> dict[str, Any]:
         """Build the cfg dict passed to metric_cls().compute().
 
         Layered, lowest to highest precedence:
@@ -571,7 +600,7 @@ class Engine:
 
     @staticmethod
     def _compute_one(
-        cls: type, psess: PreprocessedSession, cfg: dict[str, Any], identity_free: bool
+        cls: type[Metric], psess: PreprocessedSession, cfg: dict[str, Any], identity_free: bool
     ) -> Any:
         """One metric on one (whole or sliced) session. Occupancy-style zone
         metrics are pooled over detection slots on identity-free sessions."""
@@ -584,7 +613,7 @@ class Engine:
 
     def _compute_windowed(
         self,
-        cls: type,
+        cls: type[Metric],
         psess: PreprocessedSession,
         cfg: dict[str, Any],
         windows: list[Any],
@@ -660,7 +689,7 @@ class Engine:
         # D-5 IdentityStability is precisely the record of that fact, so
         # suppressing the diagnostics would remove the evidence for the
         # skips below.
-        results.update(compute_all_diagnostics(psess.session))
+        results.update(compute_all_diagnostics(psess))
 
         sel = self._manifest.metrics
 
@@ -807,6 +836,13 @@ class Engine:
             "heading_rad": heading_flat,
         })
 
+        # Distinct from was_interpolated, which covers only gap-filled frames
+        # that started as NaN. A jump-replaced position started as a real
+        # measurement that jump_detect judged implausible -- previously
+        # visible only as an aggregate count in PreprocessReport, so no
+        # reviewer could tell which rows it touched.
+        if psess.jump_replaced is not None:
+            df["was_jump_replaced"] = psess.jump_replaced.reshape(-1)
         bin_seconds = self._bin_seconds()
         if bin_seconds is not None:
             df.insert(
@@ -1138,6 +1174,8 @@ class Engine:
                     ),
                 )
 
+        self._write_project_summary(Path(out_dir), results)
+
         emit(
             progress,
             ProgressEvent(
@@ -1145,6 +1183,183 @@ class Engine:
             ),
         )
         return RunResult(sessions=results)
+
+    def _hash_and_check_input(self, session: Session, ref: SessionRef) -> str:
+        """SHA-256 of the trajectory file that produced this session's numbers.
+
+        The export's central provenance claim is "these bytes produced these
+        numbers", and it is not checkable without this. Recorded in
+        ``sessions.csv`` and in each session's export README.
+
+        Also the staleness check: when the manifest already carries a hash
+        for this session and the folder now hashes differently, the source
+        data changed after the project was configured. That is worth saying
+        loudly -- it is exactly the case where a cached or re-exported
+        session folder silently changes what a "reproduced" run means.
+
+        Never fatal: a hash that cannot be computed costs provenance, not
+        results.
+        """
+        from track2data.core.hashing import file_sha256
+
+        source = session.trajectory_source
+        if source is None:
+            return ""
+        try:
+            digest = file_sha256(Path(source))
+        except OSError:
+            logger.warning(
+                "Could not hash %s for session %s; the export will record no "
+                "input checksum for it.",
+                source,
+                ref.session_id,
+            )
+            return ""
+
+        if ref.sha256 and ref.sha256 != digest:
+            logger.warning(
+                "Session %s: the trajectory file %s has changed since this "
+                "project recorded it (manifest %s, now %s). The numbers in "
+                "this run come from the current file, not the one the project "
+                "was configured against.",
+                ref.session_id,
+                source.name,
+                ref.sha256[:12],
+                digest[:12],
+            )
+        return digest
+
+    def _write_project_summary(
+        self, out_dir: Path, results: list[SessionRunResult]
+    ) -> list[Path]:
+        """Write the run-root ``sessions.csv`` and ``PROJECT_SUMMARY.md``.
+
+        At the run root rather than inside a session folder, because both
+        describe the *project*: which sessions took part, and the ways they
+        disagree with each other. A per-session README saying "this project
+        mixes frame rates" would be in the wrong place, and repeated once per
+        session.
+
+        Built from the summaries the sessions already carried back, so this
+        costs no additional session reads.
+
+        Never fatal. A run whose numbers are all computed must not be
+        reported as failed because a bookkeeping file could not be written.
+        """
+        from track2data.core.session_consistency import (
+            heterogeneity_warnings,
+            sessions_table,
+        )
+
+        if not results:
+            return []
+
+        summaries = [r.summary for r in results if r.summary is not None]
+        errors = {r.session_id: r.error for r in results if r.error}
+        warnings = heterogeneity_warnings(summaries)
+
+        for warning in warnings:
+            logger.warning("Session consistency: %s", warning)
+
+        written: list[Path] = []
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            table_path = out_dir / "sessions.csv"
+            sessions_table(summaries, errors=errors).to_csv(
+                table_path, index=False, encoding="utf-8", lineterminator="\n"
+            )
+            written.append(table_path)
+
+            readme_path = out_dir / "PROJECT_SUMMARY.md"
+            readme_path.write_text(
+                self._project_readme_text(results, warnings), encoding="utf-8"
+            )
+            written.append(readme_path)
+
+            # At the run root, not per session: it describes the schema every
+            # session folder shares. Covers the whole registry rather than
+            # only this run's selection, so a reader can look up any column
+            # they encounter in any table.
+            from track2data.exporters.schema import build_codebook
+
+            codebook_path = out_dir / "codebook.csv"
+            build_codebook().to_csv(
+                codebook_path, index=False, encoding="utf-8", lineterminator="\n"
+            )
+            written.append(codebook_path)
+        except Exception:
+            logger.exception("Could not write the run summary to %s", out_dir)
+        return written
+
+    def _project_readme_text(
+        self, results: list[SessionRunResult], warnings: list[str]
+    ) -> str:
+        """Run-root project summary: what ran, what failed, what not to pool.
+
+        Named PROJECT_SUMMARY.md rather than README.md so it cannot be
+        confused with the per-session README the readme exporter writes into
+        each session folder -- an export that exists to be a provenance
+        record must not have two differently-scoped files with one name.
+
+        The consistency section leads when there is one. Someone reading this
+        before writing a Methods section needs to know they have a
+        mixed-frame-rate project before they need the session count.
+        """
+        ok = [r for r in results if not r.error]
+        failed = [r for r in results if r.error]
+
+        lines = [
+            f"# Track2Data Run — {self._manifest.project_name}",
+            "",
+            f"- Project hash: `{self._manifest.project_hash()}`",
+            f"- Sessions processed: {len(ok)} of {len(results)}",
+            "",
+            "Per-session outputs are in the subdirectory named after each "
+            "session. `sessions.csv` lists every session's frame rate, group "
+            "size, duration and calibration state.",
+            "",
+        ]
+
+        if warnings:
+            lines += [
+                "## Read before pooling these sessions",
+                "",
+                "The sessions in this project are not interchangeable. Each "
+                "point below changes what a cross-session comparison means:",
+                "",
+            ]
+            lines += [f"{i}. {w}" for i, w in enumerate(warnings, start=1)]
+            lines += [
+                "",
+                "None of these stopped the run -- they are design facts, not "
+                "errors -- but a result pooled across them without accounting "
+                "for them will be wrong. Use `sessions.csv` to filter, or to "
+                "build the covariate.",
+                "",
+            ]
+        else:
+            lines += [
+                "## Session consistency",
+                "",
+                "All sessions agree on frame rate, group size, video "
+                "resolution and calibration state, so nothing about the "
+                "recording setup implies a cross-session correction.",
+                "",
+            ]
+
+        if failed:
+            lines += ["## Sessions that failed", ""]
+            lines += [f"- `{r.session_id}` — {r.error}" for r in failed]
+            lines += [
+                "",
+                "These produced no metrics. They appear in `sessions.csv` with "
+                "their error, so an analysis that expected them can tell they "
+                "are missing rather than silently covering fewer animals.",
+                "",
+            ]
+
+        return "\n".join(lines)
 
     def _run_parallel(
         self,
@@ -1254,14 +1469,16 @@ class Engine:
         import time
 
         from track2data.core.progress import OperationCancelled
+        from track2data.core.session_consistency import SessionSummary
 
         start = time.monotonic()
         psess = None
         try:
             psess = self._cache_get(ref.folder)
             cached = psess is not None
-            if psess is None:
-                session = self.import_session(ref.folder)
+            # A cached result carries the Session it was built from, which is all
+            # the summary and the input hash below need.
+            session = self.import_session(ref.folder) if psess is None else psess.session
             # The override only, not ref.is_identity_free(): this method is
             # keyed by ref.session_id (see the docstring) because a
             # reader-derived id may differ, so the lookup inside
@@ -1319,6 +1536,16 @@ class Engine:
                 metric_previews=metric_previews,
                 preprocess_report=psess.report,
                 duration_s=time.monotonic() - start,
+                # Built from the session we already read and the calibration
+                # the run actually resolved, so sessions.csv reports what
+                # happened rather than what the manifest asked for.
+                summary=SessionSummary.from_session(
+                    session,
+                    calibration_mode=self._manifest.calibration.mode,
+                    is_identity_free=ref.is_identity_free(),
+                    px_per_cm=psess.px_per_cm,
+                    trajectory_sha256=self._hash_and_check_input(session, ref),
+                ),
             )
         except OperationCancelled:
             raise
@@ -1360,8 +1587,14 @@ class Engine:
 
     def validate(self) -> list[str]:
         """
-        Return a list of validation warning strings.
+        Return a list of blocking validation issues.
         Empty list means the pipeline is ready to run.
+
+        Cross-session heterogeneity (mixed frame rates, mixed calibration)
+        is deliberately NOT reported here: those are legitimate designs as
+        long as the analyst knows, so blocking the run would be wrong. See
+        :meth:`consistency_warnings`, which the GUI and CLI surface
+        alongside this and which ``run()`` records in the export.
         """
         issues: list[str] = []
         if not self._manifest.sessions:
@@ -1376,6 +1609,67 @@ class Engine:
             issues.append("No metrics selected.")
         issues.extend(self._identity_selection_issues())
         return issues
+
+    def consistency_warnings(self) -> list[str]:
+        """Report the ways this project's sessions disagree with each other.
+
+        Non-blocking by design (see :meth:`validate`): pooling 30 fps and 60
+        fps sessions is a defensible thing to do deliberately and a serious
+        mistake to do by accident, and only the analyst can tell those apart.
+
+        Reads every session folder, like ``_session_calibration_issues()``
+        and for the same reason -- this is an explicit pre-flight action, not
+        something called on every keystroke, so a complete report is worth
+        the I/O. Unreadable sessions are skipped silently here; ``validate()``
+        and the run itself both report them.
+        """
+        from track2data.core.session_consistency import heterogeneity_warnings
+
+        return heterogeneity_warnings(self._session_summaries())
+
+    def _session_summaries(self) -> list[SessionSummary]:
+        """Read every session in the manifest and summarise it.
+
+        Best-effort: a session that cannot be read contributes nothing rather
+        than aborting the report, because the whole point is to describe the
+        sessions that *will* take part in the run.
+        """
+        from track2data.core.session_consistency import SessionSummary
+
+        mode = self._manifest.calibration.mode
+        summaries: list[SessionSummary] = []
+        for ref in self._manifest.sessions:
+            try:
+                session = self.import_session(ref.folder)
+            except Exception:
+                continue
+            summaries.append(
+                SessionSummary.from_session(
+                    session,
+                    calibration_mode=mode,
+                    is_identity_free=ref.is_identity_free(),
+                    px_per_cm=self._resolve_px_per_cm(session),
+                )
+            )
+        return summaries
+
+    def _resolve_px_per_cm(self, session: Session) -> float | None:
+        """The px-to-cm ratio this session would be calibrated with, if any.
+
+        Mirrors the branch structure of ``preprocess()``'s calibration step
+        without running it: enough to answer "will this session get real
+        *_cm columns?", which is what the consistency report turns on.
+        """
+        cfg = self._manifest.calibration
+        if cfg.mode == "scalar":
+            return cfg.px_per_cm if cfg.px_per_cm and cfg.px_per_cm > 0 else None
+        if cfg.mode == "session":
+            return session.length_unit
+        # "bodylength" derives a per-animal scale from body_length_px rather
+        # than a single session-wide ratio; it produces *_bl columns whether
+        # or not a length_unit exists, so treat the session's own unit as the
+        # thing that decides whether *_cm columns are real.
+        return session.length_unit
 
     def _identity_selection_issues(self) -> list[str]:
         """Warn when the identity gate would empty the whole run.
@@ -1429,7 +1723,7 @@ class Engine:
         unreadable: list[str] = []
         for ref in self._manifest.sessions:
             try:
-                session = read_session(ref.folder)
+                session = self.import_session(ref.folder)
             except Exception:
                 unreadable.append(ref.session_id)
                 continue

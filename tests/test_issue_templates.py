@@ -108,7 +108,14 @@ def test_the_metric_type_dropdown_matches_metric_level_exactly() -> None:
     # get_type_hints, not __annotations__: the module uses
     # `from __future__ import annotations`, so the raw annotation is a
     # string and get_args() would return ().
-    levels = list(typing.get_args(typing.get_type_hints(Metric)["level"]))
+    #
+    # Metric's class attributes are declared ClassVar (they are properties of
+    # the class, not of an instance), so unwrap that first -- get_args on the
+    # ClassVar itself yields the Literal, not the Literal's values.
+    annotation = typing.get_type_hints(Metric)["level"]
+    if typing.get_origin(annotation) is typing.ClassVar:
+        annotation = typing.get_args(annotation)[0]
+    levels = list(typing.get_args(annotation))
     assert levels, "could not resolve Metric.level's Literal values"
 
     dropdown = next(b for b in _form()["body"] if b["type"] == "dropdown")

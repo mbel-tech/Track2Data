@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.1 (companion to PRD §14 and UI_DESIGN §5; aligned with v1.0 MVP scope)
 **Audience:** Frontend implementers, UX reviewers, scientific testers writing acceptance scripts
-**Related docs:** [`../PRD.md`](../PRD.md), [`./TECHNICAL_SPEC.md`](./TECHNICAL_SPEC.md), [`./UI_DESIGN.md`](./UI_DESIGN.md), [`./ENGINE_DESIGN.md`](./ENGINE_DESIGN.md)
+**Related docs:** [`../PRD.md`](../docs/dev/PRD.md), [`./TECHNICAL_SPEC.md`](./TECHNICAL_SPEC.md), [`./UI_DESIGN.md`](dev/UI_DESIGN.md), [`./ENGINE_DESIGN.md`](./ENGINE_DESIGN.md)
 
 This document describes the **user-facing journey** through Track2Data
 from launch to export. It complements PRD.md (which states *what* the
@@ -871,14 +871,44 @@ After Stage 9 the user has, on disk:
 ├── .t2d_cache/                   # content-addressed feather cache
 └── exports/
     └── 2026-05-14T1410/
-        ├── manifest.json         # hash + parameters + SHA-256s
-        ├── README.md             # one-page summary
-        ├── master_fish_by_frame.csv
-        ├── trial_activity_summary_long.csv
-        ├── trial_occupancy_long.csv
-        ├── group_dynamics_summary.csv
-        └── Track2Data_feb-experiment.xlsx
+        ├── PROJECT_SUMMARY.md    # what ran, what failed, what not to pool
+        ├── sessions.csv          # per-session fps, group size, calibration
+        ├── codebook.csv          # every column: unit, level, metric, DOI
+        ├── session_trial01/      # one directory per session
+        │   ├── manifest.json     # hash + parameters + SHA-256s
+        │   ├── README.md         # one-page summary for this session
+        │   ├── master_fish_by_frame.csv
+        │   ├── metrics_long.csv  # one row per value (tidy/long)
+        │   ├── trial_activity_summary.csv
+        │   ├── group_dynamics_summary.csv
+        │   └── Track2Data_feb-experiment.xlsx
+        └── session_trial02/
+            └── ...
 ```
+
+The two files at the run root describe the **project**; everything else
+describes one session. `sessions.csv` is the machine-readable half — one
+row per session with frame rate, frame count, duration, group size, video
+resolution, calibration state, and the error for any session that failed.
+`PROJECT_SUMMARY.md` is the human half, and leads with anything that makes
+the sessions non-interchangeable (mixed frame rates, mixed group sizes,
+mixed calibration), because a result pooled across those without
+accounting for them will be wrong.
+
+`codebook.csv` documents the schema itself: one row per exported column
+with its unit, level, originating metric and DOI. Read it before trusting
+a column name to imply its unit — notably, **every `*_pct` column holds a
+fraction in [0, 1], not a percentage** (`time_pct = 0.42` means 42 %). The
+names are kept for backward compatibility with existing analysis scripts,
+so the codebook is where the units are stated truthfully.
+
+`metrics_long.csv` is the tidy/long form —
+`session_id, individual_id, zone_name, metric_id, column, value, unit`,
+one row per measured value. The three `*_summary.csv` files are *wide*
+(one row per session × individual, a column per metric) whatever their
+names suggest, and they drop `metric_id` during the merge. Feed the long
+table to `lme4`/`glmmTMB`/`statsmodels`; it also joins directly to
+`codebook.csv` on `column`.
 
 To reproduce: send a reviewer the `project.t2d.json` plus the
 original `session_*` folders. The reviewer runs:

@@ -8,6 +8,7 @@ import pandas as pd
 
 from track2data.exporters._merge import merge_metric_frames
 from track2data.exporters.base import Exporter, ExportPayload
+from track2data.exporters.schema import long_table
 
 # ── CSV write helpers ──────────────────────────────────────────────────────────
 
@@ -31,7 +32,7 @@ def _write_csv(df: pd.DataFrame, path: Path, chunksize: int | None = None) -> Pa
     stays bounded for very long tables.
     """
     if chunksize is None or len(df) <= chunksize:
-        df.to_csv(path, **_CSV_KWARGS)  # type: ignore[arg-type]
+        df.to_csv(path, **_CSV_KWARGS)
         return path
     with open(path, "w", encoding="utf-8", newline="") as fh:
         for start in range(0, len(df), chunksize):
@@ -73,6 +74,15 @@ class CsvLongExporter(Exporter):
     * ``trial_activity_summary.csv`` — individual-level metrics merged into one
       row per (session x individual).
     * ``group_dynamics_summary.csv`` — group-level metrics (one row per session).
+    * ``metrics_long.csv`` — every metric value as one row
+      (``session_id, individual_id, zone_name, metric_id, column, value, unit``).
+
+    The name of this exporter notwithstanding, the three summary files above
+    are *wide* in tidy-data terms: one row per session x individual with a
+    column per metric, and ``metric_id`` dropped during the merge.
+    ``metrics_long.csv`` is the genuinely long form the modelling packages
+    (lme4, glmmTMB, statsmodels) want, and it keeps ``metric_id`` so a value
+    can be traced back through ``codebook.csv`` to the work that defines it.
     """
 
     name = "csv_long"
@@ -122,6 +132,18 @@ class CsvLongExporter(Exporter):
             if sort_keys_g:
                 group_summary = group_summary.sort_values(sort_keys_g).reset_index(drop=True)
         written.append(_write_csv(group_summary, out_dir / "group_dynamics_summary.csv"))
+
+        # ── genuinely long table ───────────────────────────────────────────────
+        # Built from every level at once, including zone and diagnostic
+        # metrics: the whole point is one place a model can read any value
+        # from, rather than three shapes to reconcile.
+        all_metrics = {
+            **p.individual_metrics,
+            **p.group_metrics,
+            **p.zone_metrics,
+            **p.diagnostic_metrics,
+        }
+        written.append(_write_csv(long_table(all_metrics), out_dir / "metrics_long.csv"))
 
         return written
 

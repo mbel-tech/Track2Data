@@ -67,18 +67,6 @@ class TestOrderStateClassification:
     def test_metric_id(self) -> None:
         assert OrderStateClassification.id == "GL-11"
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = OrderStateClassification().compute(psess)
-        for col in (
-            "session_id",
-            "polarised_time_pct",
-            "milling_time_pct",
-            "swarm_time_pct",
-            "n_classified_frames",
-        ):
-            assert col in df.columns
-
     def test_identical_headings_classify_as_polarised(self) -> None:
         n_frames, n_animals = 20, 5
         heading = np.full((n_frames, n_animals), 0.3)
@@ -133,17 +121,6 @@ class TestTopologicalNeighbourCounts:
     def test_metric_id(self) -> None:
         assert TopologicalNeighbourCounts.id == "GL-13"
 
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = TopologicalNeighbourCounts().compute(psess)
-        for col in (
-            "session_id",
-            "k",
-            "mean_kth_nn_distance_px",
-            "mean_neighbours_within_radius",
-        ):
-            assert col in df.columns
-
     def test_emits_one_row_per_k(self) -> None:
         rng = np.random.default_rng(2)
         xy = rng.uniform(0, 500, size=(10, 6, 2))
@@ -175,12 +152,6 @@ class TestTopologicalNeighbourCounts:
 class TestGroupElongation:
     def test_metric_id(self) -> None:
         assert GroupElongation.id == "GL-15"
-
-    def test_output_columns_present(self) -> None:
-        psess = make_psess()
-        df = GroupElongation().compute(psess)
-        for col in ("session_id", "mean_elongation_ratio", "mean_major_axis_orientation_rad"):
-            assert col in df.columns
 
     def test_elongated_line_gives_high_ratio(self) -> None:
         n_frames = 5

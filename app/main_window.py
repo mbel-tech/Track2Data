@@ -91,6 +91,9 @@ class MainWindow(QMainWindow):
 
         # ── project state ──────────────────────────────────────────────────
         self._store = ProjectStore(parent=self)
+        # One prompt per launch, not one per refused session: importing a
+        # folder of 70 sessions must not produce 70 identical dialogs.
+        self._pickle_consent_asked = False
 
         # ── central stacked widget ─────────────────────────────────────────
         self._stack = QStackedWidget()
@@ -152,6 +155,7 @@ class MainWindow(QMainWindow):
         ):
             sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
+        self._store.pickleConsentRequired.connect(self._ask_pickle_consent)
         # taskStarted/taskCancelled are deliberately NOT forwarded onto
         # ProjectStore's own signals (see ProjectStore's docstring) --
         # connect to store.tasks directly for the toolbar Cancel action.
@@ -368,6 +372,48 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("Nothing to save — open or create a project first.", 3000)
 
+    def _ask_pickle_consent(self, session_id: str, folder: str) -> None:
+        """Ask once per project whether to load trajectories that execute code.
+
+        Names the folder, because "do you trust this data?" is not a question
+        anyone can answer in the abstract. Asked only when it actually
+        matters: a folder carrying an h5 or csv trajectory alongside the
+        pickled one never reaches here, because the reader quietly uses that
+        instead.
+
+        Defaults to No, and the answer is stored in the project so a user who
+        says yes for their own data is not asked again on every launch.
+        """
+        if self._pickle_consent_asked:
+            return
+        self._pickle_consent_asked = True
+
+        answer = QMessageBox.question(
+            self,
+            "Load trajectories that can run code?",
+            f"<b>{session_id}</b> can only be read from a pickled trajectory "
+            f"file.<br><br>Loading it runs whatever code the file contains, so "
+            f"only do this for data you trust.<br><br><code>{folder}</code>"
+            "<br><br>The safer alternative is to re-export the session as HDF5 "
+            "(<code>idtrackerai_format &lt;session&gt; --formats h5</code>) and "
+            "import it again.<br><br>Load pickled trajectories for this project?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self._store.append_log(
+                f"_Declined to load pickled trajectories for `{session_id}`._\n"
+            )
+            return
+
+        self._store.set_allow_pickle_trajectories(True)
+        QMessageBox.information(
+            self,
+            "Re-import needed",
+            "Enabled for this project. Remove and re-add the session folder "
+            "to import it.",
+        )
+
     def _action_validate(self) -> None:
         if not self._store.has_project:
             QMessageBox.warning(self, "Validate pipeline", "No project is open.")
@@ -376,7 +422,20 @@ class MainWindow(QMainWindow):
 
         from track2data.api import Engine
 
-        issues = Engine(self._store.manifest).validate()
+        engine = Engine(self._store.manifest)
+        issues = engine.validate()
+        # Non-blocking by design: pooling 30 fps and 60 fps sessions is a
+        # legitimate deliberate choice and a serious accident, and only the
+        # user can tell those apart. Reported either way -- a project can be
+        # perfectly valid and still not be safe to pool.
+        warnings = engine.consistency_warnings()
+        if warnings:
+            self._store.append_log(
+                "### Session consistency\n"
+                + "\n".join(f"- {w}" for w in warnings)
+                + "\n"
+            )
+
         if issues:
             self._store.append_log(
                 "### Validation failed\n" + "\n".join(f"- {i}" for i in issues) + "\n"
@@ -388,7 +447,16 @@ class MainWindow(QMainWindow):
             )
         else:
             self._store.append_log("### Validation passed\nReady to run.\n")
-            QMessageBox.information(self, "Pipeline validation", "Ready to run.")
+            if warnings:
+                QMessageBox.warning(
+                    self,
+                    "Pipeline validation",
+                    "Ready to run, but these sessions are not interchangeable:\n\n"
+                    + "\n\n".join(warnings)
+                    + "\n\nThe run will proceed and record this in the export.",
+                )
+            else:
+                QMessageBox.information(self, "Pipeline validation", "Ready to run.")
         self._run_action.setEnabled(not issues)
 
     def _action_run(self) -> None:

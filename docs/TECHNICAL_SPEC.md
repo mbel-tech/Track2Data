@@ -3,10 +3,10 @@
 **Status:** Draft v0.1 (the system-level integration doc)
 **Audience:** New engineers, OSS reviewers, packaging maintainers
 **Companion docs:**
-[`../PRD.md`](../PRD.md) (what & why) ·
+[`../PRD.md`](../docs/dev/PRD.md) (what & why) ·
 [`./USER_WORKFLOW.md`](./USER_WORKFLOW.md) (user journey) ·
 [`./ENGINE_DESIGN.md`](./ENGINE_DESIGN.md) (engine internals) ·
-[`./UI_DESIGN.md`](./UI_DESIGN.md) (UI internals)
+[`./UI_DESIGN.md`](dev/UI_DESIGN.md) (UI internals)
 
 ---
 
@@ -31,11 +31,11 @@ and the system-level test pyramid.
 
 | Question | Where to look |
 |---|---|
-| What does the product do for users? | [`../PRD.md`](../PRD.md) |
+| What does the product do for users? | [`../PRD.md`](../docs/dev/PRD.md) |
 | What does a researcher click, in what order? | [`./USER_WORKFLOW.md`](./USER_WORKFLOW.md) |
 | How is module `metrics/group.py` implemented? | [`./ENGINE_DESIGN.md`](./ENGINE_DESIGN.md) §8 |
 | How does the idtracker.ai reader handle version / format drift? | [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) |
-| What signal does `ProjectStore` emit on calibration change? | [`./UI_DESIGN.md`](./UI_DESIGN.md) §4 |
+| What signal does `ProjectStore` emit on calibration change? | [`./UI_DESIGN.md`](dev/UI_DESIGN.md) §4 |
 
 Where this doc and a component doc disagree, the **component doc
 wins** for its own scope; raise an issue to reconcile.
@@ -217,7 +217,7 @@ engine remains a clean, UI-free `pip install track2data` library.
 | CLI | `track2data/cli.py` | ENGINE_DESIGN §12 |
 | Errors | `track2data/core/errors.py` | ENGINE_DESIGN §13 |
 | Concurrency | `track2data/core/parallel.py` | ENGINE_DESIGN §14 |
-| UI shell & wizard | `app/main_window.py`, `ui/*_screen.py` (flat — see `DECISIONS.md` D-006) | UI_DESIGN §3, §5 |
+| UI shell & wizard | `app/main_window.py`, `ui/*_screen.py` (flat — see `docs/dev/DECISIONS.md` D-006) | UI_DESIGN §3, §5 |
 | UI state + tasks | `ui/store/project_store.py`, `ui/store/task_runner.py` | UI_DESIGN §4, §7 |
 
 ---
@@ -466,13 +466,54 @@ acquisition guide, the required secrets, and verification commands.
             ├─────────────────────┤
             │  R-parity           │   ~25 tests (golden CSV)
             ├─────────────────────┤
-            │  Unit               │   >= 200 tests (>= 80 % line coverage)
+            │  Unit               │   >= 200 tests
             └─────────────────────┘
 ```
 
-Tools: `pytest`, `pytest-cov` (gate >= 80 %), `hypothesis` for
-property-based numeric tests, `pytest-qt` for UI integration,
-`click.testing.CliRunner` for CLI smoke tests.
+Tools: `pytest`, `pytest-cov`, `hypothesis` for property-based invariants
+on preprocessing, `pytest-qt` for UI integration,
+`click.testing.CliRunner` for CLI smoke tests, `mypy` for the engine's
+annotations.
+
+### 11.1a Coverage policy
+
+Coverage is measured over the **whole shipped package** — `track2data`,
+`app` and `ui` — and CI enforces two floors from that single run:
+
+| Scope | Floor | Today |
+|---|---|---|
+| `track2data/*` (engine) | 90 % | ~96 % |
+| `app/*`, `ui/*` (GUI) | 85 % | ~90 % |
+
+Two floors rather than one, because a well-covered GUI must not be able to
+mask an engine regression: a bug in the engine silently changes numbers
+that end up in a figure, while a bug in the GUI is visible to the person
+hitting it. They are different risks and deserve different gates.
+
+Previously `[tool.coverage.run] source` listed `track2data` alone, so the
+single 80 % figure measured the engine while `tests/test_ui/` and
+`tests/test_app/` ran against no floor at all — and the number was
+naturally read as whole-project coverage. `track2data/cli.py` remains
+omitted (it is exercised end-to-end through `CliRunner`, not line-covered).
+
+### 11.1b Analytic-truth tests
+
+`tests/test_metrics/test_analytic_truth.py` computes metrics from
+trajectories whose true value is derivable in closed form, and checks the
+code returns it.
+
+This exists because R-parity cannot do it. Agreeing with a reference R
+pipeline shows the two implementations match; two implementations of the
+same misreading agree perfectly. A straight track of known step length, a
+fixed lattice, a square wave in and out of a zone, and a closed circle each
+have a metric value a reader can check by hand — so recovering them is
+evidence about correctness rather than about consistency.
+
+It is also the acceptance criterion for the PP-3 identity-switch rewrite: a
+preprocessing step that quietly relabels or displaces positions shows up
+here as a metric that no longer recovers its own analytic answer. One test
+makes the asymmetry explicit — an identity swap leaves GL-1 completely
+unchanged while destroying IL-1, so a group-level check would notice nothing.
 
 ### 11.2 R-parity tests
 
