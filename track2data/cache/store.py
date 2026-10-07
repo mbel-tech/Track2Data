@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import pickle
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class CacheStore:
@@ -98,8 +104,44 @@ class CacheStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(path, engine="pyarrow", index=False)
 
+    # ── object entries (preprocessed sessions) ─────────────────────────────────
+
+    def _object_path(self, key: str) -> Path:
+        return self._dir / key[:2] / f"{key}.pkl"
+
+    def has_object(self, key: str) -> bool:
+        return self._object_path(key).exists()
+
+    def get_object(self, key: str) -> Any | None:
+        """Return the pickled object stored under *key*, or ``None``.
+
+        A truncated or otherwise unreadable entry is treated as a miss and
+        deleted, so a crash mid-write can never wedge later runs. The cache
+        directory is written by this process's own ``put_object`` and lives
+        in the user's project folder; it is not a trust boundary.
+        """
+        path = self._object_path(key)
+        if not path.exists():
+            return None
+        try:
+            with path.open("rb") as fh:
+                return pickle.load(fh)
+        except Exception:
+            logger.warning("Discarding unreadable cache entry %s", path.name)
+            path.unlink(missing_ok=True)
+            return None
+
+    def put_object(self, key: str, obj: Any) -> None:
+        """Persist *obj* under *key* atomically (write temp, then replace)."""
+        path = self._object_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".tmp{os.getpid()}")
+        with tmp.open("wb") as fh:
+            pickle.dump(obj, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
+
     def clear(self) -> int:
-        """Delete all cached Parquet files.
+        """Delete all cached Parquet and object files.
 
         Returns
         -------
@@ -107,7 +149,8 @@ class CacheStore:
             Number of files deleted.
         """
         count = 0
-        for parquet_file in self._dir.rglob("*.parquet"):
-            parquet_file.unlink()
-            count += 1
+        for pattern in ("*.parquet", "*.pkl"):
+            for entry in self._dir.rglob(pattern):
+                entry.unlink()
+                count += 1
         return count

@@ -38,6 +38,13 @@ from track2data.metrics.references import (
     STEWART_2012,
 )
 
+
+def _bl_px(session: PreprocessedSession, k: int) -> float:
+    """Body length of animal ``k`` in pixels; NaN when unavailable."""
+    bl = session.body_length_in_px()
+    return float(bl[k]) if bl is not None else np.nan
+
+
 # ── IL-1: PathLength ──────────────────────────────────────────────────────────
 
 
@@ -121,16 +128,11 @@ class PathLength(Metric):
                 "path_length_px": path_px,
             }
 
-            if session.px_per_cm is not None:
-                row["path_length_cm"] = path_px / session.px_per_cm
-                if session.body_length_cm is not None:
-                    bl_cm = float(session.body_length_cm[k])
-                    row["path_length_bl"] = row["path_length_cm"] / bl_cm if bl_cm != 0 else np.nan
-                else:
-                    row["path_length_bl"] = np.nan
-            else:
-                row["path_length_cm"] = np.nan
-                row["path_length_bl"] = np.nan
+            row["path_length_cm"] = (
+                path_px / session.px_per_cm if session.px_per_cm is not None else np.nan
+            )
+            bl_px = _bl_px(session, k)
+            row["path_length_bl"] = path_px / bl_px if bl_px > 0 else np.nan
 
             records.append(row)
 
@@ -209,21 +211,15 @@ class Speed(Metric):
                 "max_speed_px_s": max_s,
             }
 
-            if session.px_per_cm is not None:
-                row["mean_speed_cm_s"] = (
-                    mean_s / session.px_per_cm if not np.isnan(mean_s) else np.nan
-                )
-                if session.body_length_cm is not None:
-                    bl_cm = float(session.body_length_cm[k])
-                    cm_s = row["mean_speed_cm_s"]
-                    row["mean_speed_bl_s"] = (
-                        cm_s / bl_cm if (not np.isnan(cm_s) and bl_cm != 0) else np.nan
-                    )
-                else:
-                    row["mean_speed_bl_s"] = np.nan
-            else:
-                row["mean_speed_cm_s"] = np.nan
-                row["mean_speed_bl_s"] = np.nan
+            row["mean_speed_cm_s"] = (
+                mean_s / session.px_per_cm
+                if session.px_per_cm is not None and not np.isnan(mean_s)
+                else np.nan
+            )
+            bl_px = _bl_px(session, k)
+            row["mean_speed_bl_s"] = (
+                mean_s / bl_px if bl_px > 0 and not np.isnan(mean_s) else np.nan
+            )
 
             records.append(row)
 

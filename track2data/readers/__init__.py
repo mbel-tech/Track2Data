@@ -71,7 +71,30 @@ def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
     they also never see the flag, so a third-party reader that unpickles is
     trusting whatever it is pointed at, and should opt in.
     """
+    cls = _detect_or_raise(folder)
+    reader = cls()
+    if cls.accepts_allow_pickle:
+        return reader.read(folder, allow_pickle=allow_pickle)
+    return reader.read(folder)
+
+
+def probe_session(folder: Path, *, allow_pickle: bool = False) -> Session:
+    """Like ``read_session`` but via ``SessionReader.probe`` -- the cheap path
+    the GUI uses to describe a folder without loading every artefact.
+
+    ``allow_pickle`` is the project's consent, passed on exactly as
+    ``read_session`` passes it: a probe opens the same trajectory file.
+    """
+    cls = _detect_or_raise(folder)
+    reader = cls()
+    if cls.accepts_allow_pickle:
+        return reader.probe(folder, allow_pickle=allow_pickle)
+    return reader.probe(folder)
+
+
+def _detect_or_raise(folder: Path) -> type[SessionReader]:
     from track2data.core.errors import ImportError_
+
     cls = detect_reader(folder)
     if cls is None:
         raise ImportError_(
@@ -80,10 +103,7 @@ def read_session(folder: Path, *, allow_pickle: bool = False) -> Session:
             subject=str(folder),
             remediation="Ensure the folder is a valid idtracker.ai output directory.",
         )
-    reader = cls()
-    if cls.accepts_allow_pickle:
-        return reader.read(folder, allow_pickle=allow_pickle)
-    return reader.read(folder)
+    return cls
 
 
 __all__ = [
@@ -91,6 +111,7 @@ __all__ = [
     "IDTrackerAiV5Reader",
     "SessionReader",
     "detect_reader",
+    "probe_session",
     "read_session",
     "register",
 ]

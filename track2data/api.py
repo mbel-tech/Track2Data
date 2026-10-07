@@ -26,10 +26,18 @@ Typical usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import multiprocessing
+import queue as queue_mod
+import time
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 from track2data.core.models import (
     PreprocessedSession,
@@ -123,11 +131,62 @@ def _recover_preprocess_report(
     return None
 
 
+# ── parallel worker plumbing (must be module-level to be picklable) ──────────
+
+_WORKER_EVENTS: Any = None
+_WORKER_CANCEL: Any = None
+
+
+def _parallel_init(events: Any, cancel: Any) -> None:
+    global _WORKER_EVENTS, _WORKER_CANCEL
+    _WORKER_EVENTS, _WORKER_CANCEL = events, cancel
+
+
+def _parallel_run_one(
+    manifest_json: str,
+    index: int,
+    out_dir: str,
+    exporters: list[str] | None,
+    cache_dir: str | None,
+) -> SessionRunResult | None:
+    """Run session *index* in a worker process.
+
+    Returns None when cancelled (rather than raising: custom exception types
+    do not reliably survive the trip back across the process boundary).
+    """
+    from track2data.core.models import ProjectManifest
+    from track2data.core.progress import OperationCancelled
+
+    manifest = ProjectManifest.model_validate_json(manifest_json)
+    engine = Engine(manifest, cache_dir=Path(cache_dir) if cache_dir else None)
+    ref = manifest.sessions[index]
+
+    def check() -> None:
+        if _WORKER_CANCEL.is_set():
+            raise OperationCancelled()
+
+    def callback(event: ProgressEvent) -> None:
+        check()
+        _WORKER_EVENTS.put(event)
+
+    engine._cancel_check = check
+
+    try:
+        return engine._run_one_session(ref, Path(out_dir) / ref.session_id, exporters, callback)
+    except OperationCancelled:
+        return None
+
+
 class Engine:
     """Stateless facade over all engine subsystems."""
 
-    def __init__(self, manifest: ProjectManifest) -> None:
+    def __init__(self, manifest: ProjectManifest, *, cache_dir: Path | None = None) -> None:
+        """*cache_dir* enables the on-disk preprocessed-session cache used by
+        ``run()``; None (the default) never reads or writes it."""
         self._manifest = manifest
+        self._cache_dir = Path(cache_dir) if cache_dir is not None else None
+        # Set for the duration of run(); see run()'s cancel_check.
+        self._cancel_check: Callable[[], None] | None = None
 
     @property
     def manifest(self) -> ProjectManifest:
@@ -224,6 +283,62 @@ class Engine:
             sessions.append(self.import_session(ref.folder))
         return sessions
 
+    # ── preprocessed-session cache ─────────────────────────────────────────
+
+    #: Bump when PreprocessedSession's layout or preprocessing semantics change.
+    _CACHE_SCHEMA = 1
+
+    def _cache_key(self, folder: Path) -> tuple[Any, str] | None:
+        """(store, key) for *folder*, or None when caching is off/impossible."""
+        if self._cache_dir is None:
+            return None
+        from track2data import __version__
+        from track2data.cache.store import CacheStore
+        from track2data.core.hashing import dict_sha256, folder_fingerprint
+        from track2data.readers import detect_reader
+
+        reader = detect_reader(folder)
+        if reader is None:
+            return None
+        m = self._manifest
+        config_hash = dict_sha256(
+            {
+                "schema": self._CACHE_SCHEMA,
+                "app": __version__,
+                "preprocess": m.preprocess.model_dump(mode="json"),
+                "calibration": m.calibration.model_dump(mode="json"),
+                "zones": m.zones.model_dump(mode="json"),
+            }
+        )
+        store = CacheStore(self._cache_dir)
+        return store, store.key(reader.name, folder_fingerprint(folder), config_hash)
+
+    def preprocess_folder(self, folder: Path) -> PreprocessedSession:
+        """Preprocess the session in *folder*, reusing/filling the cache when
+        ``cache_dir`` is set. For callers (e.g. the GUI's trajectory viewer)
+        that need the arrays but are not running the whole pipeline."""
+        psess = self._cache_get(folder)
+        if psess is None:
+            psess = self.preprocess(self.import_session(folder))
+            self._cache_put(folder, psess)
+        return psess
+
+    def _cache_get(self, folder: Path) -> PreprocessedSession | None:
+        keyed = self._cache_key(folder)
+        if keyed is None:
+            return None
+        store, key = keyed
+        obj = store.get_object(key)
+        return obj if isinstance(obj, PreprocessedSession) else None
+
+    def _cache_put(self, folder: Path, psess: PreprocessedSession) -> None:
+        try:
+            keyed = self._cache_key(folder)
+            if keyed is not None:
+                keyed[0].put_object(keyed[1], psess)
+        except Exception:
+            logger.warning("Could not write preprocessed-session cache.", exc_info=True)
+
     # ── preprocessing ──────────────────────────────────────────────────────
 
     def preprocess(self, session: Session) -> PreprocessedSession:
@@ -245,7 +360,7 @@ class Engine:
         """
         from track2data.preprocess.pipeline import run as pp_run
 
-        psess = pp_run(session, self._manifest.preprocess)
+        psess = pp_run(session, self._manifest.preprocess, check=self._cancel_check)
         return self.apply_calibration_and_zones(psess)
 
     def apply_calibration_and_zones(
@@ -259,6 +374,13 @@ class Engine:
         re-implementation of it that could drift.
         """
         session = psess.session
+        # The tracker's own body length is calibration-independent, so *_bl
+        # metrics work whichever mode is chosen. Body-length calibration below
+        # then applies its own validation on top of the same values. Done here
+        # rather than in preprocess() so a caller that ran the pipeline itself
+        # (the sensitivity sweep) gets it too.
+        if session.body_length_px is not None:
+            psess.body_length_px = np.asarray(session.body_length_px, dtype=np.float64).copy()
         try:
             # Calibration.
             cfg = self._manifest.calibration
@@ -409,7 +531,10 @@ class Engine:
         return skipped
 
     def compute_metrics(
-        self, psess: PreprocessedSession, *, identity_free: bool | None = None
+        self,
+        psess: PreprocessedSession,
+        *,
+        identity_free: bool | None = None,
     ) -> dict[str, Any]:
         """
         Compute all selected metrics for *psess*.
@@ -431,6 +556,10 @@ class Engine:
         *identity_free* forces the verdict for callers that already know it
         (``_run_one_session`` passes the user's override, which may itself
         be None); None resolves it via ``identity_free_for()``.
+
+        During ``run()`` the run's *cancel_check* is called before each
+        selected metric, so a cancellation request is noticed between
+        metrics; ``OperationCancelled`` propagates out of this method.
         """
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
@@ -461,13 +590,23 @@ class Engine:
             for mid in metric_ids:
                 if mid in skipped:
                     continue
+                # Outside the try below: OperationCancelled must not be
+                # swallowed as "metric failed; skipping".
+                if self._cancel_check is not None:
+                    self._cancel_check()
                 cls = get(mid)
                 if cls is None:
                     logger.warning("Metric %s not registered; skipping.", mid)
                     continue
                 try:
                     cfg = self._effective_cfg(cls, psess)
-                    results[mid] = cls().compute(psess, cfg)
+                    if is_identity_free and cls.pools_when_identity_free:
+                        from track2data.metrics.zone import pooled_view
+
+                        df = cls().compute(pooled_view(psess), cfg)
+                        results[mid] = df.drop(columns=["individual_id"], errors="ignore")
+                    else:
+                        results[mid] = cls().compute(psess, cfg)
                 except Exception:
                     logger.exception("Metric %s failed; skipping.", mid)
 
@@ -816,6 +955,7 @@ class Engine:
         *,
         progress: ProgressCallback | None = None,
         n_workers: int = 1,
+        cancel_check: Callable[[], None] | None = None,
     ) -> RunResult:
         """
         Run the full pipeline for every session in the manifest.
@@ -832,17 +972,37 @@ class Engine:
         the other 69, but it must never vanish silently either, hence
         surfacing it as this session's own ``.error`` instead.)
 
-        ``n_workers`` is accepted for forward compatibility with a future
-        parallel implementation but only the sequential (n_workers=1)
-        path is implemented today; see DECISIONS.md D-013 and D-014.
-        """
-        if n_workers > 1:
-            logger.warning(
-                "Engine.run(n_workers=%d) requested, but only sequential "
-                "execution is implemented; running with n_workers=1.",
-                n_workers,
-            )
+        ``cancel_check`` is a zero-argument callable that raises
+        ``OperationCancelled`` once the caller wants the run to stop. It is
+        called between sessions, preprocessing steps and metrics -- finer
+        than the stage-boundary *progress* events, which stay sparse by
+        contract -- so a long session can be interrupted. In a parallel run
+        it is polled by the calling process and workers stop at their next
+        checkpoint.
 
+        ``n_workers > 1`` runs sessions in a pool of spawned worker processes
+        (``min(n_workers, n_sessions)``); each worker rebuilds an Engine from
+        the serialised manifest and sends progress events back over a queue,
+        so the *progress* callback is only ever called in the calling
+        process. Results come back in manifest order. Pick a value with
+        ``track2data.core.parallel.worker_count()``. A raise from *progress*
+        (``OperationCancelled``) stops the run: workers see a shared flag at
+        their next checkpoint and stop.
+        """
+        previous_check, self._cancel_check = self._cancel_check, cancel_check
+        try:
+            return self._run(out_dir, exporters, progress, n_workers, cancel_check)
+        finally:
+            self._cancel_check = previous_check
+
+    def _run(
+        self,
+        out_dir: Path,
+        exporters: list[str] | None,
+        progress: ProgressCallback | None,
+        n_workers: int,
+        cancel_check: Callable[[], None] | None,
+    ) -> RunResult:
         refs = self._manifest.sessions
         n_configured = len(refs)
         emit(
@@ -851,20 +1011,30 @@ class Engine:
         )
 
         results: list[SessionRunResult] = []
-        for i, ref in enumerate(refs):
-            results.append(
-                self._run_one_session(ref, Path(out_dir) / ref.session_id, exporters, progress)
+        n_pool = min(n_workers, n_configured)
+        if n_pool > 1:
+            results = self._run_parallel(
+                refs, Path(out_dir), exporters, progress, n_pool, cancel_check
             )
-            emit(
-                progress,
-                ProgressEvent(
-                    stage="session",
-                    current=i + 1,
-                    total=n_configured,
-                    session_id=ref.session_id,
-                    message="Session complete",
-                ),
-            )
+        else:
+            for i, ref in enumerate(refs):
+                if cancel_check is not None:
+                    cancel_check()
+                results.append(
+                    self._run_one_session(
+                        ref, Path(out_dir) / ref.session_id, exporters, progress
+                    )
+                )
+                emit(
+                    progress,
+                    ProgressEvent(
+                        stage="session",
+                        current=i + 1,
+                        total=n_configured,
+                        session_id=ref.session_id,
+                        message="Session complete",
+                    ),
+                )
 
         self._write_project_summary(Path(out_dir), results)
 
@@ -1053,6 +1223,97 @@ class Engine:
 
         return "\n".join(lines)
 
+    def _run_parallel(
+        self,
+        refs: list[SessionRef],
+        out_dir: Path,
+        exporters: list[str] | None,
+        progress: ProgressCallback | None,
+        n_pool: int,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> list[SessionRunResult]:
+        """Run *refs* across *n_pool* spawned processes; see ``run()``."""
+        # "spawn" on every OS: it is the only start method on Windows and the
+        # default on macOS, so Linux behaves the same instead of masking
+        # pickling problems only the other two would hit.
+        ctx = multiprocessing.get_context("spawn")
+        events = ctx.Queue()
+        cancel = ctx.Event()
+        manifest_json = self._manifest.model_dump_json()
+        total = len(refs)
+        results: dict[int, SessionRunResult] = {}
+
+        def drain() -> None:
+            while True:
+                try:
+                    event = events.get_nowait()
+                except queue_mod.Empty:
+                    return
+                emit(progress, event)
+
+        with ProcessPoolExecutor(
+            max_workers=n_pool,
+            mp_context=ctx,
+            initializer=_parallel_init,
+            initargs=(events, cancel),
+        ) as pool:
+            futures = {
+                pool.submit(
+                    _parallel_run_one,
+                    manifest_json,
+                    i,
+                    str(out_dir),
+                    exporters,
+                    str(self._cache_dir) if self._cache_dir is not None else None,
+                ): i
+                for i in range(total)
+            }
+            pending = set(futures)
+            try:
+                while pending:
+                    if cancel_check is not None:
+                        cancel_check()
+                    drain()
+                    finished = [f for f in pending if f.done()]
+                    for fut in finished:
+                        pending.discard(fut)
+                        i = futures[fut]
+                        results[i] = self._collect_parallel_result(refs[i], fut)
+                        emit(
+                            progress,
+                            ProgressEvent(
+                                stage="session", current=len(results), total=total,
+                                session_id=refs[i].session_id, message="Session complete",
+                            ),
+                        )
+                    if not finished:
+                        time.sleep(0.05)
+                drain()
+            except BaseException:
+                # Includes OperationCancelled raised by the progress callback.
+                cancel.set()
+                for fut in pending:
+                    fut.cancel()
+                # Keep reading so a worker blocked on a full pipe can exit.
+                while any(not f.done() for f in pending):
+                    with contextlib.suppress(queue_mod.Empty):
+                        events.get(timeout=0.1)
+                raise
+        return [results[i] for i in range(total)]
+
+    @staticmethod
+    def _collect_parallel_result(ref: SessionRef, fut: Any) -> SessionRunResult:
+        from track2data.core.progress import OperationCancelled
+
+        try:
+            result = fut.result()
+        except Exception as exc:  # worker crash / unpicklable result
+            logger.exception("Worker for session %s failed.", ref.session_id)
+            return SessionRunResult(session_id=ref.session_id, error=f"Worker failed: {exc}")
+        if result is None:
+            raise OperationCancelled()
+        return result
+
     def _run_one_session(
         self,
         ref: SessionRef,
@@ -1075,7 +1336,11 @@ class Engine:
         start = time.monotonic()
         psess = None
         try:
-            session = self.import_session(ref.folder)
+            psess = self._cache_get(ref.folder)
+            cached = psess is not None
+            # A cached result carries the Session it was built from, which is all
+            # the summary and the input hash below need.
+            session = self.import_session(ref.folder) if psess is None else psess.session
             # The override only, not ref.is_identity_free(): this method is
             # keyed by ref.session_id (see the docstring) because a
             # reader-derived id may differ, so the lookup inside
@@ -1087,15 +1352,20 @@ class Engine:
                 progress,
                 ProgressEvent(
                     stage="import", current=1, total=4,
-                    session_id=ref.session_id, message="Import complete",
+                    session_id=ref.session_id,
+                    message="Import complete (cached)" if cached else "Import complete",
                 ),
             )
-            psess = self.preprocess(session)
+            if psess is None:
+                psess = self.preprocess(session)
+                self._cache_put(ref.folder, psess)
             emit(
                 progress,
                 ProgressEvent(
                     stage="preprocess", current=2, total=4,
-                    session_id=ref.session_id, message="Preprocessing complete",
+                    session_id=ref.session_id,
+                    message="Preprocessing complete (cached)" if cached
+                    else "Preprocessing complete",
                 ),
             )
             metric_results = self.compute_metrics(psess, identity_free=identity_free)

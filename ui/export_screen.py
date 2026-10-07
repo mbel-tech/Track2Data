@@ -34,6 +34,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -41,7 +42,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -101,7 +104,16 @@ class ExportScreen(QWidget):
     # ── build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        # The page (formats, receipt, code snippets) is taller than a wizard
+        # page; scroll it instead of squeezing every control (which clipped
+        # the format names and left the receipt table one row high).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        inner = QWidget()
+        root = QVBoxLayout(inner)
         root.setContentsMargins(48, 36, 48, 36)
         root.setSpacing(16)
 
@@ -177,6 +189,7 @@ class ExportScreen(QWidget):
             0, QHeaderView.ResizeMode.Stretch
         )
         self._receipt_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._receipt_table.setMinimumHeight(140)
         receipt_layout.addWidget(self._receipt_table)
 
         receipt_btn_row = QHBoxLayout()
@@ -193,7 +206,31 @@ class ExportScreen(QWidget):
 
         root.addWidget(receipt_group)
 
+        # ── load-this-data snippets ───────────────────────────────────────
+        self._snippet_group = QGroupBox("Load this data in R or Python")
+        snippet_layout = QVBoxLayout(self._snippet_group)
+        snippet_top = QHBoxLayout()
+        self._snippet_combo = QComboBox()
+        self._snippet_combo.currentIndexChanged.connect(self._show_selected_snippet)
+        snippet_top.addWidget(self._snippet_combo)
+        self._snippet_copy_btn = QPushButton("Copy code")
+        self._snippet_copy_btn.clicked.connect(self._copy_snippet)
+        snippet_top.addWidget(self._snippet_copy_btn)
+        snippet_top.addStretch()
+        snippet_layout.addLayout(snippet_top)
+        self._snippet_text = QPlainTextEdit()
+        self._snippet_text.setReadOnly(True)
+        self._snippet_text.setMinimumHeight(130)
+        self._snippet_text.setMaximumHeight(200)
+        self._snippet_text.setStyleSheet("font-family: monospace;")
+        snippet_layout.addWidget(self._snippet_text)
+        self._snippet_group.setVisible(False)
+        self._snippets: dict[str, str] = {}
+        root.addWidget(self._snippet_group)
+
         root.addStretch()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
     # ── readme forced-on ─────────────────────────────────────────────────────
 
@@ -286,19 +323,21 @@ class ExportScreen(QWidget):
         self._store.append_log(
             "### Export started\n"
             f"_Output: `{out_dir}`_\n\n"
-            "Export re-runs the full pipeline (preprocess, metrics, and "
-            "export) for every session -- per-session results are never "
-            "cached between runs, so this is a genuine re-run rather than "
-            "a re-export of previously computed results.\n"
+            "Export re-runs metrics and export for every session. "
+            "Preprocessed sessions are reused from the project cache when "
+            "the session files and preprocessing/calibration/zone settings "
+            "are unchanged; otherwise they are recomputed.\n"
         )
 
-        engine = Engine(self._store.manifest)
+        engine = Engine(self._store.manifest, cache_dir=self._store.cache_dir)
         run_fn = functools.partial(engine.run, out_dir, exporters=selected)
 
         self._last_out_dir = out_dir
         self._last_selected_exporters = selected
         self._status_label.setText(f"Exporting… writing to {out_dir}")
-        self._current_task_id = self._store.tasks.submit_with_progress(run_fn)
+        self._current_task_id = self._store.tasks.submit_with_progress(
+            run_fn, cancel_check=True
+        )
         self._update_export_enabled()
 
     def _cancel_export(self) -> None:
@@ -340,6 +379,7 @@ class ExportScreen(QWidget):
             )
             self._open_folder_btn.setEnabled(True)
             self._copy_cli_btn.setEnabled(True)
+            self._update_snippets(result)
         elif isinstance(result, Exception):
             self._status_label.setText("Failed — see log for details.")
             self._store.append_log(f"### Export failed\n```\n{result}\n```\n")
@@ -370,6 +410,28 @@ class ExportScreen(QWidget):
             with contextlib.suppress(OSError):
                 hash_text = file_sha256(path)[:_SHORT_HASH_LEN]
             self._receipt_table.setItem(row, 2, QTableWidgetItem(hash_text))
+
+    def _update_snippets(self, result: RunResult) -> None:
+        from ui.store.code_snippets import analysis_snippets
+
+        ok_ids = [s.session_id for s in result.sessions if not s.error]
+        out_dir = self._last_out_dir or self._resolved_out_dir()
+        project = self._store.manifest.project_name if self._store.manifest else "project"
+        self._snippets = analysis_snippets(
+            out_dir, ok_ids, self._last_selected_exporters, project_name=project
+        )
+        self._snippet_combo.blockSignals(True)
+        self._snippet_combo.clear()
+        self._snippet_combo.addItems(list(self._snippets))
+        self._snippet_combo.blockSignals(False)
+        self._snippet_group.setVisible(bool(self._snippets))
+        self._show_selected_snippet()
+
+    def _show_selected_snippet(self, _index: int = 0) -> None:
+        self._snippet_text.setPlainText(self._snippets.get(self._snippet_combo.currentText(), ""))
+
+    def _copy_snippet(self) -> None:
+        QApplication.clipboard().setText(self._snippet_text.toPlainText())
 
     def _open_output_folder(self) -> None:
         if self._last_out_dir is None:

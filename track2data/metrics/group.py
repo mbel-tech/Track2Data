@@ -148,19 +148,16 @@ class NearestNeighbourDistance(Metric):
             "n_skipped_frames": n_skipped,
         }
 
-        if session.px_per_cm is not None:
-            row["mean_nnd_cm"] = mean_nnd / session.px_per_cm if not np.isnan(mean_nnd) else np.nan
-            if session.body_length_cm is not None:
-                mean_bl_cm = float(np.nanmean(session.body_length_cm))
-                cm_val = row["mean_nnd_cm"]
-                row["mean_nnd_bl"] = (
-                    cm_val / mean_bl_cm if (not np.isnan(cm_val) and mean_bl_cm != 0) else np.nan
-                )
-            else:
-                row["mean_nnd_bl"] = np.nan
-        else:
-            row["mean_nnd_cm"] = np.nan
-            row["mean_nnd_bl"] = np.nan
+        row["mean_nnd_cm"] = (
+            mean_nnd / session.px_per_cm
+            if session.px_per_cm is not None and not np.isnan(mean_nnd)
+            else np.nan
+        )
+        bl_all = session.body_length_in_px()
+        mean_bl_px = float(np.nanmean(bl_all)) if bl_all is not None else np.nan
+        row["mean_nnd_bl"] = (
+            mean_nnd / mean_bl_px if mean_bl_px > 0 and not np.isnan(mean_nnd) else np.nan
+        )
 
         return pd.DataFrame([row])
 

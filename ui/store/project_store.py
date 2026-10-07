@@ -113,6 +113,11 @@ class ProjectStore(QObject):
         return self._project_dir
 
     @property
+    def cache_dir(self) -> Path | None:
+        """Where the engine keeps preprocessed sessions for this project."""
+        return None if self._project_dir is None else self._project_dir / ".t2d_cache"
+
+    @property
     def has_project(self) -> bool:
         return self._manifest is not None
 
@@ -176,6 +181,11 @@ class ProjectStore(QObject):
             f"## Opened project: {self._manifest.project_name}\n"
             f"_Loaded from `{t2d_path}`_\n"
         )
+        # Facts are not persisted in the manifest, so a reopened project would
+        # otherwise show blank frame counts / calibration readiness forever.
+        for ref in self._manifest.sessions:
+            if ref.folder.exists():
+                self._submit_probe(ref.session_id, ref.folder)
 
     def save_project(self) -> Path | None:
         """Persist the current manifest.  Returns the written path or None."""
@@ -238,20 +248,25 @@ class ProjectStore(QObject):
         if any(s.folder.resolve() == folder.resolve() for s in self._manifest.sessions):
             self.append_log(f"_Skipped already-imported session folder `{folder}`_\n")
             return
-        from track2data.readers import read_session
-
         session_id = folder.name
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
         sessions = [*list(self._manifest.sessions), ref]
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
 
+        self._submit_probe(session_id, folder)
+
+    def _submit_probe(self, session_id: str, folder: Path) -> None:
+        from track2data.readers import probe_session
+
+        # The project's consent travels with the probe: it opens the same
+        # trajectory file a read would, so a pickled-only session must be
+        # refused (and prompt the user) here exactly as it is when it runs.
+        allow_pickle = (
+            self._manifest.security.allow_pickle_trajectories if self._manifest else False
+        )
         task_id = self._tasks.submit(
-            partial(
-                read_session,
-                folder,
-                allow_pickle=self._manifest.security.allow_pickle_trajectories,
-            )
+            partial(probe_session, folder, allow_pickle=allow_pickle)
         )
         self._identity_probes[task_id] = session_id
 

@@ -48,3 +48,21 @@ class SessionReader(ABC):
         :attr:`accepts_allow_pickle` to True, refusing those formats with
         ``IDT_PICKLE_REFUSED`` unless the caller opts in.
         """
+
+    def probe(self, folder: Path, *, allow_pickle: bool = False) -> Session:
+        """
+        Read only what the GUI needs to describe *folder* (frame count, fps,
+        animals, identity flags, calibration/ROI hints, background image).
+
+        Readers override this to skip expensive optional artefacts; the
+        default falls back to a full ``read()`` so every reader stays valid.
+
+        ``allow_pickle`` is the same consent ``read`` takes: a probe opens the
+        same trajectory file, so it must be refused pickled data exactly as a
+        read is. The default hands it on to a reader that declares
+        :attr:`accepts_allow_pickle`; a reader that overrides ``probe`` and
+        declares it must accept the keyword itself.
+        """
+        if self.accepts_allow_pickle:
+            return self.read(folder, allow_pickle=allow_pickle)
+        return self.read(folder)

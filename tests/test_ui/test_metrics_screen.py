@@ -139,7 +139,7 @@ def test_apply_selection_reads_checked_rows_from_each_tab(qtbot) -> None:
     row = _row_for_id(screen._ind_table, "IL-1")
     screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
 
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.metrics.individual == ["IL-1"]
 
@@ -181,7 +181,7 @@ def test_apply_preserves_fields_the_table_has_no_widgets_for(qtbot) -> None:
 
     row = _row_for_id(screen._ind_table, "IL-1")
     screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.metrics.individual == ["IL-1"]
     assert store.manifest.metrics.diagnostic == ["D-1", "D-2"]
@@ -778,3 +778,121 @@ def test_table_builds_without_crashing_for_a_non_conforming_plugin_metric_id(
     qtbot.addWidget(screen)
 
     assert "MyPluginMetric" in _ids_in_table(screen._ind_table)
+
+
+def test_no_apply_button_and_tick_autocommits(qtbot) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    assert not [b for b in screen.findChildren(QPushButton) if "Apply" in b.text()]
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+    qtbot.waitUntil(lambda: store.manifest.metrics.individual == ["IL-1"], timeout=2000)
+
+
+# ── search, presets, selection counter ───────────────────────────────────────
+
+
+def _visible_ids(table) -> set[str]:
+    return {
+        table.item(r, 0).data(Qt.ItemDataRole.UserRole)
+        for r in range(table.rowCount())
+        if not table.isRowHidden(r)
+    }
+
+
+def test_search_filters_rows_by_label_and_id(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    all_ind = _visible_ids(screen._ind_table)
+
+    screen._search.setText("speed")
+    shown = _visible_ids(screen._ind_table)
+    assert "IL-2" in shown and "IL-1" not in shown
+
+    screen._search.setText("il-1")  # id match, case-insensitive
+    assert "IL-1" in _visible_ids(screen._ind_table)
+
+    screen._search.setText("")
+    assert _visible_ids(screen._ind_table) == all_ind
+
+
+def test_search_hint_names_tabs_with_matches(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    screen._search.setText("nearest")
+    assert "Group" in screen._search_hint.text()
+    screen._search.setText("zzzz-no-such-metric")
+    assert "No metrics" in screen._search_hint.text()
+
+
+def test_preset_replaces_the_selection(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    il3 = _row_for_id(screen._ind_table, "IL-3")
+    screen._ind_table.item(il3, 0).setCheckState(Qt.CheckState.Checked)
+
+    screen.apply_preset("Standard locomotor")
+    screen.flush()
+    assert store.manifest.metrics.individual == ["IL-1", "IL-2", "IL-4"]
+    assert store.manifest.metrics.group == []
+
+
+def test_social_preset_selects_group_metrics_and_everything_selects_all(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    screen.apply_preset("Social dynamics")
+    screen.flush()
+    assert set(store.manifest.metrics.group) == {"GL-1", "GL-2", "GL-4", "GL-6"}
+
+    screen.apply_preset("All metrics")
+    screen.flush()
+    m = store.manifest.metrics
+    assert len(m.individual) == 12 and len(m.group) == 13 and len(m.zone) == 9
+
+
+def test_all_presets_only_name_registered_metrics() -> None:
+    from track2data import metrics
+    from ui.metrics_screen import PRESETS
+
+    metrics._load_builtins()
+    for name, ids in PRESETS.items():
+        for mid in ids or []:
+            assert mid in metrics._registry, f"{name}: {mid}"
+
+
+def test_counter_shows_selected_of_total_by_level(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    assert "0 / 34" in screen._counter.text()
+    screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0).setCheckState(
+        Qt.CheckState.Checked
+    )
+    assert "1 / 34" in screen._counter.text()
+    assert "1 individual" in screen._counter.text()
+
+
+def test_diagnostics_note_explains_they_always_run(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    assert "diagnostic" in screen._diag_note.text().lower()

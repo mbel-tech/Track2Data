@@ -354,3 +354,29 @@ class TestReaderFormatFallback:
         s = reader.read(session_dir, allow_pickle=True)
         assert s.raw_xy.shape == (3, 2, 2)
         assert s.trajectory_format == "npy"
+
+
+class TestReaderProbe:
+    """PERF-03: probe() yields the same GUI facts as read() without the bulk."""
+
+    def test_probe_facts_match_full_read(self, reader: IDTrackerAiReader,
+                                         tiny_real_session: Path) -> None:
+        from ui.store.session_facts import SessionFacts
+
+        full = SessionFacts.from_session(reader.read(tiny_real_session))
+        light = SessionFacts.from_session(reader.probe(tiny_real_session))
+        assert light == full
+
+    def test_probe_skips_bulky_artefacts(self, reader: IDTrackerAiReader,
+                                         tiny_real_session: Path) -> None:
+        s = reader.probe(tiny_real_session)
+        assert s.bbox_table is None
+        assert s.matching_results is None
+        assert s.fragments is None
+        assert s.tracking_log is None
+
+    def test_default_probe_falls_back_to_read(self, tiny_real_session: Path) -> None:
+        from track2data.readers import probe_session, read_session
+
+        a, b = read_session(tiny_real_session), probe_session(tiny_real_session)
+        assert (a.session_id, a.n_animals, a.video) == (b.session_id, b.n_animals, b.video)

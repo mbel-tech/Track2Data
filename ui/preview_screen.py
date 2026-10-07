@@ -34,11 +34,22 @@ that metric's preview table.
 
 from __future__ import annotations
 
+import functools
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
+    QSlider,
+    QSpinBox,
     QTableWidget,
     QTabWidget,
     QVBoxLayout,
@@ -46,6 +57,35 @@ from PySide6.QtWidgets import (
 )
 
 from ui.widgets.dataframe_table import clear_table, populate_table
+from ui.widgets.trajectory_view import TrajectoryView
+
+
+@dataclass
+class TrajectoryData:
+    """What the Trajectories tab needs from one preprocessed session."""
+
+    raw_xy: np.ndarray
+    xy: np.ndarray
+    fps: float
+    background: Path | None
+    size: tuple[float, float]
+
+
+def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> TrajectoryData:
+    """Load (or reuse from the project cache) one session's raw and processed
+    positions. Runs on a worker thread; raises on failure."""
+    from track2data.api import Engine
+
+    ref = next(r for r in manifest.sessions if r.session_id == session_id)
+    psess = Engine(manifest, cache_dir=cache_dir).preprocess_folder(ref.folder)
+    video = psess.session.video
+    return TrajectoryData(
+        raw_xy=psess.session.raw_xy,
+        xy=psess.xy,
+        fps=video.fps,
+        background=psess.session.background_image_path,
+        size=(float(video.width_px), float(video.height_px)),
+    )
 
 #: Diagnostic metric IDs shown in the Diagnostics tab's per-individual table.
 _PER_INDIVIDUAL_DIAGNOSTIC_IDS = ["D-1", "D-3"]
@@ -59,8 +99,16 @@ class PreviewScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        self._traj_task_id: str | None = None
+        self._traj_timer = QTimer(self)
+        self._traj_timer.setInterval(40)
+        self._traj_timer.timeout.connect(self._traj_advance)
         self._build_ui()
         if store is not None:
+            store.taskFinished.connect(self._on_traj_task_finished)
+            store.sessionsChanged.connect(self._refresh_traj_sessions)
+            store.projectChanged.connect(self._refresh_traj_sessions)
+            self._refresh_traj_sessions()
             store.projectChanged.connect(self._update_summary)
             store.sessionsChanged.connect(self._update_summary)
             store.metricsChanged.connect(self._update_summary)
@@ -91,8 +139,146 @@ class PreviewScreen(QWidget):
         tabs.addTab(self._build_summary_tab(), "Summary")
         tabs.addTab(self._build_diagnostics_tab(), "Diagnostics")
         tabs.addTab(self._build_metrics_tab(), "Metrics")
+        tabs.addTab(self._build_trajectories_tab(), "Trajectories")
 
         root.addWidget(tabs, 1)
+
+    def _build_trajectories_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Session:"))
+        self._traj_session_combo = QComboBox()
+        top.addWidget(self._traj_session_combo, 1)
+        self._traj_load_btn = QPushButton("Load trajectories")
+        self._traj_load_btn.setEnabled(False)
+        self._traj_load_btn.clicked.connect(self._load_trajectories)
+        top.addWidget(self._traj_load_btn)
+        lay.addLayout(top)
+
+        self._traj_status = QLabel(
+            "Load a session to inspect its tracked paths, what preprocessing "
+            "changed, and where the animals spent their time."
+        )
+        self._traj_status.setWordWrap(True)
+        self._traj_status.setStyleSheet("font-size: 12px; color: #777;")
+        lay.addWidget(self._traj_status)
+
+        self._traj_view = TrajectoryView()
+        lay.addWidget(self._traj_view, 1)
+
+        scrub = QHBoxLayout()
+        self._traj_play_btn = QPushButton("▶")
+        self._traj_play_btn.setFixedWidth(36)
+        self._traj_play_btn.setCheckable(True)
+        self._traj_play_btn.toggled.connect(self._traj_toggle_play)
+        scrub.addWidget(self._traj_play_btn)
+        self._traj_slider = QSlider(Qt.Orientation.Horizontal)
+        self._traj_slider.setRange(0, 0)
+        self._traj_slider.valueChanged.connect(self._traj_view.set_frame)
+        scrub.addWidget(self._traj_slider, 1)
+        self._traj_frame_label = QLabel("frame 0")
+        scrub.addWidget(self._traj_frame_label)
+        lay.addLayout(scrub)
+        self._traj_view.frameChanged.connect(self._traj_on_frame)
+
+        opts = QHBoxLayout()
+        opts.addWidget(QLabel("Trail:"))
+        self._traj_trail_spin = QSpinBox()
+        self._traj_trail_spin.setRange(1, 100000)
+        self._traj_trail_spin.setValue(250)
+        self._traj_trail_spin.setSuffix(" frames")
+        self._traj_trail_spin.valueChanged.connect(self._traj_view.set_trail_length)
+        opts.addWidget(self._traj_trail_spin)
+        opts.addWidget(QLabel("Show:"))
+        self._traj_source_combo = QComboBox()
+        self._traj_source_combo.addItem("Processed", userData="processed")
+        self._traj_source_combo.addItem("Raw", userData="raw")
+        self._traj_source_combo.addItem("Raw + processed", userData="both")
+        self._traj_source_combo.currentIndexChanged.connect(
+            lambda _i: self._traj_view.set_source(self._traj_source_combo.currentData())
+        )
+        opts.addWidget(self._traj_source_combo)
+        self._traj_zones_check = QCheckBox("Zones")
+        self._traj_zones_check.setChecked(True)
+        self._traj_zones_check.toggled.connect(self._traj_view.set_show_zones)
+        opts.addWidget(self._traj_zones_check)
+        self._traj_heatmap_check = QCheckBox("Occupancy heatmap")
+        self._traj_heatmap_check.toggled.connect(self._traj_view.set_heatmap)
+        opts.addWidget(self._traj_heatmap_check)
+        opts.addStretch()
+        lay.addLayout(opts)
+        return w
+
+    # ── slots: Trajectories ───────────────────────────────────────────────
+
+    def _refresh_traj_sessions(self) -> None:
+        current = self._traj_session_combo.currentText()
+        self._traj_session_combo.clear()
+        if self._store is not None and self._store.manifest is not None:
+            ids = [r.session_id for r in self._store.manifest.sessions]
+            self._traj_session_combo.addItems(ids)
+            if current in ids:
+                self._traj_session_combo.setCurrentText(current)
+        self._traj_load_btn.setEnabled(self._traj_session_combo.count() > 0)
+
+    def _load_trajectories(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        session_id = self._traj_session_combo.currentText()
+        if not session_id:
+            return
+        self._traj_status.setText(f"Loading {session_id}…")
+        self._traj_load_btn.setEnabled(False)
+        fn = functools.partial(
+            load_trajectory_data, self._store.manifest, session_id, self._store.cache_dir
+        )
+        self._traj_task_id = self._store.tasks.submit(fn)
+
+    def _on_traj_task_finished(self, task_id: str, result: object) -> None:
+        if task_id != self._traj_task_id:
+            return
+        self._traj_task_id = None
+        self._traj_load_btn.setEnabled(self._traj_session_combo.count() > 0)
+        if isinstance(result, Exception) or not isinstance(result, TrajectoryData):
+            self._traj_status.setText(f"Could not load trajectories: {result}")
+            return
+        rois = self._store.manifest.zones.rois if self._store.manifest else []
+        self._traj_view.set_data(
+            result.raw_xy, result.xy, result.fps, rois=rois,
+            background_path=result.background, size=result.size,
+        )
+        self._traj_slider.setRange(0, max(0, self._traj_view.n_frames - 1))
+        self._traj_slider.setValue(0)
+        self._traj_status.setText(
+            f"{self._traj_view.n_frames} frames at {result.fps:g} fps · "
+            f"{result.xy.shape[1]} animal(s). Wheel zooms."
+        )
+
+    def _traj_on_frame(self, frame: int) -> None:
+        fps = getattr(self._traj_view, "_fps", 0) or 0
+        t = f" · {frame / fps:.1f} s" if fps else ""
+        self._traj_frame_label.setText(f"frame {frame}{t}")
+        if self._traj_slider.value() != frame:
+            self._traj_slider.setValue(frame)
+
+    def _traj_toggle_play(self, playing: bool) -> None:
+        self._traj_play_btn.setText("⏸" if playing else "▶")
+        if playing and self._traj_view.n_frames > 1:
+            self._traj_timer.start()
+        else:
+            self._traj_timer.stop()
+
+    def _traj_advance(self) -> None:
+        n = self._traj_view.n_frames
+        step = max(1, n // 250)  # whole session in roughly ten seconds
+        nxt = self._traj_view.current_frame + step
+        if nxt >= n - 1:
+            self._traj_view.set_frame(n - 1)
+            self._traj_play_btn.setChecked(False)
+        else:
+            self._traj_view.set_frame(nxt)
 
     def _build_summary_tab(self) -> QWidget:
         summary_w = QWidget()

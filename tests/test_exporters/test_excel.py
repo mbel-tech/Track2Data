@@ -343,3 +343,22 @@ class TestExcelExporterEmptyMetrics:
         for sheet in ("Activity Summary", "Group Dynamics", "Zone Occupancy", "Quality"):
             df = pd.read_excel(paths[0], sheet_name=sheet)
             assert len(df) == 0
+
+
+def test_fish_by_frame_over_the_sheet_limit_continues_on_extra_sheets(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    monkeypatch.setattr("track2data.exporters.excel.EXCEL_MAX_DATA_ROWS", 2)
+    payload = _empty_metrics_payload()
+    assert len(payload.fish_by_frame) > 2
+    n_rows = len(payload.fish_by_frame)
+
+    with caplog.at_level("WARNING"):
+        (path,) = ExcelExporter().write(payload, tmp_path)
+
+    wb = openpyxl.load_workbook(path, read_only=True)
+    names = [n for n in wb.sheetnames if n.startswith("Fish by Frame")]
+    assert names[0] == "Fish by Frame" and len(names) == -(-n_rows // 2)
+    total = sum(wb[n].max_row - 1 for n in names)  # minus one header row each
+    assert total == n_rows
+    assert any("splitting" in r.message for r in caplog.records)

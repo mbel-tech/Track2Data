@@ -242,3 +242,15 @@ See `docs/dev/ROADMAP.md` for the phased M1–M5 build plan. New contributors ar
 ---
 
 Thank you for contributing! By participating in this project, you agree to abide by the `CODE_OF_CONDUCT.md`.
+
+## User guide screenshots
+
+`docs/guide/` documents each screen with screenshots. When you change how a screen looks, regenerate
+them and commit the images:
+
+```bash
+python scripts/generate_guide_screenshots.py
+```
+
+It drives the real app offscreen against a synthetic demo session. `tests/test_docs/test_guide.py`
+fails if a guide page, link or image goes missing.

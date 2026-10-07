@@ -53,7 +53,7 @@ track2data/
 │   ├── __init__.py              # discovery via entry points (§11)
 │   ├── base.py                  # SessionReader abstract base
 │   ├── idtrackerai_v5.py        # current idtracker.ai format
-│   ├── idtrackerai_v4.py        # legacy fallback
+│   ├── idtrackerai_v4.py        # stub (not implemented; see D-012)
 │   ├── idtrackerai_detect.py    # version sniffing
 │   └── video_meta.py            # extract one frame + fps via ffmpeg or pyav
 │
