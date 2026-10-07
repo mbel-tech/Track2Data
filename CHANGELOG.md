@@ -346,6 +346,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Exports with metadata no longer contain `treatment_x` / `treatment_y`.**
+  Session metadata is attached to every metric frame, and the exporters merged
+  those frames on all shared columns or on the id keys alone, so any
+  multi-metric export with metadata got duplicated suffixed columns (and the
+  Excel summary stacked metrics into separate rows instead of widening). All
+  four exporters now share `exporters/_merge.py`: join on identity keys only,
+  keep a column carried by several frames once when its values agree.
+
 - **Parameter screens no longer lose edits.** Calibration, Preprocessing,
   Metadata mapping and Metrics had "Apply" buttons; changing a value and
   navigating away silently discarded it. Edits now auto-commit after a

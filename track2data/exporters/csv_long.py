@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from track2data.exporters._merge import merge_metric_frames
 from track2data.exporters.base import Exporter, ExportPayload
 
 # ── CSV write helpers ──────────────────────────────────────────────────────────
@@ -56,40 +57,7 @@ def _sorted_by(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     return df.sort_values(keys)
 
 
-_KEY_COLS = ("session_id", "individual_id")
-_DROP_COLS = ("metric_id",)
-
-
-def _merge_metric_dfs(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Outer-merge all metric DataFrames on their identity key columns.
-
-    Key columns are any column named ``session_id`` or ``individual_id`` that is
-    present in both frames — group-level frames therefore join on ``session_id``
-    alone.  Extra identifier columns (``metric_id``) are dropped before merging
-    so they do not pollute the merged output, mirroring
-    :func:`track2data.exporters.csv_wide._build_wide`.
-
-    Returns an empty DataFrame when *metrics* is empty.
-    """
-    dfs = [
-        df.drop(columns=[c for c in _DROP_COLS if c in df.columns])
-        for df in metrics.values()
-    ]
-    if not dfs:
-        return pd.DataFrame()
-    result = dfs[0]
-    for other in dfs[1:]:
-        # Join on the identity keys only.  Merging on *every* shared column name
-        # would silently make an incidentally-shared value column part of the
-        # join key, so two metrics that both emit e.g. "n_frames" with different
-        # values would split one individual across several half-empty rows
-        # instead of widening a single row.
-        shared_keys = [c for c in _KEY_COLS if c in result.columns and c in other.columns]
-        if shared_keys:
-            result = result.merge(other, on=shared_keys, how="outer")
-        else:
-            result = pd.concat([result, other], axis=1)
-    return result
+_merge_metric_dfs = merge_metric_frames  # name kept for existing callers/tests
 
 
 # ── CsvLongExporter ───────────────────────────────────────────────────────────
