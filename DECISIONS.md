@@ -323,3 +323,25 @@ as part of `Engine.run()`'s signature, and `ui/store/task_runner.py`
 (issue #20) is being built immediately after this and will call
 `Engine.run()`; adding the parameter now avoids a second signature
 change once parallel execution does land.
+
+---
+
+## Phase 4 — Critical-issues audit
+
+### D-015 · Body-length normalisation is computed in pixel space
+
+**Decision:** `*_bl` metric columns are `value_px / body_length_px[k]`
+and no longer depend on `px_per_cm`. `PreprocessedSession.body_length_px`
+is set by body-length calibration; `body_length_in_px()` falls back to
+`body_length_cm * px_per_cm` for sessions that only carry physical units.
+`body_length_cm` keeps its legacy behaviour (pixel values in bodylength
+mode) so existing consumers do not change.
+
+**Rationale:** Body Length mode is the recommended mode and leaves
+`px_per_cm` unset, so nesting `_bl` under `px_per_cm is not None` made
+every `_bl` column NaN. The old tests built sessions with both values,
+a combination no calibration path produces, and hid the defect.
+
+**Alternative considered:** Rename `body_length_cm` to pixels outright.
+Rejected for now — it touches exporters and the public `Session` contract;
+revisit in a separate change.

@@ -44,6 +44,7 @@ def make_psess(
     n_animals: int = 2,
     px_per_cm: float | None = None,
     body_length_cm: np.ndarray | None = None,
+    body_length_px: np.ndarray | None = None,
 ) -> PreprocessedSession:
     """Build a minimal PreprocessedSession for testing."""
     if xy is None:
@@ -71,6 +72,7 @@ def make_psess(
         kinematics=kine,
         px_per_cm=px_per_cm,
         body_length_cm=body_length_cm,
+        body_length_px=body_length_px,
         report=PreprocessReport(),
     )
 
@@ -163,6 +165,13 @@ class TestPathLength:
         expected_bl = expected_cm / 5.0
         assert row0["path_length_bl"] == pytest.approx(expected_bl, rel=1e-3)
 
+    def test_path_length_bl_without_px_per_cm(self) -> None:
+        """Body-length calibration mode: _bl must not depend on px_per_cm."""
+        psess = make_psess(body_length_px=np.array([50.0, 50.0]))
+        row0 = PathLength().compute(psess).iloc[0]
+        assert row0["path_length_bl"] == pytest.approx(5.0 * 99 / 50.0)
+        assert np.isnan(row0["path_length_cm"])
+
     def test_row_count_equals_n_animals(self) -> None:
         psess = make_psess(n_animals=3)
         df = PathLength().compute(psess)
@@ -233,6 +242,13 @@ class TestSpeed:
         df = Speed().compute(psess)
         row0 = df[df["individual_id"] == 0].iloc[0]
         assert row0["mean_speed_bl_s"] == pytest.approx(2.0)
+
+    def test_mean_speed_bl_s_without_px_per_cm(self) -> None:
+        speed = np.full((100, 2), 100.0)
+        psess = make_psess(speed=speed, body_length_px=np.array([50.0, 50.0]))
+        row0 = Speed().compute(psess).iloc[0]
+        assert row0["mean_speed_bl_s"] == pytest.approx(2.0)
+        assert np.isnan(row0["mean_speed_cm_s"])
 
     def test_row_count_equals_n_animals(self) -> None:
         psess = make_psess(n_animals=4)

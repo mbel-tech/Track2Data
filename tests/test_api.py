@@ -180,6 +180,8 @@ def test_preprocess_bodylength_calibration_success() -> None:
     engine = Engine(manifest)
     psess = engine.preprocess(session)
     assert psess.body_length_cm is not None
+    assert psess.body_length_px is not None
+    np.testing.assert_allclose(psess.body_length_px, 50.0)
 
 
 # ── preprocess: zone assignment ──────────────────────────────────────────────

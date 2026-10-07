@@ -279,6 +279,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Body-length-normalised metrics (`path_length_bl`, `mean_speed_bl_s`,
+  `mean_nnd_bl`) were always NaN** under the recommended Body Length
+  calibration, because they were computed only when `px_per_cm` was set
+  and that mode leaves it unset. They are now `value_px / body_length_px`,
+  independent of `px_per_cm`. `PreprocessedSession` gains `body_length_px`
+  and `body_length_in_px()`; `*_cm` columns stay NaN without `px_per_cm`.
+
 The following were found by a review of the metrics work above, before
 any of it shipped in a release. The first six produced wrong numbers or
 discarded user input rather than failing visibly.
