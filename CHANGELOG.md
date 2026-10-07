@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Wizard sidebar shows stage status and Next is gated.** Each stage gets
+  ✓ / ⚠ / ✗ / ○ with a tooltip explaining it (`ui/store/stage_status.py`);
+  Next stays disabled, with a reason, while Project, Sessions or Metrics are
+  empty or Calibration is invalid. Creating or opening a project now moves
+  on to Sessions. `WizardSidebar.mark_complete` was never called before.
+
 - **`Engine.run(n_workers=N)` now runs sessions in parallel** (spawned
   processes; workers rebuild the Engine from the serialised manifest and
   stream progress events back over a queue). The Processing screen has a

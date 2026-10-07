@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 # 9 wizard stages. Was 7 through v0.1.0, with "6 · Preprocessing &
@@ -38,6 +40,13 @@ class WizardSidebar(QListWidget):
     _NORMAL_FG = "#ecf0f1"
     _ACTIVE_FG = "#ffffff"
     _DONE_FG = "#2ecc71"
+    # status -> (prefix glyph, foreground colour)
+    _STATUS_STYLE: ClassVar[dict[str, tuple[str, str]]] = {
+        "empty": ("○ ", "#bdc3c7"),
+        "valid": ("✓ ", "#2ecc71"),
+        "warning": ("⚠ ", "#f39c12"),
+        "blocked": ("✗ ", "#e74c3c"),
+    }
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -72,6 +81,7 @@ class WizardSidebar(QListWidget):
         for label, _ in STAGES:
             item = QListWidgetItem(f"  {label}")
             self.addItem(item)
+        self._statuses: list[str | None] = [None] * len(STAGES)
 
         self.currentRowChanged.connect(self._on_row_changed)
 
@@ -88,12 +98,23 @@ class WizardSidebar(QListWidget):
 
     def mark_complete(self, stage_index: int, complete: bool = True) -> None:
         """Add or remove a completion tick on a sidebar stage item."""
-        if stage_index < 0 or stage_index >= len(STAGES):
+        self.set_status(stage_index, "valid" if complete else "empty")
+
+    def set_status(self, stage_index: int, status: str, tooltip: str = "") -> None:
+        """Show ✓ / ⚠ / ✗ / ○ (valid / warning / blocked / empty) on a stage."""
+        if stage_index < 0 or stage_index >= len(STAGES) or status not in self._STATUS_STYLE:
             return
-        self._completions[stage_index] = complete
+        glyph, colour = self._STATUS_STYLE[status]
+        self._statuses[stage_index] = status
+        self._completions[stage_index] = status == "valid"
         label, _ = STAGES[stage_index]
-        prefix = "✓ " if complete else "  "
-        self.item(stage_index).setText(f"{prefix}{label}")
+        item = self.item(stage_index)
+        item.setText(f"{glyph}{label}")
+        item.setForeground(QColor(colour))
+        item.setToolTip(tooltip)
+
+    def status(self, stage_index: int) -> str | None:
+        return self._statuses[stage_index] if 0 <= stage_index < len(STAGES) else None
 
     # ── private ────────────────────────────────────────────────────────────
 

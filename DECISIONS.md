@@ -460,3 +460,21 @@ Engine must not run two `run()` calls concurrently.
 
 **Alternative considered:** Threads. Rejected: the metrics and shapely loops
 hold the GIL.
+
+---
+
+### D-021 · Stage status is computed from the manifest; only required pages gate Next
+
+**Decision:** `ui/store/stage_status.py::compute_stage_statuses` derives a
+status per page from the manifest (and whether results exist). `MainWindow`
+recomputes it on every store change, paints the sidebar and enables Next
+only if `next_blocker()` is None. Required pages are Project, Sessions and
+Metrics (when empty); a `blocked` page (invalid calibration) always blocks.
+Sidebar clicks stay ungated.
+
+**Rationale:** Zones, metadata and export targets are optional, and result
+pages are produced by running; gating them would trap users. Keeping the
+rules in a Qt-free function makes them unit-testable.
+
+**Alternative considered:** Gate sidebar clicks too. Rejected: users need
+to jump back to fix a problem shown by a badge.

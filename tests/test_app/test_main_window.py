@@ -336,3 +336,47 @@ def test_leaving_a_parameter_screen_commits_pending_edits(qtbot, tmp_path: Path)
 
     win._go_to_page(6)  # leave without waiting for the debounce
     assert win._store.manifest.preprocess.gap_fill.max_gap_frames == 91
+
+
+# ── GUI-03: stage badges, Next gating, advance after create ──────────────────
+
+
+def test_creating_a_project_advances_to_sessions(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win._stack.currentIndex() == 0
+    win._store.new_project("p", tmp_path)
+    assert win._stack.currentIndex() == 1
+
+
+def test_next_is_disabled_until_the_page_is_complete(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert not win._next_action.isEnabled()  # no project yet
+    assert "project" in win._next_action.toolTip().lower()
+
+    win._store.new_project("p", tmp_path)  # now on Sessions, which is empty
+    assert not win._next_action.isEnabled()
+    assert "session" in win._next_action.toolTip().lower()
+
+    ref = SessionRef(session_id="s1", folder=tmp_path, sha256="x")
+    win._store.update_sessions([ref])
+    assert win._next_action.isEnabled()
+
+
+def test_sidebar_shows_status_badges(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert win._sidebar.status(1) == "blocked"  # no project
+    win._store.new_project("p", tmp_path)
+    assert win._sidebar.status(0) == "valid"
+    assert win._sidebar.status(1) == "empty"
+    assert win._sidebar.item(0).text().startswith("✓")
+    win._store.update_sessions([SessionRef(session_id="s1", folder=tmp_path, sha256="x")])
+    assert win._sidebar.status(1) == "valid"

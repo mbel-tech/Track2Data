@@ -135,6 +135,19 @@ class MainWindow(QMainWindow):
         # ── wire signals ──────────────────────────────────────────────────
         self._sidebar.stage_page_selected.connect(self._go_to_page)
         self._store.projectChanged.connect(self._update_statusbar)
+        self._store.projectChanged.connect(self._on_project_opened)
+        for sig in (
+            self._store.projectChanged,
+            self._store.sessionsChanged,
+            self._store.calibrationChanged,
+            self._store.zonesChanged,
+            self._store.metadataChanged,
+            self._store.preprocessChanged,
+            self._store.metricsChanged,
+            self._store.exportChanged,
+            self._store.runResultsChanged,
+        ):
+            sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
         # taskStarted/taskCancelled are deliberately NOT forwarded onto
         # ProjectStore's own signals (see ProjectStore's docstring) --
@@ -145,6 +158,7 @@ class MainWindow(QMainWindow):
 
         # Start on page 0.
         self._go_to_page(0)
+        self._refresh_stage_status()
 
     # ── sidebar header ──────────────────────────────────────────────────────
 
@@ -275,7 +289,35 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(page_index)
         self._sidebar.sync_to_page(page_index)
         self._back_action.setEnabled(page_index > 0)
-        self._next_action.setEnabled(page_index < n - 1)
+        self._update_next_action()
+
+    def _on_project_opened(self) -> None:
+        """Creating/opening a project moves on to Sessions instead of leaving
+        the user on a screen whose only change is a small status label."""
+        if self._store.has_project and self._stack.currentIndex() == 0:
+            self._go_to_page(1)
+
+    def _refresh_stage_status(self) -> None:
+        from app.navigation import STAGES
+        from ui.store.stage_status import compute_stage_statuses
+
+        self._page_statuses = compute_stage_statuses(
+            self._store.manifest, has_run_results=self._store.run_results is not None
+        )
+        for stage_index, (_label, first_page) in enumerate(STAGES):
+            info = self._page_statuses[first_page]
+            self._sidebar.set_status(stage_index, info.status, info.message)
+        self._update_next_action()
+
+    def _update_next_action(self) -> None:
+        from ui.store.stage_status import next_blocker
+
+        page = self._stack.currentIndex()
+        last = self._stack.count() - 1
+        statuses = getattr(self, "_page_statuses", None)
+        reason = next_blocker(statuses, page) if statuses else None
+        self._next_action.setEnabled(page < last and reason is None)
+        self._next_action.setToolTip(reason or "Go to the next step")
 
     def _flush_current_page(self) -> None:
         """Commit the outgoing screen's debounced edits before leaving it."""
