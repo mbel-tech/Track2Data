@@ -12,7 +12,7 @@ numbers below in `DECISIONS.md`.
 | SCI-03 | Science | P2 | Metadata join was per session; a per-animal value would have been copied onto every animal (D-010). | **Fixed** (D-025) | One metadata row per animal, matched by validator label or position, with extra columns carried. Identity-free sessions get none; engine columns are never overwritten. |
 | PERF-01 | Engine | P1 | `Engine.run` forced `n_workers=1`. | **Fixed** (D-020) | Spawn process pool; workers get the manifest JSON, progress returns over a queue. Benchmark tooling added (`scripts/benchmark_parallel.py`, `docs/BENCHMARKING.md`): one synthetic data point shows 3.2x on 4 cores for 4 sessions of 20,000 frames; **not yet run on real long sessions**; on tiny sessions it is slower because start-up dominates. Default stays 1. |
 | PERF-02 | Engine | P1 | `CacheStore` stored flat DataFrames and was unused (a documented deferral, not a bug). | **Fixed** (D-019) | Preprocessed sessions cached on disk, keyed by a folder fingerprint and the preprocessing/calibration/zone settings. |
-| PERF-03 | Engine | P2 | Importing a session ran a full `read_session`. | **Partly fixed** (D-018) | `SessionReader.probe()` skips bbox tables, matching results, fragments and the log; reopening a project re-probes. The trajectory payload is still read (identity status needs it). Probes still share the single-thread task pool. |
+| PERF-03 | Engine | P2 | Importing a session ran a full `read_session`. | **Fixed** (D-018, D-023) | `SessionReader.probe()` skips bbox tables, matching results, fragments and the log; reopening a project re-probes. The trajectory payload is still read (identity status needs it). Probes run in their own task lane, so they are no longer queued behind a long run; a failed probe no longer pops the run-failure dialog. |
 | PERF-04 | Engine | P2 | Per-frame CSV copied and re-sorted the table, then wrote it in one go. | **Fixed** | Chunked write, no copy; traced peak memory halves (133 MB to 67 MB on 2.16 M rows), output byte-identical. Excel splits the table across sheets past its row limit. |
 | GUI-01 | UX | P1 | Calibration, Preprocessing, Metadata and Metrics needed an Apply click; navigating away dropped edits. | **Fixed** (D-017) | Debounced auto-commit and a flush when leaving a screen. |
 | GUI-02 | UX | P1 | No screen drew a trajectory. | **Fixed** (D-022) | Preview ▸ Trajectories: scrub/play, trails, raw vs processed, zones, occupancy heatmap. Built on Qt graphics items, not pyqtgraph. |
@@ -21,7 +21,7 @@ numbers below in `DECISIONS.md`.
 | GUI-05 | UX | P2 | Cancel was only noticed at stage-boundary events. | **Fixed** (D-020) | `Engine.run(cancel_check=...)` is polled between sessions, preprocessing steps and metrics. A single numpy/shapely call still cannot be interrupted. |
 | ENG-01 | Engine/GUI | P2 | The Preprocessing screen had no identity-switch controls and rebuilt `PreprocessConfig` on every apply, resetting `identity_switch`, `jump.pct_mult`, `smoothing.polyorder`, `coverage.min_track_frames`. | **Fixed** | Controls added (default off, with a risk warning); updates use `model_copy`; the velocity-threshold jump method is selectable. |
 | ENG-02 | Engine | P2 | The v4 reader is a stub (documented, D-012) but docs advertised v4 support. | **Resolved by documentation** | Docs say v4 is not supported yet. v4-looking folders now fail with a specific `V4_NOT_SUPPORTED` message, and `scripts/inspect_idtrackerai_output.py` plus [`IDTRACKERAI_V4_SAMPLES.md`](IDTRACKERAI_V4_SAMPLES.md) prepare the data request. The reader itself needs real v4 samples from the maintainer or users. |
-| DIST-01 | Distribution | P2 | Binaries are unsigned. | **Open, blocked** | Signing is wired in `release.yml` but needs certificates and a published release (`docs/CODE_SIGNING.md`). |
+| DIST-01 | Distribution | P2 | Binaries are unsigned. | **Open, blocked** | Signing is wired in `release.yml` but needs certificates and a published release (`docs/CODE_SIGNING.md`). Prepared offline: a complete-secrets check that fails a half-configured platform early, `packaging/verify_release.py`, actionlint in CI, and `docs/RELEASE_CHECKLIST.md`. Never exercised against a real certificate. |
 
 ## Also fixed along the way
 
@@ -38,6 +38,8 @@ numbers below in `DECISIONS.md`.
 
 ## Still open
 
-- Run the parallel benchmark on real, long sessions (PERF-01).
-- Give session probes their own thread pool (PERF-03).
-- idtracker.ai v4 reader (ENG-02) and signed binaries (DIST-01).
+All of these need something only the maintainer has:
+
+- Run `scripts/benchmark_parallel.py` on real, long sessions and decide the default worker count (PERF-01).
+- Certificates, a published release and a first real signed run on three operating systems (DIST-01; see `docs/RELEASE_CHECKLIST.md`).
+- idtracker.ai v4 sample folders, then the v4 reader (ENG-02; see `docs/IDTRACKERAI_V4_SAMPLES.md`).

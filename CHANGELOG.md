@@ -382,6 +382,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Metadata screen scrolls** instead of squashing its rows once the per-animal controls were added.
+
 - **Adding sessions no longer waits for, or disturbs, a pipeline run.** Session
   probes now run in their own task lane. Before, a probe queued behind a long
   run (blank frame counts until it ended), a failed probe popped the

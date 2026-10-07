@@ -243,7 +243,6 @@ Z-9 follow a slot across frames, so they now declare
 Tracked in [`docs/CRITICAL_ISSUES.md`](CRITICAL_ISSUES.md):
 
 - **Parallel benchmark on real data**: `scripts/benchmark_parallel.py` exists (see `docs/BENCHMARKING.md`; one local data point: 3.2x on 4 cores for 4 sessions of 20k frames); run it on real, long sessions before recommending a worker count.
-- **Probe pool**: session probes still share the single-thread `TaskRunner` pool with pipeline runs (D-018).
 - **idtracker.ai v4 reader**: stub; needs sample data (D-012). Prep done: specific error for v4-looking folders, `scripts/inspect_idtrackerai_output.py`, and [`IDTRACKERAI_V4_SAMPLES.md`](IDTRACKERAI_V4_SAMPLES.md) saying what to send.
 - **Signed binaries**: infrastructure exists; needs certificates and a published release (`docs/CODE_SIGNING.md`).
 
