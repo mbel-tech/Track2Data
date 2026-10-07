@@ -402,3 +402,30 @@ different identity heuristic.
 
 **Not done:** probes still share the single-thread `TaskRunner` pool with
 pipeline runs.
+
+---
+
+### D-019 · Preprocessed sessions are cached as pickled dataclasses (closes D-013's cache half)
+
+**Decision:** `CacheStore` gets `get_object`/`put_object` (atomic pickle,
+`.pkl`). `Engine` caches the whole `PreprocessedSession` after
+preprocess + calibration + zones, keyed by reader name, a folder
+fingerprint (relative path, size, mtime of every file) and a hash of the
+preprocess, calibration and zone configs plus a schema number and app
+version. It is opt-in via `Engine(cache_dir=...)`; the GUI passes
+`<project>/.t2d_cache`. A cache hit skips import, preprocessing,
+calibration and zone assignment.
+
+**Rationale:** D-013 left a choice of Parquet or a pickled dataclass; the
+dataclass holds ragged arrays, zone object arrays and a nested pydantic
+`Session`, which Parquet would force into an invented schema. The folder
+is fingerprinted rather than hashed because reading gigabytes to decide
+whether to read them defeats the point.
+
+**Trade-offs:** mtime/size can miss an edit that preserves both (rare);
+bump `Engine._CACHE_SCHEMA` when `PreprocessedSession` changes. Metrics
+and exports are still recomputed on every run. Pickles are only loaded from
+the project's own cache directory.
+
+**Alternative considered:** Parquet per array. Rejected for the schema
+cost above.

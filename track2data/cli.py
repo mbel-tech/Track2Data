@@ -74,7 +74,11 @@ def cli(verbose: bool) -> None:
               help="Output directory. Defaults to <project>_output/.")
 @click.option("--exporter", "-e", "exporters", multiple=True,
               help="Exporter(s) to use. Repeat for multiple.")
-def run(project: str, out_dir: str | None, exporters: tuple[str, ...]) -> None:
+@click.option("--cache-dir", default=None,
+              help="Reuse preprocessed sessions from this directory (off by default).")
+def run(
+    project: str, out_dir: str | None, exporters: tuple[str, ...], cache_dir: str | None
+) -> None:
     """Run the full pipeline for a project manifest.
 
     Reads PROJECT (a .t2d.json file), imports all sessions, preprocesses,
@@ -91,7 +95,7 @@ def run(project: str, out_dir: str | None, exporters: tuple[str, ...]) -> None:
         out_path = Path(out_dir)
 
     # Validate before running.
-    engine = Engine(manifest)
+    engine = Engine(manifest, cache_dir=Path(cache_dir) if cache_dir else None)
     issues = engine.validate()
     if issues:
         for issue in issues:
@@ -217,7 +221,7 @@ def cache(subcommand: str, cache_dir: str) -> None:
 
     \b
     Subcommands:
-      clear   Delete all cached Parquet files.
+      clear   Delete all cached files.
       stats   Print the number of entries and total size.
     """
     from track2data.cache.store import CacheStore
@@ -229,7 +233,9 @@ def cache(subcommand: str, cache_dir: str) -> None:
         click.echo(f"Cache cleared — {n} file(s) deleted from {cache_dir}.")
 
     elif subcommand == "stats":
-        parquet_files = list(Path(cache_dir).rglob("*.parquet"))
+        parquet_files = [
+            f for pat in ("*.parquet", "*.pkl") for f in Path(cache_dir).rglob(pat)
+        ]
         total_bytes = sum(f.stat().st_size for f in parquet_files)
         click.echo(
             f"Cache at {cache_dir}: "

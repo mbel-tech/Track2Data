@@ -10,7 +10,7 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 | SCI-02 | Science | P1 | **Fixed** (D-016) | All nine Z-* metrics emit per-slot rows on identity-free sessions (`metrics/zone.py`, `docs/ROADMAP.md` "Deferred: identity-free zone metrics"). |
 | SCI-03 | Science | P2 | Open, by design (D-010) | Metadata join is session-level only. |
 | PERF-01 | Engine | P1 | Open, deferred (D-013/D-014) | `Engine.run` forces `n_workers=1`; `core/parallel.py` unused. |
-| PERF-02 | Engine | P1 | Open, deferred (D-013) | `CacheStore` stores flat DataFrames; `PreprocessedSession` needs a serialisation design. |
+| PERF-02 | Engine | P1 | **Fixed** (D-019) | `CacheStore` stores flat DataFrames; `PreprocessedSession` needs a serialisation design. |
 | PERF-03 | Engine | P2 | **Partly fixed** (D-018) | GUI probes sessions with a full `read_session`. |
 | PERF-04 | Engine | P2 | **Fixed** | `exporters/csv_long.py` copies and sorts the per-frame table before one `to_csv`. |
 | GUI-01 | UX | P1 | **Fixed** (D-017) | Apply buttons on Calibration, Preprocessing, Metadata mapping, Metrics; no on-leave hook. |

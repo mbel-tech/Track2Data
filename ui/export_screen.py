@@ -286,13 +286,13 @@ class ExportScreen(QWidget):
         self._store.append_log(
             "### Export started\n"
             f"_Output: `{out_dir}`_\n\n"
-            "Export re-runs the full pipeline (preprocess, metrics, and "
-            "export) for every session -- per-session results are never "
-            "cached between runs, so this is a genuine re-run rather than "
-            "a re-export of previously computed results.\n"
+            "Export re-runs metrics and export for every session. "
+            "Preprocessed sessions are reused from the project cache when "
+            "the session files and preprocessing/calibration/zone settings "
+            "are unchanged; otherwise they are recomputed.\n"
         )
 
-        engine = Engine(self._store.manifest)
+        engine = Engine(self._store.manifest, cache_dir=self._store.cache_dir)
         run_fn = functools.partial(engine.run, out_dir, exporters=selected)
 
         self._last_out_dir = out_dir

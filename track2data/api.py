@@ -122,8 +122,11 @@ def _recover_preprocess_report(
 class Engine:
     """Stateless facade over all engine subsystems."""
 
-    def __init__(self, manifest: ProjectManifest) -> None:
+    def __init__(self, manifest: ProjectManifest, *, cache_dir: Path | None = None) -> None:
+        """*cache_dir* enables the on-disk preprocessed-session cache used by
+        ``run()``; None (the default) never reads or writes it."""
         self._manifest = manifest
+        self._cache_dir = Path(cache_dir) if cache_dir is not None else None
 
     @property
     def manifest(self) -> ProjectManifest:
@@ -210,6 +213,52 @@ class Engine:
             )
             sessions.append(self.import_session(ref.folder))
         return sessions
+
+    # ── preprocessed-session cache ─────────────────────────────────────────
+
+    #: Bump when PreprocessedSession's layout or preprocessing semantics change.
+    _CACHE_SCHEMA = 1
+
+    def _cache_key(self, folder: Path) -> tuple[Any, str] | None:
+        """(store, key) for *folder*, or None when caching is off/impossible."""
+        if self._cache_dir is None:
+            return None
+        from track2data import __version__
+        from track2data.cache.store import CacheStore
+        from track2data.core.hashing import dict_sha256, folder_fingerprint
+        from track2data.readers import detect_reader
+
+        reader = detect_reader(folder)
+        if reader is None:
+            return None
+        m = self._manifest
+        config_hash = dict_sha256(
+            {
+                "schema": self._CACHE_SCHEMA,
+                "app": __version__,
+                "preprocess": m.preprocess.model_dump(mode="json"),
+                "calibration": m.calibration.model_dump(mode="json"),
+                "zones": m.zones.model_dump(mode="json"),
+            }
+        )
+        store = CacheStore(self._cache_dir)
+        return store, store.key(reader.name, folder_fingerprint(folder), config_hash)
+
+    def _cache_get(self, folder: Path) -> PreprocessedSession | None:
+        keyed = self._cache_key(folder)
+        if keyed is None:
+            return None
+        store, key = keyed
+        obj = store.get_object(key)
+        return obj if isinstance(obj, PreprocessedSession) else None
+
+    def _cache_put(self, folder: Path, psess: PreprocessedSession) -> None:
+        try:
+            keyed = self._cache_key(folder)
+            if keyed is not None:
+                keyed[0].put_object(keyed[1], psess)
+        except Exception:
+            logger.warning("Could not write preprocessed-session cache.", exc_info=True)
 
     # ── preprocessing ──────────────────────────────────────────────────────
 
@@ -866,7 +915,10 @@ class Engine:
         start = time.monotonic()
         psess = None
         try:
-            session = self.import_session(ref.folder)
+            psess = self._cache_get(ref.folder)
+            cached = psess is not None
+            if psess is None:
+                session = self.import_session(ref.folder)
             # The override only, not ref.is_identity_free(): this method is
             # keyed by ref.session_id (see the docstring) because a
             # reader-derived id may differ, so the lookup inside
@@ -878,15 +930,20 @@ class Engine:
                 progress,
                 ProgressEvent(
                     stage="import", current=1, total=4,
-                    session_id=ref.session_id, message="Import complete",
+                    session_id=ref.session_id,
+                    message="Import complete (cached)" if cached else "Import complete",
                 ),
             )
-            psess = self.preprocess(session)
+            if psess is None:
+                psess = self.preprocess(session)
+                self._cache_put(ref.folder, psess)
             emit(
                 progress,
                 ProgressEvent(
                     stage="preprocess", current=2, total=4,
-                    session_id=ref.session_id, message="Preprocessing complete",
+                    session_id=ref.session_id,
+                    message="Preprocessing complete (cached)" if cached
+                    else "Preprocessing complete",
                 ),
             )
             metric_results = self.compute_metrics(psess, identity_free=identity_free)

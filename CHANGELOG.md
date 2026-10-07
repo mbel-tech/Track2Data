@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Preprocessed-session cache is now wired in.** `Engine(manifest,
+  cache_dir=...)` stores each session's `PreprocessedSession` and reuses it
+  when the session files (path, size, mtime) and the preprocessing,
+  calibration and zone settings are unchanged, so previewing and then
+  exporting no longer re-imports and re-preprocesses every session. The GUI
+  uses `<project>/.t2d_cache`; the CLI opts in with `track2data run
+  --cache-dir`. `CacheStore` gained pickled object entries; corrupt entries
+  are treated as misses.
+
 - **Opt-in data-derived bout/visit/dwell thresholds (Sibly et al. 1990
   log-survivorship bout-criterion interval).** New module
   `track2data/metrics/bouts.py` fits a two-segment ("broken-stick") line

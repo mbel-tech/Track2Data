@@ -57,3 +57,6 @@ artifacts/
 
 # Local git worktrees
 .worktrees/
+
+# Per-project preprocessed-session cache
+.t2d_cache/

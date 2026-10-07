@@ -139,7 +139,7 @@ class ProcessingScreen(QWidget):
         from track2data.api import Engine
 
         manifest = self._store.manifest
-        engine = Engine(manifest)
+        engine = Engine(manifest, cache_dir=self._store.cache_dir)
         issues = engine.validate()
         if issues:
             QMessageBox.warning(

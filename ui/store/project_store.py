@@ -97,6 +97,11 @@ class ProjectStore(QObject):
         return self._project_dir
 
     @property
+    def cache_dir(self) -> Path | None:
+        """Where the engine keeps preprocessed sessions for this project."""
+        return None if self._project_dir is None else self._project_dir / ".t2d_cache"
+
+    @property
     def has_project(self) -> bool:
         return self._manifest is not None
 

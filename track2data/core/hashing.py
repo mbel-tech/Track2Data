@@ -20,3 +20,16 @@ def dict_sha256(data: dict) -> str:
     import json
     serialised = json.dumps(data, sort_keys=True, default=str).encode()
     return hashlib.sha256(serialised).hexdigest()
+
+
+def folder_fingerprint(folder: Path) -> str:
+    """Cheap change-detector for a session folder: SHA-256 over every file's
+    relative path, size and mtime (nanoseconds). Not content-addressed -- a
+    multi-gigabyte session cannot be read just to decide whether to read it --
+    but any edit, add or removal changes it."""
+    h = hashlib.sha256()
+    folder = Path(folder)
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        st = path.stat()
+        h.update(f"{path.relative_to(folder).as_posix()}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+    return h.hexdigest()
