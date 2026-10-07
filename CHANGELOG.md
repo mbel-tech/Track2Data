@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`scripts/benchmark_parallel.py`** times `Engine.run` for several worker counts
+  and cache modes on synthetic (or real) sessions, with per-stage and per-metric
+  breakdowns and per-configuration peak memory; `docs/BENCHMARKING.md` explains it
+  and records one local data point (4 sessions of 20,000 frames x 10 animals:
+  71.2 s sequential, 22.0 s with 4 workers on 4 cores). A manual-only workflow
+  runs it on a hosted runner. Not run on real long sessions yet.
+
 - **Per-animal metadata.** A metadata CSV with one row per animal (map its
   animal column to *Individual ID*) now gives each animal its own values, matched
   by validator label or 0-based position. Further columns (weight, sex, ...) are

@@ -14,6 +14,7 @@ See [PRD.md](PRD.md) for the full product requirements. Design and workflow docs
 - [`docs/ENGINE_DESIGN.md`](docs/ENGINE_DESIGN.md) — pure-Python `track2data` engine: layout, models, plug-in surface.
 - [`docs/IDTRACKERAI_FORMAT_ANALYSIS.md`](docs/IDTRACKERAI_FORMAT_ANALYSIS.md) — gap analysis of the current reader against the official idtracker.ai 6.0.14 docs and a 70-session real-data corpus; cross-version normalisation strategy.
 - [`docs/METRICS_SPEC.md`](docs/METRICS_SPEC.md) — canonical, implementation-ready specification for every behavioural metric (formulas, inputs, outputs, units, citations) plus the UI info-button architecture.
+- [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) — how to time sequential vs parallel runs on your own machine and data.
 - [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) — how to enable signed releases on each OS, what it costs, and why the first release is necessarily unsigned.
 
 Contributing: see [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup, TDD workflow, branch policy, and how to run tests.
