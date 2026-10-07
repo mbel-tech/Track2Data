@@ -86,6 +86,7 @@ track2data --help
 
 ```bash
 track2data new my-study.t2d.json          # scaffold a project
+track2data add my-study.t2d.json /path/to/trajectories   # find the sessions, confirm the software
 track2data validate my-study.t2d.json     # check it before spending time on a run
 track2data run my-study.t2d.json          # import → preprocess → metrics → export
 ```

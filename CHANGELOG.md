@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (they are exported in pixels only). `Engine.scan` looks at a folder and reports
   which software wrote it.
 
+  The same steps are available headlessly. `track2data list-readers` shows what can be
+  read and what each reader must be told; `track2data scan ROOT` says which software wrote
+  a folder, with the evidence; `track2data add PROJECT ROOT` shows the suggestion, lets
+  you amend it (`--reader`, `--option fps=30`, `--exclude`, `--rename`), and adds the
+  sessions only after you confirm. `python -m track2data` runs the same CLI from the
+  code on the current path.
+
   The session cache and the GUI's session probe use the saved reader too. The
   same folder read with a different frame rate is a different cached session
   (the cache key now includes the reader and its options), a reopened project

@@ -590,6 +590,9 @@ Discovery uses `importlib.metadata.entry_points(group="track2data.*")`.
 | `track2data run <project.t2d.json>` | Headless run (FR-REP-2). |
 | `track2data validate <project.t2d.json>` | Schema + reachability checks only. |
 | `track2data list-metrics` | Print all registered metric IDs + descriptions. |
+| `track2data list-readers [--json]` | Print the registered readers: which software each reads, whether it was tested against real output, and the options it must be told. |
+| `track2data scan <root>... [--json] [--max-depth N]` | Look at a folder and say which tracking software wrote it, with the evidence. Read-only. |
+| `track2data add <project> <root>... [--reader] [--option NAME=VALUE] [--exclude ID] [--rename OLD=NEW] [--yes] [--dry-run]` | Scan, confirm (or amend) the software, and add the sessions; the reader and its options are saved on each. |
 | `track2data cache clear` | Wipe `.t2d_cache/`. |
 | `track2data new <name>` | Scaffold an empty project manifest. |
 

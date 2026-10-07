@@ -7,6 +7,9 @@ Commands
 run          Run the full pipeline for a project manifest.
 validate     Validate schema and check reachability without running.
 list-metrics Print all registered metric IDs and descriptions.
+list-readers Print the registered readers and the options each needs.
+scan         Look at a folder and say which tracking software wrote it.
+add          Scan a folder, confirm the software, and add its sessions to a project.
 cache        Wipe the cache directory.
 new          Scaffold an empty project manifest.
 
@@ -24,13 +27,17 @@ import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
 if TYPE_CHECKING:
     from track2data.core.models import ProjectManifest
     from track2data.metrics.base import Metric
+    from track2data.readers.base import SessionReader
+    from track2data.readers.confirm import ConfirmDraft
+    from track2data.readers.detection import Detection
+    from track2data.readers.scan import ScanResult
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +303,274 @@ def new(name: str, out: str | None) -> None:
     except Exception as exc:
         click.echo(f"[error] Failed to write manifest: {exc}", err=True)
         sys.exit(1)
+
+
+# ── list-readers ──────────────────────────────────────────────────────────────
+
+_VERIFICATION_NOTE = {
+    "real_sample": "tested against real tracker output",
+    "synthetic_only": "UNVERIFIED: written from the format's documentation, not yet checked "
+    "against real output",
+}
+
+
+def _reader_facts(cls: type[SessionReader]) -> dict[str, Any]:
+    return {
+        "name": cls.name,
+        "display_name": cls.display_name or cls.name,
+        "priority": cls.priority,
+        "verification": cls.verification,
+        "accepts_allow_pickle": cls.accepts_allow_pickle,
+        "parameters": [p.model_dump(mode="json") for p in cls.parameters],
+    }
+
+
+@cli.command("list-readers")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def list_readers(as_json: bool) -> None:
+    """List the registered readers: which software each reads and what it must be told."""
+    import json
+
+    from track2data.readers import get_reader, reader_names
+
+    facts = [_reader_facts(get_reader(name)) for name in reader_names()]
+    if as_json:
+        click.echo(json.dumps(facts, indent=2))
+        return
+    click.echo("Registered readers (highest priority first):")
+    for f in facts:
+        options = ", ".join(
+            f"{p['name']}*" if p["required"] else p["name"] for p in f["parameters"]
+        )
+        click.echo(
+            f"  {f['name']:<18}{f['display_name']:<30}{f['verification']:<16}"
+            f"{options or '(no options)'}"
+        )
+    click.echo("  * = required: the files do not record it, so it has to be given.")
+
+
+# ── scan / add ────────────────────────────────────────────────────────────────
+
+_LISTED = 8
+
+
+def _detection_json(d: Detection) -> dict[str, Any]:
+    return {
+        "reader": d.reader,
+        "display_name": d.display_name,
+        "confidence": d.confidence.name,
+        "verification": d.verification,
+        "evidence": list(d.evidence),
+        "parameters": [p.model_dump(mode="json") for p in d.parameters],
+        "proposed": {k: v.model_dump(mode="json") for k, v in d.proposed.items()},
+        "sessions": [
+            {"session_id": s.session_id, "source": str(s.source), "warnings": list(s.warnings)}
+            for s in d.sessions
+        ],
+    }
+
+
+def _scan_json(result: ScanResult) -> dict[str, Any]:
+    return {
+        "roots": [str(r) for r in result.roots],
+        "entries": result.entries,
+        "seconds": round(result.seconds, 3),
+        "truncated": result.truncated,
+        "warnings": list(result.warnings),
+        "file_types": dict(result.file_types),
+        "groups": [
+            {"index": i + 1, "detections": [_detection_json(d) for d in g.detections]}
+            for i, g in enumerate(result.groups)
+        ],
+    }
+
+
+def _names(ids: list[str]) -> str:
+    shown = ", ".join(ids[:_LISTED])
+    return f"{shown}, and {len(ids) - _LISTED} more" if len(ids) > _LISTED else shown
+
+
+def _echo_scan_header(result: ScanResult) -> None:
+    click.echo(f"Scanned {result.entries} entries in {result.seconds:.1f} s.")
+    if result.truncated:
+        click.echo("[warn] The scan stopped at its budget; the folder may hold more.", err=True)
+    for warning in result.warnings:
+        click.echo(f"[warn] {warning}", err=True)
+
+
+def _echo_nothing_found(result: ScanResult) -> None:
+    roots = ", ".join(str(r) for r in result.roots)
+    click.echo(f"No tracking output was recognised in {roots}.")
+    if result.file_types:
+        seen = ", ".join(f"{ext or '(none)'} x{n}" for ext, n in sorted(result.file_types.items()))
+        click.echo(f"Files seen: {seen}")
+    click.echo("Folders are searched 4 levels deep; use --max-depth N for a deeper tree.")
+    click.echo("See `track2data list-readers` for what can be read.")
+
+
+def _echo_detection(d: Detection, *, label: str) -> None:
+    ids = [s.session_id for s in d.sessions]
+    click.echo(
+        f"{label} {d.display_name}  -  {d.confidence.name} confidence  -  {len(ids)} sessions"
+    )
+    note = _VERIFICATION_NOTE.get(d.verification, d.verification)
+    click.echo(f"    reader:    {d.reader} ({note})")
+    for line in d.evidence:
+        click.echo(f"    why:       {line}")
+    click.echo(f"    sessions:  {_names(ids)}")
+    needed = [p for p in d.parameters if p.required and p.name not in d.proposed]
+    if needed:
+        click.echo("    needs:     " + ", ".join(f"{p.name} ({p.label})" for p in needed))
+
+
+@cli.command()
+@click.argument("roots", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--max-depth", type=int, default=None,
+              help="Directory levels to look into (default 4).")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def scan(roots: tuple[str, ...], max_depth: int | None, as_json: bool) -> None:
+    """Look at ROOTS and say which tracking software wrote what is in them.
+
+    Read-only: nothing is opened except file headers, and nothing is unpickled. This is the
+    first step of adding sessions; `track2data add` does the rest.
+    """
+    import json
+
+    from track2data.api import Engine
+    from track2data.readers.index import ScanBudget
+
+    budget = ScanBudget(max_depth=max_depth) if max_depth is not None else None
+    result = Engine.scan([Path(r) for r in roots], budget=budget)
+    if as_json:
+        click.echo(json.dumps(_scan_json(result), indent=2))
+        return
+    _echo_scan_header(result)
+    if not result.groups:
+        _echo_nothing_found(result)
+        return
+    for i, group in enumerate(result.groups, start=1):
+        _echo_detection(group.best, label=f"[{i}]")
+        others = [f"{d.display_name} ({d.confidence.name})" for d in group.detections[1:]]
+        if others:
+            click.echo(f"    also recognised by: {', '.join(others)}")
+
+
+def _echo_plan(draft: ConfirmDraft) -> None:
+    group = draft.result.groups[draft.group_index]
+    detection = next(d for d in group.detections if d.reader == draft.reader)
+    _echo_detection(detection, label="Detected:" if draft.chosen_by == "detected" else "Chosen:")
+    shared = draft.options
+    if shared:
+        click.echo("    options:   " + ", ".join(f"{k}={v}" for k, v in sorted(shared.items())))
+    for row in draft.rows:
+        note = (
+            "  (already in the project)" if row.already_added
+            else "" if row.included else "  (left out)"
+        )
+        click.echo(f"      {row.session_id:<28}<- {row.source}{note}")
+
+
+@cli.command()
+@click.argument("project", type=click.Path(exists=True, dir_okay=False))
+@click.argument("roots", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--group", "group_number", type=int, default=1,
+              help="Which detected group to add, as numbered by `scan` (default 1, the best).")
+@click.option("--reader", default=None,
+              help="Read it with this reader instead of the suggestion "
+                   "(one of those that recognised it).")
+@click.option("--option", "options", multiple=True, metavar="NAME=VALUE",
+              help="An option the files do not record, e.g. --option fps=30 (repeatable).")
+@click.option("--exclude", "excluded", multiple=True, metavar="ID",
+              help="Leave this session out (repeatable).")
+@click.option("--rename", "renames", multiple=True, metavar="OLD=NEW",
+              help="Call a session something else in the project (repeatable).")
+@click.option("--max-depth", type=int, default=None,
+              help="Directory levels to look into (default 4).")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Do not ask for confirmation.")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Show what would be added; add nothing.")
+def add(
+    project: str,
+    roots: tuple[str, ...],
+    group_number: int,
+    reader: str | None,
+    options: tuple[str, ...],
+    excluded: tuple[str, ...],
+    renames: tuple[str, ...],
+    max_depth: int | None,
+    yes: bool,
+    dry_run: bool,
+) -> None:
+    """Scan ROOTS, confirm which software wrote them, and add their sessions to PROJECT.
+
+    The same steps as the app: the suggestion is shown, you can amend it (--reader, --option,
+    --exclude, --rename), and nothing is added until you confirm (or pass --yes). The reader
+    and its options are saved on each session, so the project never has to guess again.
+    """
+    from track2data.api import Engine
+    from track2data.core.errors import Track2DataError
+    from track2data.core.manifest import write as manifest_write
+    from track2data.readers.confirm import ConfirmDraft
+    from track2data.readers.index import ScanBudget
+    from track2data.readers.params import parse_assignments
+
+    manifest = _load_manifest(project)
+    budget = ScanBudget(max_depth=max_depth) if max_depth is not None else None
+    result = Engine.scan([Path(r) for r in roots], budget=budget)
+    _echo_scan_header(result)
+    draft = ConfirmDraft(result, existing=manifest.sessions)
+    if draft.is_empty:
+        _echo_nothing_found(result)
+        sys.exit(1)
+
+    try:
+        draft.select_group(group_number - 1)
+        if reader is not None:
+            draft.select_reader(reader)
+        shared = [p for p in draft.parameters if p.scope == "group"]
+        for name, value in parse_assignments(shared, options, reader=draft.reader).items():
+            draft.set_option(name, value)
+        for session_id in excluded:
+            draft.set_included(session_id, False)
+        for item in renames:
+            old, separator, new = item.partition("=")
+            if not separator or not old or not new:
+                raise ValueError(f"--rename {item!r} is not of the form OLD=NEW")
+            draft.rename(old, new)
+    except KeyError as exc:
+        click.echo(f"[error] {exc.args[0]}", err=True)
+        sys.exit(1)
+    except (ValueError, Track2DataError) as exc:
+        click.echo(f"[error] {exc}", err=True)
+        sys.exit(1)
+
+    _echo_plan(draft)
+    rows = draft.rows
+    if rows and all(row.already_added for row in rows):
+        click.echo(f"Nothing to add: all {len(rows)} sessions found are already in the project.")
+        sys.exit(1)
+    problems = draft.problems()
+    if problems:
+        for problem in problems:
+            click.echo(f"[problem] {problem.message}", err=True)
+        if any(p.code == "OPTION_MISSING" for p in problems):
+            click.echo("Give each with --option NAME=VALUE, e.g. --option fps=30.", err=True)
+        sys.exit(1)
+    chosen = [row for row in rows if row.included]
+    if dry_run:
+        click.echo(f"Dry run: would add {len(chosen)} session(s); nothing was changed.")
+        return
+    if not yes:
+        click.confirm(f"Add {len(chosen)} session(s) to {project}?", abort=True)
+    refs = draft.to_session_refs()
+    updated = manifest.model_copy(
+        update={
+            "sessions": [*manifest.sessions, *refs],
+            "updated_at": datetime.now(tz=UTC),
+        }
+    )
+    manifest_write(updated, Path(project))
+    click.echo(f"Added {len(refs)} session(s) to {project}.")
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
