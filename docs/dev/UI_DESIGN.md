@@ -335,7 +335,24 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 ### 6.2 Screen 2.1 — Session Folder Import & Reader Detection
 
 **Stage:** Stage 2 (Session Management)  
-**Purpose:** Import `idtracker.ai` output folders; preview reader-detected format; select sessions for processing.
+**Purpose:** Point at the folder a tracking program wrote, confirm which program it was, and add its sessions to the project.
+
+> **As built (T0-8).** Adding is two steps. *Add Folders…* (or a drop of folders **or single files**) starts a
+> background scan, shown as an inline progress row with a Cancel button. A scan that fails is written inline
+> (never as a modal). When it finishes, the **confirm dialog** (`ui/dialogs/confirm_format_dialog.py`) opens
+> over the screen; nothing is added until its *Add N sessions* button. The dialog is a thin view over the
+> Qt-free `ConfirmDraft` and shows: the scan summary and a banner when the scan stopped at its budget; a
+> chooser when the folder holds more than one kind of output; the software, with the alternatives that also
+> recognised it and a High/Medium/Low confidence; an *unverified* badge for a reader not yet checked against
+> real tracker output; the evidence; one form for the options the files do not record (frame rate, frame size,
+> which keypoint) with where each value came from; and a session table (include, editable id, source, note).
+> *Add* is disabled, with a tooltip naming why, until nothing is missing or clashing. When nothing is
+> recognised the dialog lists the file types it did see and the software this version can read, and its only
+> button is *Close*. The dialog opens with `open()` (never `exec()`), installs no outside-click filter (a
+> combo popup is a separate window), and Escape cancels. The *Reader* column comes from the saved
+> `SessionRef.reader`, so it names the software straight away and after reopening a project. The remainder
+> of this section is the original design; the preview pane, per-row include checkboxes and *Re-detect* below
+> are not built.
 
 **Widget List:**
 - QLabel: "Drag-drop session folders here, or click ➕ Add…"

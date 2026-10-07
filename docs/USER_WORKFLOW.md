@@ -225,8 +225,28 @@ metadata that travels with every export.
 
 ### Stage 2 — Sessions
 
-**Purpose:** Tell the app which `idtracker.ai` output folders to
-process.
+**Purpose:** Tell the app which tracking output to process. You point
+at the folder; the app works out which tracking software wrote it,
+asks you to confirm (or change it), and only then adds the sessions.
+
+**How adding works:**
+
+1. **Add folders…** (or drag a folder, or a single tracking file, onto
+   the screen). A progress row shows while the app looks inside; you
+   can cancel it.
+2. **Confirm.** A dialog names the software it found and how sure it
+   is, and why. You can pick another software from the list, fill in
+   anything the files do not record (frame rate, frame size, which
+   keypoint stands for the animal), rename sessions, or leave some
+   out. *Add N sessions* stays disabled, with a tooltip saying why,
+   until nothing is missing. A reader that has not yet been checked
+   against real output from that tracker is marked **unverified**.
+3. **Add.** The sessions join the project with the software and
+   options you confirmed; they are read the same way every time the
+   project is opened.
+
+If nothing is recognised the dialog says so, lists the file types it
+did see and the software this version can read, and adds nothing.
 
 **Wireframe:**
 
@@ -272,7 +292,11 @@ folder basename).
 
 | Condition | Message | Severity |
 |---|---|---|
-| Folder is not an idtracker.ai output | *"'<folder>' is not a recognised tracker output (no reader detected). Supported: idtracker.ai 6.x output (the legacy v5 layout is also read; v4 is not yet supported)."* | error per-row |
+| Nothing in the folder was recognised | *"No tracking output was recognised in <folder>."* followed by the file types seen and the software this version can read | info, in the confirm dialog |
+| The scan itself failed | *"Could not look at that folder: <reason>"* under the table | error, inline |
+| A required option is missing (e.g. frame rate) | *Add* disabled; tooltip names the missing option | blocks adding |
+| Two sessions would share an id, or one is already in the project | *Add* disabled or the row marked *already in the project*; tooltip says which | blocks adding / info |
+| Folder is not an idtracker.ai output (probe of an entry added by an older version) | *"'<folder>' is not a recognised tracker output (no reader detected). Supported: idtracker.ai 6.x output (the legacy v5 layout is also read; v4 is not yet supported)."* | error per-row |
 | `trajectories.npy` missing | *"trajectories.npy not found under '<folder>/trajectories'. Re-run idtracker.ai or check the folder layout."* | error per-row |
 | Mixed FPS across included sessions | *"Sessions have different frame rates (30, 60). Metrics will use each session's own FPS but cross-session merges may need a manual conversion."* | warning banner |
 | All included sessions are identity-free | *"None of the included sessions have stable identities. Individual-level metrics will be unavailable; group metrics and pooled zone-occupancy metrics (Z-1, Z-2, Z-8) will run."* | info banner |
