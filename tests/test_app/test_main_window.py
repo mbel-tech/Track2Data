@@ -405,7 +405,7 @@ def test_help_menu_opens_the_user_guide(qtbot, monkeypatch) -> None:
     qtbot.addWidget(win)
     win._action_open_guide()
     assert opened[0].toString() == GUIDE_URL
-    assert GUIDE_URL.endswith("/docs/guide")
+    assert GUIDE_URL.endswith("/docs/guide/USER_GUIDE.md")
 
 
 # ── probes must not drive the run-oriented chrome ─────────────────────────────
