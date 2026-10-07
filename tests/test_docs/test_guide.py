@@ -1,4 +1,4 @@
-"""The user guide must not rot: every screen is covered, every image it shows exists, every link works.
+"""The user guide must not rot: every screen is covered, every image exists, every link works.
 
 The guide is one Markdown file, docs/guide/USER_GUIDE.md. Screenshots are produced by
 scripts/generate_guide_screenshots.py; this test only checks that the Markdown and the committed
@@ -52,7 +52,8 @@ def test_every_image_exists_and_every_committed_image_is_used() -> None:
     for t in _images():
         assert (GUIDE / t).exists(), f"image {t} is missing"
     on_disk = {p.name for p in (GUIDE / "images").glob("*.png")}
-    assert on_disk == shown, f"unused: {sorted(on_disk - shown)}, missing: {sorted(shown - on_disk)}"
+    unused, missing = sorted(on_disk - shown), sorted(shown - on_disk)
+    assert on_disk == shown, f"unused: {unused}, missing: {missing}"
 
 
 def test_every_chapter_shows_at_least_one_screenshot() -> None:
@@ -77,7 +78,8 @@ def test_screenshot_script_and_guide_agree_on_image_names() -> None:
     script = (GUIDE.parents[1] / "scripts" / "generate_guide_screenshots.py").read_text("utf-8")
     written = set(re.findall(r'shot\("([^"]+)"', script))
     shown = {Path(t).stem for t in _images()}
-    assert shown <= written, f"guide shows images the script does not write: {sorted(shown - written)}"
+    extra = sorted(shown - written)
+    assert shown <= written, f"guide shows images the script does not write: {extra}"
 
 
 def test_pdf_is_committed_with_author_metadata() -> None:

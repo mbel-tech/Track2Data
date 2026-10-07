@@ -46,7 +46,8 @@ table { border-collapse: collapse; width: 100%; margin: 8pt 0; font-size: 9pt; }
 th, td { border: 1px solid #c8d0d8; padding: 3pt 6pt; text-align: left; vertical-align: top; }
 th { background: #e8eff5; }
 tr { page-break-inside: avoid; }
-blockquote { margin: 8pt 0; padding: 2pt 10pt; border-left: 3pt solid #2f6f9f; background: #f4f8fb; }
+blockquote { margin: 8pt 0; padding: 2pt 10pt; border-left: 3pt solid #2f6f9f;
+             background: #f4f8fb; }
 figure { margin: 10pt 0; text-align: center; page-break-inside: avoid; }
 figure img { max-width: 100%; max-height: 85mm; border: 1px solid #c8d0d8; }
 figcaption { font-size: 8.5pt; color: #4a5560; margin-top: 3pt; }
