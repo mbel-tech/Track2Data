@@ -25,6 +25,7 @@ same.
   scale on the [Calibration](03-calibration.md) screen.
 - **Identity-free sessions** have no per-animal rows for metrics that follow an individual; zone
   occupancy (Z-1, Z-2, Z-8) is reported pooled over animals, without an `individual_id` column.
+- **Time bins** (when set on the Metrics screen): summary tables have one row per animal *per bin*, with `bin_index`, `bin_start_s`, `bin_end_s`; `master_fish_by_frame` gets `bin_index`. Metrics that are not meaningful per window keep a single row with empty bin columns.
 - **Missing positions** are empty values, never zeros.
 - The README written next to the files records the settings and versions used, and the SHA-256 of
   each output, so a result can be traced and reproduced.

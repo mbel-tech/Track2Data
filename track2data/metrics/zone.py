@@ -191,6 +191,12 @@ def _effective_debounce_threshold(
     Shared by Z-3, Z-4, and Z-5; Z-6 and Z-9 inherit it by forwarding
     their own cfg to Z-5's compute() unchanged.
     """
+    pre = cfg.get(f"_bout_{param_name}") if cfg is not None else None
+    if pre is not None:
+        # Resolved on the whole session by resolve_for_windows (timepoint
+        # binning): every window uses the same debounce threshold.
+        return int(pre[0]), pre[1]
+
     derive = bool(cfg.get("derive_bout_criterion", False)) if cfg is not None else False
 
     if derive:
@@ -207,6 +213,18 @@ def _effective_debounce_threshold(
     if cfg is not None and cfg.get(param_name) is not None:
         return int(cfg[param_name]), "fixed"
     return fixed_default, "fixed"
+
+
+def _resolve_debounce(
+    session: object, cfg: dict | None, param_name: str, fixed_default: int
+) -> dict:
+    """Whole-session debounce threshold, keyed so a window's compute() reuses it."""
+    zone_arrays = _collect_zone_arrays(session)
+    if not zone_arrays:
+        return {}
+    n_animals: int = session.n_animals  # type: ignore[attr-defined]
+    resolved = _effective_debounce_threshold(zone_arrays, n_animals, cfg, param_name, fixed_default)
+    return {f"_bout_{param_name}": resolved}
 
 
 # ── Z-1: Time in each zone ────────────────────────────────────────────────────
@@ -389,6 +407,12 @@ class ZoneVisitCount(Metric):
             ),
         ),
     ]
+
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        return _resolve_debounce(
+            session, cfg, "min_visit_frames", cls._FIXED_DEFAULT_MIN_VISIT_FRAMES
+        )
 
     def compute(
         self,
@@ -712,6 +736,12 @@ class ZoneTransitions(Metric):
         ),
     ]
 
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        return _resolve_debounce(
+            session, cfg, "min_dwell_frames", cls._FIXED_DEFAULT_MIN_DWELL_FRAMES
+        )
+
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Count zone-to-zone transitions for every (from_zone, to_zone, animal) triplet.
 
@@ -874,6 +904,12 @@ class Z5EntryExitEvents(Metric):
         ),
     ]
 
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        return _resolve_debounce(
+            session, cfg, "min_dwell_frames", cls._FIXED_DEFAULT_MIN_DWELL_FRAMES
+        )
+
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Emit one row per zone entry/exit edge for every (zone, animal) pair.
 
@@ -1022,6 +1058,10 @@ class Z6LatencyToFirstEntry(Metric):
             ),
         ),
     ]
+
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        return Z5EntryExitEvents.resolve_for_windows(session, cfg)
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Compute the first-entry latency for every (zone, animal) pair.
@@ -1438,6 +1478,10 @@ class ZoneDwellTimeDistribution(Metric):
             ),
         ),
     ]
+
+    @classmethod
+    def resolve_for_windows(cls, session: object, cfg: dict | None) -> dict:
+        return Z5EntryExitEvents.resolve_for_windows(session, cfg)
 
     def compute(self, session: object, cfg: dict | None = None) -> pd.DataFrame:
         """Compute dwell-time distribution statistics for every (zone, animal) pair.

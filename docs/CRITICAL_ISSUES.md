@@ -39,7 +39,6 @@ numbers below in `DECISIONS.md`.
 ## Still open
 
 - Per-animal metadata (SCI-03).
-- `MetricSelection.timepoint_minutes` is stored but never used by the engine, so no binning control is offered.
 - Benchmark parallel runs on real data (PERF-01).
 - Give session probes their own thread pool (PERF-03).
 - idtracker.ai v4 reader (ENG-02) and signed binaries (DIST-01).

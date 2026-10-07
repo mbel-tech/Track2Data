@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Timepoint binning.** Setting *Time bins* on the Metrics screen
+  (`MetricSelection.timepoint_minutes`, previously stored but ignored) computes
+  each metric per bin of true video time and adds `bin_index`, `bin_start_s`,
+  `bin_end_s` (and `bin_index` in `master_fish_by_frame`). Data-derived values
+  (activity threshold, fitted bout criterion) are resolved once on the whole
+  session so bins are comparable; whole-track metrics (IL-5, IL-9) and the
+  diagnostics stay whole-session. New `Metric.window_safe` and
+  `Metric.resolve_for_windows`.
+
 - **User guide with screenshots** in `docs/guide/` (one page per screen, output
   file reference, troubleshooting). Screenshots come from the real app via
   `scripts/generate_guide_screenshots.py`; `tests/test_docs/test_guide.py`

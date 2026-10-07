@@ -367,8 +367,20 @@ def test_shutdown_uses_one_deadline_for_both_lanes(qtbot, runner) -> None:
     import threading
 
     gate = threading.Event()
-    runner.submit(lambda: gate.wait(10), lane="probe")
-    runner.submit(lambda: gate.wait(10))
+    started = [threading.Event(), threading.Event()]
+
+    def blocker(i: int):
+        def run() -> bool:
+            started[i].set()
+            return gate.wait(10)
+
+        return run
+
+    runner.submit(blocker(0), lane="probe")
+    runner.submit(blocker(1))
+    # both must be running: a task still queued when shutdown cancels it
+    # never starts, and would drain instantly
+    assert all(e.wait(3) for e in started)
     start = time.monotonic()
     assert runner.shutdown(300) is False  # neither task polls its token
     assert time.monotonic() - start < 0.9  # not 2 x the timeout

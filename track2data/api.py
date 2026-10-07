@@ -48,57 +48,34 @@ from track2data.core.models import (
     SessionRef,
     SessionRunResult,
 )
-from track2data.core.progress import ProgressCallback, ProgressEvent, emit
+from track2data.core.progress import OperationCancelled, ProgressCallback, ProgressEvent, emit
+from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
 from track2data.readers import read_session
 
 logger = logging.getLogger(__name__)
 
 
-def _map_array_index_to_true_frame(
-    tracking_intervals: list[tuple[int, int]] | None, n_frames: int
-) -> tuple[Any, bool]:
-    """
-    Map trajectory-array row position (0..n_frames-1) to the true video
-    frame number, using ``Session.tracking_intervals``.
+_BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
 
-    idtracker.ai only tracks (and stores trajectory rows for) frames inside
-    the configured ``--tracking_intervals``; array position 0 is the first
-    frame of the first interval, not frame 0 of the video
-    (idtracker.ai_usage.md:552: "Tracking intervals in frames ... If not
-    set, the whole video is tracked"; session_idtrackerai.md:240: interval
-    end is exclusive). With a single interval starting elsewhere than 0,
-    using the raw array position as "frame" understates every frame number
-    by the interval's start; with multiple intervals, it also makes the
-    derived time axis non-monotonic in real time across the gap between
-    intervals.
 
-    Returns
-    -------
-    true_frames:
-        Array of length n_frames with the true video frame number per row.
-    valid:
-        Whether the mapping could be trusted, i.e. the intervals'
-        combined length matches n_frames exactly. When False, true_frames
-        is simply ``arange(n_frames)`` (today's behaviour) because the
-        intervals don't reconcile with the data -- e.g. a partial/embargoed
-        session.json, or gaps closed by preprocessing on idtracker.ai's
-        side that this reader has no way to reconstruct.
-    """
+def _with_bin_columns(df: Any, window: Any | None) -> Any:
+    """*df* with bin_index/bin_start_s/bin_end_s placed after its key columns.
+    ``window=None`` fills them with NaN (a whole-session result in a binned run)."""
     import numpy as np
 
-    if not tracking_intervals:
-        return np.arange(n_frames), False
-
-    lengths = [max(0, end - start) for start, end in tracking_intervals]
-    if sum(lengths) != n_frames:
-        return np.arange(n_frames), False
-
-    true_frames = np.empty(n_frames, dtype=np.int64)
-    pos = 0
-    for (start, _end), length in zip(tracking_intervals, lengths, strict=True):
-        true_frames[pos : pos + length] = np.arange(start, start + length)
-        pos += length
-    return true_frames, True
+    df = df.copy()
+    values = (
+        (np.nan, np.nan, np.nan)
+        if window is None
+        else (window.index, window.start_s, window.end_s)
+    )
+    pos = max(
+        (df.columns.get_loc(k) + 1 for k in ("session_id", "individual_id") if k in df.columns),
+        default=0,
+    )
+    for offset, (name, value) in enumerate(zip(_BIN_COLUMNS, values, strict=True)):
+        df.insert(pos + offset, name, value)
+    return df
 
 
 def _recover_preprocess_report(
@@ -501,6 +478,61 @@ class Engine:
                 skipped[mid] = reason
         return skipped
 
+    def _bin_seconds(self) -> float | None:
+        minutes = self._manifest.metrics.timepoint_minutes
+        return float(minutes) * 60.0 if minutes and minutes > 0 else None
+
+    @staticmethod
+    def _compute_one(
+        cls: type, psess: PreprocessedSession, cfg: dict[str, Any], identity_free: bool
+    ) -> Any:
+        """One metric on one (whole or sliced) session. Occupancy-style zone
+        metrics are pooled over detection slots on identity-free sessions."""
+        if identity_free and cls.pools_when_identity_free:
+            from track2data.metrics.zone import pooled_view
+
+            df = cls().compute(pooled_view(psess), cfg)
+            return df.drop(columns=["individual_id"], errors="ignore")
+        return cls().compute(psess, cfg)
+
+    def _compute_windowed(
+        self,
+        cls: type,
+        psess: PreprocessedSession,
+        cfg: dict[str, Any],
+        windows: list[Any],
+        identity_free: bool,
+    ) -> Any:
+        """Run *cls* on each time window and stack the results.
+
+        *cfg* (derived on the whole session by the caller) is extended with
+        whatever the metric derives from the data itself, resolved once on the
+        whole session, so every bin uses the same threshold.
+        """
+        import pandas as pd
+
+        from track2data.metrics.binning import slice_psess
+
+        window_cfg = {**cfg, **cls.resolve_for_windows(psess, cfg)}
+        parts = []
+        for w in windows:
+            if self._cancel_check is not None:
+                self._cancel_check()
+            df = self._compute_one(
+                cls, slice_psess(psess, w.start_row, w.stop_row), window_cfg, identity_free
+            )
+            if cls.id == "Z-5" and not df.empty:
+                # event frame/time are relative to the slice; keep them on the
+                # session axis, as in an unbinned run
+                df = df.copy()
+                df["frame"] = df["frame"] + w.start_row
+                df["t_s"] = df["t_s"] + w.start_row / psess.fps
+            parts.append(_with_bin_columns(df, w))
+        non_empty = [p for p in parts if not p.empty]
+        if not non_empty:
+            return parts[0] if parts else pd.DataFrame()
+        return pd.concat(non_empty, ignore_index=True)
+
     def compute_metrics(
         self,
         psess: PreprocessedSession,
@@ -556,7 +588,14 @@ class Engine:
                 psess.session_id,
             )
 
-        def _run(metric_ids: list[str]) -> None:
+        bin_seconds = self._bin_seconds()
+        windows = None
+        if bin_seconds is not None:
+            from track2data.metrics.binning import bin_windows
+
+            windows = bin_windows(psess, bin_seconds)
+
+        def _run(metric_ids: list[str], *, binned: bool = True) -> None:
             from track2data.metrics import get
             for mid in metric_ids:
                 if mid in skipped:
@@ -571,13 +610,18 @@ class Engine:
                     continue
                 try:
                     cfg = self._effective_cfg(cls, psess)
-                    if is_identity_free and cls.pools_when_identity_free:
-                        from track2data.metrics.zone import pooled_view
-
-                        df = cls().compute(pooled_view(psess), cfg)
-                        results[mid] = df.drop(columns=["individual_id"], errors="ignore")
-                    else:
-                        results[mid] = cls().compute(psess, cfg)
+                    if windows is not None and binned and cls.window_safe:
+                        results[mid] = self._compute_windowed(
+                            cls, psess, cfg, windows, is_identity_free
+                        )
+                        continue
+                    results[mid] = self._compute_one(cls, psess, cfg, is_identity_free)
+                    if windows is not None and binned:
+                        # Not meaningful per window: one whole-session row, with
+                        # empty bin columns so it never merges into a bin.
+                        results[mid] = _with_bin_columns(results[mid], None)
+                except OperationCancelled:
+                    raise
                 except Exception:
                     logger.exception("Metric %s failed; skipping.", mid)
 
@@ -606,7 +650,7 @@ class Engine:
             _run(sel.group)
 
         _run(sel.zone)
-        _run(sel.diagnostic)
+        _run(sel.diagnostic, binned=False)
 
         meta_fields = self._metadata_fields_for(psess.session_id)
         if meta_fields:
@@ -676,6 +720,14 @@ class Engine:
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
+
+        bin_seconds = self._bin_seconds()
+        if bin_seconds is not None:
+            df.insert(
+                df.columns.get_loc("time_s") + 1,
+                "bin_index",
+                np.floor(time_s / bin_seconds + 1e-9).astype(np.int64),
+            )
 
         if psess.px_per_cm is not None:
             df["x_cm"] = df["x_px"] / psess.px_per_cm

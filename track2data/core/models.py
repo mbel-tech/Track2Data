@@ -302,7 +302,9 @@ class MetricSelection(BaseModel):
     # Diagnostic IDs (D-*) are auto-computed regardless; this list is
     # reserved for future per-user opt-outs.
     diagnostic: list[str] = []
-    timepoint_minutes: int | None = None
+    # Minutes per time bin (fractions allowed); None or 0 = whole session.
+    # Results then carry bin_index / bin_start_s / bin_end_s. See metrics/binning.py.
+    timepoint_minutes: float | None = None
     # Mask per-frame metrics when id_probabilities[frame, animal] < threshold.
     quality_threshold: float = 0.0
     # Per-metric parameter overrides, keyed metric_id -> {param_name:

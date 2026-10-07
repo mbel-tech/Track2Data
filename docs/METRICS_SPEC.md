@@ -40,7 +40,7 @@ built-in catalogue.
 | Missing data | `NaN` in `raw_xy[:, k, :]` for animal `k` |
 | Identity-aware | Per-individual columns include `individual_id` (1..N) |
 | Identity-free | Group-level only; no per-individual rows |
-| Time bins | Whole-session + optional `timepoint_minutes` bins from `MetricSelection.timepoint_minutes` |
+| Time bins | Whole session by default. With `MetricSelection.timepoint_minutes` set, every metric except diagnostics and the whole-track ones (IL-5, IL-9) is computed per bin of true video time and carries `bin_index`, `bin_start_s`, `bin_end_s` (see 2.2) |
 | Calibration | All metrics in **two units**: native (px / px·s⁻¹) and calibrated (cm / BL) when `CalibrationConfig` is populated |
 | Zones | Polygons from `ZoneSet.rois`; point-in-polygon test via `shapely.geometry.Point.within(Polygon)` |
 | Tracking-quality gate | Each per-frame metric is masked out when `id_probabilities[frame, animal] < quality_threshold` (default 0.0; configurable via `MetricSelection.quality_threshold`) |
@@ -79,12 +79,28 @@ are treated as trustworthy.
 Every metric produces a long-format DataFrame with at least:
 
 ```
-session_id | individual_id | metric_id | value | unit | t_start_s | t_end_s | timepoint_label
+session_id | individual_id | [bin_index | bin_start_s | bin_end_s] | metric_id | <metric columns>
 ```
 
-`individual_id` is `NA` for group/zone metrics. `t_start_s/t_end_s`
-delimit the time window (whole session or one bin). Wide-format export
-is a presentation choice handled by exporters, not metrics.
+`individual_id` is `NA` for group/zone metrics. The three bin columns are present
+only when `timepoint_minutes` is set: `bin_index` is `floor(time_s / bin_length)` on
+the true video time axis (the same `time_s` the per-frame table exports), `bin_start_s`
+is the nominal start and `bin_end_s` the nominal end clipped to where data stops, so a
+partial last bin reports its real end. Bins with no data (the gap between two tracking
+intervals) are skipped. Wide-format export is a presentation choice handled by
+exporters, not metrics.
+
+**Binning rules.** Each bin is a slice of the session, but anything a metric
+derives *from the data* is resolved once on the whole session so bins stay
+comparable: the IL-4/IL-7 activity threshold (`mean speed x multiplier`), the fitted
+bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the Z-2/Z-8 zone areas.
+Consequences: IL-1 path length loses the one step across each bin edge, so bins sum
+to slightly less than the whole session; Z-1 `time_s` is exactly additive; Z-6
+`first_entry_t_s` is a latency from the start of the bin. Z-5 event `frame`/`t_s` stay
+on the session axis. IL-5 (tortuosity, defined over the whole track) and IL-9 (a
+half-against-half stability check) are not meaningful per window: they stay one
+whole-session row per animal with empty bin columns. Diagnostics (D-*) are always
+whole-session. The metadata field `timepoint` is unrelated and is never overwritten.
 
 ### 2.3 Required preprocessing
 

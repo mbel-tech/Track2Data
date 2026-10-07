@@ -524,3 +524,31 @@ mid-run. Using different signals fixes that without touching the main window.
 single reader call), so cancelling only stops probes that have not started yet.
 Run and probe lanes can read the same session files concurrently; both are
 read-only and only the run lane writes the cache.
+
+---
+
+### D-024 · Timepoint binning by slicing, with whole-session config resolution
+
+**Decision:** Binning is done in the engine, not in metrics. `metrics/binning.py`
+cuts the session into windows of true video time (`bin_index = floor(time_s /
+bin_length)`, empty bins skipped, partial last bin keeps its real end) and
+`Engine.compute_metrics` runs each metric on a sliced copy of the
+`PreprocessedSession`, then stacks the results with `bin_index`, `bin_start_s`,
+`bin_end_s`. `Metric.resolve_for_windows(session, cfg)` lets a metric resolve
+data-derived config (IL-4/IL-7 threshold, bout criterion for IL-7 and Z-3/4/5)
+on the whole session once; `Metric.window_safe = False` (IL-5, IL-9) keeps a
+metric whole-session with NaN bin columns; diagnostics are never binned.
+
+**Rationale:** The alternative, giving every metric a time range, touches 40
+metrics. Slicing works because metrics only read per-frame arrays plus fps and
+calibration. Without whole-session resolution a data-driven threshold would
+differ per window and per-bin values would not be comparable (a one-bin run
+would also not equal the unbinned run; a test pins that).
+
+**Names:** the columns are `bin_*`, not `timepoint`, because `timepoint` is a
+canonical metadata field (metadata/schema.py) and the two must coexist.
+
+**Trade-offs:** diff-based metrics lose one step per bin edge; Z-6 is a latency
+from bin start; `timepoint_minutes` became a float so tests and short sessions
+can use sub-minute bins. Binning multiplies metric time by the number of bins
+only for the slicing overhead, not for the computation itself.
