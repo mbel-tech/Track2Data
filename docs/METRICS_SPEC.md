@@ -1013,6 +1013,22 @@ Keyed on `(session_id, individual_id)` — the same key the exporters merge
 summary metrics on — so every metric row can be joined to the quality of the
 data behind it.
 
+#### D-12 — Fragment quality scores
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Fragment quality scores |
+| **Level** | Per session |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `Session.quality['fragment_connectivity']`, `Session.quality['silhouette_score']` |
+| **Formula** | Read directly from the tracker output; no computation |
+| **Output columns** | `session_id`, `fragment_connectivity`, `silhouette_score`, `note` |
+| **Units** | dimensionless |
+| **Assumptions** | The quality dict is populated by the reader from the tracker output. |
+| **Warnings** | NaN when `Session.quality` is absent or lacks the key. These are idtracker.ai self-reports (the same values the run README records) and may not reflect ground-truth accuracy. |
+| **Parameters** | none |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
 ---
 
 ## 5. Engine implementation map

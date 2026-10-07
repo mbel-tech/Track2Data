@@ -280,3 +280,30 @@ class TestReadmeProvenanceSection:
         prov = manifest["run_metadata"]["session_provenance"]
         assert prov["idtrackerai_version"] == "6.0.13"
         assert prov["estimated_accuracy"] == pytest.approx(0.751957740605162)
+
+
+class TestReadmeValidatorProvenance:
+    def test_last_validated_data_policy_and_calibration_spread(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        from dataclasses import replace
+
+        prov = replace(
+            provenance_payload.provenance,
+            last_validated="2024-01-15T10:30:00",
+            data_policy="trajectories",
+            length_calibration_n=3,
+            length_calibration_rel_sd=0.021,
+        )
+        ReadmeExporter().write(replace(provenance_payload, provenance=prov), tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "| Last validated | 2024-01-15T10:30:00 |" in content
+        assert "| idtracker.ai data policy | trajectories |" in content
+        assert "| Length calibration clicks | 3 (relative SD 2.10%) |" in content
+
+    def test_never_validated_is_stated(
+        self, tmp_path: Path, provenance_payload: ExportPayload
+    ) -> None:
+        ReadmeExporter().write(provenance_payload, tmp_path)
+        content = (tmp_path / "README.md").read_text(encoding="utf-8")
+        assert "never opened in the Validator" in content

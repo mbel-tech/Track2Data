@@ -82,6 +82,16 @@ class Normaliser:
         ))
         video_paths = payload.get("video_paths") or meta.get("video_paths") or []
         video_path = self._resolve_video_path(video_paths)
+        if video_paths and video_path is None:
+            logger.warning(
+                "IDT_VIDEO_PATH_UNREACHABLE: %s: the recorded video path %s "
+                "does not exist on this machine, so video preview is "
+                "unavailable. idtracker.ai records machine-specific absolute "
+                "paths; point the project at the real file with "
+                "Engine.set_video_path().",
+                self._folder.name,
+                video_paths[0] if isinstance(video_paths, (list, tuple)) else video_paths,
+            )
 
         video = VideoInfo(
             path=video_path,
@@ -94,6 +104,7 @@ class Normaliser:
         track_wo_identities = self._parse_track_wo_identities(meta)
         has_stable = self._check_stability(raw_xy, quality, track_wo_identities)
         body_length_px = self._normalise_body_length(payload.get("body_length"), n_animals)
+        self._log_version_and_body_length(version, body_length_px)
 
         return Session(
             session_id=self._folder.name,
@@ -331,6 +342,28 @@ class Normaliser:
     def _collect_unknown_keys(payload: dict[str, Any]) -> dict[str, Any] | None:
         unknown = {k: v for k, v in payload.items() if k not in KNOWN_TRAJECTORY_KEYS}
         return unknown if unknown else None
+
+    def _log_version_and_body_length(
+        self, version: object, body_length_px: object
+    ) -> None:
+        """Emit the IDT_VERSION_UNKNOWN / IDT_BODY_LENGTH_UNRELIABLE notes."""
+        text = version if isinstance(version, str) else ""
+        major = text.split(".", 1)[0].lstrip("v")
+        if major not in ("5", "6"):
+            logger.warning(
+                "IDT_VERSION_UNKNOWN: %s: idtracker.ai version %r is not a "
+                "known 5.x/6.x release; field semantics were verified only "
+                "against those.",
+                self._folder.name,
+                text or None,
+            )
+        if body_length_px is not None:
+            logger.info(
+                "IDT_BODY_LENGTH_UNRELIABLE: %s: body_length depends on "
+                "segmentation parameters and video conditions "
+                "(idtracker.ai's own caveat); treat *_bl columns accordingly.",
+                self._folder.name,
+            )
 
     @staticmethod
     def _resolve_video_path(video_paths: list | Any) -> Path | None:

@@ -199,7 +199,13 @@ def _make_minimal_png() -> bytes:
     )
 
 
-def _build_tiny_real_traj_dict() -> dict:
+# px per user unit for the calibrated variant; matches the single
+# length_calibrations entry (A=(0,0), B=(10,0), distance=1.0) written into
+# session.json, so Session.length_unit and length_calibrations agree.
+TINY_REAL_CALIBRATED_LENGTH_UNIT = 10.0
+
+
+def _build_tiny_real_traj_dict(length_unit: float | None = None) -> dict:
     """Pickled trajectory dict matching the 17 official idtracker.ai keys.
 
     Intentionally ships id_probabilities as (n_frames, n_animals, 1) to match
@@ -230,23 +236,71 @@ def _build_tiny_real_traj_dict() -> dict:
         },
         "setup_points": {},
         "identities_labels": ["1", "2"],
-        "identities_groups": [],
-        "length_unit": None,
+        # Real 6.x sessions ship a dict (70/70 in the GOT corpus); {} when no
+        # exclusive ROIs are defined.
+        "identities_groups": {},
+        "length_unit": length_unit,
         "silhouette_score": 0.781,
         "fragment_connectivity": 1.34,
     }
 
 
-def _build_tiny_real_session(base: Path, *, track_wo_identities: bool = False) -> None:
-    """Populate *base* with the full tiny_real session layout."""
+def _write_tiny_real_h5(path: Path, traj_dict: dict) -> None:
+    """Write *traj_dict* as idtracker.ai 6.x lays out ``trajectories.h5``.
+
+    Arrays become datasets, ``areas``/``setup_points``/``identities_groups``
+    become groups, scalars and string lists become attributes -- the shape
+    ``readers/idtrackerai/formats/h5.py`` is written against.
+    """
+    import h5py
+
+    with h5py.File(path, "w") as f:
+        f.create_dataset("trajectories", data=traj_dict["trajectories"])
+        f.create_dataset("id_probabilities", data=traj_dict["id_probabilities"])
+        areas = f.create_group("areas")
+        for key, value in traj_dict["areas"].items():
+            areas.create_dataset(key, data=value)
+        f.create_group("identities_groups")  # empty group == {}
+        f.create_group("setup_points")
+        for key in (
+            "version", "height", "width", "frames_per_second", "body_length",
+            "estimated_accuracy", "fraction_identified", "silhouette_score",
+            "fragment_connectivity",
+        ):
+            f.attrs[key] = traj_dict[key]
+        # idtracker.ai writes -1 for "never calibrated" in h5, where the
+        # npy dict carries None.
+        length_unit = traj_dict["length_unit"]
+        f.attrs["length_unit"] = -1.0 if length_unit is None else length_unit
+        f.attrs["identities_labels"] = np.array(traj_dict["identities_labels"], dtype=object)
+        f.attrs["video_paths"] = np.array(traj_dict["video_paths"], dtype=object)
+
+
+def _build_tiny_real_session(
+    base: Path,
+    *,
+    track_wo_identities: bool = False,
+    length_unit: float | None = None,
+    h5: bool = False,
+) -> None:
+    """Populate *base* with the full tiny_real session layout.
+
+    ``length_unit`` makes the session a calibrated one (26/70 of the real
+    corpus). ``h5=True`` ships ``trajectories.h5`` -- idtracker.ai 6.x's
+    default format -- instead of ``trajectories.npy``, so the h5 reader path
+    is the one actually exercised.
+    """
     n_frames, n_animals = TINY_REAL_N_FRAMES, TINY_REAL_N_ANIMALS
     session_name = base.name
 
     # ── trajectories/ ────────────────────────────────────────────────────────
     traj_dir = base / "trajectories"
     traj_dir.mkdir(parents=True)
-    traj_dict = _build_tiny_real_traj_dict()
-    np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
+    traj_dict = _build_tiny_real_traj_dict(length_unit)
+    if h5:
+        _write_tiny_real_h5(traj_dir / "trajectories.h5", traj_dict)
+    else:
+        np.save(traj_dir / "trajectories.npy", traj_dict, allow_pickle=True)
 
     # CSV bundle
     csv_dir = traj_dir / "trajectories_csv"
@@ -292,8 +346,8 @@ def _build_tiny_real_session(base: Path, *, track_wo_identities: bool = False) -
         "silhouette_score": 0.781,
         "fragment_connectivity": 1.34,
         "identities_labels": ["1", "2"],
-        "identities_groups": [],
-        "length_unit": None,
+        "identities_groups": {},
+        "length_unit": length_unit,
         "setup_points": {},
         "video_paths": ["/Volumes/Expansion/tiny_real.mp4"],
     }
@@ -353,11 +407,11 @@ def _build_tiny_real_session(base: Path, *, track_wo_identities: bool = False) -
         '  "silhouette_score": 0.781,\n'
         '  "fragment_connectivity": 1.34,\n'
         '  "identities_labels": ["1", "2"],\n'
-        '  "identities_groups": [],\n'
+        '  "identities_groups": {},\n'
         '  "identities_colors": ["#e41a1c", "#377eb8"],\n'
         '  "last_validated": "2024-01-15T10:30:00",\n'
         '  "data_policy": "idmatcher.ai",\n'
-        '  "trajectories_formats": ["npy", "csv"],\n'
+        f'  "trajectories_formats": ["{"h5" if h5 else "npy"}", "csv"],\n'
         '  "number_of_error_frames": 3,\n'
         '  "exclusive_rois": false,\n'
         # Present in 70/70 real sessions (always false there). Parameterised
@@ -418,7 +472,8 @@ def _build_tiny_real_session(base: Path, *, track_wo_identities: bool = False) -
     # ── macOS resource-fork noise ─────────────────────────────────────────────
     # A real OneDrive-synced session will have ._* files at every level.
     (base / "._session.json").write_bytes(b"\x00\x05\x16\x07\x00\x02\x00\x00")
-    (traj_dir / "._trajectories.npy").write_bytes(b"\x00\x05\x16\x07\x00\x02\x00\x00")
+    stub_name = "._trajectories.h5" if h5 else "._trajectories.npy"
+    (traj_dir / stub_name).write_bytes(b"\x00\x05\x16\x07\x00\x02\x00\x00")
 
 
 @pytest.fixture(scope="session")
@@ -443,4 +498,29 @@ def tiny_identity_free_session(tmp_path_factory: pytest.TempPathFactory) -> Path
     """
     base = tmp_path_factory.mktemp("tiny_identity_free")
     _build_tiny_real_session(base, track_wo_identities=True)
+    return base
+
+
+@pytest.fixture(scope="session")
+def tiny_real_h5(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The tiny_real session shipped the way idtracker.ai 6.x does by default:
+    ``trajectories.h5`` (plus the csv bundle) and no ``trajectories.npy``.
+
+    Reading it goes through ``formats/h5.py``, and needs no pickle consent.
+    """
+    pytest.importorskip("h5py")
+    base = tmp_path_factory.mktemp("tiny_real_h5")
+    _build_tiny_real_session(base, h5=True)
+    return base
+
+
+@pytest.fixture(scope="session")
+def tiny_real_calibrated(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The tiny_real session with a real, positive ``length_unit``.
+
+    The calibrated case is 26/70 of the real corpus; this is the end-to-end
+    fixture (real folder layout, read through ``read_session``) for it.
+    """
+    base = tmp_path_factory.mktemp("tiny_real_calibrated")
+    _build_tiny_real_session(base, length_unit=TINY_REAL_CALIBRATED_LENGTH_UNIT)
     return base

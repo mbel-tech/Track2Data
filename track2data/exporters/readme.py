@@ -202,6 +202,16 @@ class ReadmeExporter(Exporter):
         else:
             lines.append("| Length calibration factor | *(not calibrated)* |")
 
+        if p.length_calibration_n:
+            spread = (
+                f"relative SD {p.length_calibration_rel_sd:.2%}"
+                if p.length_calibration_rel_sd is not None
+                else "single measurement, no spread estimate"
+            )
+            lines.append(
+                f"| Length calibration clicks | {p.length_calibration_n} ({spread}) |"
+            )
+
         reliability = (
             "acknowledged reliable" if p.body_length_reliable
             else "**not** acknowledged reliable -- depends on segmentation "
@@ -218,6 +228,13 @@ class ReadmeExporter(Exporter):
                 "| Body-length source | session-wide value broadcast to every "
                 "identity (no per-identity blob-layer data) |"
             )
+
+        lines.append(
+            f"| Last validated | {p.last_validated or '*(never opened in the Validator)*'} |"
+        )
+        lines.append(
+            f"| idtracker.ai data policy | {p.data_policy or '*(not reported)*'} |"
+        )
 
         lines.append("")
         return lines

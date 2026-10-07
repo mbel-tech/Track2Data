@@ -944,6 +944,72 @@ class MetricInputProvenance(Metric):
         return pd.DataFrame(rows, columns=self.output_columns)
 
 
+class FragmentQualityScores(Metric):
+    """D-12: idtracker.ai's own fragment-clustering quality scores.
+
+    ``fragment_connectivity`` and ``silhouette_score`` are already read into
+    ``Session.quality`` and recorded in the export's provenance; this makes
+    them selectable and tabulable like the rest of D-1..D-11, so they can be
+    filtered on across a batch.
+    """
+
+    id = "D-12"
+    name = "fragment_quality_scores"
+    label = "Fragment Quality Scores"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "fragment_connectivity",
+        "silhouette_score",
+        "note",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Quality scores idtracker.ai reports for its identification of "
+            "fragments. fragment_connectivity summarises how well fragments "
+            "are linked into global fragments; silhouette_score is the "
+            "silhouette of the identity clustering of fragment embeddings "
+            "(higher is better separated)."
+        ),
+        formula_plain=(
+            "Reads Session.quality['fragment_connectivity'] "
+            "and Session.quality['silhouette_score']"
+        ),
+        inputs=["Session.quality"],
+        assumptions=["quality dict is populated by the reader from the tracker output."],
+        warnings=[
+            "Returns NaN values when Session.quality is None or the key is absent.",
+            "These are tracker self-reports and may not reflect ground-truth accuracy.",
+        ],
+        primary_reference=ROMERO_FERRERO_2019,
+        supporting_references=[],
+    )
+
+    def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        quality = session.quality or {}
+
+        def _get(key: str) -> float:
+            raw = quality.get(key)
+            try:
+                return float(raw) if raw is not None else float("nan")
+            except (TypeError, ValueError):
+                return float("nan")
+
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "fragment_connectivity": _get("fragment_connectivity"),
+                    "silhouette_score": _get("silhouette_score"),
+                    "note": "" if quality else "quality is None; no scores available",
+                }
+            ],
+            columns=self.output_columns,
+        )
+
+
 # ── Convenience function ───────────────────────────────────────────────────────
 
 
@@ -967,6 +1033,7 @@ def compute_all_diagnostics(psess: PreprocessedSession) -> dict[str, pd.DataFram
         CrossingRate(),
         SwapOpportunityCount(),
         PhysicalPlausibilityViolations(),
+        FragmentQualityScores(),
     ]
     results = {m.id: m.compute(session) for m in metrics}
     results[MetricInputProvenance.id] = MetricInputProvenance().compute(psess)
@@ -988,3 +1055,4 @@ _register(CrossingRate)
 _register(SwapOpportunityCount)
 _register(PhysicalPlausibilityViolations)
 _register(MetricInputProvenance)
+_register(FragmentQualityScores)

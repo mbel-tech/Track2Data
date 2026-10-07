@@ -1,8 +1,8 @@
 """Extract per-blob bounding boxes from an idtracker.ai list_of_blobs.pickle.
 
-UNMAINTAINED, AND KNOWN TO BE WRONG. Not part of the Track2Data package:
-nothing here imports it, no test covers it, and it is kept only because it
-is used in an adjacent pipeline. See issue #80.
+DEPRECATED -- UNMAINTAINED, AND KNOWN TO BE WRONG (prints a warning on run).
+Not part of the Track2Data package: nothing here imports it, no test covers
+it, and it is kept only because it is used in an adjacent pipeline. See issue #80.
 
 Four confirmed defects are catalogued, with fixes, in
 ``docs/dev/EXTRACT_BBOXES_FIX.md`` -- among them ``blob.contours`` (the real
@@ -21,6 +21,7 @@ import csv
 import json
 import pickle
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -296,6 +297,22 @@ def main():
         help="Folder where to write <session_id>_bboxes.csv and summary",
     )
     args = ap.parse_args()
+
+    warnings.warn(
+        "extract_bboxes.py is DEPRECATED and known to bias body length by "
+        "about +27.8% against the blob-derived value. Use the packaged "
+        "reader (track2data.readers.idtrackerai.blobs."
+        "enrich_session_with_blob_body_length, or "
+        "CalibrationConfig.body_length_source='blobs'). See "
+        "docs/dev/EXTRACT_BBOXES_FIX.md.",
+        DeprecationWarning,
+        stacklevel=1,
+    )
+    print(
+        "WARNING: extract_bboxes.py is deprecated and its body-length output "
+        "is biased (+27.8%). See docs/dev/EXTRACT_BBOXES_FIX.md.",
+        file=sys.stderr,
+    )
 
     session = Path(args.session_dir)
     out_dir = Path(args.out_dir)

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Batch-comparability warnings.** `Engine.consistency_warnings()` now also
+  flags sessions whose idtracker.ai segmentation parameters differ (body
+  length and area are defined by them) or whose `resolution_reduction` /
+  `id_image_size` differ (identity matching across sessions needs them equal).
+  The run README records `last_validated`, `data_policy` and the spread of the
+  Validator's length-calibration clicks.
+- **D-12 `fragment_quality_scores`** exposes `fragment_connectivity` and
+  `silhouette_score` as a selectable diagnostic.
+- **`CalibrationConfig.body_length_source = "blobs"`** (opt-in, default
+  `"session"`) derives per-identity body length from `list_of_blobs.pickle`.
+  Needs `security.allow_pickle_trajectories`; changes `*_cm` values, so it is
+  not the default.
+- **Reader diagnostic codes:** `IDT_VIDEO_PATH_UNREACHABLE`,
+  `IDT_VERSION_UNKNOWN`, `IDT_PARTIAL_SESSION`, `IDT_BODY_LENGTH_UNRELIABLE`
+  and `IDT_RESOURCE_FORK_IGNORED` are now logged. `Engine.set_video_path()`
+  stores a located video in `ProjectManifest.video_overrides`.
+- `tiny_real_h5` and `tiny_real_calibrated` test fixtures; `tiny_real`
+  now ships a dict `identities_groups`.
+- `scripts/extract_bboxes.py` prints a deprecation warning when run.
+
 - **`track2data sensitivity` — recompute metrics across a grid of
   preprocessing settings.** The strongest methodological objection this class
   of tool attracts is that the preprocessing choices, not the animals, drive

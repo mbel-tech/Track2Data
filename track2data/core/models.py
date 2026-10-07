@@ -306,6 +306,14 @@ class CalibrationConfig(BaseModel):
     # confirmed_by_user records whether anyone actually verified it.
     length_unit_label: str = "cm"
     length_unit_confirmed_by_user: bool = False
+    # Where the per-identity body length comes from (bodylength mode and every
+    # *_bl column). "session" is the session-wide scalar idtracker.ai records
+    # and the default. "blobs" derives a per-identity value from
+    # preprocessing/list_of_blobs.pickle (readers/idtrackerai/blobs.py); it
+    # needs security.allow_pickle_trajectories because it unpickles, and is
+    # opt-in because docs/dev/EXTRACT_BBOXES_FIX.md measured a +27.8% bias in
+    # the bbox-derived value it corrects, so switching changes *_cm numbers.
+    body_length_source: Literal["session", "blobs"] = "session"
 
 
 class ROI(BaseModel):
@@ -463,6 +471,10 @@ class ProjectManifest(BaseModel):
     security: SecurityConfig = SecurityConfig()
     export_targets: list[ExportTarget] = []
     run_log_path: Path | None = None
+    # session_id -> video file, for sessions whose recorded video path does not
+    # exist on this machine (IDT_VIDEO_PATH_UNREACHABLE). Remembered per
+    # project, so the user locates the video once.
+    video_overrides: dict[str, Path] = {}
 
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""
