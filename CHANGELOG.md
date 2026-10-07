@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
+  `session_*` folders to settle what the synthetic tests cannot: how far the
+  blob-derived body length sits from the session-wide value (issue #72), how
+  fully fragment `identity`/`certainty` are populated and how D-14 moves with
+  its certainty cut, and whether `identity_corrected_solving_jumps` exists and
+  fires in real blob pickles (D-15). Writes a per-session CSV and a Markdown
+  summary; the blob part needs `--allow-pickle`.
 - **Calibration-click spread in session mode.** The Validator's
   length-calibration clicks behind `length_unit` now yield a relative SD that
   session mode records (`PreprocessedSession.px_per_cm_rel_sd`), writes to
