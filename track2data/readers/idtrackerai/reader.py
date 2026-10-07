@@ -192,6 +192,22 @@ class IDTrackerAiReader(SessionReader):
                 remediation="Ensure the folder contains a trajectories/ subdirectory.",
             )
 
+        # Only the directories the reader actually reads from; identification
+        # images alone can be tens of thousands of files.
+        stubs = [
+            p
+            for sub in ("trajectories", "preprocessing")
+            for p in (folder / sub).glob("**/._*")
+            if p.is_file()
+        ]
+        if stubs:
+            logger.info(
+                "IDT_RESOURCE_FORK_IGNORED: %s: ignored %d macOS '._*' "
+                "resource-fork file(s).",
+                folder.name,
+                len(stubs),
+            )
+
         # Load trajectory payload from the best available format, falling back
         # through hit.all_present when the highest-priority format (often h5,
         # idtracker.ai's own default) has no loader yet.
@@ -232,6 +248,13 @@ class IDTrackerAiReader(SessionReader):
             if durations:
                 log_digest = {**log_digest, "durations": durations}
         session = session.model_copy(update={"tracking_log": log_digest})
+        if log_digest and log_digest.get("status") == "Failed":
+            logger.warning(
+                "IDT_PARTIAL_SESSION: %s: idtracker.ai's own log reports a "
+                "failed run (%s); trajectories may be incomplete.",
+                folder.name,
+                log_digest.get("failure_summary") or "no summary",
+            )
 
         # Attach custom artefacts (all opportunistic — never required).
         session = session.model_copy(update={

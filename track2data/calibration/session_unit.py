@@ -11,6 +11,8 @@ apply_session_calibration  -- set psess.px_per_cm from the session's own
 from __future__ import annotations
 
 import dataclasses
+import math
+from typing import Any
 
 from track2data.core.errors import CalibrationError
 from track2data.core.models import CalibrationConfig, PreprocessedSession
@@ -74,3 +76,37 @@ def apply_session_calibration(
         )
 
     return dataclasses.replace(psess, px_per_cm=session.length_unit)
+
+
+def length_calibration_spread(
+    calibrations: list[dict[str, Any]] | None,
+) -> tuple[int, float | None]:
+    """``(n_usable, relative_sd)`` over a session's calibration clicks.
+
+    ``Session.length_unit`` is the mean of several Validator calibration
+    measurements (``length_calibrations``); the scatter between them is the
+    only direct uncertainty estimate on every calibrated metric. Each entry
+    is ``{"point_A": [x, y], "point_B": [x, y], "distance": d}``; its ratio is
+    the pixel distance between the points over ``d``.
+
+    ``relative_sd`` is the sample standard deviation of those ratios divided
+    by their mean, or None when fewer than two usable entries exist (one
+    click carries no spread). Malformed entries are skipped, never fatal.
+    """
+    ratios: list[float] = []
+    for entry in calibrations or []:
+        try:
+            ax, ay = entry["point_A"]
+            bx, by = entry["point_B"]
+            distance = float(entry["distance"])
+            px = math.hypot(float(bx) - float(ax), float(by) - float(ay))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if distance > 0 and px > 0 and math.isfinite(px) and math.isfinite(distance):
+            ratios.append(px / distance)
+    n = len(ratios)
+    if n < 2:
+        return n, None
+    mean = sum(ratios) / n
+    sd = math.sqrt(sum((r - mean) ** 2 for r in ratios) / (n - 1))
+    return n, sd / mean

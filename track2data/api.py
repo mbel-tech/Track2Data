@@ -344,10 +344,72 @@ class Engine:
         folder that also carries an h5 or csv trajectory imports normally
         either way -- the reader falls through to it.
         """
-        return read_session(
-            Path(folder),
-            allow_pickle=self._manifest.security.allow_pickle_trajectories,
-        )
+        folder = Path(folder)
+        allow_pickle = self._manifest.security.allow_pickle_trajectories
+        session = read_session(folder, allow_pickle=allow_pickle)
+
+        if self._manifest.calibration.body_length_source == "blobs":
+            if allow_pickle:
+                from track2data.readers.idtrackerai.blobs import (
+                    enrich_session_with_blob_body_length,
+                )
+
+                session = enrich_session_with_blob_body_length(
+                    session, allow_pickle=True
+                )
+                if session.blob_body_length_source_file is None:
+                    logger.warning(
+                        "Session %s: body_length_source='blobs' but no usable "
+                        "blob pickle was found; keeping the session-wide "
+                        "body length.",
+                        session.session_id,
+                    )
+            else:
+                logger.warning(
+                    "body_length_source='blobs' needs "
+                    "security.allow_pickle_trajectories (the blob file is a "
+                    "pickle); keeping the session-wide body length for %s.",
+                    session.session_id,
+                )
+
+        if self._manifest.blob_diagnostics:
+            if allow_pickle:
+                from track2data.readers.idtrackerai.blobs import (
+                    enrich_session_with_blob_corrections,
+                )
+
+                session = enrich_session_with_blob_corrections(
+                    session, allow_pickle=True
+                )
+            else:
+                logger.warning(
+                    "blob_diagnostics needs security.allow_pickle_trajectories "
+                    "(the blob file is a pickle); D-15 will be NaN for %s.",
+                    session.session_id,
+                )
+
+        override = self._manifest.video_overrides.get(session.session_id)
+        if override is not None and Path(override).exists():
+            session = session.model_copy(
+                update={"video": session.video.model_copy(update={"path": Path(override)})}
+            )
+        return session
+
+    def set_video_path(self, session_id: str, path: Path) -> None:
+        """Point *session_id* at its real video file (the "Locate video..." fix).
+
+        idtracker.ai records the machine-specific absolute path the video had
+        when it was tracked, which is usually unreachable elsewhere
+        (IDT_VIDEO_PATH_UNREACHABLE). The choice is stored in the manifest so
+        it only has to be made once per project.
+        """
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(f"Video file not found: {path}")
+        if session_id not in {r.session_id for r in self._manifest.sessions}:
+            raise KeyError(f"No session {session_id!r} in this project")
+        overrides = {**self._manifest.video_overrides, session_id: path}
+        self._manifest = self._manifest.model_copy(update={"video_overrides": overrides})
 
     def import_ref(self, ref: SessionRef) -> Session:
         """Import the session a manifest entry describes.
@@ -1060,6 +1122,9 @@ class Engine:
             identity_free_source = "tracker"
         else:
             identity_free_source = "not reported"
+        from track2data.calibration.session_unit import length_calibration_spread
+
+        cal_n, cal_rel_sd = length_calibration_spread(session.length_calibrations)
         # What the export says about the software behind the numbers. The reader class knows its
         # display name and whether it was ever tested on real output; the manifest entry knows
         # who chose it and with which options. A reader that is no longer registered has neither.
@@ -1095,6 +1160,10 @@ class Engine:
             length_unit_confirmed_by_user=self._manifest.calibration.length_unit_confirmed_by_user,
             body_length_reliable=session.body_length_reliable,
             blob_body_length_source_file=session.blob_body_length_source_file,
+            last_validated=session.last_validated,
+            data_policy=session.data_policy,
+            length_calibration_n=cal_n,
+            length_calibration_rel_sd=cal_rel_sd,
         )
 
         return ExportPayload(

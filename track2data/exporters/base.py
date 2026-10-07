@@ -73,6 +73,15 @@ class SessionProvenance:
     # sessions in one analysis without recording which is which is a
     # reproducibility hazard.
     blob_body_length_source_file: str | None = None
+    # Validator/data-retention provenance (Session.last_validated /
+    # Session.data_policy): whether a human reviewed this session, and which
+    # idtracker.ai output folders could have survived.
+    last_validated: str | None = None
+    data_policy: str | None = None
+    # Spread between the Validator's length-calibration clicks; the only
+    # direct uncertainty estimate on *_cm columns. n counts usable clicks.
+    length_calibration_n: int = 0
+    length_calibration_rel_sd: float | None = None
 
     # Which software produced the trajectories and how the reader that read them was chosen.
     # Every field above that is about idtracker.ai stays empty for any other tracker; these are

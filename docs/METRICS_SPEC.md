@@ -834,6 +834,12 @@ three together.
 | D-8 Crossing Rate | ✅ | Per-frame / session-level only |
 | D-9 Identity Swap Opportunity Count | ✅ | Reads fragment boundaries, not trajectories |
 | D-10 Physical-Plausibility Violation Rate | ✅ | Assumes a fixed row index *by design* — it measures how badly that assumption fails, so it must keep running on identity-free sessions |
+| D-11 Metric Input Provenance | ✅ | Per-slot counts of what the metrics consumed |
+| D-12 Fragment Quality Scores | ✅ | Session-level tracker self-report |
+| D-13 Per-Identity Fragment Certainty | ❌ | Reports idtracker.ai's per-identity fragment certainty |
+| D-14 Certain-Fragment Frame Fraction | ✅ | Session-level fraction over fragments |
+| D-15 Tracker Correction Census | ✅ | Session-level frame count from the blob layer |
+| D-16 Preprocessing Distortion Index | ✅ | Compares raw and processed tracks by row index *by design*, like D-10 |
 
 **Zone metrics (SCI-02, D-016).** Z-1, Z-2 and Z-8 are pure occupancy:
 on an identity-free session the engine computes them on a pooled view in
@@ -1012,6 +1018,86 @@ selection, and exported alongside the metrics CSV in a separate
 Keyed on `(session_id, individual_id)` — the same key the exporters merge
 summary metrics on — so every metric row can be joined to the quality of the
 data behind it.
+
+#### D-12 — Fragment quality scores
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Fragment quality scores |
+| **Level** | Per session |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `Session.quality['fragment_connectivity']`, `Session.quality['silhouette_score']` |
+| **Formula** | Read directly from the tracker output; no computation |
+| **Output columns** | `session_id`, `fragment_connectivity`, `silhouette_score`, `note` |
+| **Units** | dimensionless |
+| **Assumptions** | The quality dict is populated by the reader from the tracker output. |
+| **Warnings** | NaN when `Session.quality` is absent or lacks the key. These are idtracker.ai self-reports (the same values the run README records) and may not reflect ground-truth accuracy. |
+| **Parameters** | none |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
+#### D-13 — Per-identity fragment certainty
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Per-identity fragment certainty |
+| **Level** | Per individual |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `Session.fragments` (`list_of_fragments.json`) |
+| **Formula** | `certainty_mean[k] = Σ lenᵢ·certaintyᵢ / Σ lenᵢ` over individual fragments with `identity = k+1` and a recorded certainty; `lenᵢ = end_frame − start_frame` |
+| **Output columns** | `individual_id`, `n_fragments`, `n_frames_attributed`, `certainty_mean`, `certainty_min` |
+| **Units** | counts; dimensionless score |
+| **Assumptions** | Fragment `identity` is 1-based and is mapped to the 0-based `individual_id`. |
+| **Warnings** | `certainty` is not a probability: negative values occur (observed −0.0069). Fragments without an identity or certainty are skipped; `n_frames_attributed` shows the coverage. NaN when `Session.fragments` is absent. |
+| **Parameters** | none |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
+#### D-14 — Certain-fragment frame fraction
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Certain-fragment frame fraction |
+| **Level** | Per session |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `Session.fragments`, `Session.n_frames` |
+| **Formula** | `frac_frames_certain = Σ lenᵢ [certaintyᵢ ≥ 0.5] / (n_frames·n_animals)` over individual fragments; `frac_frames_identity_fixed` uses `identity_is_fixed`; `frac_frames_individual` counts every individual fragment |
+| **Output columns** | `session_id`, `certainty_threshold_used`, `frac_frames_certain`, `frac_frames_identity_fixed`, `frac_frames_individual` |
+| **Units** | dimensionless fractions |
+| **Assumptions** | Fragment lengths are summed over animals, so the denominator is `n_frames·n_animals`. |
+| **Warnings** | The 0.5 cut is a Track2Data threshold (the one the body-length blob reader uses), not an idtracker.ai constant, and is not configurable. Fragments lacking a certainty count as not certain. NaN when `Session.fragments` is absent. |
+| **Parameters** | none |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
+#### D-15 — Tracker correction census
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Tracker correction census |
+| **Level** | Per session |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `Session.tracker_corrected_frames` (blob layer; needs `blob_diagnostics` and pickle consent) |
+| **Formula** | `n_corrected_frames = count(frames with any blob where identity_corrected_solving_jumps ≠ None)` |
+| **Output columns** | `session_id`, `n_corrected_frames`, `frac_corrected_frames`, `note` |
+| **Units** | frames; dimensionless fraction |
+| **Assumptions** | Read from `preprocessing/list_of_blobs.pickle` through the restricted unpickler. |
+| **Warnings** | NaN means the blob layer was not read, not that there were no corrections. Distinct from **D-9**, which counts swap opportunities in this project's preprocessing. The attribute's semantics come from idtracker.ai's source and have not been checked against a real corpus. |
+| **Parameters** | none |
+| **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
+
+#### D-16 — Preprocessing distortion index
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Preprocessing distortion index |
+| **Level** | Per individual |
+| **Priority** | Diagnostic (always on) |
+| **Inputs** | `PreprocessedSession.xy`, `Session.raw_xy` |
+| **Formula** | `rms = √mean(‖xyₜ − rawₜ‖²)` over frames finite in both; `distortion_index = rms / median‖rawₜ − rawₜ₋₁‖`; `path_length_ratio = Σ‖xyₜ − xyₜ₋₁‖ / Σ‖rawₜ − rawₜ₋₁‖` |
+| **Output columns** | `individual_id`, `rms_displacement_px`, `frac_frames_altered`, `path_length_ratio`, `distortion_index` |
+| **Units** | px; dimensionless |
+| **Assumptions** | Gap-filled frames have no raw position: counted as altered, excluded from the RMS. |
+| **Warnings** | `distortion_index` is NaN for a stationary track (median raw step 0); read `path_length_ratio`, where a large value is the spurious-teleport failure. Smoothing alone lowers the ratio below 1 by design. |
+| **Parameters** | none |
+| **Reference** | Data-provenance convention for derived measures; no single originating work |
 
 ---
 

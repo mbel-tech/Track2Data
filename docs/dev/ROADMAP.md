@@ -26,7 +26,7 @@ The engine, the GUI, and the packaging pipeline are all built and green.
 | Full error hierarchy (`core/errors.py`) | ✅ Implemented |
 | Manifest read/write + migration (`core/manifest.py`) | ✅ Implemented |
 | Unified idtracker.ai reader (`readers/idtrackerai/`) — h5 / npy / csv | ✅ Implemented; 70/70 real corpus sessions import |
-| Behavioural metrics | ✅ 45 registered (IL-1..11, IL-14, GL-1..11, GL-13, GL-15, Z-1..9, D-1..11) |
+| Behavioural metrics | ✅ 50 registered (IL-1..11, IL-14, GL-1..11, GL-13, GL-15, Z-1..9, D-1..16) |
 | Exporters | ✅ 5 (`csv_long`, `csv_wide`, `excel`, `feather`, `readme`) |
 | Metadata join wired into `Engine` | ✅ Implemented |
 | Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |
@@ -153,5 +153,5 @@ The repository is public (see M5).
 - [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — dev setup, TDD workflow, branch policy
 - [`docs/TECHNICAL_SPEC.md`](../TECHNICAL_SPEC.md) — system architecture, testing strategy
 - [`docs/ENGINE_DESIGN.md`](../ENGINE_DESIGN.md) — engine internals and module layout
-- [`docs/METRICS_SPEC.md`](../METRICS_SPEC.md) — 45 behavioural metrics with formulas and citations
+- [`docs/METRICS_SPEC.md`](../METRICS_SPEC.md) — 50 behavioural metrics with formulas and citations
 - [`docs/dev/UI_DESIGN.md`](UI_DESIGN.md) — 14-screen PySide6 GUI specification

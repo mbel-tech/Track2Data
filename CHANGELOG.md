@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Batch-comparability warnings.** `Engine.consistency_warnings()` now also
+  flags sessions whose idtracker.ai segmentation parameters differ (body
+  length and area are defined by them) or whose `resolution_reduction` /
+  `id_image_size` differ (identity matching across sessions needs them equal).
+  The run README records `last_validated`, `data_policy` and the spread of the
+  Validator's length-calibration clicks.
+- **D-12 `fragment_quality_scores`** exposes `fragment_connectivity` and
+  `silhouette_score` as a selectable diagnostic.
+- **D-13..D-16 diagnostics.** D-13 per-identity fragment certainty
+  (frame-weighted); D-14 certain-fragment frame fraction (0.5 certainty cut,
+  a Track2Data threshold, plus `identity_is_fixed`); D-15 tracker correction
+  census, read from the blob layer and only when `blob_diagnostics` is set and
+  pickle loading is allowed (NaN otherwise, never 0); D-16 preprocessing
+  distortion index (RMS displacement, share of altered frames, path-length
+  ratio).
+- **`CalibrationConfig.body_length_source = "blobs"`** (opt-in, default
+  `"session"`) derives per-identity body length from `list_of_blobs.pickle`.
+  Needs `security.allow_pickle_trajectories`; changes `*_cm` values, so it is
+  not the default.
+- **Reader diagnostic codes:** `IDT_VIDEO_PATH_UNREACHABLE`,
+  `IDT_VERSION_UNKNOWN`, `IDT_PARTIAL_SESSION`, `IDT_BODY_LENGTH_UNRELIABLE`
+  and `IDT_RESOURCE_FORK_IGNORED` are now logged. `Engine.set_video_path()`
+  stores a located video in `ProjectManifest.video_overrides`.
+- `tiny_real_h5` and `tiny_real_calibrated` test fixtures; `tiny_real`
+  now ships a dict `identities_groups`.
+- `scripts/extract_bboxes.py` prints a deprecation warning when run.
+
 - **Readers can declare options and be read by name.** The first step towards
   importing output from trackers other than idtracker.ai. A reader can now
   declare the options its files do not record (frame rate, frame size, which

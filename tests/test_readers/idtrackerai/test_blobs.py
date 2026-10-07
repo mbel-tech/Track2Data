@@ -340,3 +340,43 @@ class TestEnrichSessionWithBlobBodyLength:
         assert result is not session
         assert result.body_length_px[0] != 999.0
         assert result.blob_body_length_source_file == "list_of_blobs.pickle"
+
+
+class TestEngineBodyLengthSource:
+    """CalibrationConfig.body_length_source='blobs' wires the enrichment in."""
+
+    def _engine(self, source: str, *, allow_pickle: bool):
+        from datetime import UTC, datetime
+
+        from track2data.api import Engine
+        from track2data.core.models import (
+            CalibrationConfig,
+            ProjectManifest,
+            SecurityConfig,
+        )
+
+        now = datetime.now(tz=UTC)
+        return Engine(ProjectManifest(
+            project_name="p", created_at=now, updated_at=now,
+            calibration=CalibrationConfig(body_length_source=source),
+            security=SecurityConfig(allow_pickle_trajectories=allow_pickle),
+        ))
+
+    def test_blobs_source_replaces_session_wide_value(
+        self, tiny_real_session: Path, tmp_path: Path, fake_idtrackerai_classes
+    ) -> None:
+        import shutil
+
+        folder = tmp_path / "s"
+        shutil.copytree(tiny_real_session, folder)
+        blob_cls, lob_cls = fake_idtrackerai_classes
+        _write_blob_pickle(
+            folder / "preprocessing" / "list_of_blobs.pickle", lob_cls, blob_cls,
+            [[_make_blob(blob_cls, seems_like_individual=True, identity=i + 1,
+                         identity_certainty=0.9, contour=_SQUARE) for i in range(2)]],
+        )
+        default = self._engine("session", allow_pickle=True).import_session(folder)
+        assert default.blob_body_length_source_file is None
+        blobs = self._engine("blobs", allow_pickle=True).import_session(folder)
+        assert blobs.blob_body_length_source_file == "list_of_blobs.pickle"
+        assert blobs.body_length_px is not None

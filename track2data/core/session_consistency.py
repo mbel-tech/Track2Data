@@ -74,6 +74,12 @@ class SessionSummary:
     # every session and only the run itself needs the provenance record.
     trajectory_sha256: str = ""
     trajectory_source: str | None = None
+    # What body length/area are *defined by* (idtracker.ai's segmentation
+    # parameters) and what identity matching across sessions needs to agree
+    # on (the identification CNN's input geometry). None = not recorded.
+    segmentation_params: dict[str, Any] | None = None
+    resolution_reduction: float | None = None
+    id_image_size: tuple[int, ...] | None = None
     # Whether the reader supplied a body length. Without one, the default "bodylength"
     # calibration cannot run and the session is exported in pixels only. Defaults to True so a
     # summary built without the fact never raises that warning.
@@ -116,6 +122,11 @@ class SessionSummary:
             is_identity_free=is_identity_free,
             trajectory_sha256=trajectory_sha256,
             trajectory_source=source.name if source is not None else None,
+            segmentation_params=session.segmentation_params,
+            resolution_reduction=session.resolution_reduction,
+            id_image_size=(
+                tuple(session.id_image_size) if session.id_image_size else None
+            ),
             has_body_length=session.body_length_px is not None,
         )
 
@@ -209,7 +220,41 @@ def heterogeneity_warnings(summaries: Sequence[SessionSummary]) -> list[str]:
             "not describe the same physical region in another."
         )
 
+    seg_groups = _group_by(summaries, _segmentation_key)
+    if len(seg_groups) > 1:
+        warnings.append(
+            "Sessions were segmented with different idtracker.ai parameters: "
+            f"{_describe(seg_groups)}. Body length and area are defined by "
+            "these parameters (intensity/area thresholds, background "
+            "subtraction, erosion), so body-length and area values -- and every "
+            "*_bl column derived from them -- are not comparable across these "
+            "groups."
+        )
+
+    id_groups = _group_by(summaries, _identification_key)
+    if len(id_groups) > 1:
+        warnings.append(
+            "Sessions used different identification-image settings "
+            f"(resolution_reduction / id_image_size): {_describe(id_groups)}. "
+            "Identities are only matchable across sessions (e.g. with "
+            "idmatcher.ai) when both agree."
+        )
+
     return warnings
+
+
+def _segmentation_key(s: SessionSummary) -> str:
+    """Canonical, order-independent label for a session's segmentation params."""
+    if not s.segmentation_params:
+        return "not recorded"
+    return ", ".join(f"{k}={v}" for k, v in sorted(s.segmentation_params.items()))
+
+
+def _identification_key(s: SessionSummary) -> str:
+    if s.resolution_reduction is None and s.id_image_size is None:
+        return "not recorded"
+    size = "x".join(str(v) for v in s.id_image_size) if s.id_image_size else "?"
+    return f"reduction={s.resolution_reduction}, size={size}"
 
 
 def sessions_table(

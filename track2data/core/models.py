@@ -178,6 +178,12 @@ class Session(BaseModel):
     # uncurated sessions in one analysis without knowing which is which is
     # a reproducibility hazard.
     blob_body_length_source_file: str | None = None
+    # Frame indices where idtracker.ai's own post-processing re-assigned an
+    # identity (blob attribute ``identity_corrected_solving_jumps`` set).
+    # Comes from the blob pickle, so it is None unless the project opted in
+    # (ProjectManifest.blob_diagnostics) AND allowed pickle loading; None
+    # means "not read", never "no corrections".
+    tracker_corrected_frames: set[int] | None = None
 
     @property
     def n_frames(self) -> int:
@@ -306,6 +312,14 @@ class CalibrationConfig(BaseModel):
     # confirmed_by_user records whether anyone actually verified it.
     length_unit_label: str = "cm"
     length_unit_confirmed_by_user: bool = False
+    # Where the per-identity body length comes from (bodylength mode and every
+    # *_bl column). "session" is the session-wide scalar idtracker.ai records
+    # and the default. "blobs" derives a per-identity value from
+    # preprocessing/list_of_blobs.pickle (readers/idtrackerai/blobs.py); it
+    # needs security.allow_pickle_trajectories because it unpickles, and is
+    # opt-in because docs/dev/EXTRACT_BBOXES_FIX.md measured a +27.8% bias in
+    # the bbox-derived value it corrects, so switching changes *_cm numbers.
+    body_length_source: Literal["session", "blobs"] = "session"
 
 
 class ROI(BaseModel):
@@ -481,6 +495,14 @@ class ProjectManifest(BaseModel):
     security: SecurityConfig = SecurityConfig()
     export_targets: list[ExportTarget] = []
     run_log_path: Path | None = None
+    # session_id -> video file, for sessions whose recorded video path does not
+    # exist on this machine (IDT_VIDEO_PATH_UNREACHABLE). Remembered per
+    # project, so the user locates the video once.
+    video_overrides: dict[str, Path] = {}
+    # Read idtracker.ai's blob layer on import to feed D-15 (tracker
+    # corrections). Opt-in: it unpickles a file that is tens of MB, and needs
+    # security.allow_pickle_trajectories.
+    blob_diagnostics: bool = False
 
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""

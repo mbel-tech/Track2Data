@@ -60,6 +60,13 @@ _EXPLICIT_UNITS: dict[str, str] = {
     # Probabilities and other bounded dimensionless quantities.
     "estimated_accuracy": "fraction (0-1)",
     "fraction_identified": "fraction (0-1)",
+    "fragment_connectivity": "dimensionless (ratio)",
+    "silhouette_score": "dimensionless (score, -1 to 1)",
+    "certainty_mean": "dimensionless (score)",
+    "certainty_min": "dimensionless (score)",
+    "certainty_threshold_used": "dimensionless (score)",
+    "path_length_ratio": "dimensionless (ratio)",
+    "distortion_index": "dimensionless (ratio)",
     "id_prob_frac_above_0p9": "fraction (0-1)",
     "id_prob_median": "probability (0-1)",
     "id_prob_p10": "probability (0-1)",

@@ -121,7 +121,7 @@ class Metric(ABC):
     Every attribute below is a ``ClassVar``: a metric's identity, level and
     declared schema are properties of the class, not of an instance, and
     every concrete metric sets them with a plain class-body assignment.
-    Declaring them as instance variables here made each of those 45
+    Declaring them as instance variables here made each of those 50
     assignments a type error.
     """
 
@@ -140,7 +140,7 @@ class Metric(ABC):
     window_safe: ClassVar[bool] = True
     output_columns: ClassVar[list[str]]
     documentation: ClassVar[MetricDocumentation]
-    # Most metrics (25 of 45 today) take no configuration at all --
+    # Most metrics (30 of 50 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.
