@@ -342,7 +342,7 @@ class ExportScreen(QWidget):
 
     def _cancel_export(self) -> None:
         if self._store is not None:
-            self._store.tasks.cancel_all()
+            self._store.tasks.cancel_all(lane="run")
         self._status_label.setText("Cancelling…")
 
     # ── slots ──────────────────────────────────────────────────────────────

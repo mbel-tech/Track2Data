@@ -501,3 +501,26 @@ platforms. Trails are strided to at most 1500 points each.
 **Trade-off:** no built-in axes, ROI tools or GPU acceleration. If time
 series plots (e.g. speed vs time with a live filter preview) are added
 later, pyqtgraph can be reconsidered for those alone.
+
+---
+
+## Phase 5 — Open items after the critical-issues audit
+
+### D-023 · Task lanes: probes get their own pool and their own signals
+
+**Decision:** `TaskRunner` owns one single-thread pool per lane (`run`, `probe`).
+Probe-lane tasks emit `probeFinished/probeFailed/probeCancelled` and none of the
+generic `task*` signals. `cancel_all(lane=...)` can target one lane; the Cancel
+button, Processing and Export screens pass `lane="run"`. A task whose token is
+already cancelled never starts. `shutdown()` waits on both pools against one
+deadline.
+
+**Rationale:** Extends D-003. A separate pool alone was not enough: the main
+window listens to the generic signals to enable Cancel and to show a modal
+failure dialog, so a probe finishing during a run would have disabled Cancel
+mid-run. Using different signals fixes that without touching the main window.
+
+**Trade-offs:** probes still do not poll their token while running (a probe is a
+single reader call), so cancelling only stops probes that have not started yet.
+Run and probe lanes can read the same session files concurrently; both are
+read-only and only the run lane writes the cache.

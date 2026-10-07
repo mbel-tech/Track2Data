@@ -283,3 +283,99 @@ def test_cancel_check_reaches_the_callable_and_cancels(qtbot) -> None:
         runner.submit_with_progress(work, cancel_check=True)
         assert started.wait(2)
         runner.cancel_all()
+
+
+# ── lanes: probes get their own pool (PERF-03) ──────────────────────────────
+
+
+def test_probe_lane_runs_while_the_run_lane_is_busy(qtbot, runner) -> None:
+    import threading
+
+    release = threading.Event()
+    runner.submit(lambda: release.wait(5) or "run-done")  # occupies the run lane
+
+    with qtbot.waitSignal(runner.probeFinished, timeout=2000) as blocker:
+        probe_id = runner.submit(lambda: "probe-done", lane="probe")
+    assert blocker.args == [probe_id, "probe-done"]
+    assert not release.is_set()  # the run was still blocked when the probe finished
+    release.set()
+
+
+def test_run_lane_is_still_serial(qtbot, runner) -> None:
+    import threading
+
+    active, peak = [0], [0]
+    lock = threading.Lock()
+
+    def work() -> None:
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+
+    ids = [runner.submit(work) for _ in range(3)]
+    done: list[str] = []
+    runner.taskFinished.connect(lambda tid, _r: done.append(tid))
+    qtbot.waitUntil(lambda: len(done) == 3, timeout=3000)
+    assert peak[0] == 1 and set(done) == set(ids)
+
+
+def test_probe_lane_does_not_use_the_generic_task_signals(qtbot, runner) -> None:
+    seen: list[str] = []
+    for sig in (runner.taskStarted, runner.taskFinished, runner.taskFailed, runner.taskCancelled):
+        sig.connect(lambda *a, _s=seen: _s.append("generic"))
+
+    with qtbot.waitSignal(runner.probeFinished, timeout=2000):
+        runner.submit(lambda: 1, lane="probe")
+    with qtbot.waitSignal(runner.probeFailed, timeout=2000) as blocker:
+        runner.submit(lambda: 1 / 0, lane="probe")
+    assert "division by zero" in blocker.args[1]
+    qtbot.wait(50)
+    assert seen == []  # MainWindow listens to these; probes must not trigger it
+
+
+def test_cancel_all_for_the_run_lane_leaves_probes_alone(qtbot, runner) -> None:
+    import threading
+
+    gate = threading.Event()
+    probe_id = runner.submit(lambda: (gate.wait(5), "probe-ok")[1], lane="probe")
+    run_id = runner.submit(lambda: "x")
+    runner.cancel_all(lane="run")
+    assert probe_id in runner._tokens and not runner._tokens[probe_id].is_cancelled
+    assert run_id not in runner._tokens or runner._tokens[run_id].is_cancelled
+    with qtbot.waitSignal(runner.probeFinished, timeout=3000) as blocker:
+        gate.set()
+    assert blocker.args == [probe_id, "probe-ok"]
+
+
+def test_a_task_cancelled_before_it_starts_never_runs(qtbot, runner) -> None:
+    import threading
+
+    gate = threading.Event()
+    ran: list[int] = []
+    runner.submit(lambda: gate.wait(5), lane="probe")  # blocks the probe thread
+    queued = runner.submit(lambda: ran.append(1), lane="probe")
+    runner.cancel(queued)
+    with qtbot.waitSignal(runner.probeCancelled, timeout=3000) as blocker:
+        gate.set()
+    assert blocker.args == [queued] and ran == []
+
+
+def test_shutdown_uses_one_deadline_for_both_lanes(qtbot, runner) -> None:
+    import threading
+
+    gate = threading.Event()
+    runner.submit(lambda: gate.wait(10), lane="probe")
+    runner.submit(lambda: gate.wait(10))
+    start = time.monotonic()
+    assert runner.shutdown(300) is False  # neither task polls its token
+    assert time.monotonic() - start < 0.9  # not 2 x the timeout
+    gate.set()
+    assert runner.shutdown(3000) is True
+
+
+def test_unknown_lane_is_rejected(runner) -> None:
+    with pytest.raises(ValueError):
+        runner.submit(lambda: 1, lane="nope")

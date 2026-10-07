@@ -346,6 +346,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Adding sessions no longer waits for, or disturbs, a pipeline run.** Session
+  probes now run in their own task lane. Before, a probe queued behind a long
+  run (blank frame counts until it ended), a failed probe popped the
+  "Pipeline run failed" dialog, and every probe start flashed the toolbar
+  Cancel button. Cancel now only targets the run lane, queued probes are
+  dropped when a project is created or opened (and on quit, instead of
+  draining the whole backlog), and shutdown shares one deadline across lanes.
+
 - **Exports with metadata no longer contain `treatment_x` / `treatment_y`.**
   Session metadata is attached to every metric frame, and the exporters merged
   those frames on all shared columns or on the id keys alone, so any
