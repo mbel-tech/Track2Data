@@ -7,7 +7,7 @@ Widgets:
   • skip_btn       QPushButton → sets metadata_source = None
   • preview_table  QTableWidget (first 5 rows)
   • mapping combos QComboBox per canonical field
-  • apply_btn      QPushButton → build MappingRule and store
+  • mapping edits auto-commit (debounced) → MappingRule in the store; flush() on leave
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from track2data.core.hashing import file_sha256
 from track2data.core.models import MappingRule, MetadataSource
+from ui.widgets.autocommit import AutoCommit
 from ui.widgets.labels import label_for
 
 _CANONICAL_FIELDS = ["session_id", "treatment", "trial_id", "trial_date"]
@@ -49,6 +50,7 @@ class MetadataScreen(QWidget):
         super().__init__(parent)
         self._store = store
         self._columns: list[str] = []
+        self._auto = AutoCommit(self._apply_mapping, self)
         self._build_ui()
         if store is not None:
             store.metadataChanged.connect(self._on_metadata_changed)
@@ -104,13 +106,9 @@ class MetadataScreen(QWidget):
             combo = QComboBox()
             combo.addItem("(skip)")
             self._combos[field] = combo
+            combo.currentIndexChanged.connect(self._auto.trigger)
             self._mapping_form.addRow(f"{label_for(field, _FIELD_LABELS)}:", combo)
         root.addLayout(self._mapping_form)
-
-        apply_btn = QPushButton("Apply mapping")
-        apply_btn.setFixedWidth(130)
-        apply_btn.clicked.connect(self._apply_mapping)
-        root.addWidget(apply_btn)
 
         root.addStretch()
 
@@ -158,7 +156,16 @@ class MetadataScreen(QWidget):
                 self._preview.setItem(r, c, QTableWidgetItem(val))
         self._preview.resizeColumnsToContents()
 
+    def flush(self) -> None:
+        """Commit any pending mapping edit now (called when the screen is left)."""
+        self._auto.flush()
+
     def _populate_combos(self, headers: list[str]) -> None:
+        with self._auto.suppressed():
+            self._fill_combos(headers)
+        self._auto.trigger()  # persist the auto-matched columns
+
+    def _fill_combos(self, headers: list[str]) -> None:
         for field, combo in self._combos.items():
             combo.clear()
             combo.addItem("(skip)")
@@ -180,7 +187,6 @@ class MetadataScreen(QWidget):
 
     def _apply_mapping(self) -> None:
         if self._store is None or self._store.manifest is None:
-            QMessageBox.information(self, "Info", "No project open.")
             return
         rules: dict[str, str] = {}
         for field, combo in self._combos.items():

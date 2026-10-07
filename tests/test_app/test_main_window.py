@@ -319,3 +319,20 @@ def test_close_event_shuts_down_the_task_runner(
     win.close()
 
     assert calls == [5000]
+
+
+def test_leaving_a_parameter_screen_commits_pending_edits(qtbot, tmp_path: Path) -> None:
+    """GUI-01: an edit made just before navigating must not be lost."""
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("p", tmp_path)
+
+    pre = win._stack.widget(5)  # Preprocessing
+    win._go_to_page(5)
+    pre._gap_max.setValue(91)
+    assert win._store.manifest.preprocess.gap_fill.max_gap_frames != 91  # still debounced
+
+    win._go_to_page(6)  # leave without waiting for the debounce
+    assert win._store.manifest.preprocess.gap_fill.max_gap_frames == 91

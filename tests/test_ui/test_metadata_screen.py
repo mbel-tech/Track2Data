@@ -109,3 +109,21 @@ def test_skip_metadata_still_clears_any_previously_loaded_source(
 
     screen._skip_metadata()
     assert store.manifest.metadata_source is None
+
+
+def test_mapping_change_autocommits_without_apply_button(qtbot, tmp_path) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.metadata_screen import MetadataScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    store.new_project("p", tmp_path)
+    screen = MetadataScreen(store)
+    qtbot.addWidget(screen)
+    assert not [b for b in screen.findChildren(QPushButton) if "Apply" in b.text()]
+
+    screen._populate_combos(["sid", "group"])
+    screen._combos["session_id"].setCurrentIndex(1)  # "sid"
+    screen.flush()
+    assert store.manifest.mapping.rules.get("session_id") == "sid"

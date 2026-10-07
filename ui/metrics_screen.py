@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 from track2data import metrics
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
+from ui.widgets.autocommit import AutoCommit
 
 _COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
 _COL_INCLUDE, _COL_NAME, _COL_INFO, _COL_CONFIG = range(4)
@@ -81,12 +82,14 @@ class MetricsScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        self._auto = AutoCommit(self._apply, self)
         self._build_ui()
         if store is not None:
             store.metricsChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
             store.sessionsChanged.connect(self._update_identity_graying)
             store.zonesChanged.connect(self._update_zone_tab_enabled)
+            self._load_from_store()
             self._update_identity_graying()
             self._update_zone_tab_enabled()
 
@@ -126,10 +129,29 @@ class MetricsScreen(QWidget):
         qform.addRow("Quality threshold:", self._quality_spin)
         root.addLayout(qform)
 
-        apply_btn = QPushButton("Apply selection")
-        apply_btn.setFixedWidth(130)
-        apply_btn.clicked.connect(self._apply)
-        root.addWidget(apply_btn)
+        # No Apply button: edits auto-commit after a pause; MainWindow
+        # calls flush() when the screen is left.
+        for table in (self._ind_table, self._grp_table, self._zone_table):
+            table.itemChanged.connect(self._on_item_changed)
+        self._quality_spin.valueChanged.connect(
+            lambda _v: self._auto.trigger() if self._differs_from_store() else None
+        )
+
+    def flush(self) -> None:
+        """Commit any pending edit now (called when the screen is left)."""
+        self._auto.flush()
+
+    def _differs_from_store(self) -> bool:
+        if self._store is None or self._store.manifest is None:
+            return False
+        current = self._store.manifest.metrics
+        return self._selection_from_widgets(current) != current
+
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        # itemChanged also fires for flag/tooltip updates (identity graying);
+        # only a selection that differs from the store is an edit to commit.
+        if item.column() == _COL_INCLUDE and self._differs_from_store():
+            self._auto.trigger()
 
     def _make_table(self, level: str) -> QTableWidget:
         metric_classes = sorted(metrics.list_for_level(level), key=_natural_sort_key)
@@ -254,9 +276,10 @@ class MetricsScreen(QWidget):
 
     def _apply(self) -> None:
         if self._store is None or self._store.manifest is None:
-            QMessageBox.information(self, "Info", "No project open.")
             return
         sel = self._selection_from_widgets(self._store.manifest.metrics)
+        if sel == self._store.manifest.metrics:
+            return
         try:
             self._store.update_metrics(sel)
         except Exception as exc:
@@ -265,11 +288,14 @@ class MetricsScreen(QWidget):
     def _load_from_store(self) -> None:
         if self._store is None or self._store.manifest is None:
             return
+        if self._auto.pending:
+            return  # keep the user's not-yet-committed edit; it commits next
         sel = self._store.manifest.metrics
-        self._set_checked(self._ind_table, sel.individual)
-        self._set_checked(self._grp_table, sel.group)
-        self._set_checked(self._zone_table, sel.zone)
-        self._quality_spin.setValue(sel.quality_threshold)
+        with self._auto.suppressed():
+            self._set_checked(self._ind_table, sel.individual)
+            self._set_checked(self._grp_table, sel.group)
+            self._set_checked(self._zone_table, sel.zone)
+            self._quality_spin.setValue(sel.quality_threshold)
         self._update_identity_graying()
         self._update_zone_tab_enabled()
 

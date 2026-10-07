@@ -279,6 +279,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Parameter screens no longer lose edits.** Calibration, Preprocessing,
+  Metadata mapping and Metrics had "Apply" buttons; changing a value and
+  navigating away silently discarded it. Edits now auto-commit after a
+  200 ms pause and `MainWindow` flushes the outgoing screen on navigation.
+  Preprocessing also stopped resetting `identity_switch`, `jump.pct_mult`,
+  `smoothing.polyorder` and `coverage.min_track_frames` to defaults on
+  every apply, and screens now read the store when constructed.
+- **Preprocessing screen exposes identity-switch correction** (default OFF,
+  with a risk warning) and the `idtracker_velocity_threshold` jump method.
+
 - **Zone metrics no longer fabricate per-animal results on identity-free
   sessions.** Z-3, Z-4, Z-5, Z-6, Z-7 and Z-9 follow an animal across
   frames, so they now require identity and are skipped; Z-1, Z-2 and Z-8

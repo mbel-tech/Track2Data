@@ -11,7 +11,7 @@ Widgets:
   • readiness_list       QListWidget     (Session calibration mode only) --
                           per-session length_unit readiness, from
                           ProjectStore.session_facts()
-  • apply_btn            QPushButton → store.update_calibration
+  • edits auto-commit (debounced) → store.update_calibration; flush() on leave
 """
 
 from __future__ import annotations
@@ -26,11 +26,12 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMessageBox,
-    QPushButton,
     QRadioButton,
     QVBoxLayout,
     QWidget,
 )
+
+from ui.widgets.autocommit import AutoCommit
 
 _UNIT_CHOICES = ["cm", "mm", "m"]
 
@@ -41,6 +42,7 @@ class CalibrationScreen(QWidget):
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._store = store
+        self._auto = AutoCommit(self._apply, self)
         self._build_ui()
         if store is not None:
             store.calibrationChanged.connect(self._on_calibration_changed)
@@ -139,12 +141,6 @@ class CalibrationScreen(QWidget):
 
         root.addWidget(self._session_widget)
 
-        # ── apply button ──────────────────────────────────────────────────
-        apply_btn = QPushButton("Apply")
-        apply_btn.setFixedWidth(100)
-        apply_btn.clicked.connect(self._apply)
-        root.addWidget(apply_btn)
-
         root.addStretch()
 
         # wire radio changes
@@ -153,6 +149,17 @@ class CalibrationScreen(QWidget):
         self._radio_session.toggled.connect(self._update_mode_visibility)
         self._update_mode_visibility()
         self._refresh_readiness()
+
+        # auto-commit (no Apply button): every edit is saved after a pause
+        for radio in (self._radio_bl, self._radio_scalar, self._radio_session):
+            radio.toggled.connect(self._auto.trigger)
+        self._px_spin.valueChanged.connect(self._auto.trigger)
+        self._unit_combo.currentIndexChanged.connect(self._auto.trigger)
+        self._confirm_check.toggled.connect(self._auto.trigger)
+
+    def flush(self) -> None:
+        """Commit any pending edit now (called when the screen is left)."""
+        self._auto.flush()
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -170,7 +177,6 @@ class CalibrationScreen(QWidget):
 
     def _apply(self) -> None:
         if self._store is None or self._store.manifest is None:
-            QMessageBox.information(self, "Info", "No project open.")
             return
         mode = self._current_mode()
         # model_copy(update=...) against the manifest's current
@@ -188,12 +194,18 @@ class CalibrationScreen(QWidget):
             updates["length_unit_label"] = self._unit_combo.currentText()
             updates["length_unit_confirmed_by_user"] = self._confirm_check.isChecked()
         cfg = current.model_copy(update=updates)
+        if cfg == current:
+            return
         try:
             self._store.update_calibration(cfg)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to apply calibration:\n{exc}")
 
     def _on_calibration_changed(self) -> None:
+        with self._auto.suppressed():
+            self._populate()
+
+    def _populate(self) -> None:
         if self._store is not None and self._store.manifest is not None:
             cfg = self._store.manifest.calibration
             if cfg.mode == "scalar":

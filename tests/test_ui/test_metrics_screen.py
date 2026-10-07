@@ -139,7 +139,7 @@ def test_apply_selection_reads_checked_rows_from_each_tab(qtbot) -> None:
     row = _row_for_id(screen._ind_table, "IL-1")
     screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
 
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.metrics.individual == ["IL-1"]
 
@@ -181,7 +181,7 @@ def test_apply_preserves_fields_the_table_has_no_widgets_for(qtbot) -> None:
 
     row = _row_for_id(screen._ind_table, "IL-1")
     screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.metrics.individual == ["IL-1"]
     assert store.manifest.metrics.diagnostic == ["D-1", "D-2"]
@@ -778,3 +778,18 @@ def test_table_builds_without_crashing_for_a_non_conforming_plugin_metric_id(
     qtbot.addWidget(screen)
 
     assert "MyPluginMetric" in _ids_in_table(screen._ind_table)
+
+
+def test_no_apply_button_and_tick_autocommits(qtbot) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    assert not [b for b in screen.findChildren(QPushButton) if "Apply" in b.text()]
+
+    row = _row_for_id(screen._ind_table, "IL-1")
+    screen._ind_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+    qtbot.waitUntil(lambda: store.manifest.metrics.individual == ["IL-1"], timeout=2000)

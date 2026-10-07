@@ -365,3 +365,21 @@ under pooling.
 
 **Alternative considered:** Pool every zone metric (the earlier ROADMAP
 plan). Rejected for the reason above.
+
+---
+
+### D-017 · Parameter screens auto-commit; no Apply buttons
+
+**Decision:** `ui/widgets/autocommit.py::AutoCommit` debounces widget
+changes (200 ms) into the screen's commit method. Screens expose
+`flush()`; `MainWindow._go_to_page` and `_action_validate` call it on the
+outgoing screen. Screens populate from the store when built and suppress
+triggers while populating. Commits use `model_copy` on the current config
+and are skipped when nothing changed.
+
+**Rationale:** An unclicked Apply button silently dropped edits. A
+dirty-bar ("Apply / Discard") was the alternative, but every setting here
+is cheap and reversible, so saving continuously is simpler and safer.
+
+**Alternative considered:** Warn on leave with Apply/Discard. Rejected as
+more friction for no safety gain.

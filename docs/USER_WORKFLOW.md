@@ -523,7 +523,7 @@ the aspirational two-pane layout of earlier drafts):**
 │  ☑ Coverage Gate                     ▲ (scrolls)                  │
 │      Max % missing per individual  [ 10 % ]                       │
 │                                                                    │
-│  [ Apply ]                                                        │
+│  (changes save automatically)                                     │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -578,7 +578,7 @@ preselected; Identity Switch Correction defaults **off**).
 │  (Greyed for a session with no stable identities.)                        │
 │                                                                             │
 │  Quality threshold  [ 0.00 ]                                              │
-│  [ Apply selection ]                                                      │
+│  (changes save automatically)                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -608,9 +608,8 @@ preselected; Identity Switch Correction defaults **off**).
 |---|---|---|
 | 0 metrics selected | Next disabled; tooltip *"Select at least one metric."* | (disabled) |
 
-**Saved at advance:** `MetricSelection` (only when **Apply selection**
-is clicked — the toolbar's Next action advances the page but does not
-itself save the selection).
+**Saved automatically:** `MetricSelection` is committed shortly after each
+change and again when the page is left; there is no Apply button.
 
 ---
 

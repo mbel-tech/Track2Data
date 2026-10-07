@@ -271,10 +271,17 @@ class MainWindow(QMainWindow):
         n = self._stack.count()
         if not (0 <= page_index < n):
             return
+        self._flush_current_page()
         self._stack.setCurrentIndex(page_index)
         self._sidebar.sync_to_page(page_index)
         self._back_action.setEnabled(page_index > 0)
         self._next_action.setEnabled(page_index < n - 1)
+
+    def _flush_current_page(self) -> None:
+        """Commit the outgoing screen's debounced edits before leaving it."""
+        flush = getattr(self._stack.currentWidget(), "flush", None)
+        if callable(flush):
+            flush()
 
     def _go_back(self) -> None:
         self._go_to_page(self._stack.currentIndex() - 1)
@@ -320,6 +327,7 @@ class MainWindow(QMainWindow):
         if not self._store.has_project:
             QMessageBox.warning(self, "Validate pipeline", "No project is open.")
             return
+        self._flush_current_page()
 
         from track2data.api import Engine
 

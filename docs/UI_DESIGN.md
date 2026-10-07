@@ -387,7 +387,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 
 > **Reality note (Part 2 of the post-v0.1.0 GUI fixes):** the real
 > `CalibrationScreen` is a single page (mode radios, mode-specific
-> controls, and Apply, all together) rather than this section's
+> controls, all together; edits auto-commit) rather than this section's
 > aspirational two-screen chooser/data-entry split -- that mismatch
 > predates this note and is unchanged here. What *did* change: there
 > are now three modes, not two -- a "Session calibration" radio was
@@ -740,7 +740,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 - "Select at least one metric." (Next button disabled + tooltip)
 
 **Next Button Logic:**
-- Next is the shared toolbar ◀ Back / Next ▶ action, not a per-screen button — its enabled state depends only on stack position (`page_index < last_page`), not on how many metrics are selected, and it just advances the `QStackedWidget` to the next built stage (the Processing screen). It does not itself save the selection. `MetricSelection` is saved separately by the screen's own **Apply selection** button, which calls `ProjectStore.update_metrics()` (this is what emits `metricsChanged`).
+- Next is the shared toolbar ◀ Back / Next ▶ action, not a per-screen button — its enabled state depends only on stack position (`page_index < last_page`), not on how many metrics are selected, and it just advances the `QStackedWidget` to the next built stage (the Processing screen). It does not itself save the selection. `MetricSelection` is saved by the screen itself: ticking a metric or changing the quality threshold auto-commits after a 200 ms pause (`ui/widgets/autocommit.py`) via `ProjectStore.update_metrics()` (this is what emits `metricsChanged`), and `MainWindow` flushes any pending edit when the page is left.
 - Screen 6.3 (below) is not implemented — there is no config schema or navigation target for it yet, so Next never routes there.
 
 ---

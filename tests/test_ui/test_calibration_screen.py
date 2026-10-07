@@ -89,7 +89,7 @@ def test_apply_custom_mode_sets_scalar_config(qtbot, tmp_path: Path) -> None:
 
     screen._radio_scalar.setChecked(True)
     screen._px_spin.setValue(42.5)
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.calibration.mode == "scalar"
     assert store.manifest.calibration.px_per_cm == pytest.approx(42.5)
@@ -103,7 +103,7 @@ def test_apply_bodylength_mode_clears_px_per_cm(qtbot, tmp_path: Path) -> None:
     qtbot.addWidget(screen)
 
     screen._radio_bl.setChecked(True)
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.calibration.mode == "bodylength"
     assert store.manifest.calibration.px_per_cm is None
@@ -119,7 +119,7 @@ def test_apply_session_mode_sets_mode_unit_and_confirmation(qtbot, tmp_path: Pat
     screen._radio_session.setChecked(True)
     screen._unit_combo.setCurrentText("mm")
     screen._confirm_check.setChecked(True)
-    screen._apply()
+    screen.flush()
 
     cfg = store.manifest.calibration
     assert cfg.mode == "session"
@@ -149,7 +149,7 @@ def test_apply_preserves_bl_min_samples_across_mode_switches(qtbot, tmp_path: Pa
     # this mode's widgets at all, so it must survive untouched.
     screen._radio_scalar.setChecked(True)
     screen._px_spin.setValue(5.0)
-    screen._apply()
+    screen.flush()
 
     assert store.manifest.calibration.bl_min_samples == 99
 
@@ -171,7 +171,7 @@ def test_apply_preserves_length_unit_confirmation_when_applying_another_mode(
     qtbot.addWidget(screen)
 
     screen._radio_bl.setChecked(True)
-    screen._apply()
+    screen.flush()
 
     cfg = store.manifest.calibration
     assert cfg.mode == "bodylength"
@@ -241,3 +241,19 @@ def test_readiness_list_distinguishes_calibrated_from_uncalibrated_sessions(
     rows = [screen._readiness_list.item(i).text() for i in range(screen._readiness_list.count())]
     assert any("calibrated" in r and "12.5" in r for r in rows if r.startswith("calibrated"))
     assert any("not calibrated" in r for r in rows if r.startswith("uncalibrated"))
+
+
+def test_no_apply_button_and_change_autocommits(qtbot, tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+    assert not [b for b in screen.findChildren(QPushButton) if b.text() == "Apply"]
+
+    screen._radio_scalar.setChecked(True)
+    screen._px_spin.setValue(12.5)
+    qtbot.waitUntil(lambda: store.manifest.calibration.px_per_cm == 12.5, timeout=2000)
+    assert store.manifest.calibration.mode == "scalar"
