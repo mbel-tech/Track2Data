@@ -74,12 +74,29 @@ def read_session(folder: Path) -> Session:
     return cls().read(folder)
 
 
+def probe_session(folder: Path) -> Session:
+    """Like ``read_session`` but via ``SessionReader.probe`` -- the cheap path
+    the GUI uses to describe a folder without loading every artefact."""
+    from track2data.core.errors import ImportError_
+
+    cls = detect_reader(folder)
+    if cls is None:
+        raise ImportError_(
+            f"No reader recognised the session folder: {folder}",
+            code="NO_READER",
+            subject=str(folder),
+            remediation="Ensure the folder is a valid idtracker.ai output directory.",
+        )
+    return cls().probe(folder)
+
+
 __all__ = [
     "IDTrackerAiReader",
     "IDTrackerAiV4Reader",
     "IDTrackerAiV5Reader",
     "SessionReader",
     "detect_reader",
+    "probe_session",
     "read_session",
     "register",
 ]

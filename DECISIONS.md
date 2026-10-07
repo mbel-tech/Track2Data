@@ -383,3 +383,22 @@ is cheap and reversible, so saving continuously is simpler and safer.
 
 **Alternative considered:** Warn on leave with Apply/Discard. Rejected as
 more friction for no safety gain.
+
+---
+
+### D-018 · Cheap session probe via `SessionReader.probe()`
+
+**Decision:** `SessionReader.probe(folder)` (default: `read()`) returns the
+facts the GUI shows. The unified idtracker.ai reader overrides it to skip
+bbox tables, matching results, inconsistent frames, fragments and the
+log. `ProjectStore` probes through `readers.probe_session` on import and on
+project open.
+
+**Rationale:** The trajectory payload is still read: `has_stable_identities`
+falls back to NaN coverage, so identity status needs it, and the pickled
+`.npy` payload cannot be memory-mapped. Skipping the other artefacts is the
+safe saving; a payload-free probe would need format-specific work and a
+different identity heuristic.
+
+**Not done:** probes still share the single-thread `TaskRunner` pool with
+pipeline runs.

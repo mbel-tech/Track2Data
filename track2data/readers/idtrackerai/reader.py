@@ -61,6 +61,19 @@ class IDTrackerAiReader(SessionReader):
         return detect(folder) is not None
 
     def read(self, folder: Path) -> Session:
+        return self._read(folder, light=False)
+
+    def probe(self, folder: Path) -> Session:
+        """Session facts without the bulky opportunistic artefacts.
+
+        Skips the bounding-box tables, matching results, inconsistent-frame
+        list, fragment records and the tracking log -- none of which feed
+        ``SessionFacts`` -- so importing a batch of folders does not pull
+        all of them into memory just to fill in a table row.
+        """
+        return self._read(folder, light=True)
+
+    def _read(self, folder: Path, *, light: bool) -> Session:
         folder = Path(folder)
         hit = detect(folder)
         if hit is None:
@@ -93,6 +106,17 @@ class IDTrackerAiReader(SessionReader):
         # Enrich from session.json (tracking_intervals, roi_list, etc.).
         session = self._enrich_from_session_json(session, session_meta)
 
+        # Attach preprocessing/ image paths first: cheap, and the zone canvas
+        # backdrop comes from here even for a probe.
+        images = find_preprocessing_images(folder)
+        if images:
+            session = session.model_copy(update={
+                "roi_mask_path": images.get("roi_mask"),
+                "background_image_path": images.get("background"),
+            })
+        if light:
+            return session
+
         # Attach log digest, with durations merged in from session.json's
         # structured `timers` dict -- the log's own duration text ("It took
         # H:MM:SS") has no reliable regex; timers has real ISO timestamps.
@@ -110,15 +134,6 @@ class IDTrackerAiReader(SessionReader):
             "bbox_summary": load_bbox_summary(folder),
             "matching_results": load_matching_results(folder),
         })
-
-        # Attach preprocessing/ image paths (opportunistic — data_policy
-        # can delete this folder entirely).
-        images = find_preprocessing_images(folder)
-        if images:
-            session = session.model_copy(update={
-                "roi_mask_path": images.get("roi_mask"),
-                "background_image_path": images.get("background"),
-            })
 
         # Attach parsed list_of_fragments.json (opportunistic, same caveat).
         fragments_data = load_fragments(folder)
