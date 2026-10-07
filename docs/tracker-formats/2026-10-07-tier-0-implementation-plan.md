@@ -1309,28 +1309,27 @@ In `test_reader_contract.py` replace `registry.detect_reader(folder)().read(fold
 
 ---
 
-## PR T0-4: the read-only scan
+## PR T0-4: the read-only scan (built)
 
-**Branch:** `feat/scan-core` · **Expanded to code level when T0-3 has merged.**
+**Branch:** `feat/scan-core` · **Status:** implemented in `5ca75a6` and `e34170c`; this section records the design as built.
 
-**Interfaces.**
+**What was built.**
 
-- `readers/index.py`: `ScanBudget(max_entries=100_000, max_depth=4, max_seconds=30.0, max_peeks=2_000, peek_bytes=65_536)`, `IndexEntry(path, name, is_dir, size, cloud_only, depth)`, `ScanIndex(root, entries, truncated, warnings)` with `children(path)` and `files_named(...)`, and `build_index(roots, budget=ScanBudget(), progress=None, token=None) -> ScanIndex`.
-- `readers/peek.py`: `Peeker(budget)` with `head_bytes`, `csv_header_rows`, `npy_header`, `zip_names`, `h5_signature` (root keys, node types, string attributes only), `mat_variables`, `sqlite_tables`. Every method returns `None` on any failure and refuses `cloud_only` entries.
-- `readers/scan.py`: `scan(roots, *, budget=None, progress=None, token=None) -> ScanResult(groups, unmatched, truncated, warnings)`, `lenient_detection(result, reader_name)`.
-- `SessionReader.discover(cls, index, peek) -> list[Detection]` defaulting to a wrapper over `detect`, called on candidate directories. The idtracker.ai readers implement it: a directory with `trajectories/` holding a known trajectories file is a session, and a `.npy` header peek separates the unified reader (object dtype) from the v5 reader (raw float array).
+- `readers/index.py`: `ScanBudget(max_entries=100_000, max_depth=4, max_seconds=30.0, max_peeks=2_000, peek_bytes=65_536)`; `IndexEntry(path, is_dir, size, cloud_only, depth)`; `ScanIndex` (`walk`, `dirs`, `entry`, `children`, `child`, `file_types`, plus `truncated`, `warnings`, `seconds`); `classify_attributes(attrs, is_dir=...)`, the Windows attribute rules as a pure function so Linux CI tests them; `build_index(roots, budget, progress, token, clock=...)`.
+- `readers/peek.py`: `Peeker(budget, index)` with `head_bytes`, `text_lines` and `npy_header` (returns `NpyHeader(shape, dtype, fortran_order)` and never unpickles). Peeks for other containers (HDF5 signature, MAT variables, zip members, SQLite) are added with the first reader that needs them.
+- `readers/detection.py` (T0-3) holds the types. `readers/discovery.py` holds `claim_sessions(index, accept)`, the breadth-first walk where a claimed folder is a leaf.
+- `readers/scan.py`: `scan(roots, *, budget, progress, token) -> ScanResult` and the pure `scan_index(index, *, budget, token)`. `ScanResult(roots, groups, file_types, truncated, warnings, entries, seconds)`; `FormatGroup(detections)` with `.best`. Weaker claims inside a folder another reader is sure about are pruned, and session ids are made unique from their paths.
+- `SessionReader.discover(index, peek)` has a default that wraps `detect` (MEDIUM confidence). Both idtracker.ai readers implement it. A session's own `trajectories/` subfolder, picked on its own, gives a LOW suggestion pointing at its parent.
+- `IDTrackerAiReader.detect` now declines the v5 layout (a raw-array `trajectories.npy` beside a `video_object.npy`), so auto-detection reaches the v5 reader instead of failing with `IDT_FORMAT_AMBIGUOUS`. A raw array with no `video_object.npy` is still claimed, so reading it explains the problem instead of "no reader recognised the folder".
 - `core/progress.py`: `Stage` gains `"scan"`.
 
-**Tests (all in `tests/test_scan/`).**
+**Deferred from the original outline**, until something needs it:
 
-- A folder of 70 `tiny_real` sessions gives one group, HIGH, 70 candidates, in under 2 s; the root being a session itself; the user picking `trajectories/` or something inside a session gives a hint.
-- v5 versus unified resolved by the `.npy` header.
-- Junk: empty directory, videos only, zero-byte files, `._*` and `__MACOSX` doubles, symlink and junction loops (Windows attributes injected), cloud-only placeholders (assert the peeker is never called on them), permission-denied directories.
-- Budget caps set `truncated=True`; cancellation within one second.
-- The scan never writes (tree hash before and after), never unpickles (a pickle that would raise on load is ignored), and never raises (hypothesis over generated indexes).
-- The golden detection table starts with the 10 suite case folders and the idtracker.ai fixtures, and a collision matrix requires zero HIGH on every other format.
+- `lenient_detection` (the "it is actually X" re-run): needed by the dialog's "Choose software…" path, so it arrives with T0-6 and T0-8.
+- The HDF5, MAT, zip and SQLite peeks: they arrive with the first reader that uses each.
+- The golden table over the suite's ten case folders: it arrives with the first real reader (T1-2), when there is something to expect.
 
-**Acceptance.** The 70-session root scans to one HIGH group with 70 candidates; the `corpus_local` test does the same on the real corpus in under 2 s.
+**Verified.** 89 scan tests, including a property test that any tree scans deterministically with safe, unique ids. A mutation check shows the detect/discover agreement test fails without the v5 rule. On the real 70-session corpus one scan gives one HIGH group of 70 sessions (3,847 entries, 0.19 s for the walk and discovery). The default suite is 2,110 passed.
 
 ---
 
