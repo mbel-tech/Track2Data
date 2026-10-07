@@ -1,0 +1,122 @@
+"""Reader options: what a reader must be told because its files do not say.
+
+Most tracker outputs record neither the frame rate nor the frame size (DeepLabCut, SLEAP,
+Anipose), and several need a choice (which keypoint stands for the animal). A reader declares
+these as ``parameters``; the confirm dialog renders them, the manifest stores the answers
+(``SessionRef.reader_options``), and ``read(..., options=...)`` receives them.
+
+A required option that is missing is an error and never a default: a made-up frame rate
+silently corrupts every speed metric.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel
+
+from track2data.core.errors import ImportError_
+
+ParameterKind = Literal["int", "float", "str", "bool", "choice", "multichoice", "path"]
+ValueSource = Literal["file", "video", "tool-default", "required", "user"]
+
+
+class ReaderParameter(BaseModel):
+    """One option a reader accepts."""
+
+    name: str
+    label: str
+    kind: ParameterKind
+    default: Any = None
+    required: bool = False
+    choices: tuple[str, ...] = ()
+    help: str = ""
+    #: "group": one value for every session in a scan group; "session": a per-session column.
+    scope: Literal["group", "session"] = "group"
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+class ProposedValue(BaseModel):
+    """A value a detection proposes for a parameter, and where it came from."""
+
+    value: Any = None
+    source: ValueSource = "required"
+
+
+def _invalid(reader: str, name: str, why: str) -> ImportError_:
+    return ImportError_(
+        f"Reader {reader!r}: option {name!r} {why}",
+        code="READER_OPTION_INVALID",
+        subject=name,
+        remediation=f"Correct option {name!r} in the confirm dialog or with --option.",
+    )
+
+
+def _check(reader: str, spec: ReaderParameter, value: Any) -> Any:
+    """Return *value* if it suits *spec*, otherwise raise READER_OPTION_INVALID."""
+    kind, name = spec.kind, spec.name
+    if kind in ("int", "float"):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise _invalid(reader, name, f"must be a number, got {value!r}")
+        if not math.isfinite(value):
+            raise _invalid(reader, name, "must be finite")
+        if kind == "int" and not float(value).is_integer():
+            raise _invalid(reader, name, f"must be an integer, got {value!r}")
+        if spec.minimum is not None and value < spec.minimum:
+            raise _invalid(reader, name, f"must be at least {spec.minimum}")
+        if spec.maximum is not None and value > spec.maximum:
+            raise _invalid(reader, name, f"must be at most {spec.maximum}")
+    elif kind == "bool":
+        if not isinstance(value, bool):
+            raise _invalid(reader, name, f"must be true or false, got {value!r}")
+    elif kind == "str":
+        if not isinstance(value, str):
+            raise _invalid(reader, name, f"must be text, got {value!r}")
+    elif kind == "choice":
+        if value not in spec.choices:
+            raise _invalid(reader, name, f"must be one of {list(spec.choices)}, got {value!r}")
+    elif kind == "multichoice":
+        if isinstance(value, str) or not isinstance(value, Sequence | set | frozenset):
+            raise _invalid(reader, name, "must be a list of choices")
+        extra = [item for item in value if item not in spec.choices]
+        if extra:
+            raise _invalid(reader, name, f"has unknown choices {extra}")
+    elif kind == "path" and not isinstance(value, str | Path):
+        raise _invalid(reader, name, f"must be a path, got {value!r}")
+    return value
+
+
+def resolve_options(
+    reader: str,
+    parameters: Sequence[ReaderParameter],
+    options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Validate *options* against *parameters* and fill the declared defaults.
+
+    Unknown names, wrong types and out-of-range values raise READER_OPTION_INVALID. A required
+    option that is absent (or None) raises READER_OPTION_MISSING with its name as the subject.
+    """
+    given = dict(options or {})
+    unknown = sorted(set(given) - {p.name for p in parameters})
+    if unknown:
+        raise _invalid(reader, ", ".join(unknown), "is not an option of this reader")
+    resolved: dict[str, Any] = {}
+    for spec in parameters:
+        value = given.get(spec.name)
+        if value is None:
+            if spec.required:
+                raise ImportError_(
+                    f"Reader {reader!r} needs option {spec.name!r} ({spec.label}); "
+                    "the files do not record it",
+                    code="READER_OPTION_MISSING",
+                    subject=spec.name,
+                    remediation=f"Supply {spec.name!r} in the confirm dialog or with --option.",
+                )
+            resolved[spec.name] = spec.default
+        else:
+            resolved[spec.name] = _check(reader, spec, value)
+    return resolved
