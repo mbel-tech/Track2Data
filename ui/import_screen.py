@@ -10,15 +10,21 @@ Widgets:
   • remove_btn     QPushButton → remove every selected row
   • locate_btn     QPushButton → pick the video file for the selected session
                     (stored as ProjectManifest.video_overrides)
+  • scan row       progress bar + Cancel while a folder is being looked at
   • status_label   QLabel  "{n} sessions imported"
 
-Also accepts folders dropped directly onto the screen (setAcceptDrops)
--- see dragEnterEvent/dragMoveEvent/dropEvent below.
+Adding is two steps. Pointing at folders (the picker, or a drop of folders or
+files) starts a background scan; when it finishes, the confirm dialog shows
+which tracking software wrote them and lets the user amend that. Only the
+dialog's "Add" puts sessions in the project. A scan that finds nothing still
+opens the dialog (its empty state says what was seen); a scan that fails is
+written inline, never as a modal.
 
 Reader/fps/frames/animals/identity are populated from
-ProjectStore.session_facts(), a cache built off the same background
-read_session() probe add_session() already submits (see
-ui/store/session_facts.py) -- they show as "—" until that probe lands.
+ProjectStore.session_facts(), a cache built off the background probe that
+adding a session submits (see ui/store/session_facts.py) -- they show as "—"
+until that probe lands. The Reader column is the exception: it comes from the
+project itself, so it still names the software after a project is reopened.
 
 The Identity-free column is the one editable cell on this screen. It
 starts from what idtracker.ai declared (session.json's
@@ -43,6 +49,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListView,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -51,8 +58,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.readers import find_reader
+from track2data.readers.confirm import ConfirmDraft
+from ui.dialogs.confirm_format_dialog import ConfirmFormatDialog
+
 _COLUMN_HEADERS = [
-    "Session ID", "Reader", "FPS", "Frames", "Animals", "Identity", "Identity-free",
+    "Session ID",
+    "Reader",
+    "FPS",
+    "Frames",
+    "Animals",
+    "Identity",
+    "Identity-free",
     "Video",
 ]
 (
@@ -81,7 +98,7 @@ _OPTION_DONT_USE_NATIVE = QFileDialog.Option.DontUseNativeDialog
 
 
 class ImportScreen(QWidget):
-    """Stage 2 — Import idtracker.ai session folders."""
+    """Stage 2 — Add sessions: point at folders, confirm the software, add."""
 
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -91,12 +108,17 @@ class ImportScreen(QWidget):
         # which would write the value straight back to the store and
         # re-enter the refresh.
         self._refreshing = False
+        self._scan_id: str | None = None  # the scan whose answer is still wanted
+        self._dialog: ConfirmFormatDialog | None = None
         self._build_ui()
         self.setAcceptDrops(True)
         if store is not None:
             store.sessionsChanged.connect(self._refresh_table)
             store.sessionFactsChanged.connect(self._refresh_table)
             store.projectChanged.connect(self._refresh_table)
+            store.scanProgress.connect(self._on_scan_progress)
+            store.scanFinished.connect(self._on_scan_finished)
+            store.scanCancelled.connect(self._on_scan_cancelled)
         # A screen built against a store that already has sessions (e.g.
         # navigating back to this page) must show them immediately, not
         # only after the next signal -- the constructor never called
@@ -115,8 +137,9 @@ class ImportScreen(QWidget):
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Add one or more <tt>idtracker.ai</tt> output folders, "
-            "or drag and drop them here."
+            "Add the folder your tracking software wrote its output to, or drag and drop it "
+            "here. Track2Data looks inside, works out which software wrote it, and asks you "
+            "to confirm before anything is added."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("font-size: 14px; color: #555;")
@@ -142,6 +165,7 @@ class ImportScreen(QWidget):
         # ── buttons ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         add_btn = QPushButton("Add Folders…")
+        add_btn.setObjectName("add_folders")
         add_btn.clicked.connect(self._add_folders)
         remove_btn = QPushButton("Remove Selected")
         remove_btn.clicked.connect(self._remove_selected)
@@ -158,6 +182,27 @@ class ImportScreen(QWidget):
         btn_row.addStretch()
         root.addLayout(btn_row)
         self._update_locate_enabled()
+
+        # ── scan in progress / scan failed ────────────────────────────────
+        self._scan_row = QWidget()
+        scan_layout = QHBoxLayout(self._scan_row)
+        scan_layout.setContentsMargins(0, 0, 0, 0)
+        self._scan_label = QLabel("Looking for tracking output…")
+        self._scan_bar = QProgressBar()
+        self._scan_bar.setRange(0, 100)
+        self._scan_cancel_btn = QPushButton("Cancel")
+        self._scan_cancel_btn.clicked.connect(self._cancel_scan)
+        scan_layout.addWidget(self._scan_label)
+        scan_layout.addWidget(self._scan_bar, 1)
+        scan_layout.addWidget(self._scan_cancel_btn)
+        self._scan_row.hide()
+        root.addWidget(self._scan_row)
+
+        self._scan_message = QLabel()
+        self._scan_message.setWordWrap(True)
+        self._scan_message.setStyleSheet("color: #c0392b;")
+        self._scan_message.hide()
+        root.addWidget(self._scan_message)
 
         # ── status ─────────────────────────────────────────────────────
         self._status_label = QLabel("0 sessions imported")
@@ -184,40 +229,80 @@ class ImportScreen(QWidget):
 
         if dialog.exec() != _DIALOG_ACCEPTED:
             return
-        self._import_folders(Path(p) for p in dialog.selectedFiles())
+        self._import_paths([Path(p) for p in dialog.selectedFiles()])
 
-    def _import_folders(self, folders) -> None:
-        if self._store is None:
+    # ── scan -> confirm -> add ─────────────────────────────────────────────
+
+    def _import_paths(self, paths) -> None:
+        """Start looking at *paths*; the confirm dialog follows when the scan is done."""
+        if self._store is None or not paths:
             return
-        failed: list[str] = []
-        for folder in folders:
-            try:
-                self._store.add_session(folder)
-            except Exception as exc:
-                failed.append(f"{folder}: {exc}")
-        if failed:
-            QMessageBox.critical(
-                self, "Error", "Failed to add session(s):\n" + "\n".join(failed)
-            )
+        if self._scan_id is not None:  # a newer pick replaces one still running
+            self._store.cancel_scan(self._scan_id)
+        self._scan_message.hide()
+        self._scan_label.setText("Looking for tracking output…")
+        self._scan_bar.setValue(0)
+        self._scan_row.show()
+        self._scan_id = self._store.scan_folders(list(paths))
+
+    def _cancel_scan(self) -> None:
+        if self._store is not None and self._scan_id is not None:
+            self._store.cancel_scan(self._scan_id)
+
+    def _on_scan_progress(self, task_id: str, event) -> None:
+        if task_id != self._scan_id:
+            return
+        if event.message:
+            self._scan_label.setText(event.message)
+        self._scan_bar.setValue(event.percent)
+
+    def _on_scan_cancelled(self, task_id: str) -> None:
+        if task_id == self._scan_id:
+            self._scan_id = None
+            self._scan_row.hide()
+
+    def _on_scan_finished(self, task_id: str, result) -> None:
+        if task_id != self._scan_id:
+            return  # the answer to a scan that has been replaced
+        self._scan_id = None
+        self._scan_row.hide()
+        if isinstance(result, Exception):
+            self._scan_message.setText(f"Could not look at that folder: {result}")
+            self._scan_message.show()
+            return
+        existing = list(self._store.manifest.sessions) if self._store.manifest else []
+        dialog = ConfirmFormatDialog(ConfirmDraft(result, existing=existing), self)
+        dialog.finished.connect(lambda code, d=dialog: self._on_confirm_finished(d, code))
+        self._dialog = dialog
+        # open(), never exec(): exec() would block the GUI driver's event loop.
+        dialog.open()
+
+    def _on_confirm_finished(self, dialog: ConfirmFormatDialog, code: int) -> None:
+        if self._dialog is dialog:
+            self._dialog = None
+        if code == ConfirmFormatDialog.DialogCode.Accepted and self._store is not None:
+            self._store.add_confirmed(dialog.sessions())
+        dialog.deleteLater()
 
     # ── drag and drop ────────────────────────────────────────────────────
 
-    def _directories_in(self, event) -> list[Path]:
+    def _paths_in(self, event) -> list[Path]:
+        """What was dragged: folders, and single tracking files (some trackers write one)."""
         mime = event.mimeData()
         if not mime.hasUrls():
             return []
         paths = (Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile())
-        return [p for p in paths if p.is_dir()]
+        return [p for p in paths if p.exists()]
 
     def dragEnterEvent(self, event) -> None:
-        if self._directories_in(event):
+        if self._paths_in(event):
             event.acceptProposedAction()
             self._set_drag_active(True)
         else:
             event.ignore()
 
     def dragMoveEvent(self, event) -> None:
-        if self._directories_in(event):
+        if self._paths_in(event):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -227,18 +312,16 @@ class ImportScreen(QWidget):
 
     def dropEvent(self, event) -> None:
         self._set_drag_active(False)
-        folders = self._directories_in(event)
-        if folders:
-            self._import_folders(folders)
+        paths = self._paths_in(event)
+        if paths:
+            self._import_paths(paths)
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def _set_drag_active(self, active: bool) -> None:
         # Blue-border feedback on drag-over, per UI_DESIGN.md §6.2.
-        self._table.setStyleSheet(
-            "QTableWidget { border: 2px solid #2980b9; }" if active else ""
-        )
+        self._table.setStyleSheet("QTableWidget { border: 2px solid #2980b9; }" if active else "")
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -251,8 +334,7 @@ class ImportScreen(QWidget):
         }
         if self._store is not None and self._store.manifest is not None:
             sessions = [
-                s for s in self._store.manifest.sessions
-                if s.session_id not in ids_to_remove
+                s for s in self._store.manifest.sessions if s.session_id not in ids_to_remove
             ]
             self._store.update_sessions(sessions)
 
@@ -326,6 +408,12 @@ class ImportScreen(QWidget):
         )
 
     @staticmethod
+    def _reader_label(name: str) -> str:
+        """The reader's display name; the bare name for one this version no longer has."""
+        reader = find_reader(name)
+        return (reader.display_name or name) if reader is not None else name
+
+    @staticmethod
     def _identity_free_tooltip(ref, facts) -> str:
         if facts is None:
             return "Reading the session folder…"
@@ -371,11 +459,12 @@ class ImportScreen(QWidget):
             id_item = QTableWidgetItem(ref.session_id)
             id_item.setData(_ROLE_SESSION_ID, ref.session_id)
             self._table.setItem(row, _COL_SESSION_ID, id_item)
+            saved_reader = self._reader_label(ref.reader) if ref.reader else None
             if facts is None:
-                values = [_PLACEHOLDER] * 5
+                values = [saved_reader or _PLACEHOLDER] + [_PLACEHOLDER] * 4
             else:
                 values = [
-                    facts.reader,
+                    saved_reader or facts.reader,
                     str(facts.fps),
                     str(facts.n_frames),
                     str(facts.n_animals),
@@ -394,9 +483,7 @@ class ImportScreen(QWidget):
             # back on as a side effect of setting a check state, so clearing
             # it first would be silently undone.
             free_item.setCheckState(
-                Qt.CheckState.Checked
-                if ref.is_identity_free()
-                else Qt.CheckState.Unchecked
+                Qt.CheckState.Checked if ref.is_identity_free() else Qt.CheckState.Unchecked
             )
             flags = free_item.flags() & ~Qt.ItemFlag.ItemIsEditable
             # Not checkable until the probe has landed: before that the box

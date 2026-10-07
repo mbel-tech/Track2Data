@@ -1415,6 +1415,17 @@ In `test_reader_contract.py` replace `registry.detect_reader(folder)().read(fold
 
 **Acceptance.** A scan of the 70-session corpus root and one Enter adds all 70 sessions.
 
+**Built (T0-8).** `ConfirmFormatDialog` and the `ImportScreen` routing as above. Two items were deliberately
+left out, with reasons:
+
+- *No shared `ui/widgets/parameter_form.py` extraction.* The confirm dialog uses its own
+  `ReaderOptionsForm` (`ui/widgets/reader_options_form.py`), whose controls are driven by
+  `ReaderParameter` and which has a "not set" state the metric form does not. Merging the two would change
+  `MetricConfigDialog` for no user-visible gain; revisit if a third form needs the same builder.
+- *No "Re-detect" after adding, and no per-session option columns.* The dialog is where the software is
+  chosen; to change it later, remove the sessions and add them again. A reader with per-session options
+  (an arena choice) shows them in the shared form until a reader needs a per-row column.
+
 ---
 
 ## PR T0-9: driver verbs and recognise-only formats

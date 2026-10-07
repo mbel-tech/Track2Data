@@ -65,7 +65,6 @@ def _cache_facts(store, session_id: str, **overrides):
     store._session_facts[session_id] = SessionFacts(**fields)
 
 
-
 # ── table population ────────────────────────────────────────────────────────
 
 
@@ -225,7 +224,9 @@ class _FakeMultiSelectDialog:
         return [str(p) for p in self._selected]
 
 
-def test_add_folders_imports_every_selected_folder(qtbot, tmp_path: Path, monkeypatch) -> None:
+def test_add_folders_scans_what_was_picked_and_adds_nothing_yet(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
     from ui.import_screen import ImportScreen
 
     f1, f2 = tmp_path / "s1", tmp_path / "s2"
@@ -234,12 +235,15 @@ def test_add_folders_imports_every_selected_folder(qtbot, tmp_path: Path, monkey
     monkeypatch.setattr("ui.import_screen.QFileDialog", _FakeMultiSelectDialog([f1, f2]))
 
     store = _make_store(tmp_path)
+    asked: list[list[Path]] = []
+    monkeypatch.setattr(store, "scan_folders", lambda paths: asked.append(list(paths)) or "t1")
     screen = ImportScreen(store)
     qtbot.addWidget(screen)
 
     screen._add_folders()
 
-    assert {s.session_id for s in store.manifest.sessions} == {"s1", "s2"}
+    assert asked == [[f1, f2]]
+    assert store.manifest.sessions == []
 
 
 # ── drag and drop ────────────────────────────────────────────────────────────
@@ -304,74 +308,281 @@ def test_drag_enter_accepts_an_existing_directory(qtbot, tmp_path: Path) -> None
     assert accepted
 
 
-def test_drag_enter_rejects_a_plain_file(qtbot, tmp_path: Path) -> None:
+def test_drag_enter_accepts_a_tracking_file_too(qtbot, tmp_path: Path) -> None:
     from ui.import_screen import ImportScreen
 
     store = _make_store(tmp_path)
     screen = ImportScreen(store)
     qtbot.addWidget(screen)
 
-    plain_file = tmp_path / "not_a_folder.csv"
-    plain_file.write_text("x")
-    accepted = _fire_drag_enter(screen, [plain_file])
+    one_file = tmp_path / "tracks.csv"
+    one_file.write_text("x")
 
-    assert not accepted
+    assert _fire_drag_enter(screen, [one_file])
 
 
-def test_drop_imports_every_dropped_directory(qtbot, tmp_path: Path) -> None:
+def test_drag_enter_rejects_something_that_is_not_on_disk(qtbot, tmp_path: Path) -> None:
     from ui.import_screen import ImportScreen
 
-    f1, f2 = tmp_path / "s1", tmp_path / "s2"
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+
+    assert not _fire_drag_enter(screen, [tmp_path / "does_not_exist"])
+
+
+def test_drop_scans_everything_dropped(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from ui.import_screen import ImportScreen
+
+    f1 = tmp_path / "s1"
     f1.mkdir()
-    f2.mkdir()
-
-    store = _make_store(tmp_path)
-    screen = ImportScreen(store)
-    qtbot.addWidget(screen)
-
-    event = _urls_event_drop([f1, f2])
-    screen.dropEvent(event)
-
-    assert {s.session_id for s in store.manifest.sessions} == {"s1", "s2"}
-
-
-def test_drop_ignores_files_mixed_in_with_directories(qtbot, tmp_path: Path) -> None:
-    from ui.import_screen import ImportScreen
-
-    folder = tmp_path / "s1"
-    folder.mkdir()
-    plain_file = tmp_path / "not_a_folder.csv"
+    plain_file = tmp_path / "tracks.csv"
     plain_file.write_text("x")
 
     store = _make_store(tmp_path)
+    asked: list[list[Path]] = []
+    monkeypatch.setattr(store, "scan_folders", lambda paths: asked.append(list(paths)) or "t1")
     screen = ImportScreen(store)
     qtbot.addWidget(screen)
 
-    event = _urls_event_drop([folder, plain_file])
-    screen.dropEvent(event)
+    screen.dropEvent(_urls_event_drop([f1, plain_file]))
 
-    assert [s.session_id for s in store.manifest.sessions] == ["s1"]
-
-
-# ── duplicate-folder guard (project_store.add_session) ──────────────────────
+    assert asked == [[f1, plain_file]]
+    assert store.manifest.sessions == []
 
 
-def test_dropping_the_same_folder_twice_does_not_duplicate_the_session(
+# ── scan -> confirm -> add ──────────────────────────────────────────────────
+
+
+def _idtracker_root(tiny_real_session: Path, tmp_path: Path, names=("s1", "s2")) -> Path:
+    import shutil
+
+    root = tmp_path / "root"
+    for name in names:
+        shutil.copytree(tiny_real_session, root / name)
+    return root
+
+
+def _scan_to_dialog(qtbot, screen, root: Path):
+    screen._import_paths([root])
+    qtbot.waitUntil(lambda: screen._dialog is not None, timeout=8000)
+    return screen._dialog
+
+
+def test_a_scanned_folder_opens_the_confirm_dialog_and_adds_nothing_yet(
+    qtbot, tiny_real_session: Path, tmp_path: Path
+) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+
+    dialog = _scan_to_dialog(qtbot, screen, _idtracker_root(tiny_real_session, tmp_path))
+
+    assert dialog.isVisible()
+    assert dialog.draft.reader == "idtrackerai"
+    assert [row.session_id for row in dialog.draft.rows] == ["s1", "s2"]
+    assert store.manifest.sessions == []
+
+
+def test_confirming_adds_the_sessions_with_the_reader_that_was_confirmed(
+    qtbot, tiny_real_session: Path, tmp_path: Path
+) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    dialog = _scan_to_dialog(qtbot, screen, _idtracker_root(tiny_real_session, tmp_path))
+
+    dialog.ok_button.click()
+
+    refs = store.manifest.sessions
+    assert {r.session_id for r in refs} == {"s1", "s2"}
+    assert {r.reader for r in refs} == {"idtrackerai"}
+    assert {r.reader_chosen_by for r in refs} == {"detected"}
+    assert screen._dialog is None
+
+
+def test_cancelling_the_dialog_adds_nothing(qtbot, tiny_real_session: Path, tmp_path: Path) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    dialog = _scan_to_dialog(qtbot, screen, _idtracker_root(tiny_real_session, tmp_path))
+
+    dialog.cancel_button.click()
+
+    assert store.manifest.sessions == []
+    assert screen._dialog is None
+
+
+def test_leaving_a_session_out_in_the_dialog_leaves_it_out_of_the_project(
+    qtbot, tiny_real_session: Path, tmp_path: Path
+) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    dialog = _scan_to_dialog(qtbot, screen, _idtracker_root(tiny_real_session, tmp_path))
+
+    dialog.table.item(1, 0).setCheckState(Qt.CheckState.Unchecked)
+    dialog.ok_button.click()
+
+    assert [r.session_id for r in store.manifest.sessions] == ["s1"]
+
+
+def test_a_session_already_in_the_project_is_marked_when_the_folder_is_scanned_again(
+    qtbot, tiny_real_session: Path, tmp_path: Path
+) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    root = _idtracker_root(tiny_real_session, tmp_path)
+    _scan_to_dialog(qtbot, screen, root).ok_button.click()
+
+    second = _scan_to_dialog(qtbot, screen, root)
+
+    assert all(row.already_added for row in second.draft.rows)
+    assert not second.ok_button.isEnabled()
+
+
+def test_a_folder_with_nothing_recognisable_opens_the_dialog_in_its_empty_state(
     qtbot, tmp_path: Path
 ) -> None:
     from ui.import_screen import ImportScreen
 
-    folder = tmp_path / "s1"
-    folder.mkdir()
-
+    junk = tmp_path / "junk"
+    junk.mkdir()
+    (junk / "notes.txt").write_text("hello")
     store = _make_store(tmp_path)
     screen = ImportScreen(store)
     qtbot.addWidget(screen)
 
-    screen.dropEvent(_urls_event_drop([folder]))
-    screen.dropEvent(_urls_event_drop([folder]))
+    dialog = _scan_to_dialog(qtbot, screen, junk)
 
-    assert [s.session_id for s in store.manifest.sessions] == ["s1"]
+    assert dialog.draft.is_empty
+    assert dialog.ok_button.isHidden()
+
+
+def test_a_scan_in_progress_is_shown_with_a_way_to_stop_it(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(store, "scan_folders", lambda paths: "t1")
+    stopped: list[str] = []
+    monkeypatch.setattr(store, "cancel_scan", stopped.append)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._scan_row.isHidden()
+
+    screen._import_paths([tmp_path])
+    assert not screen._scan_row.isHidden()
+
+    screen._scan_cancel_btn.click()
+    assert stopped == ["t1"]
+
+    store.scanCancelled.emit("t1")
+    assert screen._scan_row.isHidden()
+    assert screen._dialog is None
+
+
+def test_scan_progress_is_written_next_to_the_bar(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from track2data.core.progress import ProgressEvent
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(store, "scan_folders", lambda paths: "t1")
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._import_paths([tmp_path])
+
+    store.scanProgress.emit("t1", ProgressEvent("scan", 40, 100, message="40 entries"))
+
+    assert "40 entries" in screen._scan_label.text()
+    assert screen._scan_bar.value() == 40
+
+
+def test_a_failed_scan_says_so_inline_without_a_modal(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(store, "scan_folders", lambda paths: "t1")
+    modals: list[object] = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: modals.append(a))
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._import_paths([tmp_path])
+
+    store.scanFinished.emit("t1", RuntimeError("the disk went away"))
+
+    assert not screen._scan_message.isHidden()
+    assert "the disk went away" in screen._scan_message.text()
+    assert screen._scan_row.isHidden() and screen._dialog is None
+    assert modals == []
+
+
+def test_a_new_scan_replaces_one_still_running(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    ids = iter(["t1", "t2"])
+    monkeypatch.setattr(store, "scan_folders", lambda paths: next(ids))
+    stopped: list[str] = []
+    monkeypatch.setattr(store, "cancel_scan", stopped.append)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._import_paths([tmp_path])
+    screen._import_paths([tmp_path])
+
+    assert stopped == ["t1"]
+
+
+def test_an_old_scans_result_is_ignored(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    monkeypatch.setattr(store, "scan_folders", lambda paths: "t2")
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._import_paths([tmp_path])
+
+    store.scanFinished.emit("t1", RuntimeError("stale"))
+
+    assert not screen._scan_row.isHidden()  # still waiting for t2
+    assert screen._scan_message.isHidden()
+
+
+# ── the Reader column comes from the project, not only from the probe ───────
+
+
+def test_the_reader_column_names_the_saved_reader_before_the_probe_lands(
+    qtbot, tmp_path: Path
+) -> None:
+    from track2data.core.models import SessionRef
+    from track2data.readers import get_reader
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    ref = SessionRef(session_id="a", folder=tmp_path / "a", sha256="", reader="idtrackerai")
+    store.update_sessions([ref])
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+
+    shown = screen._table.item(0, 1).text()
+
+    assert shown == get_reader("idtrackerai").display_name
+    assert shown != "—"
 
 
 # ── identity-free override checkbox ────────────────────────────────────────
@@ -383,9 +594,7 @@ def _free_cell(screen):
     return screen._table.item(0, _COL_IDENTITY_FREE)
 
 
-def test_identity_free_checkbox_is_disabled_until_the_probe_lands(
-    qtbot, tmp_path: Path
-) -> None:
+def test_identity_free_checkbox_is_disabled_until_the_probe_lands(qtbot, tmp_path: Path) -> None:
     """Before the probe there is nothing to show: an unchecked box would
     assert the session preserves identity, which is not yet known."""
     from ui.import_screen import ImportScreen
@@ -431,7 +640,9 @@ def test_identity_free_checkbox_starts_checked_when_the_tracker_says_so(
     store.update_sessions(
         [
             SessionRef(
-                session_id="session_a", folder=folder, sha256="",
+                session_id="session_a",
+                folder=folder,
+                sha256="",
                 track_wo_identities=True,
             )
         ]
@@ -446,9 +657,7 @@ def test_identity_free_checkbox_starts_checked_when_the_tracker_says_so(
     assert "without identification" in cell.toolTip()
 
 
-def test_ticking_the_checkbox_writes_an_override_to_the_store(
-    qtbot, tmp_path: Path
-) -> None:
+def test_ticking_the_checkbox_writes_an_override_to_the_store(qtbot, tmp_path: Path) -> None:
     from ui.import_screen import ImportScreen
 
     store = _make_store(tmp_path)
@@ -465,9 +674,7 @@ def test_ticking_the_checkbox_writes_an_override_to_the_store(
     assert ref.is_identity_free() is True
 
 
-def test_unticking_records_an_explicit_override_not_a_reset_to_auto(
-    qtbot, tmp_path: Path
-) -> None:
+def test_unticking_records_an_explicit_override_not_a_reset_to_auto(qtbot, tmp_path: Path) -> None:
     """Unticking a session the tracker called identity-free must persist as
     a deliberate "no, identities are fine here", or the next refresh would
     re-check the box from the tracker's value."""
@@ -480,7 +687,9 @@ def test_unticking_records_an_explicit_override_not_a_reset_to_auto(
     store.update_sessions(
         [
             SessionRef(
-                session_id="session_a", folder=folder, sha256="",
+                session_id="session_a",
+                folder=folder,
+                sha256="",
                 track_wo_identities=True,
             )
         ]
@@ -498,9 +707,7 @@ def test_unticking_records_an_explicit_override_not_a_reset_to_auto(
     assert _free_cell(screen).checkState() == Qt.CheckState.Unchecked
 
 
-def test_refreshing_the_table_does_not_clobber_the_override(
-    qtbot, tmp_path: Path
-) -> None:
+def test_refreshing_the_table_does_not_clobber_the_override(qtbot, tmp_path: Path) -> None:
     """_refresh_table sets check states, which emits itemChanged -- without
     the re-entrancy guard that write-back would fire on every refresh."""
     from ui.import_screen import ImportScreen
@@ -520,9 +727,7 @@ def test_refreshing_the_table_does_not_clobber_the_override(
     assert _free_cell(screen).checkState() == Qt.CheckState.Checked
 
 
-def test_a_later_probe_result_does_not_undo_the_override(
-    qtbot, tmp_path: Path
-) -> None:
+def test_a_later_probe_result_does_not_undo_the_override(qtbot, tmp_path: Path) -> None:
     from ui.import_screen import ImportScreen
 
     store = _make_store(tmp_path)

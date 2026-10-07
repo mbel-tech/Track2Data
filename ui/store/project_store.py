@@ -11,6 +11,7 @@ signals from. app/state.py keeps a deprecated re-export for compatibility.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
-from track2data.core.ids import default_session_id
+from track2data.core.ids import default_session_id, uniquify
 from track2data.core.models import (
     CalibrationConfig,
     ExportTarget,
@@ -31,6 +32,8 @@ from track2data.core.models import (
     SessionRef,
     ZoneSet,
 )
+from track2data.core.progress import CancellationToken, OperationCancelled
+from track2data.readers import find_reader
 from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
@@ -44,6 +47,61 @@ def _is_pickle_refusal(exc: object) -> bool:
     """
     code = getattr(exc, "code", "") or ""
     return code == "IDT_PICKLE_REFUSED" or "IDT_PICKLE_REFUSED" in str(exc)
+
+
+class _CallableToken(CancellationToken):
+    """A token whose cancellation is whatever *check* says.
+
+    The task runner gives a task a zero-argument ``cancel_check`` that raises
+    ``OperationCancelled`` once the user cancels; ``Engine.scan`` takes a
+    ``CancellationToken``. This is the bridge, so one cancel stops the walk and the
+    discovery that follows it alike.
+    """
+
+    def __init__(self, check: Callable[[], None]) -> None:
+        super().__init__()
+        self._check = check
+
+    @property
+    def is_cancelled(self) -> bool:
+        try:
+            self._check()
+        except OperationCancelled:
+            return True
+        return False
+
+    def raise_if_cancelled(self) -> None:
+        self._check()
+
+
+def _selector(ref: SessionRef) -> tuple[tuple[str, str], ...]:
+    """The options that pick *which* session in a file (an arena), not how to read it."""
+    reader = find_reader(ref.reader) if ref.reader else None
+    names = {p.name for p in reader.parameters if p.scope == "session"} if reader else set()
+    return tuple(sorted((k, repr(v)) for k, v in ref.reader_options.items() if k in names))
+
+
+def _resolved(path: Path) -> Path:
+    try:
+        return Path(path).resolve()
+    except OSError:
+        return Path(path)
+
+
+def _is_duplicate(ref: SessionRef, existing: Sequence[SessionRef]) -> bool:
+    """Whether *ref* is a session the project already has: the same place, read by the same
+    reader (a legacy entry with no saved reader counts as any), picking the same arena.
+
+    The same folder under another reader is not a duplicate: another reader could read the same
+    files into different numbers, so it is a different session.
+    """
+    place, selector = _resolved(ref.folder), _selector(ref)
+    return any(
+        _resolved(other.folder) == place
+        and (other.reader is None or other.reader == ref.reader)
+        and _selector(other) == selector
+        for other in existing
+    )
 
 
 class ProjectStore(QObject):
@@ -85,6 +143,12 @@ class ProjectStore(QObject):
     # the file it is asking about -- "do you trust this folder?" is not a
     # question anyone can answer in the abstract.
     pickleConsentRequired = Signal(str, str)
+    # Looking at a folder before anything is added (the confirm dialog's first step).
+    # scanFinished carries a ScanResult, or an Exception for a scan that failed: a failed
+    # scan is shown inline by the dialog, never as the generic failure modal.
+    scanProgress  = Signal(str, object)   # task_id, ProgressEvent
+    scanFinished  = Signal(str, object)   # task_id, ScanResult-or-exception
+    scanCancelled = Signal(str)           # task_id
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -92,6 +156,7 @@ class ProjectStore(QObject):
         self._project_dir: Path | None = None
         self._run_results: RunResult | None = None
         self._identity_probes: dict[str, str] = {}  # task_id -> session_id
+        self._scans: set[str] = set()  # task ids of scans whose result is still wanted
         # Derived cache, never persisted -- see ui/store/session_facts.py's
         # module docstring for why this lives here and not on SessionRef.
         self._session_facts: dict[str, SessionFacts] = {}
@@ -105,6 +170,11 @@ class ProjectStore(QObject):
         # they never drive the main window's Cancel button or failure dialog.
         self._tasks.probeFinished.connect(self._on_identity_probe_finished)
         self._tasks.probeFailed.connect(self._on_probe_failed)
+        # A scan has its own lane and signals for the same reason.
+        self._tasks.scanProgress.connect(self._on_scan_progress)
+        self._tasks.scanFinished.connect(self._on_scan_finished)
+        self._tasks.scanFailed.connect(self._on_scan_failed)
+        self._tasks.scanCancelled.connect(self._on_scan_cancelled)
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -154,6 +224,32 @@ class ProjectStore(QObject):
         exc.traceback = tb  # type: ignore[attr-defined]
         self._on_identity_probe_finished(task_id, exc)
 
+    def _on_scan_progress(self, task_id: str, event: object) -> None:
+        if task_id in self._scans:
+            self.scanProgress.emit(task_id, event)
+
+    def _on_scan_finished(self, task_id: str, result: object) -> None:
+        if task_id in self._scans:  # a scan dropped by a project switch has no audience
+            self._scans.discard(task_id)
+            self.scanFinished.emit(task_id, result)
+
+    def _on_scan_failed(self, task_id: str, message: str, tb: str) -> None:
+        exc = RuntimeError(message)
+        exc.traceback = tb  # type: ignore[attr-defined]
+        self._on_scan_finished(task_id, exc)
+
+    def _on_scan_cancelled(self, task_id: str) -> None:
+        if task_id in self._scans:
+            self._scans.discard(task_id)
+            self.scanCancelled.emit(task_id)
+
+    def _cancel_pending_scans(self) -> None:
+        """Drop every outstanding scan (project switch): any result that still arrives is
+        ignored."""
+        for task_id in list(self._scans):
+            self._tasks.cancel(task_id)
+        self._scans.clear()
+
     def _cancel_pending_probes(self) -> None:
         """Drop every outstanding probe (project switch): queued ones never
         start, and any result that still arrives is ignored."""
@@ -171,6 +267,7 @@ class ProjectStore(QObject):
     def new_project(self, name: str, directory: Path) -> None:
         """Create a blank manifest for a new project."""
         self._cancel_pending_probes()
+        self._cancel_pending_scans()
         self._session_facts.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
@@ -187,6 +284,7 @@ class ProjectStore(QObject):
     def open_project(self, t2d_path: Path) -> None:
         """Load an existing project from a .t2d.json file."""
         self._cancel_pending_probes()
+        self._cancel_pending_scans()
         self._session_facts.clear()
         from track2data.core.manifest import read as manifest_read
 
@@ -298,6 +396,60 @@ class ProjectStore(QObject):
             lane="probe",
         )
         self._identity_probes[task_id] = session_id
+
+    def scan_folders(self, paths: Sequence[Path]) -> str:
+        """Look at *paths* in the background and report which tracking software wrote them.
+
+        Returns the task id. The result arrives on ``scanFinished`` (a ``ScanResult``, or an
+        exception if it failed), progress on ``scanProgress``; ``cancel_scan`` stops it. The scan
+        is read-only and runs in its own lane, so it neither waits for a pipeline run nor
+        delays a probe.
+        """
+        from track2data.api import Engine
+
+        roots = [Path(p) for p in paths]
+
+        def run(*, progress: Any, cancel_check: Callable[[], None]) -> Any:
+            return Engine.scan(roots, progress=progress, token=_CallableToken(cancel_check))
+
+        task_id = self._tasks.submit_with_progress(run, cancel_check=True, lane="scan")
+        self._scans.add(task_id)
+        return task_id
+
+    def cancel_scan(self, task_id: str) -> None:
+        """Stop a scan; ``scanCancelled`` follows."""
+        self._tasks.cancel(task_id)
+
+    def add_confirmed(self, refs: Sequence[SessionRef]) -> list[SessionRef]:
+        """Add the sessions the user confirmed, and probe each with the reader it saved.
+
+        Returns the entries actually added. One already in the project (same place, same
+        reader) is skipped and logged, like ``add_session`` does for a folder added twice; an id
+        that clashes is made unique rather than letting one session replace another (the
+        confirm step has already refused this, so it only guards a race).
+        """
+        if self._manifest is None:
+            return []
+        existing = list(self._manifest.sessions)
+        taken = {ref.session_id for ref in existing}
+        added: list[SessionRef] = []
+        for ref in refs:
+            if _is_duplicate(ref, [*existing, *added]):
+                self.append_log(f"_Skipped already-imported session folder `{ref.folder}`_\n")
+                continue
+            if ref.session_id in taken:
+                new_id = uniquify([ref.session_id], taken)[0]
+                self.append_log(f"_Session id `{ref.session_id}` was taken; using `{new_id}`_\n")
+                ref = ref.model_copy(update={"session_id": new_id})
+            taken.add(ref.session_id)
+            added.append(ref)
+        if not added:
+            return []
+        self._manifest = self._manifest.model_copy(update={"sessions": [*existing, *added]})
+        self.sessionsChanged.emit()
+        for ref in added:
+            self._submit_probe(ref.session_id, ref.folder)
+        return added
 
     def _on_identity_probe_finished(self, task_id: str, result: object) -> None:
         session_id = self._identity_probes.pop(task_id, None)

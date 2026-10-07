@@ -536,6 +536,13 @@ single reader call), so cancelling only stops probes that have not started yet.
 Run and probe lanes can read the same session files concurrently; both are
 read-only and only the run lane writes the cache.
 
+**Addendum (scan lane):** a third lane, `scan`, carries the read-only scan that precedes
+adding sessions (D-027). It reports progress on `scanProgress`, ends on `scanFinished`,
+`scanFailed` or `scanCancelled`, and never touches the generic or probe signals, so a failed
+or cancelled scan is shown inline by the confirm dialog rather than as the pipeline-failure
+modal, and a long scan neither waits for a run nor delays a probe. `ProjectStore.scan_folders`
+submits it with a cancel check and drops its result if the project changes meanwhile.
+
 ---
 
 ### D-024 · Timepoint binning by slicing, with whole-session config resolution

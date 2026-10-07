@@ -391,3 +391,88 @@ def test_shutdown_uses_one_deadline_for_both_lanes(qtbot, runner) -> None:
 def test_unknown_lane_is_rejected(runner) -> None:
     with pytest.raises(ValueError):
         runner.submit(lambda: 1, lane="nope")
+
+
+# ── lanes: scans get their own pool, with progress and cancellation ──────────
+
+
+def test_scan_lane_runs_while_the_other_lanes_are_busy(qtbot, runner) -> None:
+    import threading
+
+    release = threading.Event()
+    runner.submit(lambda: release.wait(5) or "run-done")  # the run lane
+    runner.submit(lambda: release.wait(5) or "probe-done", lane="probe")  # the probe lane
+
+    with qtbot.waitSignal(runner.scanFinished, timeout=2000) as blocker:
+        scan_id = runner.submit(lambda: "scan-done", lane="scan")
+    assert blocker.args == [scan_id, "scan-done"]
+    assert not release.is_set()
+    release.set()
+
+
+def test_scan_lane_does_not_use_the_generic_or_probe_signals(qtbot, runner) -> None:
+    seen: list[str] = []
+    for sig in (
+        runner.taskStarted, runner.taskFinished, runner.taskFailed, runner.taskCancelled,
+        runner.probeFinished, runner.probeFailed, runner.probeCancelled,
+    ):  # fmt: skip
+        sig.connect(lambda *a, _s=seen: _s.append("other lane"))
+
+    with qtbot.waitSignal(runner.scanFinished, timeout=2000):
+        runner.submit(lambda: 1, lane="scan")
+    with qtbot.waitSignal(runner.scanFailed, timeout=2000) as blocker:
+        runner.submit(lambda: 1 / 0, lane="scan")
+    assert "division by zero" in blocker.args[1]
+    qtbot.wait(50)
+    assert seen == []  # a failed scan must not pop the "pipeline run failed" dialog
+
+
+def test_scan_progress_reaches_scan_progress_only(qtbot, runner) -> None:
+    from track2data.core.progress import ProgressEvent
+
+    generic: list[object] = []
+    runner.taskEvent.connect(lambda tid, ev: generic.append(ev))
+
+    def scanning(*, progress) -> str:
+        progress(ProgressEvent(stage="scan", current=1, total=2, message="walking"))
+        return "done"
+
+    with qtbot.waitSignal(runner.scanProgress, timeout=2000) as blocker:
+        task_id = runner.submit_with_progress(scanning, lane="scan")
+    assert blocker.args[0] == task_id
+    assert blocker.args[1].stage == "scan" and blocker.args[1].message == "walking"
+    qtbot.wait(50)
+    assert generic == []
+
+
+def test_a_scan_can_be_cancelled_through_its_cancel_check(qtbot, runner) -> None:
+    import threading
+
+    started = threading.Event()
+
+    def spinning(*, progress, cancel_check) -> None:
+        started.set()
+        while True:
+            cancel_check()
+            time.sleep(0.01)
+
+    task_id = runner.submit_with_progress(spinning, cancel_check=True, lane="scan")
+    assert started.wait(2)
+    begin = time.monotonic()
+    with qtbot.waitSignal(runner.scanCancelled, timeout=2000) as blocker:
+        runner.cancel(task_id)
+    assert blocker.args == [task_id]
+    assert time.monotonic() - begin < 1.0
+
+
+def test_cancel_all_for_the_run_lane_leaves_a_scan_alone(qtbot, runner) -> None:
+    import threading
+
+    gate = threading.Event()
+    scan_id = runner.submit(lambda: (gate.wait(5), "scan-ok")[1], lane="scan")
+    runner.cancel_all(lane="run")
+    assert scan_id in runner._tokens and not runner._tokens[scan_id].is_cancelled
+    with qtbot.waitSignal(runner.scanFinished, timeout=3000) as blocker:
+        gate.set()
+    assert blocker.args == [scan_id, "scan-ok"]
+
