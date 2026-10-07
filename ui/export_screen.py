@@ -298,7 +298,9 @@ class ExportScreen(QWidget):
         self._last_out_dir = out_dir
         self._last_selected_exporters = selected
         self._status_label.setText(f"Exporting… writing to {out_dir}")
-        self._current_task_id = self._store.tasks.submit_with_progress(run_fn)
+        self._current_task_id = self._store.tasks.submit_with_progress(
+            run_fn, cancel_check=True
+        )
         self._update_export_enabled()
 
     def _cancel_export(self) -> None:

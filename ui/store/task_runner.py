@@ -57,8 +57,10 @@ class _EngineTask(QRunnable):
         token: CancellationToken,
         *,
         progress_enabled: bool,
+        cancel_check_enabled: bool = False,
     ) -> None:
         super().__init__()
+        self._cancel_check_enabled = cancel_check_enabled
         self._task_id = task_id
         self._fn = fn
         self._signals = signals
@@ -68,11 +70,15 @@ class _EngineTask(QRunnable):
     def run(self) -> None:
         self._signals.started.emit(self._task_id)
         try:
-            result = (
-                self._fn(progress=self._on_progress)
-                if self._progress_enabled
-                else self._fn()
-            )
+            if self._progress_enabled:
+                kwargs: dict[str, Any] = {"progress": self._on_progress}
+                if self._cancel_check_enabled:
+                    # Lets the engine notice Cancel between preprocessing
+                    # steps and metrics, not only at stage-boundary events.
+                    kwargs["cancel_check"] = self._token.raise_if_cancelled
+                result = self._fn(**kwargs)
+            else:
+                result = self._fn()
         except OperationCancelled:
             self._signals.cancelled.emit(self._task_id)
         except Exception as exc:
@@ -127,14 +133,24 @@ class TaskRunner(QObject):
         accepts a progress= kwarg."""
         return self._submit(fn, progress_enabled=False)
 
-    def submit_with_progress(self, fn: Callable[..., Any]) -> str:
+    def submit_with_progress(
+        self, fn: Callable[..., Any], *, cancel_check: bool = False
+    ) -> str:
         """Submit a callable that accepts progress=<ProgressCallback>,
         e.g. a functools.partial(engine.run, out_dir, exporters=...).
-        Explicit rather than magic-detected: mixing the two call shapes
+        With ``cancel_check=True`` the callable must also accept
+        ``cancel_check=<Callable[[], None]>`` (as ``Engine.run`` does).
+        Explicit rather than magic-detected: mixing the call shapes
         silently would be a subtle bug, not a convenience."""
-        return self._submit(fn, progress_enabled=True)
+        return self._submit(fn, progress_enabled=True, cancel_check_enabled=cancel_check)
 
-    def _submit(self, fn: Callable[..., Any], *, progress_enabled: bool) -> str:
+    def _submit(
+        self,
+        fn: Callable[..., Any],
+        *,
+        progress_enabled: bool,
+        cancel_check_enabled: bool = False,
+    ) -> str:
         task_id = uuid.uuid4().hex
         token = CancellationToken()
         self._tokens[task_id] = token
@@ -155,7 +171,14 @@ class TaskRunner(QObject):
         signals.failed.connect(forget)
         signals.cancelled.connect(forget)
 
-        task = _EngineTask(task_id, fn, signals, token, progress_enabled=progress_enabled)
+        task = _EngineTask(
+            task_id,
+            fn,
+            signals,
+            token,
+            progress_enabled=progress_enabled,
+            cancel_check_enabled=cancel_check_enabled,
+        )
         # Qt's C++ side would otherwise auto-delete the QRunnable itself
         # once run() returns; Python's own reference in self._active is
         # now the sole owner of its lifetime, cleared only in _forget.

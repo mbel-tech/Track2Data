@@ -261,3 +261,25 @@ def test_shutdown_cancels_in_flight_tasks_first(qtbot, runner) -> None:
 
     drained = runner.shutdown(3000)
     assert drained is True  # cancellation lets it exit well within the timeout
+
+
+def test_cancel_check_reaches_the_callable_and_cancels(qtbot) -> None:
+    """GUI-05: a callable that polls cancel_check (not progress) is stoppable."""
+    import threading
+
+    from ui.store.task_runner import TaskRunner
+
+    runner = TaskRunner()
+    started = threading.Event()
+
+    def work(progress=None, cancel_check=None):
+        started.set()
+        for _ in range(200):
+            cancel_check()
+            threading.Event().wait(0.02)
+        return "finished"
+
+    with qtbot.waitSignal(runner.taskCancelled, timeout=5000):
+        runner.submit_with_progress(work, cancel_check=True)
+        assert started.wait(2)
+        runner.cancel_all()

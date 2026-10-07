@@ -9,7 +9,7 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 | SCI-01 | Science | P0 | **Open** (audit wrongly said fixed) | `calibration/bodylength.py` stores px in `body_length_cm` and leaves `px_per_cm=None`; `*_bl` outputs sit under `if px_per_cm is not None` (`metrics/individual.py`, `metrics/group.py`) so they are always NaN. Tests build sessions with both values, which no real path produces. |
 | SCI-02 | Science | P1 | **Fixed** (D-016) | All nine Z-* metrics emit per-slot rows on identity-free sessions (`metrics/zone.py`, `docs/ROADMAP.md` "Deferred: identity-free zone metrics"). |
 | SCI-03 | Science | P2 | Open, by design (D-010) | Metadata join is session-level only. |
-| PERF-01 | Engine | P1 | Open, deferred (D-013/D-014) | `Engine.run` forces `n_workers=1`; `core/parallel.py` unused. |
+| PERF-01 | Engine | P1 | **Fixed** (D-020), not benchmarked at scale | `Engine.run` forces `n_workers=1`; `core/parallel.py` unused. |
 | PERF-02 | Engine | P1 | **Fixed** (D-019) | `CacheStore` stores flat DataFrames; `PreprocessedSession` needs a serialisation design. |
 | PERF-03 | Engine | P2 | **Partly fixed** (D-018) | GUI probes sessions with a full `read_session`. |
 | PERF-04 | Engine | P2 | **Fixed** | `exporters/csv_long.py` copies and sorts the per-frame table before one `to_csv`. |
@@ -17,7 +17,7 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 | GUI-02 | UX | P1 | Open | No trajectory plotting; no plotting dependency. |
 | GUI-03 | UX | P2 | Open | `WizardSidebar.mark_complete` (`app/navigation.py`) is never called; Next is ungated. |
 | GUI-04 | UX | P2 | Open | Zone canvas has no edges, fill, saved-zone display, zoom/pan or undo. |
-| GUI-05 | UX | P2 | Open | Cancellation is only checked at stage boundaries; probes are not cancellable. |
+| GUI-05 | UX | P2 | **Fixed** (D-020) | Cancellation is only checked at stage boundaries; probes are not cancellable. |
 | ENG-01 | Engine/GUI | P2 | **Fixed** | `PreprocessingScreen._apply` rebuilds `PreprocessConfig`, resetting `identity_switch` and other unexposed fields. |
 | ENG-02 | Engine | P2 | Open, deferred (D-012) | v4 reader is a stub; no v4 sample data. |
 | DIST-01 | Distribution | P2 | Open, blocked | Signing is wired in `release.yml` but needs certificates and a published release (`docs/CODE_SIGNING.md`). |

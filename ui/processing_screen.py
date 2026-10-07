@@ -27,11 +27,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+
+from track2data.core.parallel import worker_count
 
 #: ProgressEvent.stage -> friendly per-session status label. Stages not
 #: listed here (e.g. "import", "run") aren't session-scoped in the same
@@ -53,6 +56,7 @@ class ProcessingScreen(QWidget):
         self._store = store
         self._current_task_id: str | None = None
         self._session_rows: dict[str, int] = {}  # session_id -> table row
+        self._parallel_run = False
         self._build_ui()
         if store is not None:
             store.projectChanged.connect(self._on_project_changed)
@@ -98,6 +102,15 @@ class ProcessingScreen(QWidget):
         btn_row.addWidget(self._validate_btn)
         btn_row.addWidget(self._run_btn)
         btn_row.addWidget(self._cancel_btn)
+        btn_row.addSpacing(16)
+        btn_row.addWidget(QLabel("Workers:"))
+        self._workers = QSpinBox()
+        self._workers.setRange(1, max(1, worker_count(None)))
+        self._workers.setValue(1)
+        self._workers.setToolTip(
+            "Sessions processed at the same time. 1 runs them one after another."
+        )
+        btn_row.addWidget(self._workers)
         btn_row.addStretch()
         root.addLayout(btn_row)
 
@@ -155,8 +168,12 @@ class ProcessingScreen(QWidget):
         self._cancel_btn.setEnabled(True)
         self._store.append_log(f"### Run started\n_Output: `{out_dir}`_\n")
 
-        run_fn = functools.partial(engine.run, out_dir)
-        self._current_task_id = self._store.tasks.submit_with_progress(run_fn)
+        n_workers = self._workers.value()
+        self._parallel_run = n_workers > 1
+        run_fn = functools.partial(engine.run, out_dir, n_workers=n_workers)
+        self._current_task_id = self._store.tasks.submit_with_progress(
+            run_fn, cancel_check=True
+        )
 
     def _default_out_dir(self) -> Path:
         project_dir = self._store.project_dir or Path(".")
@@ -223,13 +240,17 @@ class ProcessingScreen(QWidget):
             self._status_table.setItem(row, 3, QTableWidgetItem("—"))
 
     def _on_task_progress(self, task_id: str, percent: int) -> None:
-        if task_id != self._current_task_id:
-            return
+        if task_id != self._current_task_id or self._parallel_run:
+            return  # parallel runs drive the bar from session events instead
         self._progress.setValue(percent)
 
     def _on_task_event(self, task_id: str, event) -> None:
         if task_id != self._current_task_id:
             return
+        if self._parallel_run and event.stage in ("session", "run"):
+            # Stage events of concurrent sessions interleave, so the bar
+            # follows completed sessions only.
+            self._progress.setValue(event.percent)
         if event.session_id is None or event.session_id not in self._session_rows:
             return
         label = _STAGE_LABELS.get(event.stage)

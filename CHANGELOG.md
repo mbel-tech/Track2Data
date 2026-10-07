@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`Engine.run(n_workers=N)` now runs sessions in parallel** (spawned
+  processes; workers rebuild the Engine from the serialised manifest and
+  stream progress events back over a queue). The Processing screen has a
+  Workers control (default 1). On the four-session test fixture the pool
+  is slower than sequential because process start-up dominates, so use it
+  for long sessions.
+- **Cancel now takes effect inside a session.** `Engine.run(cancel_check=...)`
+  is polled between sessions, preprocessing steps and metrics; the GUI's
+  Cancel button passes it (previously it was only noticed at stage
+  boundaries, so a long session ran to completion).
+
 - **Preprocessed-session cache is now wired in.** `Engine(manifest,
   cache_dir=...)` stores each session's `PreprocessedSession` and reuses it
   when the session files (path, size, mtime) and the preprocessing,

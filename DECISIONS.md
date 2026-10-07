@@ -429,3 +429,34 @@ the project's own cache directory.
 
 **Alternative considered:** Parquet per array. Rejected for the schema
 cost above.
+
+---
+
+### D-020 · Parallel session runs and in-session cancellation (closes D-013/D-014's parallel half)
+
+**Decision:** `Engine.run(n_workers=N>1)` uses a `ProcessPoolExecutor` with
+the `spawn` context on every OS. Workers receive only the manifest JSON, a
+session index, the output directory, exporter names and the cache path;
+they rebuild an `Engine`, send `ProgressEvent`s through a `multiprocessing`
+queue and read a shared cancel `Event`. The calling process drains the
+queue and invokes the caller's `progress` callback, so Qt closures never
+cross the process boundary. A worker that is cancelled returns `None`
+(custom exceptions do not reliably unpickle). Results come back in manifest
+order. Default stays `n_workers=1`.
+
+Cancellation is a separate `cancel_check: Callable[[], None]` argument, not
+extra progress events: existing tests and the GUI bar rely on progress being
+sparse and stage-boundary only. The engine calls it between sessions,
+preprocessing steps and metrics; in a parallel run the parent polls it and
+sets the workers' flag. `TaskRunner.submit_with_progress(fn, cancel_check=True)`
+passes the task's token.
+
+**Trade-offs:** start-up per worker is roughly 0.6 s (imports), so small
+sessions get slower; the benefit is for sessions taking many seconds each.
+Not yet benchmarked on the real corpus. Memory is per-worker. A step inside
+one numpy/shapely call still cannot be interrupted. `Engine` now holds the
+run's `cancel_check` on the instance for the duration of `run()`, so one
+Engine must not run two `run()` calls concurrently.
+
+**Alternative considered:** Threads. Rejected: the metrics and shapely loops
+hold the GIL.
