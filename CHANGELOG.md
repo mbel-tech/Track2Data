@@ -285,11 +285,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   additional session reads, and neither can fail a run: a bookkeeping file
   that cannot be written is logged, not raised.
 
-- **User guide with screenshots** in `docs/guide/` (one page per screen, output
-  file reference, troubleshooting). Screenshots come from the real app via
-  `scripts/generate_guide_screenshots.py`; `tests/test_docs/test_guide.py`
-  fails if a page, link or image goes missing. **Help ▸ Open user guide**
-  opens it.
+- **User guide with screenshots** as one document, `docs/guide/USER_GUIDE.md`
+  (one chapter per screen, output file reference, troubleshooting), also
+  published as `docs/guide/Track2Data_User_Guide.pdf` (author and copyright:
+  Martina Bellio, 2026; rebuild with `scripts/build_user_guide.py`).
+  Screenshots come from the real app via `scripts/generate_guide_screenshots.py`;
+  `tests/test_docs/test_guide.py` fails if a section, link or image goes missing.
+  **Help ▸ Open user guide** opens it.
 
 - **Calibration "Measure on frame"** (Custom mode): click both ends of an
   object of known length on a session frame, enter its real length, and the

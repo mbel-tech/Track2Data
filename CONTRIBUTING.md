@@ -245,7 +245,7 @@ Thank you for contributing! By participating in this project, you agree to abide
 
 ## User guide screenshots
 
-`docs/guide/` documents each screen with screenshots. When you change how a screen looks, regenerate
+`docs/guide/USER_GUIDE.md` is the single-document user guide, with screenshots in `docs/guide/images/`. When you change how a screen looks, regenerate
 them and commit the images:
 
 ```bash
@@ -253,4 +253,11 @@ python scripts/generate_guide_screenshots.py
 ```
 
 It drives the real app offscreen against a synthetic demo session. `tests/test_docs/test_guide.py`
-fails if a guide page, link or image goes missing.
+fails if a guide section, link or image goes missing.
+
+After editing the guide or its screenshots, rebuild the PDF (needs `pandoc`, Chromium/Chrome and
+`pypdf`) and commit it:
+
+```bash
+python scripts/build_user_guide.py
+```
