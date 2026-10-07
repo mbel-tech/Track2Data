@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QMessageBox,
+    QPushButton,
     QRadioButton,
     QVBoxLayout,
     QWidget,
@@ -104,6 +105,12 @@ class CalibrationScreen(QWidget):
         self._px_spin.setDecimals(4)
         self._px_spin.setSuffix(" px per unit")
         scalar_form.addRow("Pixels per unit:", self._px_spin)
+        self._measure_btn = QPushButton("Measure on frame…")
+        self._measure_btn.setToolTip(
+            "Click both ends of an object of known length on a session frame"
+        )
+        self._measure_btn.clicked.connect(self._measure_on_frame)
+        scalar_form.addRow("", self._measure_btn)
         root.addWidget(self._scalar_widget)
 
         # ── session calibration controls ────────────────────────────────
@@ -222,7 +229,48 @@ class CalibrationScreen(QWidget):
         self._update_mode_visibility()
         self._refresh_readiness()
 
+    def _measure_on_frame(self) -> None:
+        """Open the two-point ruler on the first session with facts and, if
+        accepted, put its pixels-per-unit into the spin box."""
+        from ui.widgets.ruler_dialog import RulerDialog
+
+        background, size = None, (640.0, 480.0)
+        if self._store is not None and self._store.manifest is not None:
+            for ref in self._store.manifest.sessions:
+                facts = self._store.session_facts(ref.session_id)
+                if facts is not None:
+                    background = facts.background_image_path
+                    size = (float(facts.width_px), float(facts.height_px))
+                    break
+        dialog = RulerDialog(background, size, parent=self)
+        if dialog.exec() == RulerDialog.DialogCode.Accepted:
+            scale = dialog.px_per_unit()
+            if scale is not None:
+                self._px_spin.setValue(min(scale, self._px_spin.maximum()))
+
+    def body_length_summary(self) -> str:
+        """Median / range of the sessions' per-animal body lengths (pixels)."""
+        values: list[float] = []
+        n_sessions = 0
+        if self._store is not None and self._store.manifest is not None:
+            for ref in self._store.manifest.sessions:
+                facts = self._store.session_facts(ref.session_id)
+                if facts is not None and facts.body_length_px:
+                    n_sessions += 1
+                    values.extend(v for v in facts.body_length_px if v == v)
+        if not values:
+            return "Body length will be derived from session bounding boxes."
+        import statistics
+
+        return (
+            f"Body length from {len(values)} animal(s) in {n_sessions} session(s): "
+            f"median {statistics.median(values):.1f} px "
+            f"(range {min(values):.1f} to {max(values):.1f} px). "
+            "Distances are reported in body lengths; physical units need a scale."
+        )
+
     def _refresh_readiness(self) -> None:
+        self._bl_label.setText(self.body_length_summary())
         self._readiness_list.clear()
         if self._store is None or self._store.manifest is None:
             return

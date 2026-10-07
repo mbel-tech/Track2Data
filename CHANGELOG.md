@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Calibration "Measure on frame"** (Custom mode): click both ends of an
+  object of known length on a session frame, enter its real length, and the
+  pixels-per-unit scale is filled in. Body Length mode now shows the median
+  and range of the sessions' body lengths instead of a generic sentence.
+- **Export screen shows R and Python code** to load the files just written
+  (feather, CSV or Excel), with a Copy button.
+
 - **Trajectory viewer** (Preview ▸ Trajectories). Load a session (reusing the
   project cache) and scrub or play its tracked paths with per-animal
   trails, raw vs processed overlays (to see what gap filling, jump removal

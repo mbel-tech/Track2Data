@@ -66,6 +66,9 @@ class SessionFacts:
     # preprocessing.py's module docstring) -- the zone canvas decodes
     # it directly via QImage when it needs a backdrop.
     background_image_path: Path | None
+    # Per-animal body length in pixels (Session.body_length_px), when the
+    # tracker provided it; used for the calibration summary.
+    body_length_px: tuple[float, ...] | None = None
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -86,5 +89,10 @@ class SessionFacts:
             setup_points=session.setup_points,
             roi_list=session.roi_list,
             has_body_length=session.body_length_px is not None,
+            body_length_px=(
+                None
+                if session.body_length_px is None
+                else tuple(float(v) for v in session.body_length_px)
+            ),
             background_image_path=session.background_image_path,
         )
