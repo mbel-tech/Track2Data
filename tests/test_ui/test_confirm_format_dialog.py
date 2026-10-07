@@ -53,7 +53,9 @@ def detection(
     )
 
 
-def result(*groups: tuple[Detection, ...], truncated: bool = False, file_types=None) -> ScanResult:
+def result(
+    *groups: tuple[Detection, ...], truncated: bool = False, file_types=None, recognised=()
+) -> ScanResult:
     return ScanResult(
         roots=(Path("root"),),
         groups=tuple(FormatGroup(detections=g) for g in groups),
@@ -62,6 +64,7 @@ def result(*groups: tuple[Detection, ...], truncated: bool = False, file_types=N
         warnings=("a warning",) if truncated else (),
         entries=412,
         seconds=0.4,
+        recognised=recognised,
     )
 
 
@@ -286,6 +289,19 @@ class TestWhenNothingWasRecognised:
         assert not dialog.table.isVisibleTo(dialog)
         assert not dialog.reader_combo.isVisibleTo(dialog)
         assert dialog.cancel_button.text() == "Close"
+
+    def test_a_format_it_can_name_but_not_read_is_named_with_what_to_do(self, qtbot) -> None:
+        from track2data.readers.recognise import Recognised
+
+        found = Recognised(
+            "sleap_slp", "SLEAP project (.slp)", "Export Analysis HDF5 instead.",
+            Path("root/a.slp"), 3,
+        )  # fmt: skip
+        dialog = make(qtbot, recognised=(found,))
+        text = dialog.empty_label.text()
+        assert "SLEAP project (.slp)" in text and "3" in text
+        assert "Export Analysis HDF5 instead." in text
+        assert dialog.ok_button.isHidden()
 
     def test_it_names_the_software_this_version_can_read(self, qtbot) -> None:
         dialog = make(qtbot)

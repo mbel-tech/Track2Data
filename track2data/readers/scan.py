@@ -22,6 +22,7 @@ from track2data.core.progress import CancellationToken, ProgressCallback
 from track2data.readers.detection import Confidence, Detection, SessionCandidate
 from track2data.readers.index import ScanBudget, ScanIndex, build_index
 from track2data.readers.peek import Peeker
+from track2data.readers.recognise import Recognised, find_unreadable
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,8 @@ class ScanResult:
     warnings: tuple[str, ...]
     entries: int
     seconds: float
+    #: Formats named but not readable (so "nothing to add" can say what the files are).
+    recognised: tuple[Recognised, ...] = ()
 
 
 def scan(
@@ -86,6 +89,7 @@ def scan_index(
             warnings.append(f"reader {cls.name} failed during discovery: {exc}")
     found = _prune_nested(found, index)
     found = [_with_unique_ids(d, index.roots) for d in found]
+    claimed = [s.source for d in found for s in d.sessions]
     return ScanResult(
         roots=index.roots,
         groups=tuple(_group(found, priority)),
@@ -94,6 +98,7 @@ def scan_index(
         warnings=tuple(warnings),
         entries=len(index),
         seconds=index.seconds,
+        recognised=find_unreadable(index, peek, claimed),
     )
 
 

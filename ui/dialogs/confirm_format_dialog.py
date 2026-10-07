@@ -213,7 +213,10 @@ class ConfirmFormatDialog(QDialog):
             f"{ext or '(no extension)'}: {n}" for ext, n in sorted(result.file_types.items())
         )
         readable = ", ".join(get_reader(name).display_name or name for name in reader_names())
-        lines = []
+        lines = [
+            f"<b>{found.display_name}</b> ({found.count} found): {found.remediation}"
+            for found in result.recognised
+        ]
         if seen:
             lines.append(f"Files seen: {seen}.")
         lines.append(f"This version can read output from: {readable}.")

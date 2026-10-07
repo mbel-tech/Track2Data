@@ -378,6 +378,16 @@ def _scan_json(result: ScanResult) -> dict[str, Any]:
         "truncated": result.truncated,
         "warnings": list(result.warnings),
         "file_types": dict(result.file_types),
+        "recognised": [
+            {
+                "key": r.key,
+                "display_name": r.display_name,
+                "count": r.count,
+                "example": str(r.example),
+                "remediation": r.remediation,
+            }
+            for r in result.recognised
+        ],
         "groups": [
             {"index": i + 1, "detections": [_detection_json(d) for d in g.detections]}
             for i, g in enumerate(result.groups)
@@ -401,6 +411,8 @@ def _echo_scan_header(result: ScanResult) -> None:
 def _echo_nothing_found(result: ScanResult) -> None:
     roots = ", ".join(str(r) for r in result.roots)
     click.echo(f"No tracking output was recognised in {roots}.")
+    for found in result.recognised:
+        click.echo(f"Found {found.display_name} x{found.count}: {found.remediation}")
     if result.file_types:
         seen = ", ".join(f"{ext or '(none)'} x{n}" for ext, n in sorted(result.file_types.items()))
         click.echo(f"Files seen: {seen}")
