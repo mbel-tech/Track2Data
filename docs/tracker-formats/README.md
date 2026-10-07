@@ -15,6 +15,13 @@ supplied. Do not edit them in place: re-copy the file, then update its pin in
 Not copied here: the reader fixture-test suite (`t2d_reader_fixture_tests.zip`)
 lives in `tests/real_samples/`, because it is test code, not documentation.
 
+## Design and plan
+
+- [`2026-10-07-tracker-import-design.md`](2026-10-07-tracker-import-design.md): the
+  approved design (scan, detect, confirm, persist; tiers; reader specs; gates).
+- [`2026-10-07-tier-0-implementation-plan.md`](2026-10-07-tier-0-implementation-plan.md):
+  the Tier 0 task-by-task plan. Each later tier gets its own plan when it starts.
+
 ## Where the sources disagree
 
 The table CSV was written before the formats document was corrected against real
