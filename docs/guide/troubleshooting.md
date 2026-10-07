@@ -3,7 +3,7 @@
 | You see | Why | What to do |
 |---|---|---|
 | **Next ▶** is disabled | A required stage is empty or invalid | Hover over Next: the tooltip names the problem. Check the ✗ / ○ badges in the sidebar |
-| *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet |
+| *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet (a v4-looking folder gets a specific message; see [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)) |
 | Session frames / animals show `—` | The folder is still being read | Wait a moment; a failed read is reported in the Run Log |
 | `*_cm` columns are empty | No pixels-per-unit scale | Use `*_bl` columns or set a scale in [Calibration](03-calibration.md) |
 | ⚠ on *Sessions* | A session is identity-free | Expected for sessions tracked without identities; see [Sessions](02-sessions.md) |

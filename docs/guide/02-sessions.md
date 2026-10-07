@@ -21,4 +21,4 @@ sidebar shows ⚠ while any session is identity-free.
 - Folders are only read, never modified.
 - Adding the same folder twice is ignored.
 - The status bar (bottom left) shows the session count.
-- Supported: idtracker.ai 6.x output (the legacy v5 layout is also read). v4 is not supported yet.
+- Supported: idtracker.ai 6.x output (the legacy v5 layout is also read). v4 is not supported yet (Track2Data tells you so if it recognises a v4 folder; see [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)).

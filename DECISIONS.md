@@ -244,6 +244,11 @@ support with no real fixture to test against would be speculation, not
 engineering. Revisit if v4 sample data becomes available; re-add the
 entry-point line at that point, not before.
 
+**Addendum (offline prep):** a conservative `looks_like_v4()` heuristic now makes
+`read_session`/`probe_session` raise `V4_NOT_SUPPORTED` rather than `NO_READER`;
+`detect()` still returns False and no entry point is added. The inspector script and
+`docs/IDTRACKERAI_V4_SAMPLES.md` exist so real samples can be gathered.
+
 ### D-013 · `core/parallel.py` and `cache/store.py` stay unwired for now — CLOSED
 
 **Decision:** `Engine.run_all()` continues to loop over sessions

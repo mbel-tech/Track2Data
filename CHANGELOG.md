@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **idtracker.ai v4 preparation:** folders that look like v4 output now fail with a specific
+  `V4_NOT_SUPPORTED` message instead of the generic "no reader" one; `scripts/inspect_idtrackerai_output.py`
+  describes any idtracker.ai folder (pickles are only opened with `--allow-pickle`);
+  `docs/IDTRACKERAI_V4_SAMPLES.md` lists what to send. The v4 reader itself is still not implemented.
 - **Signing readiness (no certificates needed):** `packaging/check_signing_readiness.py`
   classifies each platform as sign / skip / partial from the secret names present, and
   `release.yml` now uses it, so a half-configured platform (e.g. a macOS certificate

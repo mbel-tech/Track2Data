@@ -341,7 +341,9 @@ class SessionReader(ABC):
 
 - **`idtrackerai_v5`** — legacy reader (priority 10). Kept for backwards
   compatibility with pre-6.x data using `video_object.npy`.
-- **`idtrackerai_v4`** — legacy fallback (priority 5).
+- **`idtrackerai_v4`** — placeholder (priority 5), `detect()` always False. `looks_like_v4()`
+  only lets `read_session`/`probe_session` raise `V4_NOT_SUPPORTED` instead of `NO_READER`;
+  see `docs/IDTRACKERAI_V4_SAMPLES.md`.
 
 ### 5.3 Discovery
 
