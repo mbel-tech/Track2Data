@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Metadata screen** offers every canonical field (Trial, Group, Timepoint
+  as well as the original four), auto-matches column aliases ("date",
+  "condition", "tank", …), shows "N of M sessions matched" with the
+  unmatched session names, and repopulates after reopening a project.
+  Individual ID is shown disabled: the join is per session (D-010).
+- **Metrics screen** gained a search box (name or ID), presets (standard
+  locomotor, thigmotaxis & space use, social dynamics, all), a
+  "Selected n / 34" counter, and a note that diagnostics always run.
+
 - **Zone canvas is usable.** Selected vertices are joined by edges and
   shaded once they form a polygon; saved zones are shown shaded with their
   names; the wheel zooms, middle-drag pans and Fit resets; Ctrl+Z / Undo

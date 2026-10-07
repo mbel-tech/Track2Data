@@ -30,17 +30,23 @@ from PySide6.QtWidgets import (
 
 from track2data.core.hashing import file_sha256
 from track2data.core.models import MappingRule, MetadataSource
+from track2data.metadata.schema import CANONICAL, resolve_column
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.labels import label_for
 
-_CANONICAL_FIELDS = ["session_id", "treatment", "trial_id", "trial_date"]
+_CANONICAL_FIELDS = list(CANONICAL)
 
 #: field -> row label override, for the ones str.title() gets wrong.
 #: title() capitalises the first letter of each word with no idea that
 #: "id" is an acronym -- "session_id" -> "Session Id", not "Session
 #: ID" -- so both id-suffixed fields need an explicit entry; treatment
 #: and trial_date already read fine through the mechanical fallback.
-_FIELD_LABELS = {"session_id": "Session ID", "trial_id": "Trial ID"}
+_FIELD_LABELS = {
+    "session_id": "Session ID",
+    "trial_id": "Trial ID",
+    "individual_id": "Individual ID",
+    "group_id": "Group ID",
+}
 
 
 class MetadataScreen(QWidget):
@@ -54,6 +60,8 @@ class MetadataScreen(QWidget):
         self._build_ui()
         if store is not None:
             store.metadataChanged.connect(self._on_metadata_changed)
+            store.sessionsChanged.connect(self._refresh_match_summary)
+            store.projectChanged.connect(self._on_metadata_changed)
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -107,8 +115,21 @@ class MetadataScreen(QWidget):
             combo.addItem("(skip)")
             self._combos[field] = combo
             combo.currentIndexChanged.connect(self._auto.trigger)
+            if field == "individual_id":
+                # Metadata is joined per session (D-010): a per-animal value
+                # would be copied onto every animal, so it is not offered.
+                combo.setEnabled(False)
+                combo.setToolTip(
+                    "Per-animal metadata is not supported yet: the join is per "
+                    "session, so this value would be copied to every animal."
+                )
             self._mapping_form.addRow(f"{label_for(field, _FIELD_LABELS)}:", combo)
         root.addLayout(self._mapping_form)
+
+        self._match_label = QLabel("")
+        self._match_label.setWordWrap(True)
+        self._match_label.setStyleSheet("font-size: 13px; color: #555;")
+        root.addWidget(self._match_label)
 
         root.addStretch()
 
@@ -118,8 +139,11 @@ class MetadataScreen(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self, "Load metadata CSV", "", "CSV files (*.csv);;All files (*)"
         )
-        if not path:
-            return
+        if path:
+            self.load_path(Path(path))
+
+    def load_path(self, path: Path) -> None:
+        """Load *path* as the project's metadata file (what the dialog calls)."""
         try:
             import csv
             rows: list[list[str]] = []
@@ -171,11 +195,13 @@ class MetadataScreen(QWidget):
             combo.addItem("(skip)")
             for col in headers:
                 combo.addItem(col)
-            # auto-select matching column names
-            lower_headers = [h.lower() for h in headers]
-            if field in lower_headers:
-                idx = lower_headers.index(field) + 1  # +1 for (skip)
-                combo.setCurrentIndex(idx)
+            # auto-select a column named like the field, or by a known alias
+            # ("date" -> trial_date, "condition" -> treatment, ...)
+            if not combo.isEnabled():
+                continue
+            resolved = [resolve_column(h) for h in headers]
+            if field in resolved:
+                combo.setCurrentIndex(resolved.index(field) + 1)  # +1 for (skip)
 
     def _skip_metadata(self) -> None:
         if self._store is not None:
@@ -200,4 +226,76 @@ class MetadataScreen(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to apply mapping:\n{exc}")
 
     def _on_metadata_changed(self) -> None:
-        pass  # refresh logic handled by load/skip actions
+        """Restore the screen from the store (reopened project) and refresh
+        the match summary. A pending, uncommitted edit is never overwritten."""
+        if self._store is None or self._store.manifest is None:
+            return
+        src = self._store.manifest.metadata_source
+        if not self._auto.pending:
+            if src is None:
+                if self._file_label.text() not in ("(skipped)",):
+                    self._file_label.setText("(no file loaded)")
+            elif self._file_label.text() != src.path.name and Path(src.path).exists():
+                self._restore_from_source(src)
+            self._sync_combos_to_mapping()
+        self._refresh_match_summary()
+
+    def _sync_combos_to_mapping(self) -> None:
+        rule = self._store.manifest.mapping if self._store and self._store.manifest else None
+        if rule is None:
+            return
+        with self._auto.suppressed():
+            for field, column in rule.rules.items():
+                combo = self._combos.get(field)
+                idx = combo.findText(column) if combo is not None else -1
+                if idx >= 0 and combo.currentIndex() != idx:
+                    combo.setCurrentIndex(idx)
+
+    def _restore_from_source(self, src: MetadataSource) -> None:
+        import csv
+
+        with open(src.path, newline="", encoding="utf-8-sig") as fh:
+            rows = [row for _, row in zip(range(6), csv.reader(fh), strict=False)]
+        if not rows:
+            return
+        self._columns = rows[0]
+        self._populate_preview(rows[0], rows[1:])
+        with self._auto.suppressed():
+            self._fill_combos(rows[0])
+        self._file_label.setText(src.path.name)
+        self._file_label.setStyleSheet("color: #2c3e50;")
+
+    def _refresh_match_summary(self) -> None:
+        """"N of M sessions matched" from the same join the engine will run."""
+        if self._store is None or self._store.manifest is None:
+            self._match_label.setText("")
+            return
+        m = self._store.manifest
+        if m.metadata_source is None or m.mapping is None or not m.sessions:
+            self._match_label.setText("")
+            return
+        try:
+            from track2data.metadata.join import match
+            from track2data.metadata.loader import load
+            from track2data.metadata.mapping import apply_mapping
+
+            mapped = apply_mapping(load(m.metadata_source.path), m.mapping)
+            result = match([r.session_id for r in m.sessions], mapped, m.mapping)
+        except Exception as exc:
+            self._match_label.setText(f"Could not match sessions: {exc}")
+            self._match_label.setStyleSheet("font-size: 13px; color: #b8860b;")
+            return
+        total = len(m.sessions)
+        text = f"{len(result.matched)} of {total} sessions matched."
+        if result.unmatched_sessions:
+            text += " No row for: " + ", ".join(result.unmatched_sessions) + "."
+        if result.conflicts:
+            text += (
+                f" {len(result.conflicts)} session(s) matched several rows "
+                "(the first row is used)."
+            )
+        ok = len(result.matched) == total and not result.conflicts
+        self._match_label.setText(text)
+        self._match_label.setStyleSheet(
+            f"font-size: 13px; color: {'#2c7a4b' if ok else '#b8860b'};"
+        )

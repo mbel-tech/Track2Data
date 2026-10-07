@@ -25,3 +25,12 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 Corrections to the original audit: `ui/widgets/wizard_nav.py` and `metrics/group_m2.py` do not
 exist (the sidebar is `app/navigation.py`, GroupSpread is in `metrics/group.py`); the audit's
 `BodyLengthArray` was never merged.
+
+Additional findings from the GUI review (not in the original audit):
+
+| Item | Status |
+|---|---|
+| Metadata screen limited to four fields, no alias matching, no match feedback, blank after reopen | **Fixed** |
+| Metrics screen had no search/presets/counter | **Fixed** |
+| `MetricSelection.timepoint_minutes` is never read by the engine, so no binning control is offered | Open: binning needs engine support first |
+| Probes still share the single-thread `TaskRunner` pool with pipeline runs | Open (D-018) |
