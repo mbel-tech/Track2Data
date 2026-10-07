@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **User guide with screenshots** in `docs/guide/` (one page per screen, output
+  file reference, troubleshooting). Screenshots come from the real app via
+  `scripts/generate_guide_screenshots.py`; `tests/test_docs/test_guide.py`
+  fails if a page, link or image goes missing. **Help ▸ Open user guide**
+  opens it.
+
 - **Calibration "Measure on frame"** (Custom mode): click both ends of an
   object of known length on a session frame, enter its real length, and the
   pixels-per-unit scale is filled in. Body Length mode now shows the median
@@ -355,6 +361,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   frames, so they now require identity and are skipped; Z-1, Z-2 and Z-8
   (pure occupancy) are emitted pooled, with no `individual_id` column.
 
+- **`*_bl` columns no longer depend on the calibration mode.** The tracker's
+  body length is now carried into every mode, so Custom and Session
+  calibration also report body lengths.
 - **Body-length-normalised metrics (`path_length_bl`, `mean_speed_bl_s`,
   `mean_nnd_bl`) were always NaN** under the recommended Body Length
   calibration, because they were computed only when `px_per_cm` was set

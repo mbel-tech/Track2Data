@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -103,7 +104,16 @@ class ExportScreen(QWidget):
     # ── build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        # The page (formats, receipt, code snippets) is taller than a wizard
+        # page; scroll it instead of squeezing every control (which clipped
+        # the format names and left the receipt table one row high).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        inner = QWidget()
+        root = QVBoxLayout(inner)
         root.setContentsMargins(48, 36, 48, 36)
         root.setSpacing(16)
 
@@ -179,6 +189,7 @@ class ExportScreen(QWidget):
             0, QHeaderView.ResizeMode.Stretch
         )
         self._receipt_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._receipt_table.setMinimumHeight(140)
         receipt_layout.addWidget(self._receipt_table)
 
         receipt_btn_row = QHBoxLayout()
@@ -209,7 +220,8 @@ class ExportScreen(QWidget):
         snippet_layout.addLayout(snippet_top)
         self._snippet_text = QPlainTextEdit()
         self._snippet_text.setReadOnly(True)
-        self._snippet_text.setMaximumHeight(150)
+        self._snippet_text.setMinimumHeight(130)
+        self._snippet_text.setMaximumHeight(200)
         self._snippet_text.setStyleSheet("font-family: monospace;")
         snippet_layout.addWidget(self._snippet_text)
         self._snippet_group.setVisible(False)
@@ -217,6 +229,8 @@ class ExportScreen(QWidget):
         root.addWidget(self._snippet_group)
 
         root.addStretch()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
     # ── readme forced-on ─────────────────────────────────────────────────────
 

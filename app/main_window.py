@@ -12,8 +12,8 @@ Implements the QMainWindow shell described in UI_DESIGN.md §3:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
@@ -47,6 +47,8 @@ from ui.zones_screen import ZonesScreen
 
 APP_NAME = "Track2Data"
 APP_VERSION = __version__
+#: Step-by-step guide with screenshots (docs/guide/ in the repository).
+GUIDE_URL = "https://github.com/mbel-tech/Track2Data/tree/main/docs/guide"
 
 
 class RunLogDock(QWidget):
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
         # ── wire signals ──────────────────────────────────────────────────
         self._sidebar.stage_page_selected.connect(self._go_to_page)
         self._store.projectChanged.connect(self._update_statusbar)
+        self._store.sessionsChanged.connect(self._update_statusbar)
         self._store.projectChanged.connect(self._on_project_opened)
         for sig in (
             self._store.projectChanged,
@@ -236,7 +239,7 @@ class MainWindow(QMainWindow):
             QAction("&About Track2Data", self, triggered=self._action_about)
         )
         help_menu.addAction(
-            QAction("Open &documentation", self)  # Phase 4: open browser
+            QAction("Open &user guide", self, triggered=self._action_open_guide)
         )
 
     # ── toolbar ─────────────────────────────────────────────────────────────
@@ -404,6 +407,9 @@ class MainWindow(QMainWindow):
     def _action_export(self) -> None:
         # Phase 2+: calls exporters
         self._go_to_page(9)  # jump to Export screen
+
+    def _action_open_guide(self) -> None:
+        QDesktopServices.openUrl(QUrl(GUIDE_URL))
 
     def _action_about(self) -> None:
         QMessageBox.about(

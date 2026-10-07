@@ -264,7 +264,7 @@ folder basename).
 **Decisions / branches:**
 - A session may be **identity-stable** or **identity-free**. The flag
   is auto-detected (≥ 50 % non-NaN per animal). Identity-free sessions
-  can still be processed but will only produce group-level metrics.
+  can still be processed but produce only group metrics and the pure-occupancy zone metrics (Z-1, Z-2, Z-8), pooled over animals.
 - A session whose source video is unreachable is allowed; preview
   falls back to a blank canvas.
 
@@ -272,10 +272,10 @@ folder basename).
 
 | Condition | Message | Severity |
 |---|---|---|
-| Folder is not an idtracker.ai output | *"'<folder>' is not a recognised tracker output (no reader detected). Tracked formats: idtracker.ai v5, v4."* | error per-row |
+| Folder is not an idtracker.ai output | *"'<folder>' is not a recognised tracker output (no reader detected). Supported: idtracker.ai 6.x output (the legacy v5 layout is also read; v4 is not yet supported)."* | error per-row |
 | `trajectories.npy` missing | *"trajectories.npy not found under '<folder>/trajectories'. Re-run idtracker.ai or check the folder layout."* | error per-row |
 | Mixed FPS across included sessions | *"Sessions have different frame rates (30, 60). Metrics will use each session's own FPS but cross-session merges may need a manual conversion."* | warning banner |
-| All included sessions are identity-free | *"None of the included sessions have stable identities. Individual-level metrics will be unavailable; only group and zone metrics will run."* | info banner |
+| All included sessions are identity-free | *"None of the included sessions have stable identities. Individual-level metrics will be unavailable; group metrics and pooled zone-occupancy metrics (Z-1, Z-2, Z-8) will run."* | info banner |
 | 0 sessions ticked include | Next button disabled; tooltip: *"Tick at least one session to continue."* | (disabled state) |
 
 **Saved at advance:** each included `SessionRef` (path + SHA-256 of

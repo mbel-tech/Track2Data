@@ -37,6 +37,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from track2data.core.models import (
     PreprocessedSession,
     PreprocessReport,
@@ -346,6 +348,11 @@ class Engine:
         from track2data.preprocess.pipeline import run as pp_run
 
         psess = pp_run(session, self._manifest.preprocess, check=self._cancel_check)
+        # The tracker's own body length is calibration-independent, so *_bl
+        # metrics work whichever mode is chosen. Body-length calibration below
+        # then applies its own validation on top of the same values.
+        if session.body_length_px is not None:
+            psess.body_length_px = np.asarray(session.body_length_px, dtype=np.float64).copy()
 
         try:
             # Calibration.

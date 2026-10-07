@@ -19,7 +19,7 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 | GUI-04 | UX | P2 | **Fixed** | Zone canvas has no edges, fill, saved-zone display, zoom/pan or undo. |
 | GUI-05 | UX | P2 | **Fixed** (D-020) | Cancellation is only checked at stage boundaries; probes are not cancellable. |
 | ENG-01 | Engine/GUI | P2 | **Fixed** | `PreprocessingScreen._apply` rebuilds `PreprocessConfig`, resetting `identity_switch` and other unexposed fields. |
-| ENG-02 | Engine | P2 | Open, deferred (D-012) | v4 reader is a stub; no v4 sample data. |
+| ENG-02 | Engine | P2 | **Resolved by documentation** (D-012): docs no longer claim v4 support | v4 reader is a stub; no v4 sample data. |
 | DIST-01 | Distribution | P2 | Open, blocked | Signing is wired in `release.yml` but needs certificates and a published release (`docs/CODE_SIGNING.md`). |
 
 Corrections to the original audit: `ui/widgets/wizard_nav.py` and `metrics/group_m2.py` do not

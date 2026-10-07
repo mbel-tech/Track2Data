@@ -380,3 +380,29 @@ def test_sidebar_shows_status_badges(qtbot, tmp_path: Path) -> None:
     assert win._sidebar.item(0).text().startswith("✓")
     win._store.update_sessions([SessionRef(session_id="s1", folder=tmp_path, sha256="x")])
     assert win._sidebar.status(1) == "valid"
+
+
+def test_status_bar_session_count_follows_added_sessions(qtbot, tmp_path: Path) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("p", tmp_path)
+    assert "Sessions: 0" in win._status_project.text()
+    win._store.update_sessions([SessionRef(session_id="s1", folder=tmp_path, sha256="x")])
+    assert "Sessions: 1" in win._status_project.text()
+
+
+def test_help_menu_opens_the_user_guide(qtbot, monkeypatch) -> None:
+    from app import main_window
+    from app.main_window import GUIDE_URL, MainWindow
+
+    opened = []
+    monkeypatch.setattr(
+        main_window.QDesktopServices, "openUrl", staticmethod(lambda url: opened.append(url))
+    )
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._action_open_guide()
+    assert opened[0].toString() == GUIDE_URL
+    assert GUIDE_URL.endswith("/docs/guide")

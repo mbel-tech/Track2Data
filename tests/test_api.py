@@ -1721,3 +1721,34 @@ def test_a_null_override_does_not_silently_drop_the_metric(
     Engine(manifest).compute_metrics(_make_psess(_make_session(n_frames=5)))
 
     assert received == [{}], "a null override must be dropped, not passed through as None"
+
+
+def test_body_length_px_is_available_in_every_calibration_mode() -> None:
+    """*_bl metrics must not depend on choosing Body Length calibration: with a
+    custom scale the tracker's own body length still normalises distances."""
+    from track2data.api import Engine
+    from track2data.metrics.individual import PathLength
+
+    session = _make_session(
+        n_frames=40, n_animals=2, body_length_px=np.full(2, 50.0)
+    )
+    manifest = _make_manifest(
+        sessions=[SessionRef(session_id="s1", folder=session.folder, sha256="x")],
+        calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+    )
+    psess = Engine(manifest).preprocess(session)
+    assert psess.px_per_cm == 10.0
+    np.testing.assert_allclose(psess.body_length_px, 50.0)
+    df = PathLength().compute(psess)
+    assert df["path_length_bl"].notna().all()
+    assert df["path_length_cm"].notna().all()
+
+
+def test_no_body_length_in_the_session_leaves_bl_empty() -> None:
+    from track2data.api import Engine
+
+    session = _make_session(n_frames=20, n_animals=1)
+    manifest = _make_manifest(
+        calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+    )
+    assert Engine(manifest).preprocess(session).body_length_px is None

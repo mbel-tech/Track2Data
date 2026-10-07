@@ -2,8 +2,11 @@
 
 Open-source desktop application that turns `idtracker.ai` output folders into analysis-ready behavioural datasets.
 
+**New here? Start with the [user guide](docs/guide/README.md)**: a step-by-step walkthrough of the app with screenshots.
+
 See [PRD.md](PRD.md) for the full product requirements. Design and workflow docs live in [docs/](docs/):
 
+- [`docs/guide/`](docs/guide/README.md) — **user guide**: every screen, with screenshots, plus output-file reference and troubleshooting.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased M1–M5 implementation plan, module build order, and exit criteria.
 - [`docs/TECHNICAL_SPEC.md`](docs/TECHNICAL_SPEC.md) — **read first.** System-level technical contract: tech stack, architecture, project file format, build/packaging, testing pyramid, plug-in compatibility policy.
 - [`docs/USER_WORKFLOW.md`](docs/USER_WORKFLOW.md) — the end-to-end user journey through the wizard, wireframes, validation messages, and save/resume logic.
