@@ -14,7 +14,7 @@ Paths are repo-relative. Updated as the fixes land (see `CHANGELOG.md` and `DECI
 | PERF-03 | Engine | P2 | **Partly fixed** (D-018) | GUI probes sessions with a full `read_session`. |
 | PERF-04 | Engine | P2 | **Fixed** | `exporters/csv_long.py` copies and sorts the per-frame table before one `to_csv`. |
 | GUI-01 | UX | P1 | **Fixed** (D-017) | Apply buttons on Calibration, Preprocessing, Metadata mapping, Metrics; no on-leave hook. |
-| GUI-02 | UX | P1 | Open | No trajectory plotting; no plotting dependency. |
+| GUI-02 | UX | P1 | **Fixed** (D-022) | No trajectory plotting; no plotting dependency. |
 | GUI-03 | UX | P2 | **Fixed** (D-021) | `WizardSidebar.mark_complete` (`app/navigation.py`) is never called; Next is ungated. |
 | GUI-04 | UX | P2 | **Fixed** | Zone canvas has no edges, fill, saved-zone display, zoom/pan or undo. |
 | GUI-05 | UX | P2 | **Fixed** (D-020) | Cancellation is only checked at stage boundaries; probes are not cancellable. |

@@ -298,6 +298,16 @@ class Engine:
         store = CacheStore(self._cache_dir)
         return store, store.key(reader.name, folder_fingerprint(folder), config_hash)
 
+    def preprocess_folder(self, folder: Path) -> PreprocessedSession:
+        """Preprocess the session in *folder*, reusing/filling the cache when
+        ``cache_dir`` is set. For callers (e.g. the GUI's trajectory viewer)
+        that need the arrays but are not running the whole pipeline."""
+        psess = self._cache_get(folder)
+        if psess is None:
+            psess = self.preprocess(self.import_session(folder))
+            self._cache_put(folder, psess)
+        return psess
+
     def _cache_get(self, folder: Path) -> PreprocessedSession | None:
         keyed = self._cache_key(folder)
         if keyed is None:

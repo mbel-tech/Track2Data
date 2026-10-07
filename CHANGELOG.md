@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Trajectory viewer** (Preview ▸ Trajectories). Load a session (reusing the
+  project cache) and scrub or play its tracked paths with per-animal
+  trails, raw vs processed overlays (to see what gap filling, jump removal
+  and smoothing changed), saved zones and an occupancy heatmap. Previously
+  no screen drew a single trajectory.
+
 - **Metadata screen** offers every canonical field (Trial, Group, Timepoint
   as well as the original four), auto-matches column aliases ("date",
   "condition", "tank", …), shows "N of M sessions matched" with the

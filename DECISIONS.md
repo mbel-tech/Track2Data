@@ -478,3 +478,20 @@ rules in a Qt-free function makes them unit-testable.
 
 **Alternative considered:** Gate sidebar clicks too. Rejected: users need
 to jump back to fix a problem shown by a badge.
+
+---
+
+### D-022 · Trajectory viewer is drawn with Qt graphics items, not pyqtgraph
+
+**Decision:** `ui/widgets/trajectory_view.py` renders trails, markers, zones
+and the heatmap with `QGraphicsView`, the same stack as the zone canvas.
+No plotting dependency is added.
+
+**Rationale:** The audit proposed pyqtgraph. The viewer needs paths over an
+image with a scrubber, which graphics items already do, and a new
+dependency would also need PyInstaller hidden-import work on three
+platforms. Trails are strided to at most 1500 points each.
+
+**Trade-off:** no built-in axes, ROI tools or GPU acceleration. If time
+series plots (e.g. speed vs time with a live filter preview) are added
+later, pyqtgraph can be reconsidered for those alone.
