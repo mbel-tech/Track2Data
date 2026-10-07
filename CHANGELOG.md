@@ -832,6 +832,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A session in the legacy idtracker.ai layout could not be opened by auto-detection.**
+  A raw `trajectories.npy` array beside a `video_object.npy` was claimed first by the
+  unified reader, which then failed with `IDT_FORMAT_AMBIGUOUS` ("expected a dict, got
+  ndarray"), so the legacy reader was unreachable from `read_session`, the CLI and the
+  app; only calling it directly worked. The unified reader now declines that layout
+  (it looks at the `.npy` header, never unpickling), so detection reaches the legacy
+  reader. A raw array with no `video_object.npy` is still claimed, so reading it
+  explains the problem instead of "no reader recognised the folder".
+
 - **The D-5 identity-stability diagnostic no longer calls a tracker "weak" for
   not reporting identification quality.** With no `fraction_identified` it
   defaulted to 0.0, so any session from a tracker that does not report one
