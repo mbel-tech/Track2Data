@@ -101,7 +101,10 @@ class ProjectStore(QObject):
         self._tasks.taskFinished.connect(self.taskFinished)
         self._tasks.taskFailed.connect(self._on_task_failed)
         self._tasks.taskLog.connect(lambda _task_id, line: self.append_log(line))
-        self.taskFinished.connect(self._on_identity_probe_finished)
+        # Session probes run in their own lane and report on probe* signals, so
+        # they never drive the main window's Cancel button or failure dialog.
+        self._tasks.probeFinished.connect(self._on_identity_probe_finished)
+        self._tasks.probeFailed.connect(self._on_probe_failed)
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -146,6 +149,18 @@ class ProjectStore(QObject):
         self._run_results = results
         self.runResultsChanged.emit()
 
+    def _on_probe_failed(self, task_id: str, message: str, tb: str) -> None:
+        exc = RuntimeError(message)
+        exc.traceback = tb  # type: ignore[attr-defined]
+        self._on_identity_probe_finished(task_id, exc)
+
+    def _cancel_pending_probes(self) -> None:
+        """Drop every outstanding probe (project switch): queued ones never
+        start, and any result that still arrives is ignored."""
+        for task_id in list(self._identity_probes):
+            self._tasks.cancel(task_id)
+        self._identity_probes.clear()
+
     def _on_task_failed(self, task_id: str, message: str, tb: str) -> None:
         exc = RuntimeError(message)
         exc.traceback = tb
@@ -155,7 +170,7 @@ class ProjectStore(QObject):
 
     def new_project(self, name: str, directory: Path) -> None:
         """Create a blank manifest for a new project."""
-        self._identity_probes.clear()
+        self._cancel_pending_probes()
         self._session_facts.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
@@ -171,7 +186,7 @@ class ProjectStore(QObject):
 
     def open_project(self, t2d_path: Path) -> None:
         """Load an existing project from a .t2d.json file."""
-        self._identity_probes.clear()
+        self._cancel_pending_probes()
         self._session_facts.clear()
         from track2data.core.manifest import read as manifest_read
 
@@ -279,7 +294,8 @@ class ProjectStore(QObject):
                 allow_pickle=allow_pickle,
                 reader=ref.reader if ref else None,
                 options=dict(ref.reader_options) if ref else None,
-            )
+            ),
+            lane="probe",
         )
         self._identity_probes[task_id] = session_id
 

@@ -17,6 +17,7 @@ from track2data.core.errors import ImportError_
 from track2data.core.models import Session
 from track2data.readers.base import SessionReader
 from track2data.readers.idtrackerai.reader import IDTrackerAiReader
+from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
 from track2data.readers.params import resolve_options
 
@@ -45,7 +46,10 @@ def _load_entry_points() -> None:
 
 
 # Register built-ins — the unified reader has the highest priority (20) so it
-# wins over the legacy v5 reader (10) when a folder is detected by both.
+# wins over the legacy v5 reader (10) when a folder is detected by both. The v4
+# placeholder is deliberately not registered: its detect() is always False, so it
+# could never be selected, and a registered class that only raises is worse than
+# an absent one (DECISIONS D-012). Its module only supplies ``looks_like_v4``.
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
 _load_entry_points()
@@ -133,19 +137,32 @@ def _call_probe(
     return cls().probe(path, **_reader_kwargs(cls, allow_pickle=allow_pickle, options=options))
 
 
+def _require_reader(folder: Path) -> type[SessionReader]:
+    """The reader for *folder*, or a specific ``ImportError_`` explaining why none."""
+    cls = detect_reader(folder)
+    if cls is not None:
+        return cls
+    if looks_like_v4(folder):
+        raise ImportError_(
+            f"This looks like idtracker.ai v4 output, which Track2Data cannot read yet: {folder}",
+            code="V4_NOT_SUPPORTED",
+            subject=str(folder),
+            remediation=(
+                "Only idtracker.ai v5 output is supported. To help add v4, follow "
+                "docs/IDTRACKERAI_V4_SAMPLES.md (IDTRACKERAI_V4_SAMPLES)."
+            ),
+        )
+    raise ImportError_(
+        f"No reader recognised the session folder: {folder}",
+        code="NO_READER",
+        subject=str(folder),
+        remediation="Ensure the folder is a valid idtracker.ai output directory.",
+    )
+
+
 def _choose(folder: Path, reader: str | None) -> type[SessionReader]:
     """The reader named *reader*, else the one that detects *folder*; an error if neither."""
-    if reader is not None:
-        return get_reader(reader)
-    cls = detect_reader(folder)
-    if cls is None:
-        raise ImportError_(
-            f"No reader recognised the session folder: {folder}",
-            code="NO_READER",
-            subject=str(folder),
-            remediation="Ensure the folder is a valid idtracker.ai output directory.",
-        )
-    return cls
+    return get_reader(reader) if reader is not None else _require_reader(folder)
 
 
 def read_session(

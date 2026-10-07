@@ -11,6 +11,7 @@ Run/Validate/Export actually do something.
 
 from __future__ import annotations
 
+import time
 import traceback
 import uuid
 from collections.abc import Callable
@@ -68,6 +69,10 @@ class _EngineTask(QRunnable):
         self._progress_enabled = progress_enabled
 
     def run(self) -> None:
+        if self._token.is_cancelled:
+            # Cancelled while still queued (shutdown, new project): never start.
+            self._signals.cancelled.emit(self._task_id)
+            return
         self._signals.started.emit(self._task_id)
         try:
             if self._progress_enabled:
@@ -95,12 +100,24 @@ class _EngineTask(QRunnable):
         self._signals.progress.emit(self._task_id, event.percent)
 
 
+#: Task lanes. "run": pipeline runs, exports, previews -- serialised so two
+#: triggers can't race on one output directory. "probe": cheap session reads
+#: made when a folder is added, kept off the run lane so they are never queued
+#: behind a long run, and silent on the generic task signals (see below).
+LANES = ("run", "probe")
+
+
 class TaskRunner(QObject):
     """
-    Owns a private QThreadPool(max_threads=1) -- deliberately not
-    QThreadPool.globalInstance() -- so runs are serialised (two
-    concurrent triggers can't race on the same output directory) and
+    Owns one private QThreadPool(max_threads=1) per lane -- deliberately not
+    QThreadPool.globalInstance() -- so tasks within a lane are serialised and
     waitForDone() is deterministic for shutdown.
+
+    Run-lane tasks report on taskStarted/Progress/Event/Log/Finished/Failed/
+    Cancelled, which the main window uses to drive its Cancel button and
+    failure dialog. Probe-lane tasks report only on probeFinished/
+    probeFailed/probeCancelled, so a session probe can neither flash Cancel
+    nor pop a "pipeline run failed" dialog.
     """
 
     taskStarted = Signal(str)
@@ -110,11 +127,18 @@ class TaskRunner(QObject):
     taskFinished = Signal(str, object)
     taskFailed = Signal(str, str, str)
     taskCancelled = Signal(str)
+    probeFinished = Signal(str, object)
+    probeFailed = Signal(str, str, str)
+    probeCancelled = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._pool = QThreadPool()
-        self._pool.setMaxThreadCount(1)
+        self._pools: dict[str, QThreadPool] = {}
+        for lane in LANES:
+            pool = QThreadPool()
+            pool.setMaxThreadCount(1)
+            self._pools[lane] = pool
+        self._lane_of: dict[str, str] = {}
         self._tokens: dict[str, CancellationToken] = {}
         # Explicit strong references to each in-flight task's _WorkerSignals
         # and _EngineTask, keyed by task_id. Both are local variables inside
@@ -127,11 +151,11 @@ class TaskRunner(QObject):
         # only once a task reaches a terminal state (see _forget).
         self._active: dict[str, tuple[_WorkerSignals, _EngineTask]] = {}
 
-    def submit(self, fn: Callable[[], Any]) -> str:
+    def submit(self, fn: Callable[[], Any], *, lane: str = "run") -> str:
         """Submit a plain callable that takes no arguments -- e.g.
         Engine.validate, Engine.preview_frame -- neither of which
         accepts a progress= kwarg."""
-        return self._submit(fn, progress_enabled=False)
+        return self._submit(fn, progress_enabled=False, lane=lane)
 
     def submit_with_progress(
         self, fn: Callable[..., Any], *, cancel_check: bool = False
@@ -150,19 +174,28 @@ class TaskRunner(QObject):
         *,
         progress_enabled: bool,
         cancel_check_enabled: bool = False,
+        lane: str = "run",
     ) -> str:
+        if lane not in self._pools:
+            raise ValueError(f"unknown lane {lane!r}; expected one of {LANES}")
         task_id = uuid.uuid4().hex
         token = CancellationToken()
         self._tokens[task_id] = token
+        self._lane_of[task_id] = lane
 
         signals = _WorkerSignals()
-        signals.started.connect(self.taskStarted)
-        signals.event.connect(self.taskEvent)
-        signals.progress.connect(self.taskProgress)
-        signals.log.connect(self.taskLog)
-        signals.finished.connect(self.taskFinished)
-        signals.failed.connect(self.taskFailed)
-        signals.cancelled.connect(self.taskCancelled)
+        if lane == "probe":
+            signals.finished.connect(self.probeFinished)
+            signals.failed.connect(self.probeFailed)
+            signals.cancelled.connect(self.probeCancelled)
+        else:
+            signals.started.connect(self.taskStarted)
+            signals.event.connect(self.taskEvent)
+            signals.progress.connect(self.taskProgress)
+            signals.log.connect(self.taskLog)
+            signals.finished.connect(self.taskFinished)
+            signals.failed.connect(self.taskFailed)
+            signals.cancelled.connect(self.taskCancelled)
         # Drop the token once the task reaches a terminal state, so
         # cancel()/cancel_all() never accumulate entries for tasks that
         # have already finished/failed/been cancelled.
@@ -184,13 +217,14 @@ class TaskRunner(QObject):
         # now the sole owner of its lifetime, cleared only in _forget.
         task.setAutoDelete(False)
         self._active[task_id] = (signals, task)
-        self._pool.start(task)
+        self._pools[lane].start(task)
         return task_id
 
     def _forget(self, task_id: str) -> Callable[..., None]:
         def _cleanup(*_args: object) -> None:
             self._tokens.pop(task_id, None)
             self._active.pop(task_id, None)
+            self._lane_of.pop(task_id, None)
         return _cleanup
 
     def cancel(self, task_id: str) -> None:
@@ -201,10 +235,12 @@ class TaskRunner(QObject):
         if token is not None:
             token.cancel()
 
-    def cancel_all(self) -> None:
-        """Request cancellation of every currently in-flight task."""
-        for token in list(self._tokens.values()):
-            token.cancel()
+    def cancel_all(self, lane: str | None = None) -> None:
+        """Request cancellation of every in-flight task, or of those in one
+        *lane* (the toolbar Cancel passes ``"run"`` so it never touches probes)."""
+        for task_id, token in list(self._tokens.items()):
+            if lane is None or self._lane_of.get(task_id) == lane:
+                token.cancel()
 
     def shutdown(self, msecs: int = 5000) -> bool:
         """
@@ -218,4 +254,9 @@ class TaskRunner(QObject):
         traceback.
         """
         self.cancel_all()
-        return self._pool.waitForDone(msecs)
+        deadline = time.monotonic() + msecs / 1000
+        drained = True
+        for pool in self._pools.values():
+            remaining = max(0, int((deadline - time.monotonic()) * 1000))
+            drained = pool.waitForDone(remaining) and drained
+        return drained
