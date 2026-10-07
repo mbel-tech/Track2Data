@@ -398,6 +398,15 @@ class SessionRef(BaseModel):
     # is user-authored project state that cannot be re-derived from the
     # session folder.
     identity_free_override: bool | None = None
+    # The reader that reads this session, and how. Chosen once, by detection or by the user in
+    # the confirm dialog, and replayed on every run, so the numbers cannot change because a
+    # later detection came out differently. None on a manifest written before a reader could
+    # be chosen: the engine then auto-detects exactly as it always did.
+    reader: str | None = None
+    reader_options: dict[str, Any] = {}
+    reader_chosen_by: Literal["detected", "user"] | None = None
+    # How sure the scan was when the choice was made ("HIGH", "MEDIUM", "LOW"), for provenance.
+    reader_confidence: str | None = None
 
     @field_validator("session_id")
     @classmethod
