@@ -9,6 +9,7 @@ source, and manifest hashing.
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -229,3 +230,149 @@ def test_d12_is_nan_without_quality(tiny_real_session: Path) -> None:
     s = read_session(tiny_real_session, allow_pickle=True).model_copy(update={"quality": None})
     row = FragmentQualityScores().compute(s).iloc[0]
     assert np.isnan(row["fragment_connectivity"]) and row["note"]
+
+
+# ── #75 D-13..D-16 ───────────────────────────────────────────────────────────
+
+
+def _frag(start, end, **kw):
+    return {"identifier": start, "start_frame": start, "end_frame": end,
+            "is_an_individual": True, **kw}
+
+
+def _with_fragments(session, frags):
+    return session.model_copy(update={"fragments": {"n_animals": 2, "fragments": frags}})
+
+
+def test_d13_frame_weighted_certainty_per_identity(tiny_real_session: Path) -> None:
+    from track2data.metrics.diagnostic import FragmentIdentityCertainty
+
+    s = _with_fragments(read_session(tiny_real_session, allow_pickle=True), [
+        _frag(0, 2, identity=1, certainty=0.2),
+        _frag(2, 10, identity=1, certainty=1.0),
+        _frag(0, 10, identity=2, certainty=-0.0069),
+        _frag(0, 10),                              # no identity: skipped
+        _frag(0, 5, identity=3, certainty=1.0),    # out of range: skipped
+    ])
+    df = FragmentIdentityCertainty().compute(s)
+    a, b = df.iloc[0], df.iloc[1]
+    assert a["individual_id"] == 0 and a["n_fragments"] == 2
+    assert a["certainty_mean"] == pytest.approx((2 * 0.2 + 8 * 1.0) / 10)
+    assert a["certainty_min"] == pytest.approx(0.2)
+    assert b["certainty_mean"] == pytest.approx(-0.0069)
+
+
+def test_d13_nan_without_fragments(tiny_real_session: Path) -> None:
+    from track2data.metrics.diagnostic import FragmentIdentityCertainty
+
+    df = FragmentIdentityCertainty().compute(read_session(tiny_real_session, allow_pickle=True))
+    assert df["certainty_mean"].isna().all() and (df["n_fragments"] == 0).all()
+
+
+def test_d14_fractions(tiny_real_session: Path) -> None:
+    from track2data.metrics.diagnostic import CertainFragmentFrameFraction
+
+    s = _with_fragments(read_session(tiny_real_session, allow_pickle=True), [
+        _frag(0, 10, identity=1, certainty=0.9, identity_is_fixed=True),   # 10 frames
+        _frag(0, 5, identity=2, certainty=0.1),                            # 5 frames
+        {**_frag(0, 10), "is_an_individual": False},                       # crossing
+    ])
+    row = CertainFragmentFrameFraction().compute(s).iloc[0]
+    assert row["frac_frames_certain"] == pytest.approx(10 / 20)
+    assert row["frac_frames_identity_fixed"] == pytest.approx(10 / 20)
+    assert row["frac_frames_individual"] == pytest.approx(15 / 20)
+
+
+def test_d15_nan_until_blob_layer_is_read(tiny_real_session: Path) -> None:
+    from track2data.metrics.diagnostic import TrackerCorrectionCensus
+
+    s = read_session(tiny_real_session, allow_pickle=True)
+    assert np.isnan(TrackerCorrectionCensus().compute(s).iloc[0]["n_corrected_frames"])
+    row = TrackerCorrectionCensus().compute(
+        s.model_copy(update={"tracker_corrected_frames": {1, 4}})
+    ).iloc[0]
+    assert row["n_corrected_frames"] == 2 and row["frac_corrected_frames"] == pytest.approx(0.2)
+
+
+def test_find_identity_corrected_frames_distinguishes_unsupported_from_zero() -> None:
+    from track2data.readers.idtrackerai.blobs import find_identity_corrected_frames
+
+    class B:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    assert find_identity_corrected_frames([[B()], [B()]]) is None
+    assert find_identity_corrected_frames(
+        [[B(identity_corrected_solving_jumps=None)], [B(identity_corrected_solving_jumps=None)]]
+    ) == set()
+    assert find_identity_corrected_frames(
+        [[B(identity_corrected_solving_jumps=None)], [B(identity_corrected_solving_jumps=2)]]
+    ) == {1}
+
+
+def test_blob_diagnostics_wires_corrections_into_import(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    import pickle
+    import sys
+    import types
+
+    folder = tmp_path / "s"
+    shutil.copytree(tiny_real_session, folder)
+    mod = types.ModuleType("idtrackerai.blob")
+    pkg = types.ModuleType("idtrackerai")
+    pkg.__path__ = []  # type: ignore[attr-defined]
+    lob_mod = types.ModuleType("idtrackerai.list_of_blobs")
+    blob_cls = type("Blob", (), {"__module__": "idtrackerai.blob"})
+    lob_cls = type("ListOfBlobs", (), {"__module__": "idtrackerai.list_of_blobs"})
+    mod.Blob, lob_mod.ListOfBlobs = blob_cls, lob_cls  # type: ignore[attr-defined]
+    names = ("idtrackerai", "idtrackerai.blob", "idtrackerai.list_of_blobs")
+    saved = {k: sys.modules.get(k) for k in names}
+    sys.modules.update({"idtrackerai": pkg, "idtrackerai.blob": mod,
+                        "idtrackerai.list_of_blobs": lob_mod})
+    try:
+        blobs = []
+        for corrected in (None, 1, None):
+            b = blob_cls()
+            b.__dict__["identity_corrected_solving_jumps"] = corrected
+            blobs.append([b])
+        lob = lob_cls()
+        lob.__dict__["blobs_in_video"] = blobs
+        (folder / "preprocessing" / "list_of_blobs.pickle").write_bytes(pickle.dumps(lob))
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+    sec = SecurityConfig(allow_pickle_trajectories=True)
+    off = Engine(_manifest(security=sec)).import_session(folder)
+    on = Engine(_manifest(security=sec, blob_diagnostics=True)).import_session(folder)
+    assert off.tracker_corrected_frames is None
+    assert on.tracker_corrected_frames == {1}
+
+
+def test_d16_distortion(tiny_real_session: Path) -> None:
+    from track2data.metrics.diagnostic import PreprocessingDistortion
+
+    s = read_session(tiny_real_session, allow_pickle=True)
+    psess = PreprocessedSession(
+        session=s, xy=s.raw_xy.copy(), kinematics=None,  # type: ignore[arg-type]
+        report=PreprocessReport(),
+    )
+    clean = PreprocessingDistortion().compute(psess)
+    assert (clean["rms_displacement_px"] == 0).all()
+    assert (clean["frac_frames_altered"] == 0).all()
+    assert clean["path_length_ratio"].tolist() == pytest.approx([1.0, 1.0])
+
+    moved = s.raw_xy.copy()
+    moved[5, 0, 1] += 100.0                       # a one-frame teleport
+    out = PreprocessingDistortion().compute(
+        PreprocessedSession(session=s, xy=moved, kinematics=None,  # type: ignore[arg-type]
+                            report=PreprocessReport())
+    )
+    r0 = out.iloc[0]
+    assert r0["frac_frames_altered"] == pytest.approx(1 / 10)
+    assert r0["path_length_ratio"] > 1.5 and r0["distortion_index"] > 1
+    assert out.iloc[1]["path_length_ratio"] == pytest.approx(1.0)

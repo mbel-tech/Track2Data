@@ -4,7 +4,7 @@
 
 You tracked your fish. idtracker.ai gave you a folder of trajectories.
 Track2Data turns that into tables you can put straight into R or Python:
-46 behavioural metrics, every one with a citation, in documented units,
+50 behavioural metrics, every one with a citation, in documented units,
 with a record of exactly which frames were measured and which were
 reconstructed.
 
@@ -201,7 +201,7 @@ every export's `manifest.json`.
 
 A rendered site is published from these files at
 **<https://mbel-tech.github.io/Track2Data/>**, including a browsable
-catalogue of all 46 metrics with their formulas, units and DOIs.
+catalogue of all 50 metrics with their formulas, units and DOIs.
 
 **Using it**
 

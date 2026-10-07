@@ -1010,6 +1010,343 @@ class FragmentQualityScores(Metric):
         )
 
 
+class FragmentIdentityCertainty(Metric):
+    """D-13: idtracker.ai's own identification certainty, per identity.
+
+    Distinct from D-3, which summarises the raw ``id_probabilities`` array:
+    this reads the per-fragment ``certainty`` idtracker.ai stores in
+    ``list_of_fragments.json`` and aggregates it per identity, weighted by
+    fragment length, so one long confident fragment outweighs many short
+    doubtful ones.
+    """
+
+    id = "D-13"
+    name = "fragment_identity_certainty"
+    label = "Per-Identity Fragment Certainty"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "individual_id",
+        "n_fragments",
+        "n_frames_attributed",
+        "certainty_mean",
+        "certainty_min",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Frame-weighted mean and minimum of idtracker.ai's per-fragment "
+            "identification certainty, for each identity."
+        ),
+        formula_plain=(
+            "certainty_mean[k] = sum(len_i * certainty_i) / sum(len_i) over "
+            "individual fragments i with identity k+1 and a recorded "
+            "certainty; len_i = end_frame - start_frame"
+        ),
+        inputs=["Session.fragments"],
+        assumptions=[
+            "Fragment identity is 1-based and is mapped to the 0-based "
+            "individual_id used everywhere else.",
+        ],
+        warnings=[
+            "certainty is not a probability: negative values occur "
+            "(observed -0.0069) and no upper bound is guaranteed.",
+            "Fragments without an identity or certainty (about a third of "
+            "fragments in the corpus used to build the reader) are skipped; "
+            "n_frames_attributed shows how much of the identity that covers.",
+            "NaN when Session.fragments is None.",
+        ],
+        primary_reference=ROMERO_FERRERO_2019,
+        supporting_references=[],
+    )
+
+    def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        from track2data.readers.idtrackerai.fragments import individual_fragments
+
+        n_animals = session.n_animals
+        weights: dict[int, list[tuple[float, float]]] = {k: [] for k in range(n_animals)}
+        if session.fragments is not None:
+            for frag in individual_fragments(session.fragments):
+                identity, certainty = frag.get("identity"), frag.get("certainty")
+                start, end = frag.get("start_frame"), frag.get("end_frame")
+                if (
+                    not isinstance(identity, int)
+                    or isinstance(identity, bool)
+                    or certainty is None
+                    or not isinstance(start, int)
+                    or not isinstance(end, int)
+                    or not 1 <= identity <= n_animals
+                    or end <= start
+                ):
+                    continue
+                try:
+                    weights[identity - 1].append((float(end - start), float(certainty)))
+                except (TypeError, ValueError):
+                    continue
+
+        rows = []
+        for k in range(n_animals):
+            pairs = weights[k]
+            if pairs:
+                total = sum(w for w, _ in pairs)
+                mean = sum(w * c for w, c in pairs) / total
+                lowest = min(c for _, c in pairs)
+            else:
+                total, mean, lowest = 0.0, float("nan"), float("nan")
+            rows.append({
+                "session_id": session.session_id,
+                "individual_id": k,
+                "n_fragments": len(pairs),
+                "n_frames_attributed": int(total),
+                "certainty_mean": mean,
+                "certainty_min": lowest,
+            })
+        return pd.DataFrame(rows, columns=self.output_columns)
+
+
+class CertainFragmentFrameFraction(Metric):
+    """D-14: what share of frames sit in fragments whose identity is secure.
+
+    A cleaner signal than D-1's raw coverage: a frame can have coordinates and
+    still belong to a fragment idtracker.ai itself was unsure about.
+    """
+
+    id = "D-14"
+    name = "certain_fragment_frame_fraction"
+    label = "Certain-Fragment Frame Fraction"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "certainty_threshold_used",
+        "frac_frames_certain",
+        "frac_frames_identity_fixed",
+        "frac_frames_individual",
+    ]
+    #: Track2Data threshold (not an idtracker.ai constant); see warnings.
+    MIN_CERTAINTY: ClassVar[float] = 0.5
+    documentation = MetricDocumentation(
+        definition=(
+            "Fraction of session frames covered by individual fragments "
+            "whose certainty meets a threshold, and by fragments idtracker.ai "
+            "marked identity_is_fixed."
+        ),
+        formula_plain=(
+            "frac_frames_certain = sum(len_i for individual fragments with "
+            "certainty_i >= min_certainty) / n_frames; "
+            "frac_frames_identity_fixed uses identity_is_fixed; "
+            "frac_frames_individual counts every individual fragment"
+        ),
+        inputs=["Session.fragments", "Session.n_frames"],
+        assumptions=[
+            "Fragments are disjoint per animal, so their lengths are summed "
+            "over all animals and divided by n_frames * n_animals.",
+        ],
+        warnings=[
+            "The 0.5 certainty cut (the same value the body-length blob "
+            "reader uses) is a Track2Data threshold, not one idtracker.ai "
+            "defines, and is not configurable; certainty is not a probability.",
+            "Fragments lacking a certainty count as not certain.",
+            "NaN when Session.fragments is None.",
+        ],
+        primary_reference=ROMERO_FERRERO_2019,
+        supporting_references=[],
+    )
+
+    def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        from track2data.readers.idtrackerai.fragments import individual_fragments
+
+        threshold = self.MIN_CERTAINTY
+        nan = float("nan")
+        certain = fixed = individual = nan
+        denom = session.n_frames * session.n_animals
+        if session.fragments is not None and denom > 0:
+            certain = fixed = individual = 0.0
+            for frag in individual_fragments(session.fragments):
+                start, end = frag.get("start_frame"), frag.get("end_frame")
+                if not isinstance(start, int) or not isinstance(end, int) or end <= start:
+                    continue
+                length = float(end - start)
+                individual += length
+                c = frag.get("certainty")
+                if isinstance(c, (int, float)) and not isinstance(c, bool) and c >= threshold:
+                    certain += length
+                if frag.get("identity_is_fixed") is True:
+                    fixed += length
+            certain, fixed, individual = (
+                min(v / denom, 1.0) for v in (certain, fixed, individual)
+            )
+        return pd.DataFrame(
+            [{
+                "session_id": session.session_id,
+                "certainty_threshold_used": threshold,
+                "frac_frames_certain": certain,
+                "frac_frames_identity_fixed": fixed,
+                "frac_frames_individual": individual,
+            }],
+            columns=self.output_columns,
+        )
+
+
+class TrackerCorrectionCensus(Metric):
+    """D-15: frames where idtracker.ai's own tracker re-assigned an identity.
+
+    Independent of D-9, which counts opportunities for a swap in *this*
+    project's preprocessing; this counts what the tracker itself changed.
+    """
+
+    id = "D-15"
+    name = "tracker_correction_census"
+    label = "Tracker Correction Census"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "n_corrected_frames",
+        "frac_corrected_frames",
+        "note",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Number and fraction of frames in which at least one blob's "
+            "identity was re-assigned by idtracker.ai while solving jumps."
+        ),
+        formula_plain=(
+            "n_corrected_frames = count(frames with any blob where "
+            "identity_corrected_solving_jumps is not None)"
+        ),
+        inputs=["Session.tracker_corrected_frames"],
+        assumptions=[
+            "Read from preprocessing/list_of_blobs.pickle, only when the "
+            "project sets blob_diagnostics and allows pickle loading.",
+        ],
+        warnings=[
+            "NaN means the blob layer was not read -- not that there were no "
+            "corrections.",
+            "The attribute's semantics come from idtracker.ai's source and "
+            "have not been checked against a real-session corpus.",
+        ],
+        primary_reference=ROMERO_FERRERO_2019,
+        supporting_references=[],
+    )
+
+    def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        frames = session.tracker_corrected_frames
+        if frames is None:
+            n, frac, note = float("nan"), float("nan"), "blob layer not read"
+        else:
+            n = float(len(frames))
+            frac = n / session.n_frames if session.n_frames else float("nan")
+            note = ""
+        return pd.DataFrame(
+            [{
+                "session_id": session.session_id,
+                "n_corrected_frames": n,
+                "frac_corrected_frames": frac,
+                "note": note,
+            }],
+            columns=self.output_columns,
+        )
+
+
+class PreprocessingDistortion(Metric):
+    """D-16: how far preprocessing moved each animal from its raw track.
+
+    Takes the PreprocessedSession (like D-11). One scale-free number --
+    ``distortion_index`` -- says at a glance whether gap-fill, jump
+    replacement and smoothing changed the trajectory by more than the animal
+    actually moves per frame.
+    """
+
+    id = "D-16"
+    name = "preprocessing_distortion"
+    label = "Preprocessing Distortion Index"
+    level = "diagnostic"
+    priority = "diagnostic"
+    requires_identity = False
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "individual_id",
+        "rms_displacement_px",
+        "frac_frames_altered",
+        "path_length_ratio",
+        "distortion_index",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "RMS distance between the raw and preprocessed position, the "
+            "fraction of frames that differ, the ratio of preprocessed to "
+            "raw path length, and the RMS displacement divided by the raw "
+            "median per-frame step."
+        ),
+        formula_plain=(
+            "d_t = |xy_t - raw_t| over frames finite in both; "
+            "rms = sqrt(mean(d_t^2)); distortion_index = rms / "
+            "median(|raw_t - raw_{t-1}|); path_length_ratio = "
+            "sum|xy_t - xy_{t-1}| / sum|raw_t - raw_{t-1}|"
+        ),
+        inputs=["PreprocessedSession.xy", "Session.raw_xy"],
+        assumptions=[
+            "Frames filled by gap-fill have no raw position, so they count "
+            "as altered but are excluded from the RMS (nothing to compare).",
+        ],
+        warnings=[
+            "distortion_index is NaN for an animal whose median raw step is "
+            "zero (a stationary track); read path_length_ratio instead -- "
+            "a large ratio there is exactly the spurious-teleport failure.",
+            "Smoothing alone lowers path_length_ratio below 1 by design.",
+        ],
+        citation=(
+            "Data-provenance convention for derived measures; no single "
+            "originating work"
+        ),
+    )
+
+    def compute(
+        self, session: PreprocessedSession, cfg: dict[str, Any] | None = None
+    ) -> pd.DataFrame:
+        raw = np.asarray(session.session.raw_xy, dtype=np.float64)
+        proc = np.asarray(session.xy, dtype=np.float64)
+        nan = float("nan")
+        rows = []
+        for k in range(session.n_animals):
+            r, p = raw[:, k, :], proc[:, k, :]
+            both = ~(np.isnan(r).any(axis=1) | np.isnan(p).any(axis=1))
+            if both.any():
+                d = np.hypot(*(p[both] - r[both]).T)
+                rms = float(np.sqrt(np.mean(d**2)))
+            else:
+                rms = nan
+
+            p_ok = ~np.isnan(p).any(axis=1)
+            differs = ~both & p_ok | (both & (np.hypot(*(p - r).T) > 1e-9))
+            n_used = int(p_ok.sum())
+            altered = float(differs.sum() / n_used) if n_used else nan
+
+            def _steps(a: np.ndarray) -> np.ndarray:
+                ok = ~np.isnan(a).any(axis=1)
+                pair = ok[1:] & ok[:-1]
+                return np.hypot(*(a[1:] - a[:-1]).T)[pair]
+
+            raw_steps, proc_steps = _steps(r), _steps(p)
+            raw_len = float(raw_steps.sum())
+            ratio = float(proc_steps.sum()) / raw_len if raw_len > 0 else nan
+            med = float(np.median(raw_steps)) if raw_steps.size else nan
+            index = rms / med if med and not np.isnan(rms) and med > 0 else nan
+            rows.append({
+                "session_id": session.session_id,
+                "individual_id": k,
+                "rms_displacement_px": rms,
+                "frac_frames_altered": altered,
+                "path_length_ratio": ratio,
+                "distortion_index": index,
+            })
+        return pd.DataFrame(rows, columns=self.output_columns)
+
+
 # ── Convenience function ───────────────────────────────────────────────────────
 
 
@@ -1034,9 +1371,13 @@ def compute_all_diagnostics(psess: PreprocessedSession) -> dict[str, pd.DataFram
         SwapOpportunityCount(),
         PhysicalPlausibilityViolations(),
         FragmentQualityScores(),
+        FragmentIdentityCertainty(),
+        CertainFragmentFrameFraction(),
+        TrackerCorrectionCensus(),
     ]
     results = {m.id: m.compute(session) for m in metrics}
     results[MetricInputProvenance.id] = MetricInputProvenance().compute(psess)
+    results[PreprocessingDistortion.id] = PreprocessingDistortion().compute(psess)
     return results
 
 
@@ -1056,3 +1397,7 @@ _register(SwapOpportunityCount)
 _register(PhysicalPlausibilityViolations)
 _register(MetricInputProvenance)
 _register(FragmentQualityScores)
+_register(FragmentIdentityCertainty)
+_register(CertainFragmentFrameFraction)
+_register(TrackerCorrectionCensus)
+_register(PreprocessingDistortion)

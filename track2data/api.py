@@ -337,6 +337,22 @@ class Engine:
                     session.session_id,
                 )
 
+        if self._manifest.blob_diagnostics:
+            if allow_pickle:
+                from track2data.readers.idtrackerai.blobs import (
+                    enrich_session_with_blob_corrections,
+                )
+
+                session = enrich_session_with_blob_corrections(
+                    session, allow_pickle=True
+                )
+            else:
+                logger.warning(
+                    "blob_diagnostics needs security.allow_pickle_trajectories "
+                    "(the blob file is a pickle); D-15 will be NaN for %s.",
+                    session.session_id,
+                )
+
         override = self._manifest.video_overrides.get(session.session_id)
         if override is not None and Path(override).exists():
             session = session.model_copy(

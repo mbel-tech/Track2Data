@@ -270,3 +270,47 @@ def enrich_session_with_blob_body_length(
         "body_length_px": result["body_length_px"],
         "blob_body_length_source_file": result["source_file"],
     })
+
+
+def find_identity_corrected_frames(blobs_in_video: list) -> set[int] | None:
+    """Frames where idtracker.ai re-assigned an identity while solving jumps.
+
+    A blob carries ``identity_corrected_solving_jumps`` (None unless the
+    tracker's post-processing changed its identity). Returns the set of frame
+    indices with at least one such blob; an empty set means the list was read
+    and nothing was corrected. None when no blob exposes the attribute at all
+    (an older or different pickle layout), so "unsupported" is never reported
+    as "zero corrections".
+    """
+    seen_attribute = False
+    frames: set[int] = set()
+    for frame, frame_blobs in enumerate(blobs_in_video):
+        for blob in frame_blobs:
+            state = blob.__dict__
+            if "identity_corrected_solving_jumps" not in state:
+                continue
+            seen_attribute = True
+            if state["identity_corrected_solving_jumps"] is not None:
+                frames.add(frame)
+                break
+    return frames if seen_attribute else None
+
+
+def enrich_session_with_blob_corrections(
+    session: Session, *, allow_pickle: bool
+) -> Session:
+    """Attach ``tracker_corrected_frames`` from the blob pickle (D-15's input).
+
+    Same gating and never-raises contract as
+    :func:`enrich_session_with_blob_body_length`: returns *session* unchanged
+    when pickle loading is not allowed or the blob file is absent/unusable.
+    """
+    if not allow_pickle:
+        return session
+    loaded = _load_blobs_in_video(session.folder)
+    if loaded is None:
+        return session
+    frames = find_identity_corrected_frames(loaded[0])
+    if frames is None:
+        return session
+    return session.model_copy(update={"tracker_corrected_frames": frames})

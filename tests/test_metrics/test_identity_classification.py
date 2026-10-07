@@ -51,6 +51,8 @@ IDENTITY_REQUIRING = {
     # Always computed regardless (diagnostics bypass the gate), but the
     # flag is what it claims to be.
     "D-3",
+    # Likewise per-identity: idtracker.ai's fragment certainty by identity.
+    "D-13",
     # Sequence-based zone metrics: follow one slot across frames
     # (SCI-02, D-016). Z-1/Z-2/Z-8 are pure occupancy and are pooled instead.
     "Z-3", "Z-4", "Z-5", "Z-6", "Z-7", "Z-9",

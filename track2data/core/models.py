@@ -178,6 +178,12 @@ class Session(BaseModel):
     # uncurated sessions in one analysis without knowing which is which is
     # a reproducibility hazard.
     blob_body_length_source_file: str | None = None
+    # Frame indices where idtracker.ai's own post-processing re-assigned an
+    # identity (blob attribute ``identity_corrected_solving_jumps`` set).
+    # Comes from the blob pickle, so it is None unless the project opted in
+    # (ProjectManifest.blob_diagnostics) AND allowed pickle loading; None
+    # means "not read", never "no corrections".
+    tracker_corrected_frames: set[int] | None = None
 
     @property
     def n_frames(self) -> int:
@@ -475,6 +481,10 @@ class ProjectManifest(BaseModel):
     # exist on this machine (IDT_VIDEO_PATH_UNREACHABLE). Remembered per
     # project, so the user locates the video once.
     video_overrides: dict[str, Path] = {}
+    # Read idtracker.ai's blob layer on import to feed D-15 (tracker
+    # corrections). Opt-in: it unpickles a file that is tens of MB, and needs
+    # security.allow_pickle_trajectories.
+    blob_diagnostics: bool = False
 
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""
