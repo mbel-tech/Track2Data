@@ -47,9 +47,10 @@ def _missing_body_length(summaries: Sequence[SessionSummary]) -> list[str]:
     by_reader = _ids_by(lacking, key=lambda s: _label(s.reader))
     detail = "; ".join(f"{label}: {_listed(ids)}" for label, ids in by_reader.items())
     return [
-        "Calibration is set to 'bodylength', but these sessions carry no body length, so it is "
-        f"skipped for them and their columns stay in pixels ({detail}). Choose 'scalar' "
-        "calibration and give pixels per cm to get real-unit columns."
+        "Calibration is set to 'bodylength', but some sessions carry no body length, so it is "
+        "skipped for them and their columns stay in pixels. Affected sessions, by reader: "
+        f"{detail}. To get real-unit columns, choose 'scalar' calibration and give pixels per "
+        "cm (or 'session' calibration, for sessions that carry their own length unit)."
     ]
 
 

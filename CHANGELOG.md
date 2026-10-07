@@ -32,7 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   detecting again. A session whose reader is not installed fails with
   `READER_NOT_AVAILABLE`; it is never read by a different reader, which could
   turn the same files into different numbers. Projects saved before this still
-  load and give the same metrics; only the project hash changes, once.
+  load and write byte-identical per-session CSVs; only the project hash changes,
+  once. One thing is newly visible: an idtracker.ai v5 project on the default
+  body-length calibration now gets a note that its sessions carry no body
+  length. That calibration was already being skipped without a word, so nothing
+  about the numbers changes, only that they are now told.
 
   For a session from any tracker other than idtracker.ai, the per-session
   `README.md` and `manifest.json` carry a "Source software provenance" section:

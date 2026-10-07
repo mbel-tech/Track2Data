@@ -136,6 +136,14 @@ class TestBodyLengthCalibrationWithoutABodyLength:
         assert "has_bl" not in text
         assert "pixels" in text
         assert "'scalar'" in text
+        assert "'session'" in text
+
+    def test_does_not_nest_the_reader_and_session_lists_in_parentheses(self) -> None:
+        (advisory,) = reader_advisories(
+            [_summary("a", "adv_verified", mode="bodylength", has_body_length=False)]
+        )
+        assert "(Verified tool: a)" not in advisory
+        assert "Verified tool: a" in advisory
 
     def test_is_silent_under_any_other_calibration_mode(self) -> None:
         for mode in ("scalar", "session"):

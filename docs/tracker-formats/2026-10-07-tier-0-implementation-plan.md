@@ -1350,7 +1350,14 @@ In `test_reader_contract.py` replace `registry.detect_reader(folder)().read(fold
 
 **Deviation from the outline.** The outline put the body-length advisory on the reader's `provides_body_length` flag. The flag remains a declaration for the dialog, but the advisory is driven by whether the session really has a body length: it is what decides whether calibration runs.
 
-**Verified.** A toy non-idtracker reader runs `Engine.run` end to end from its saved options (`tests/test_integration/test_non_idtracker_reader.py`): README, `manifest.json`, D-5, advisories and the project summary. Ten mutations of the new logic (the idtracker/other switch, the verified-reader skip, the calibration-mode test, the verification field, pipe escaping, name-only file listing, the body-length flag, both consistency surfaces, the "+N more" cut) are each caught by a test.
+**Done when.** Legacy projects give byte-identical metrics (only `project_hash` differs), and a saved reader replays to exactly what detection produced.
+
+**Verified.**
+
+- A toy non-idtracker reader runs `Engine.run` end to end from its saved options (`tests/test_integration/test_non_idtracker_reader.py`): README, `manifest.json`, D-5, advisories and the project summary. Ten mutations of the new logic (the idtracker/other switch, the verified-reader skip, the calibration-mode test, the verification field, pipe escaping, name-only file listing, the body-length flag, both consistency surfaces, the "+N more" cut) are each caught by a test.
+- **Legacy outputs, compared across trees.** The pp3 tip (`2017cc8`) and the T0-4 tree (`48610f5`) were extracted with `git archive` (no worktree, no install) and run from inside their own folders, each asserting that `track2data` was imported from there. All four ran over the same two fixture folders (`tiny_real`, `tiny_v5`), every metric selected, diagnostics included, `allow_pickle_trajectories` on, once under the default `bodylength` calibration and once under `scalar`. The pp3 tip cannot read `tiny_v5` (`IDT_FORMAT_AMBIGUOUS`, fixed in T0-4), so it is a baseline for `tiny_real` only. Result: every per-session CSV is byte-identical from pp3 and from T0-4 to now (4 files per session, both calibrations), and byte-identical between a project whose entries name no reader and the same project with persisted readers.
+- **What does differ, all expected.** `codebook.csv`: only D-5's description (it now documents `not_assessed`). `PROJECT_SUMMARY.md`: the project hash and, for `tiny_v5` under `bodylength`, the new "Notes on the readers" entry saying its sessions carry no body length (true before, and reported only now: the calibration was skipped without a word). `sessions.csv` differs from the pp3 run only because the pp3 run could not read `tiny_v5`.
+- The permanent guard is `tests/test_integration/test_replayed_reader.py`: all CSVs of a detected run and a saved-reader run must match byte for byte, for both layouts and both calibration modes. Breaking the replay road (the project's pickle consent not forwarded; the wrong reader replayed) makes it fail.
 
 ---
 
