@@ -855,6 +855,9 @@ and headless CLI report the same identifier. The full list:
 | `IDT_JSON_NONSTRICT` | 2 | info | "`session.json` contains non-strict JSON literal (`Infinity`/`NaN`); parsed leniently." |
 | `IDT_VIDEO_PATH_UNREACHABLE` | 2 | warning | "`video_paths` `<p>` unreachable on this machine. Use 'Locate video…' to rebase." |
 | `IDT_RESOURCE_FORK_IGNORED` | 2 | info | "Ignored `<count>` macOS resource-fork files (`._*`)." |
+| `READER_UNKNOWN` | 2 | error | "No reader named '<name>' is registered." Fix: check the spelling (`track2data list-readers`) or install the plug-in that provides it. |
+| `READER_OPTION_MISSING` | 2 | error | "Reader '<reader>' needs option '<name>' (<label>); the files do not record it." Never defaulted: a made-up frame rate would corrupt every speed metric. |
+| `READER_OPTION_INVALID` | 2 | error | "Reader '<reader>': option '<name>' <reason>." Raised for an unknown option name, a wrong type, a value outside its range or choices, or any option given to a reader that takes none. |
 
 The `IDT_*` codes are sourced from [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) §7.1 and become live when the reader rewrite lands.
 

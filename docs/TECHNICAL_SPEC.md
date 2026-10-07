@@ -599,6 +599,16 @@ takes the shorter route.
 | Change a method signature | no | yes |
 | Tighten a default tolerance | document in release notes | — |
 
+**Optional keyword arguments on `SessionReader.read`.** `read` has gained
+keywords in minor releases without breaking readers written against the original
+one-argument `read(folder)`, because `read_session` forwards a keyword only to a
+reader that declares it: `allow_pickle` to those with `accepts_allow_pickle`, and
+`options` to those with a non-empty `parameters`. A new optional capability follows
+the same pattern, a class attribute that opts in, never a changed default
+signature. The other class attributes added this way (`display_name`,
+`verification`, `coordinate_frame`, `provides_body_length`) all have defaults, so
+an older reader inherits them.
+
 External plug-ins are loaded behind a `try/except` and **never crash
 the engine** — failures surface as a warning in the run log
 (ENGINE_DESIGN §5.3).

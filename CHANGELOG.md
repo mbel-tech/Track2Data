@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Readers can declare options and be read by name.** The first step towards
+  importing output from trackers other than idtracker.ai. A reader can now
+  declare the options its files do not record (frame rate, frame size, which
+  keypoint stands for the animal) as `parameters`, and say whether it was tested
+  against real tracker output (`verification`). `read_session` takes
+  `reader=` and `options=`, so a confirmed choice can be replayed instead of
+  re-detected. A required option that is missing is a coded error
+  (`READER_OPTION_MISSING`), never a default: a made-up frame rate would
+  silently corrupt every speed metric.
+
+  All of it is additive. A reader written against the original one-argument
+  `read(folder)` keeps working, because a keyword is passed only to a reader that
+  declares it. Session ids now come from one helper (`track2data.core.ids`), and
+  `SessionRef` rejects ids that could escape the output directory; every id that
+  loaded before still loads. The design and rollout plan are in
+  `docs/tracker-formats/`.
+
 - **`track2data sensitivity` — recompute metrics across a grid of
   preprocessing settings.** The strongest methodological objection this class
   of tool attracts is that the preprocessing choices, not the animals, drive
