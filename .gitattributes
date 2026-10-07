@@ -4,3 +4,5 @@ docs/tracker-formats/animal_tracking_output_formats.md -text
 docs/tracker-formats/animal_tracking_formats_table.csv -text
 docs/tracker-formats/importer_priority.csv -text
 docs/tracker-formats/tracker_test_datasets.csv -text
+
+tests/real_samples/fixtures_manifest.json -text
