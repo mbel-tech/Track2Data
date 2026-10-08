@@ -881,7 +881,15 @@ and headless CLI report the same identifier. The full list:
 | `READER_UNKNOWN` | 2 | error | "No reader named '<name>' is registered." Fix: check the spelling (`track2data list-readers`) or install the plug-in that provides it. |
 | `READER_NOT_AVAILABLE` | 2 | error | "Session '<id>' was added with reader '<name>', which is not available here." Fix: install the plug-in that provides it, or remove the session and add it again so a reader is detected afresh. The session is never read by a different reader: another reader could turn the same files into different numbers. |
 | `READER_OPTION_MISSING` | 2 | error | "Reader '<reader>' needs option '<name>' (<label>); the files do not record it." Never defaulted: a made-up frame rate would corrupt every speed metric. |
-| `READER_OPTION_INVALID` | 2 | error | "Reader '<reader>': option '<name>' <reason>." Raised for an unknown option name, a wrong type, a value outside its range or choices, or any option given to a reader that takes none. |
+| `READER_OPTION_INVALID` | 2 | error | "Reader '<reader>': option '<name>' <reason>." Raised for an unknown option name, a wrong type, a value outside its range or choices, or any option given to a reader that takes none. A keypoint or animal that is not in the file is the same code, and the fix lists the ones that are. |
+| `READER_OUTPUT_INVALID` | 2 | error | "<what is wrong>" (a frame rate or size that cannot be true, no frames, positions of the wrong shape). Raised when a reader's result fails the checks every session must pass; the `subject` names the field. |
+| `POSE_NO_POSITIONS` | 2 | error | "No keypoint has any usable position." Fix: lower the likelihood cutoff, or check that the file is the tracker's output. |
+| `SESSION_AMBIGUOUS` | 2 | error | "<folder> holds N DeepLabCut files, one per video." Fix: add one of the listed files directly, or scan the folder to add them all. |
+| `DLC_NOT_A_PREDICTION_FILE` | 2 | error | "<file> is not a DeepLabCut prediction table." A prediction table starts with a `scorer` row and has `x`, `y` and `likelihood` columns; annotation files (`CollectedData_*`) and 3-D tables are not read. |
+| `DLC_NO_FILE` | 2 | error | "Nothing to read at <path>." Fix: point at a DeepLabCut `.csv` file or a folder that holds one. |
+| `DLC_UNREADABLE` | 2 | error | "<file> is not valid text / could not be parsed." The file may be damaged; re-export it from DeepLabCut. |
+| `DLC_BAD_FRAME_INDEX` | 2 | error | "The first column must hold each frame number once." Raised for a missing, negative, fractional or repeated frame number. |
+| `DLC_BAD_VALUE` | 2 | error | "<file> has cells that are not numbers." An empty cell is missing data; a text cell is an error and is never silently turned into a gap. |
 
 The `IDT_*` codes are sourced from [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) §7.1 and become live when the reader rewrite lands.
 

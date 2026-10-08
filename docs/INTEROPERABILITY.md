@@ -132,7 +132,8 @@ ds = xr.Dataset(
 | Excel | ✅ shipped | `excel` exporter, needs `openpyxl` |
 | Feather / Arrow | ✅ shipped | `feather` exporter, needs `pyarrow` |
 | `movement` xarray | 📋 documented above | Not implemented |
-| DeepLabCut / SLEAP input | ❌ out of scope | Track2Data reads idtracker.ai output, not pose files. A reader plug-in is possible — see the `track2data.readers` entry point in `CONTRIBUTING.md`. |
+| DeepLabCut CSV input (also Lightning Pose, EKS) | ✅ supported | One session per prediction file; the frame rate and frame size are options you give (the file records neither); one keypoint stands for the animal and the whole skeleton is stored beside it. See `docs/tracker-formats/README.md`. |
+| DeepLabCut `.h5`, SLEAP input | 🕒 planned | Next in the reader rollout (`docs/tracker-formats/`). Until then export DeepLabCut as CSV, or SLEAP as an analysis file once that reader lands. A reader plug-in is also possible — see the `track2data.readers` entry point in `CONTRIBUTING.md`. |
 | NWB | ❌ not planned | Would be worth revisiting if the behavioural-NWB extensions stabilise. |
 
 Writing a reader for another tracker does not require changing Track2Data:

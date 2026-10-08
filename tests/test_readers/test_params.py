@@ -180,3 +180,39 @@ def test_the_same_option_given_twice_is_invalid_rather_than_last_one_wins() -> N
     assert err.value.code == "READER_OPTION_INVALID"
     assert err.value.subject == "fps"
 
+
+
+class TestAChoiceWhoseValuesOnlyTheFilesKnow:
+    """Which keypoint, which individual: the list exists only once a file has been looked at.
+
+    The class-level spec (what ``read`` validates against) cannot list them, so empty ``choices``
+    means "open set: the reader checks the value against the file". The scan's per-file spec fills
+    the choices in for the dialog.
+    """
+
+    OPEN_CHOICE = ReaderParameter(name="keypoint", label="Keypoint", kind="choice")
+    OPEN_MULTI = ReaderParameter(name="individuals", label="Animals", kind="multichoice")
+
+    def test_any_value_is_accepted_for_the_reader_to_check(self) -> None:
+        out = resolve_options("r", [self.OPEN_CHOICE, self.OPEN_MULTI], {
+            "keypoint": "snout", "individuals": ["a", "b"],
+        })  # fmt: skip
+        assert out == {"keypoint": "snout", "individuals": ["a", "b"]}
+
+    def test_it_is_still_optional_and_defaults_to_nothing(self) -> None:
+        assert resolve_options("r", [self.OPEN_CHOICE], {}) == {"keypoint": None}
+
+    def test_a_string_is_still_not_a_list(self) -> None:
+        with pytest.raises(ImportError_):
+            resolve_options("r", [self.OPEN_MULTI], {"individuals": "a"})
+
+    def test_the_command_line_form_is_accepted_too(self) -> None:
+        assert parse_value(self.OPEN_CHOICE, "snout") == "snout"
+        assert parse_value(self.OPEN_MULTI, "a, b") == ["a", "b"]
+
+    def test_a_closed_choice_is_still_closed(self) -> None:
+        closed = ReaderParameter(name="v", label="V", kind="choice", choices=("a",))
+        with pytest.raises(ImportError_):
+            resolve_options("r", [closed], {"v": "b"})
+        with pytest.raises(ImportError_):
+            parse_value(closed, "b")

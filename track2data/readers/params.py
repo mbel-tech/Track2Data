@@ -32,6 +32,9 @@ class ReaderParameter(BaseModel):
     kind: ParameterKind
     default: Any = None
     required: bool = False
+    #: For "choice"/"multichoice". Empty means an open set that only the files know (which
+    #: keypoint, which individual): the value is checked by the reader against the file, and the
+    #: scan's per-file spec fills the list in for the dialog.
     choices: tuple[str, ...] = ()
     help: str = ""
     #: "group": one value for every session in a scan group; "session": a per-session column.
@@ -78,12 +81,12 @@ def _check(reader: str, spec: ReaderParameter, value: Any) -> Any:
         if not isinstance(value, str):
             raise _invalid(reader, name, f"must be text, got {value!r}")
     elif kind == "choice":
-        if value not in spec.choices:
+        if spec.choices and value not in spec.choices:
             raise _invalid(reader, name, f"must be one of {list(spec.choices)}, got {value!r}")
     elif kind == "multichoice":
         if isinstance(value, str) or not isinstance(value, Sequence | set | frozenset):
             raise _invalid(reader, name, "must be a list of choices")
-        extra = [item for item in value if item not in spec.choices]
+        extra = [item for item in value if spec.choices and item not in spec.choices]
         if extra:
             raise _invalid(reader, name, f"has unknown choices {extra}")
     elif kind == "path" and not isinstance(value, str | Path):
@@ -159,11 +162,11 @@ def parse_value(spec: ReaderParameter, text: str, *, reader: str = "") -> Any:
             return False
         raise _invalid(reader, name, f"must be true or false, got {text!r}")
     if kind == "choice":
-        if raw not in spec.choices:
+        if spec.choices and raw not in spec.choices:
             raise _invalid(reader, name, f"must be one of {list(spec.choices)}, got {text!r}")
         return raw
     items = [item.strip() for item in raw.split(",") if item.strip()]
-    extra = [item for item in items if item not in spec.choices]
+    extra = [item for item in items if spec.choices and item not in spec.choices]
     if extra:
         raise _invalid(reader, name, f"has unknown choices {extra}")
     return items
