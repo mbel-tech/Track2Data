@@ -30,3 +30,18 @@ def test_applying_a_theme_loads_fonts_once(qtbot, monkeypatch) -> None:
     manager.apply("dark", persist=False)
     manager.apply("light", persist=False)
     assert calls == [1]
+
+
+def test_the_bundled_fonts_register_both_families(qtbot) -> None:
+    from app.fonts import load_bundled_fonts
+
+    families = load_bundled_fonts()
+    assert "Atkinson Hyperlegible" in families
+    assert "IBM Plex Mono" in families
+
+
+def test_each_bundled_font_ships_with_its_licence() -> None:
+    from app.fonts import FONT_DIR
+
+    names = {p.name for p in FONT_DIR.iterdir()}
+    assert {"OFL-AtkinsonHyperlegible.txt", "OFL-IBMPlexMono.txt"} <= names
