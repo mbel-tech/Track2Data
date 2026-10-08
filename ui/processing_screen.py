@@ -59,6 +59,8 @@ class ProcessingScreen(QWidget):
         super().__init__(parent)
         self._store = store
         self._current_task_id: str | None = None
+        self._run_analysis_hash: str | None = None
+        self._run_project_revision: int | None = None
         self._session_rows: dict[str, int] = {}  # session_id -> table row
         self._parallel_run = False
         self._build_ui()
@@ -280,10 +282,15 @@ class ProcessingScreen(QWidget):
         if self._store is None or self._store.manifest is None:
             QMessageBox.warning(self, "Run pipeline", "No project is open.")
             return
+        # Do not queue another run while the current one is still finishing.
+        if self._current_task_id is not None:
+            return
 
         from track2data.api import Engine
 
         manifest = self._store.manifest
+        self._run_analysis_hash = self._store.analysis_hash()
+        self._run_project_revision = self._store.project_revision
         engine = Engine(manifest, cache_dir=self._store.cache_dir)
         issues = engine.validate()
         if issues:
@@ -401,7 +408,13 @@ class ProcessingScreen(QWidget):
         from track2data.core.models import RunResult
 
         if isinstance(result, RunResult):
-            self._store.set_run_results(result)
+            accepted = self._store.set_run_results(
+                result, analysis_hash=self._run_analysis_hash,
+                project_revision=self._run_project_revision,
+            )
+            if not accepted:
+                self._status_label.setText("Finished for a previous project.")
+                return
             for session_result in result.sessions:
                 row = self._session_rows.get(session_result.session_id)
                 if row is None:

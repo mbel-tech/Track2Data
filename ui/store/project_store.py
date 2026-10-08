@@ -134,6 +134,7 @@ class ProjectStore(QObject):
     metricsChanged     = Signal()
     exportChanged      = Signal()
     runResultsChanged  = Signal()
+    persistenceChanged = Signal()
     runLogAppended     = Signal(str)           # one Markdown line
     taskProgress       = Signal(str, int)      # task_id, percent 0-100
     taskFinished       = Signal(str, object)   # task_id, result-or-exception
@@ -155,6 +156,13 @@ class ProjectStore(QObject):
         self._manifest: ProjectManifest | None = None
         self._project_dir: Path | None = None
         self._run_results: RunResult | None = None
+        self._saved_manifest: str | None = None
+        self._manifest_path: Path | None = None
+        self._result_analysis_hash: str | None = None
+        self._last_results_stale = False
+        self._project_revision = 0
+        # The window flushes/saves before either Project-screen or menu replacement.
+        self.prepare_project_change: Callable[[], bool] | None = None
         self._identity_probes: dict[str, str] = {}  # task_id -> session_id
         self._scans: set[str] = set()  # task ids of scans whose result is still wanted
         # Derived cache, never persisted -- see ui/store/session_facts.py's
@@ -175,6 +183,12 @@ class ProjectStore(QObject):
         self._tasks.scanFinished.connect(self._on_scan_finished)
         self._tasks.scanFailed.connect(self._on_scan_failed)
         self._tasks.scanCancelled.connect(self._on_scan_cancelled)
+        for signal in (
+            self.projectChanged, self.sessionsChanged, self.calibrationChanged,
+            self.zonesChanged, self.metadataChanged, self.preprocessChanged,
+            self.metricsChanged, self.exportChanged,
+        ):
+            signal.connect(self._on_manifest_changed)
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -213,11 +227,59 @@ class ProjectStore(QObject):
         ui/store/session_facts.py."""
         return self._session_facts.get(session_id)
 
-    def set_run_results(self, results: RunResult) -> None:
+    @property
+    def dirty(self) -> bool:
+        return self._manifest is not None and (
+            self._manifest.model_dump_json() != self._saved_manifest
+        )
+
+    @property
+    def project_revision(self) -> int:
+        return self._project_revision
+
+    def analysis_hash(self) -> str | None:
+        """Settings producing the previews; output formats do not change the numbers."""
+        if self._manifest is None:
+            return None
+        from track2data.core.hashing import dict_sha256
+
+        data = self._manifest.model_dump(mode="json", exclude={
+            "created_at", "updated_at", "run_log_path", "export_targets",
+        })
+        # These are probe-derived facts, not inputs to Engine.import_ref().
+        for ref in data["sessions"]:
+            for key in ("sha256", "has_stable_identities", "track_wo_identities"):
+                ref.pop(key, None)
+        return dict_sha256(data)
+
+    @property
+    def results_stale(self) -> bool:
+        return self._run_results is not None and (
+            self._result_analysis_hash != self.analysis_hash()
+        )
+
+    def _on_manifest_changed(self) -> None:
+        self.persistenceChanged.emit()
+        stale = self.results_stale
+        if stale != self._last_results_stale:
+            self._last_results_stale = stale
+            self.runResultsChanged.emit()
+
+    def set_run_results(
+        self, results: RunResult | None, *, analysis_hash: str | None = None,
+        project_revision: int | None = None,
+    ) -> bool:
         """Record the outcome of the most recent Engine.run() and notify
         listeners (e.g. the preview screen's Diagnostics/Metrics tabs)."""
+        if project_revision is not None and project_revision != self._project_revision:
+            return False
         self._run_results = results
+        self._result_analysis_hash = (
+            analysis_hash if analysis_hash is not None else self.analysis_hash()
+        )
+        self._last_results_stale = self.results_stale
         self.runResultsChanged.emit()
+        return True
 
     def _on_probe_failed(self, task_id: str, message: str, tb: str) -> None:
         exc = RuntimeError(message)
@@ -264,8 +326,15 @@ class ProjectStore(QObject):
 
     # ── project lifecycle ──────────────────────────────────────────────────
 
-    def new_project(self, name: str, directory: Path) -> None:
+    def new_project(self, name: str, directory: Path) -> bool:
         """Create a blank manifest for a new project."""
+        target = Path(directory) / f"{name}.t2d.json"
+        if target.exists():
+            raise FileExistsError(
+                f"Project already exists: {target}. Open it or choose another name."
+            )
+        if self.prepare_project_change is not None and not self.prepare_project_change():
+            return False
         self._cancel_pending_probes()
         self._cancel_pending_scans()
         self._session_facts.clear()
@@ -276,20 +345,34 @@ class ProjectStore(QObject):
             updated_at=now,
         )
         self._project_dir = Path(directory)
+        self._manifest_path = target
+        self._saved_manifest = None
+        self._project_revision += 1
+        self.set_run_results(None)
         self.projectChanged.emit()
         self.runLogAppended.emit(
             f"## New project: {name}\n_Created {now.isoformat()}_\n"
         )
+        return True
 
-    def open_project(self, t2d_path: Path) -> None:
+    def open_project(self, t2d_path: Path) -> bool:
         """Load an existing project from a .t2d.json file."""
+        from track2data.core.manifest import read as manifest_read
+
+        manifest = manifest_read(t2d_path)
+        if self.prepare_project_change is not None and not self.prepare_project_change():
+            return False
+        # Saving pending edits may have updated the file being reopened.
+        manifest = manifest_read(t2d_path)
         self._cancel_pending_probes()
         self._cancel_pending_scans()
         self._session_facts.clear()
-        from track2data.core.manifest import read as manifest_read
-
-        self._manifest = manifest_read(t2d_path)
+        self._manifest = manifest
         self._project_dir = t2d_path.parent
+        self._manifest_path = Path(t2d_path)
+        self._saved_manifest = manifest.model_dump_json()
+        self._project_revision += 1
+        self.set_run_results(None)
         self.projectChanged.emit()
         self.runLogAppended.emit(
             f"## Opened project: {self._manifest.project_name}\n"
@@ -300,6 +383,7 @@ class ProjectStore(QObject):
         for ref in self._manifest.sessions:
             if ref.folder.exists():
                 self._submit_probe(ref.session_id, ref.folder)
+        return True
 
     def save_project(self) -> Path | None:
         """Persist the current manifest.  Returns the written path or None."""
@@ -307,8 +391,11 @@ class ProjectStore(QObject):
             return None
         from track2data.core.manifest import write as manifest_write
 
-        out = self._project_dir / f"{self._manifest.project_name}.t2d.json"
+        out = self._manifest_path or self._project_dir / f"{self._manifest.project_name}.t2d.json"
         manifest_write(self._manifest, out)
+        self._manifest_path = out
+        self._saved_manifest = self._manifest.model_dump_json()
+        self.persistenceChanged.emit()
         return out
 
     # ── field setters (each replaces the field and emits its signal) ───────

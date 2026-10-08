@@ -958,6 +958,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Project saving and result freshness (GUI).** Changes are saved automatically after a short pause
+  (footer: *Unsaved changes* / *Saved* / *Not saved*); Save, Close, New and Open first commit pending
+  edits, including a number typed but not yet confirmed, and are blocked when saving fails, so a
+  failure never loses work. The manifest is written atomically, a reopened project saves back to its
+  own file, and New will not overwrite an existing project. Preview and the sidebar now say when the
+  results come from older settings (export-format changes do not count, reverting does clear it), a
+  run is judged against the settings it started with, a run that finishes for a replaced project is
+  ignored, and a run with no successful session is no longer labelled *Results ready*. Export says
+  it recomputes under the current settings.
+
 - **The test process no longer aborts at exit.** After every GUI test passed, pytest could crash in Qt
   teardown (`QObject: shared QObject was deleted directly`, exit 134), failing the CI test jobs.
   Standalone screens, tables and dialogs created in tests are now registered with pytest-qt so they

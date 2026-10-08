@@ -24,6 +24,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QDockWidget,
     QFileDialog,
     QFrame,
@@ -121,6 +122,11 @@ class MainWindow(QMainWindow):
 
         # ── project state ──────────────────────────────────────────────────
         self._store = ProjectStore(parent=self)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(500)
+        self._autosave_timer.timeout.connect(self._autosave)
+        self._store.prepare_project_change = self._save_before_project_change
         # One prompt per launch, not one per refused session: importing a
         # folder of 70 sessions must not produce 70 identical dialogs.
         self._pickle_consent_asked = False
@@ -203,6 +209,7 @@ class MainWindow(QMainWindow):
         self._store.tasks.taskStarted.connect(self._on_task_started)
         self._store.tasks.taskCancelled.connect(self._on_task_cancelled)
         self._store.taskFinished.connect(self._on_task_finished)
+        self._store.persistenceChanged.connect(self._schedule_autosave)
 
         theme.apply()
         self.resize(1280, 800)
@@ -258,6 +265,9 @@ class MainWindow(QMainWindow):
         self._btn_next.setProperty("role", "primary")
         row.addWidget(self._btn_back)
         row.addWidget(self._btn_log)
+        self._save_status = QLabel()
+        self._save_status.setProperty("role", "faint")
+        row.addWidget(self._save_status)
         row.addStretch(1)
         row.addWidget(self._btn_run)
         row.addWidget(self._btn_next)
@@ -446,11 +456,27 @@ class MainWindow(QMainWindow):
         )
         has_run = self._store.run_results is not None
         summaries = stage_summaries(self._store.manifest, has_run_results=has_run)
+        if self._store.results_stale:
+            summaries[7] = summaries[8] = "Settings changed · re-run"
+        elif has_run:
+            results = self._store.run_results.sessions
+            failed = sum(bool(s.error) for s in results)
+            if not results or failed == len(results):
+                summaries[7] = summaries[8] = "No successful sessions"
+            elif failed:
+                summaries[7] = summaries[8] = f"{len(results) - failed} succeeded · {failed} failed"
         for stage_index, (_label, first_page) in enumerate(STAGES):
             info = self._page_statuses[first_page]
             self._sidebar.set_status(
                 stage_index, info.status, info.message, summary=summaries[stage_index]
             )
+            if stage_index in (7, 8) and has_run:
+                if self._store.results_stale or any(
+                    s.error for s in self._store.run_results.sessions
+                ):
+                    self._sidebar.set_status(stage_index, "warning", summary=summaries[stage_index])
+                elif not self._store.run_results.sessions:
+                    self._sidebar.set_status(stage_index, "empty", summary=summaries[stage_index])
         self._sidebar.set_locked(len(STAGES) - 1, not has_run)
         manifest = self._store.manifest
         self._project_sub.setText(manifest.project_name if manifest else f"v{APP_VERSION}")
@@ -492,6 +518,10 @@ class MainWindow(QMainWindow):
 
     def _flush_current_page(self) -> None:
         """Commit the outgoing screen's debounced edits before leaving it."""
+        # Keyboard tracking may be disabled, so visible text has not yet
+        # become a numeric value. Commit it even when Save has moved focus.
+        for spin in self._stack.currentWidget().findChildren(QAbstractSpinBox):
+            spin.interpretText()
         flush = getattr(self._stack.currentWidget(), "flush", None)
         if callable(flush):
             flush()
@@ -516,7 +546,12 @@ class MainWindow(QMainWindow):
         if not directory:
             return
         from pathlib import Path
-        self._store.new_project(name.strip(), Path(directory))
+        try:
+            if not self._store.new_project(name.strip(), Path(directory)):
+                return
+        except Exception as exc:
+            QMessageBox.critical(self, "Project not created", str(exc))
+            return
         self._go_to_page(0)
 
     def _action_open_project(self) -> None:
@@ -526,15 +561,53 @@ class MainWindow(QMainWindow):
         if not path:
             return
         from pathlib import Path
-        self._store.open_project(Path(path))
+        try:
+            if not self._store.open_project(Path(path)):
+                return
+        except Exception as exc:
+            QMessageBox.critical(self, "Project not opened", str(exc))
+            return
         self._go_to_page(0)
 
     def _action_save_project(self) -> None:
-        saved = self._store.save_project()
-        if saved:
-            self.show_toast("Saved")
-        else:
+        self._flush_current_page()
+        if not self._store.has_project:
             self.show_toast("Nothing to save — open or create a project first.")
+        elif self._save_project_safely():
+            self.show_toast("Saved")
+
+    def _schedule_autosave(self) -> None:
+        if self._store.dirty:
+            self._save_status.setText("Unsaved changes")
+            self._autosave_timer.start()
+        else:
+            self._autosave_timer.stop()
+            self._save_status.setText("Saved" if self._store.has_project else "")
+
+    def _save_project_safely(self, *, show_error: bool = True) -> bool:
+        self._autosave_timer.stop()
+        try:
+            self._store.save_project()
+        except Exception as exc:
+            self._save_status.setText("Not saved — use File → Save")
+            self._save_status.setToolTip(str(exc))
+            if show_error:
+                QMessageBox.critical(
+                    self, "Project not saved",
+                    f"Your changes are still open. Fix the save problem and try again.\n\n{exc}",
+                )
+            return False
+        self._save_status.setToolTip("")
+        return True
+
+    def _autosave(self) -> None:
+        self._flush_current_page()
+        if self._store.dirty:
+            self._save_project_safely(show_error=False)
+
+    def _save_before_project_change(self) -> bool:
+        self._flush_current_page()
+        return not self._store.dirty or self._save_project_safely()
 
     def _ask_pickle_consent(self, session_id: str, folder: str) -> None:
         """Ask once per project whether to load trajectories that execute code.
@@ -694,5 +767,9 @@ class MainWindow(QMainWindow):
         down. See ui/store/task_runner.py's docstring and DECISIONS.md for
         the pool-thread-into-mid-GC-object access-violation crash this
         prevents (issue #20)."""
+        if not self._save_before_project_change():
+            event.ignore()
+            return
+        self._autosave_timer.stop()
         self._store.tasks.shutdown(5000)
         super().closeEvent(event)

@@ -124,6 +124,7 @@ class PreviewScreen(QWidget):
             store.metricsChanged.connect(self._update_summary)
             store.runResultsChanged.connect(self._update_diagnostics)
             store.runResultsChanged.connect(self._update_metrics)
+            store.runResultsChanged.connect(self._update_freshness)
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -142,6 +143,11 @@ class PreviewScreen(QWidget):
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
+        self._freshness_banner = QLabel()
+        self._freshness_banner.setWordWrap(True)
+        self._freshness_banner.setProperty("role", "warn")
+        self._freshness_banner.hide()
+        root.addWidget(self._freshness_banner)
 
         # ── tabs ──────────────────────────────────────────────────────────
         tabs = QTabWidget()
@@ -423,6 +429,15 @@ class PreviewScreen(QWidget):
         return metric_w
 
     # ── slots: Summary ────────────────────────────────────────────────────
+
+    def _update_freshness(self) -> None:
+        stale = self._store is not None and self._store.results_stale
+        self._freshness_banner.setText(
+            "These results are outdated: settings changed after this run. "
+            "Re-run the pipeline before reviewing the dataset. "
+            "Export will use the current settings."
+        )
+        self._freshness_banner.setVisible(stale)
 
     def _update_summary(self) -> None:
         if self._store is None or self._store.manifest is None:
