@@ -42,15 +42,19 @@ class ProjectScreen(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Project")
         title.setObjectName("PageTitle")
         root.addWidget(title)
 
-        subtitle = QLabel("Create a new project or open an existing one.")
+        subtitle = QLabel(
+            "Everything you set up is saved to one .t2d.json file, so someone else can re-run it."
+        )
         subtitle.setObjectName("PageLead")
+        subtitle.setWordWrap(True)
+        subtitle.setMaximumWidth(600)
         root.addWidget(subtitle)
 
         # ── form ──────────────────────────────────────────────────────────
@@ -59,20 +63,24 @@ class ProjectScreen(QWidget):
 
         self._name_edit = QLineEdit()
         self._name_edit.setPlaceholderText("My experiment")
-        form.addRow("Project name:", self._name_edit)
+        form.addRow("Project name", self._name_edit)
 
         dir_row = QHBoxLayout()
         self._dir_label = QLabel("(no directory selected)")
-        self._dir_label.setStyleSheet(" font-style: italic;")
+        self._dir_label.setProperty("role", "faint")
         browse_btn = QPushButton("Browse…")
         browse_btn.setProperty("role", "outline")
         browse_btn.setFixedWidth(90)
         browse_btn.clicked.connect(self._browse_dir)
         dir_row.addWidget(self._dir_label, 1)
         dir_row.addWidget(browse_btn)
-        form.addRow("Directory:", dir_row)
+        form.addRow("Project folder", dir_row)
 
-        root.addLayout(form)
+        form_box = QWidget()
+        form_box.setMaximumWidth(600)
+        form_box.setLayout(form)
+        form.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(form_box)
 
         # ── action buttons ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -89,7 +97,7 @@ class ProjectScreen(QWidget):
 
         # ── status ─────────────────────────────────────────────────────
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("font-size: 13px; margin-top: 8px;")
+        self._status_label.setProperty("role", "muted")
         root.addWidget(self._status_label)
 
         root.addStretch()
@@ -101,7 +109,9 @@ class ProjectScreen(QWidget):
         if directory:
             self._selected_dir = directory
             self._dir_label.setText(directory)
-            self._dir_label.setStyleSheet("")
+            self._dir_label.setProperty("role", "mono")
+            self._dir_label.style().unpolish(self._dir_label)
+            self._dir_label.style().polish(self._dir_label)
 
     def _create_project(self) -> None:
         name = self._name_edit.text().strip()
