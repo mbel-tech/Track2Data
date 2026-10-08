@@ -233,10 +233,20 @@ class ZoneCanvas(QGraphicsView):
 
     # ── loading ────────────────────────────────────────────────────────────
 
-    def load_session(self, background_image_path: Path | None, setup_points) -> None:
+    def load_session(
+        self,
+        background_image_path: Path | None,
+        setup_points,
+        frame_size: tuple[int, int] | None = None,
+    ) -> None:
         """Load a new session's backdrop + setup_points, discarding any
         prior selection -- called when the Zones screen's session
-        picker changes."""
+        picker changes.
+
+        *frame_size* is the session's video frame in pixels. Zones are stored in image
+        pixels, so a canvas with no backdrop must still be the size of the frame: a blank
+        scene of any other size would make every vertex a coordinate in a picture that is
+        not the video."""
         self._gscene.clear()
         self._marker_items = {}
         self._label_items = {}
@@ -258,9 +268,13 @@ class ZoneCanvas(QGraphicsView):
         else:
             # No backdrop available (session probe still pending, or
             # this session shipped no preprocessing/background.png) --
-            # still usable: markers render over a blank scene sized to
-            # fit them.
-            self._gscene.setSceneRect(0, 0, 640, 480)
+            # still usable: markers render over a blank scene the size of
+            # the video frame, or 640x480 when the frame is not known.
+            width, height = frame_size if frame_size is not None else (0, 0)
+            if width > 0 and height > 0:
+                self._gscene.setSceneRect(0, 0, width, height)
+            else:
+                self._gscene.setSceneRect(0, 0, 640, 480)
 
         self._rebuild_saved_zones()
         self._rebuild_markers()

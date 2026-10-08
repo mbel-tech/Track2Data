@@ -438,3 +438,117 @@ def test_rectangle_tool_button_drives_the_canvas_and_enables_save(
 
     screen._undo_btn.click()
     assert len(screen._canvas.selected_points()) == 3
+
+
+# ── zones are drawn in the video's own pixels ────────────────────────────────
+
+_THREE_POINTS = {"BP1": [[0, 0]], "BP2": [[10, 0]], "BP3": [[10, 10]]}
+
+
+def _draw_zone(screen, name: str = "tank") -> None:
+    screen._canvas.click_at(0.0, 0.0)
+    screen._canvas.click_at(10.0, 0.0)
+    screen._canvas.click_at(10.0, 10.0)
+    screen._zone_name_edit.setText(name)
+    screen._save_zone()
+
+
+def test_a_session_without_a_background_gets_a_canvas_the_size_of_its_frame(
+    qtbot, tmp_path: Path
+) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store, "session_a", tmp_path, width_px=1920, height_px=1080, setup_points=_THREE_POINTS
+    )
+
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    rect = screen._canvas.scene().sceneRect()
+    assert (rect.width(), rect.height()) == (1920, 1080)
+
+
+def test_the_first_zone_saved_records_the_frame_it_was_drawn_on(qtbot, tmp_path: Path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store, "session_a", tmp_path, width_px=1920, height_px=1080, setup_points=_THREE_POINTS
+    )
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    _draw_zone(screen)
+
+    zones = store.manifest.zones
+    assert (zones.source_width_px, zones.source_height_px) == (1920, 1080)
+
+
+def test_a_zone_added_to_existing_unstamped_zones_does_not_stamp_them(
+    qtbot, tmp_path: Path
+) -> None:
+    """Zones drawn on the old blank 640x480 canvas carry no size. Stamping them now would
+    relabel coordinates that are not video pixels as video pixels, and hide the mismatch."""
+    from track2data.core.models import ROI, ZoneSet
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store, "session_a", tmp_path, width_px=1920, height_px=1080, setup_points=_THREE_POINTS
+    )
+    store.update_zones(ZoneSet(rois=[ROI(name="old", vertices=[(0, 0), (5, 0), (5, 5)])]))
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    _draw_zone(screen, "new")
+
+    zones = store.manifest.zones
+    assert [r.name for r in zones.rois] == ["old", "new"]
+    assert zones.source_width_px is None and zones.source_height_px is None
+
+
+def test_a_recorded_frame_size_is_never_overwritten(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import ROI, ZoneSet
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store, "session_a", tmp_path, width_px=1920, height_px=1080, setup_points=_THREE_POINTS
+    )
+    store.update_zones(
+        ZoneSet(
+            rois=[ROI(name="old", vertices=[(0, 0), (5, 0), (5, 5)])],
+            source_width_px=640,
+            source_height_px=480,
+        )
+    )
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    _draw_zone(screen, "new")
+
+    zones = store.manifest.zones
+    assert (zones.source_width_px, zones.source_height_px) == (640, 480)
+
+
+def test_a_session_with_an_unknown_frame_leaves_the_size_unrecorded(qtbot, tmp_path: Path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    _add_session_with_facts(
+        store, "session_a", tmp_path, width_px=0, height_px=0, setup_points=_THREE_POINTS
+    )
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+
+    _draw_zone(screen)
+
+    zones = store.manifest.zones
+    assert zones.source_width_px is None and zones.source_height_px is None

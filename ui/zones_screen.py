@@ -384,12 +384,31 @@ class ZonesScreen(QWidget):
         if facts is None:
             self._canvas.load_session(None, None)
             return
-        self._canvas.load_session(facts.background_image_path, facts.setup_points)
+        self._canvas.load_session(
+            facts.background_image_path,
+            facts.setup_points,
+            frame_size=(facts.width_px, facts.height_px),
+        )
 
     def _on_canvas_selection_changed(self) -> None:
         n = len(self._canvas.selected_points())
         self._selection_count_label.setText(f"{n} point{'s' if n != 1 else ''} selected")
         self._save_zone_btn.setEnabled(n >= _MIN_ZONE_VERTICES)
+
+    def _frame_size_to_record(self, zones) -> dict[str, int]:
+        """The frame size to stamp on the zone set, or nothing.
+
+        Only a zone set with no zones yet is stamped, with the frame of the session the zone
+        was drawn on. A set that already holds zones keeps what it has: zones drawn before the
+        canvas matched the frame carry no size, and stamping them now would relabel coordinates
+        that are not video pixels as video pixels, hiding the mismatch the stamp exists to catch.
+        """
+        if zones.rois or self._store is None:
+            return {}
+        facts = self._store.session_facts(self._session_combo.currentText())
+        if facts is None or facts.width_px <= 0 or facts.height_px <= 0:
+            return {}
+        return {"source_width_px": facts.width_px, "source_height_px": facts.height_px}
 
     def _save_zone(self) -> None:
         if self._store is None or self._store.manifest is None:
@@ -403,12 +422,11 @@ class ZonesScreen(QWidget):
             return
         level = self._zone_level_combo.currentText().strip() or "main"
         roi = ROI(name=name, level=level, vertices=vertices)
+        zones = self._store.manifest.zones
+        update: dict[str, object] = {"rois": [*zones.rois, roi]}
+        update.update(self._frame_size_to_record(zones))
         try:
-            self._store.update_zones(
-                self._store.manifest.zones.model_copy(
-                    update={"rois": [*self._store.manifest.zones.rois, roi]}
-                )
-            )
+            self._store.update_zones(zones.model_copy(update=update))
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to save zone:\n{exc}")
             return
