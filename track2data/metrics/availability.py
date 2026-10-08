@@ -24,11 +24,21 @@ def view_unavailable_reason(metric_cls: Any, camera_view: str) -> str | None:
     valid = getattr(metric_cls, "valid_camera_views", None)
     if valid is None or camera_view in valid:
         return None
-    needed = " or ".join(_VIEW_WORDS.get(v, v) for v in sorted(valid))
     return (
-        f"needs a recording made from this view: {needed}; the project's camera view is "
-        f"{_VIEW_WORDS.get(camera_view, camera_view)} (set it on the Calibration screen)"
+        f"needs a recording made from this view: {required_views_text(metric_cls)}; the "
+        f"project's camera view is {_VIEW_WORDS.get(camera_view, camera_view)} "
+        "(set it on the Calibration screen)"
     )
+
+
+def required_views_text(metric_cls: Any) -> str | None:
+    """The views *metric_cls* is meaningful for, in words ("side view"), or None for any view."""
+    valid = getattr(metric_cls, "valid_camera_views", None)
+    if valid is None:
+        return None
+    ordered = [view for view in _VIEW_WORDS if view in valid]
+    ordered += sorted(v for v in valid if v not in _VIEW_WORDS)
+    return " or ".join(_VIEW_WORDS.get(v, v) for v in ordered)
 
 
 def view_skipped_metrics(

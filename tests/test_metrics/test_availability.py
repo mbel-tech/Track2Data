@@ -59,3 +59,19 @@ def test_view_skipped_metrics_maps_only_the_ruled_out_ids() -> None:
     skipped = view_skipped_metrics(["IL-ANY", "IL-SIDE", "IL-GONE"], "unknown", registry.get)
     assert set(skipped) == {"IL-SIDE"}
     assert view_skipped_metrics(["IL-ANY", "IL-SIDE"], "side", registry.get) == {}
+
+
+def test_required_views_text_names_the_views_or_nothing() -> None:
+    from track2data.metrics.availability import required_views_text
+
+    assert required_views_text(_AnyView) is None
+    assert required_views_text(_SideOnly) == "side view"
+    assert required_views_text(_TopOrUnknown) == "not set or top-down"
+
+
+def test_the_reason_uses_the_same_wording_as_required_views_text() -> None:
+    from track2data.metrics.availability import required_views_text
+
+    reason = view_unavailable_reason(_TopOrUnknown, "side")
+    assert reason is not None
+    assert required_views_text(_TopOrUnknown) in reason
