@@ -121,3 +121,15 @@ def test_corrupt_cache_entry_falls_back_to_recompute(folder, tmp_path, pp_calls)
     r = _run(_manifest(folder), cache, tmp_path / "o2")
     assert len(pp_calls) == 2
     assert not r.sessions[0].error
+
+
+def test_changed_camera_view_still_hits_the_cache(folder, tmp_path, pp_calls) -> None:
+    """The camera view only decides which metrics are offered, never a preprocessed
+    position, so changing it must not throw the cache away."""
+    from track2data.core.models import SceneConfig
+
+    cache = tmp_path / "cache"
+    _run(_manifest(folder), cache, tmp_path / "o1")
+    m2 = _manifest(folder).model_copy(update={"scene": SceneConfig(camera_view="side")})
+    _run(m2, cache, tmp_path / "o2")
+    assert len(pp_calls) == 1

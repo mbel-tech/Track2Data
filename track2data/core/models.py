@@ -381,6 +381,23 @@ class CalibrationConfig(BaseModel):
     body_length_source: Literal["session", "blobs"] = "session"
 
 
+#: How the camera looked at the animals. "unknown" is the default and means nothing was declared,
+#: so no view-dependent metric is offered. All three values exist from the start: a build that
+#: predates a value rejects a manifest that uses it.
+CameraView = Literal["unknown", "top", "side"]
+
+
+class SceneConfig(BaseModel):
+    """What the recordings look at, declared once for the project.
+
+    Kept apart from ``ZoneSet`` (the Zones screen replaces that whole object on Clear/Load/Import)
+    and from ``CalibrationConfig`` (hashed into the preprocessing cache key, which a camera view
+    never changes: it only decides which metrics are offered).
+    """
+
+    camera_view: CameraView = "unknown"
+
+
 class ROI(BaseModel):
     name: str
     level: str = "main"
@@ -547,6 +564,7 @@ class ProjectManifest(BaseModel):
     sessions: list[SessionRef] = []
     calibration: CalibrationConfig = CalibrationConfig()
     zones: ZoneSet = ZoneSet()
+    scene: SceneConfig = SceneConfig()
     metadata_source: MetadataSource | None = None
     mapping: MappingRule | None = None
     preprocess: PreprocessConfig = PreprocessConfig()
