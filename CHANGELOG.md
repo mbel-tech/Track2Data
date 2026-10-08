@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Formats we can name but not read are now named.** A scan recognises SLEAP `.slp`
+  projects, `trx.mat`, FlyTracker `-track.mat`, DANNCE `save_data_AVG.mat`, Multi-Worm Tracker
+  `.blobs`, AnimalTA detailed files, DeepLabCut 3-D tables and FicTrac logs, and says what to do
+  instead (for `.slp`: export Analysis HDF5), in the confirm dialog, `track2data scan` and
+  `scan --json` (`recognised`), instead of "nothing recognised". Matched only by what the format
+  fixes (a name, suffix, folder or header row); nothing is added.
+- **GUI driver verbs `scan`, `confirm` and `shot-dialog`** drive the scan, the confirm dialog and
+  Add as a user would, and a guard makes every file picker answer "cancelled" instead of blocking.
 - **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
   `session_*` folders to settle what the synthetic tests cannot: how far the
   blob-derived body length sits from the session-wide value (issue #72), how

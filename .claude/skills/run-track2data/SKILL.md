@@ -57,6 +57,25 @@ python .claude/skills/run-track2data/driver.py shot --page 7 -o /tmp/processing.
 The stack has **10** pages even though the sidebar shows 7 numbered
 stages — `pages` prints the mapping.
 
+### Adding sessions (scan, confirm, add)
+
+Adding tracking output is two steps: a scan, then the confirm dialog. The driver runs both the
+way a user would, against a throwaway project, and never opens a file picker (a picker would block
+forever, so every `QFileDialog` answers "cancelled" at once and is logged as `[modal intercepted]`).
+
+```bash
+# what the dialog shows: software, confidence, evidence, options, sessions, Add state
+python .claude/skills/run-track2data/driver.py scan /data/trajectories --shot /tmp/dialog.png
+
+# fill what the files do not record, press Add; exit code 1 if Add is blocked
+python .claude/skills/run-track2data/driver.py confirm /data/run1 --option fps=25 --option width_px=1920
+
+# a picture of the dialog alone (also its empty state, which names unreadable formats)
+python .claude/skills/run-track2data/driver.py shot-dialog /data/run1 -o /tmp/dialog.png
+```
+
+Look at the picture: the disabled *Add* and its tooltip are the part most likely to be wrong.
+
 ### Interactive driving
 
 For a flow the subcommands don't cover, pipe commands into the REPL:
@@ -67,7 +86,8 @@ printf 'goto processing\nstate\nshot /tmp/p.png\nquit\n' \
 ```
 
 Commands: `goto <page>`, `click <button-label>`, `type <text>`,
-`shot <path>`, `state`, `pages`, `quit`. `click` matches button text
+`shot <path>`, `scan <path>`, `option <name=value>`, `confirm`,
+`shot-dialog <path>`, `state`, `pages`, `quit`. `click` matches button text
 case-insensitively as a substring, so `click Create Project` finds
 `Create Project` and `click Open` finds `Open Project…`.
 
