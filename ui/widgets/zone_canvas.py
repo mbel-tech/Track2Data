@@ -40,10 +40,25 @@ _SETUP_POINT_COLOR = QColor("#2980b9")
 _CUSTOM_POINT_COLOR = QColor("#e67e22")
 _SELECTED_COLOR = QColor("#2ecc71")
 _ZOOM_MIN, _ZOOM_MAX = 0.02, 40.0
-#: Distinct translucent fills for saved zones, cycled by order.
-_SAVED_ZONE_COLORS = ["#3498db", "#e67e22", "#9b59b6", "#1abc9c", "#e74c3c", "#f1c40f"]
+#: Distinct translucent fills for saved zones, cycled by order (the design's animal colours).
+_SAVED_ZONE_COLORS = ["#3fa7b5", "#e8b64c", "#e07a5f", "#7d8fd6", "#6bb38a", "#b07cc6"]
+#: Fill opacity of a saved zone, and of the selected one (out of 255).
+_FILL_ALPHA, _FILL_ALPHA_SELECTED = 46, 82
+_HANDLE_RADIUS_PX = 6.0
 #: Vertices used when a circle is drawn (a polygon is all a ROI can hold).
 _CIRCLE_VERTICES = 32
+
+
+def polygon_area(vertices) -> float:
+    """Area of a simple polygon in the units of its vertices squared (shoelace)."""
+    pts = list(vertices)
+    if len(pts) < 3:
+        return 0.0
+    total = 0.0
+    for i, (x0, y0) in enumerate(pts):
+        x1, y1 = pts[(i + 1) % len(pts)]
+        total += x0 * y1 - x1 * y0
+    return abs(total) / 2.0
 
 
 def _unwrap_point(raw: Any) -> tuple[float, float]:
@@ -209,6 +224,8 @@ class ZoneCanvas(QGraphicsView):
     PointSelector."""
 
     selectionChanged = Signal()
+    #: A saved zone's vertex was dragged: (zone index, new vertex list).
+    zoneEdited = Signal(int, list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -221,6 +238,9 @@ class ZoneCanvas(QGraphicsView):
         self._polygon_item: object | None = None
         self._saved_rois: list[Any] = []
         self._saved_items: list[object] = []
+        self._selected_zone: int | None = None
+        self._handle_items: list[object] = []
+        self._handle_drag: int | None = None
         self._tool = "points"
         self._press_xy: tuple[float, float] | None = None
         self._drag_name: str | None = None
@@ -243,6 +263,7 @@ class ZoneCanvas(QGraphicsView):
         self._outline_items = []
         self._polygon_item = None
         self._saved_items = []
+        self._handle_items = []
         self._preview_item = None
         self._selector.load_setup_points(setup_points)
 
@@ -302,9 +323,10 @@ class ZoneCanvas(QGraphicsView):
         for i, roi in enumerate(self._saved_rois):
             colour = QColor(_SAVED_ZONE_COLORS[i % len(_SAVED_ZONE_COLORS)])
             fill = QColor(colour)
-            fill.setAlpha(55)
+            chosen = i == self._selected_zone
+            fill.setAlpha(_FILL_ALPHA_SELECTED if chosen else _FILL_ALPHA)
             poly = QPolygonF([QPointF(x, y) for x, y in roi.vertices])
-            item = self._gscene.addPolygon(poly, QPen(colour, 2), QBrush(fill))
+            item = self._gscene.addPolygon(poly, QPen(colour, 3 if chosen else 1.5), QBrush(fill))
             item.setZValue(1)
             item.setToolTip(f"{roi.name} ({roi.level})")
             self._saved_items.append(item)
@@ -316,6 +338,58 @@ class ZoneCanvas(QGraphicsView):
                 label.setPos(cx - label.boundingRect().width() / 2, cy - 8)
                 label.setZValue(1)
                 self._saved_items.append(label)
+        self._rebuild_handles()
+
+    # ── selecting and editing a saved zone ────────────────────────────────
+
+    def set_selected_zone(self, index: int | None) -> None:
+        """Highlight saved zone *index* and show draggable handles on its vertices."""
+        if index is not None and not 0 <= index < len(self._saved_rois):
+            index = None
+        self._selected_zone = index
+        self._rebuild_saved_zones()
+
+    def selected_zone(self) -> int | None:
+        return self._selected_zone
+
+    def _rebuild_handles(self) -> None:
+        for item in self._handle_items:
+            if item.scene() is self._gscene:
+                self._gscene.removeItem(item)
+        self._handle_items = []
+        if self._selected_zone is None:
+            return
+        for x, y in self._saved_rois[self._selected_zone].vertices:
+            handle = self._gscene.addEllipse(
+                x - _HANDLE_RADIUS_PX, y - _HANDLE_RADIUS_PX,
+                _HANDLE_RADIUS_PX * 2, _HANDLE_RADIUS_PX * 2,
+                QPen(QColor("#33444a"), 1.5), QBrush(QColor("white")),
+            )
+            handle.setZValue(3)
+            self._handle_items.append(handle)
+
+    def _handle_at(self, x: float, y: float) -> int | None:
+        if self._selected_zone is None:
+            return None
+        best, best_dist = None, _HIT_RADIUS_PX
+        for i, (vx, vy) in enumerate(self._saved_rois[self._selected_zone].vertices):
+            dist = math.hypot(vx - x, vy - y)
+            if dist <= best_dist:
+                best, best_dist = i, dist
+        return best
+
+    def edit_vertex(self, vertex_index: int, x: float, y: float) -> bool:
+        """Move one vertex of the selected zone and announce the new shape.
+        Public so tests do not need synthesized mouse events."""
+        if self._selected_zone is None:
+            return False
+        roi = self._saved_rois[self._selected_zone]
+        if not 0 <= vertex_index < len(roi.vertices):
+            return False
+        vertices = [tuple(v) for v in roi.vertices]
+        vertices[vertex_index] = (float(x), float(y))
+        self.zoneEdited.emit(self._selected_zone, vertices)
+        return True
 
     # ── interaction ───────────────────────────────────────────────────────
 
@@ -382,7 +456,10 @@ class ZoneCanvas(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             pos = self.mapToScene(event.pos())
             xy = (pos.x(), pos.y())
-            if self._tool in ("rect", "circle"):
+            handle = self._handle_at(*xy) if self._tool == "points" else None
+            if handle is not None:
+                self._handle_drag = handle
+            elif self._tool in ("rect", "circle"):
                 self._press_xy = xy
             else:
                 name = self._selector.hit_selected_custom(*xy)
@@ -401,7 +478,9 @@ class ZoneCanvas(QGraphicsView):
             event.accept()
             return
         pos = self.mapToScene(event.pos())
-        if self._drag_name is not None:
+        if self._handle_drag is not None:
+            self._move_handle_preview(self._handle_drag, pos.x(), pos.y())
+        elif self._drag_name is not None:
             self._drag_moved = True
             self._selector.move_point(self._drag_name, pos.x(), pos.y())
             self._rebuild_markers()
@@ -417,7 +496,10 @@ class ZoneCanvas(QGraphicsView):
             return
         if event.button() == Qt.MouseButton.LeftButton:
             pos = self.mapToScene(event.pos())
-            if self._drag_name is not None:
+            if self._handle_drag is not None:
+                index, self._handle_drag = self._handle_drag, None
+                self.edit_vertex(index, pos.x(), pos.y())
+            elif self._drag_name is not None:
                 if self._drag_moved:
                     self.selectionChanged.emit()
                 elif self._press_xy is not None:
@@ -428,6 +510,12 @@ class ZoneCanvas(QGraphicsView):
                 self.drag_shape(self._press_xy, (pos.x(), pos.y()))
                 self._press_xy = None
         super().mouseReleaseEvent(event)
+
+    def _move_handle_preview(self, index: int, x: float, y: float) -> None:
+        """Follow the cursor with the handle while it is dragged."""
+        if index < len(self._handle_items):
+            r = _HANDLE_RADIUS_PX
+            self._handle_items[index].setRect(x - r, y - r, 2 * r, 2 * r)
 
     def keyPressEvent(self, event) -> None:
         if event.matches(QKeySequence.StandardKey.Undo):
