@@ -66,7 +66,7 @@ class _ModeCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802 -- Qt override
+    def mousePressEvent(self, event) -> None:
         self._radio.setChecked(True)
         super().mousePressEvent(event)
 
