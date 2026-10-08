@@ -41,21 +41,28 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from app.theme import theme
+from ui.store.quality_grid import SessionQuality, assess_session, count_verdicts
 from ui.widgets.dataframe_table import clear_table, populate_table
 from ui.widgets.trajectory_view import TrajectoryView
 
@@ -80,7 +87,7 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
     psess = Engine(manifest, cache_dir=cache_dir).preprocess_ref(ref)
     video = psess.session.video
     return TrajectoryData(
-        raw_xy=psess.session.raw_xy,
+        raw_xy=psess.raw_xy_aligned,
         xy=psess.xy,
         fps=video.fps,
         background=psess.session.background_image_path,
@@ -91,6 +98,9 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
 _PER_INDIVIDUAL_DIAGNOSTIC_IDS = ["D-1", "D-3"]
 #: Diagnostic metric IDs shown in the Diagnostics tab's session-level table.
 _SESSION_LEVEL_DIAGNOSTIC_IDS = ["D-2", "D-4", "D-5"]
+_QUALITY_HEADERS = [
+    "Session", "Coverage", "Identity", "Crossings", "Jumps", "Interpolated", "Verdict",
+]
 
 
 class PreviewScreen(QWidget):
@@ -142,6 +152,7 @@ class PreviewScreen(QWidget):
         tabs.addTab(self._build_trajectories_tab(), "Trajectories")
 
         root.addWidget(tabs, 1)
+        self._tabs = tabs
 
     def _build_trajectories_tab(self) -> QWidget:
         w = QWidget()
@@ -197,9 +208,7 @@ class PreviewScreen(QWidget):
         self._traj_source_combo.addItem("Processed", userData="processed")
         self._traj_source_combo.addItem("Raw", userData="raw")
         self._traj_source_combo.addItem("Raw + processed", userData="both")
-        self._traj_source_combo.currentIndexChanged.connect(
-            lambda _i: self._traj_view.set_source(self._traj_source_combo.currentData())
-        )
+        self._traj_source_combo.currentIndexChanged.connect(self._traj_on_source_changed)
         opts.addWidget(self._traj_source_combo)
         self._traj_zones_check = QCheckBox("Zones")
         self._traj_zones_check.setChecked(True)
@@ -264,6 +273,12 @@ class PreviewScreen(QWidget):
         if self._traj_slider.value() != frame:
             self._traj_slider.setValue(frame)
 
+    def _traj_on_source_changed(self, _index: int) -> None:
+        # A bound method, not a lambda over ``self``: PySide holds a lambda's
+        # closure strongly, which makes the screen a reference cycle that is
+        # only freed at interpreter exit, after the QApplication is gone.
+        self._traj_view.set_source(self._traj_source_combo.currentData())
+
     def _traj_toggle_play(self, playing: bool) -> None:
         self._traj_play_btn.setText("⏸" if playing else "▶")
         if playing and self._traj_view.n_frames > 1:
@@ -294,10 +309,54 @@ class PreviewScreen(QWidget):
     def _build_diagnostics_tab(self) -> QWidget:
         diag_w = QWidget()
         diag_layout = QVBoxLayout(diag_w)
+        diag_layout.setContentsMargins(0, 8, 12, 8)
+        diag_layout.setSpacing(10)
 
         self._diag_placeholder = QLabel("Run the pipeline to see diagnostics.")
         self._diag_placeholder.setProperty("role", "faint")
         diag_layout.addWidget(self._diag_placeholder)
+
+        # ── traffic-light quality grid, one row per session ──────────────
+        verdict_row = QHBoxLayout()
+        verdict_row.setSpacing(8)
+        self._verdict_chips: dict[str, QLabel] = {}
+        for verdict, kind in (("Good", "ok"), ("Check", "warn"), ("Review", "err")):
+            chip = QLabel()
+            chip.setProperty("chip", kind)
+            self._verdict_chips[verdict] = chip
+            verdict_row.addWidget(chip)
+        verdict_row.addStretch()
+        diag_layout.addLayout(verdict_row)
+
+        self._quality_table = QTableWidget(0, len(_QUALITY_HEADERS))
+        self._quality_table.setHorizontalHeaderLabels(_QUALITY_HEADERS)
+        self._quality_table.verticalHeader().hide()
+        self._quality_table.verticalHeader().setDefaultSectionSize(36)
+        self._quality_table.setShowGrid(False)
+        self._quality_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._quality_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._quality_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._quality_table.itemSelectionChanged.connect(self._on_quality_row_selected)
+        diag_layout.addWidget(self._quality_table)
+
+        self._why_card = QFrame()
+        self._why_card.setProperty("card", True)
+        why_col = QVBoxLayout(self._why_card)
+        why_col.setContentsMargins(16, 12, 16, 12)
+        self._why_title = QLabel()
+        self._why_title.setObjectName("CardTitle")
+        self._why_body = QLabel()
+        self._why_body.setWordWrap(True)
+        self._why_open = QPushButton("Open trajectories")
+        self._why_open.setProperty("role", "outline")
+        self._why_open.clicked.connect(self._open_trajectories_for_selected)
+        why_col.addWidget(self._why_title)
+        why_col.addWidget(self._why_body)
+        why_col.addWidget(self._why_open, 0, Qt.AlignmentFlag.AlignLeft)
+        self._why_card.hide()
+        diag_layout.addWidget(self._why_card)
+        self._qualities: list[SessionQuality] = []
+        self._tabs: QTabWidget | None = None
 
         selector_form = QFormLayout()
         self._diag_session_combo = QComboBox()
@@ -327,8 +386,16 @@ class PreviewScreen(QWidget):
         self._diag_preprocess_table = QTableWidget()
         diag_layout.addWidget(self._diag_preprocess_table)
 
+        for table in (
+            self._diag_individual_table, self._diag_session_table, self._diag_preprocess_table,
+        ):
+            table.setMinimumHeight(150)
         diag_layout.addStretch()
-        return diag_w
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(diag_w)
+        return scroll
 
     def _build_metrics_tab(self) -> QWidget:
         metric_w = QWidget()
@@ -384,6 +451,10 @@ class PreviewScreen(QWidget):
             self._diag_session_table.hide()
             self._diag_preprocess_table.hide()
             self._diag_session_combo.clear()
+            self._quality_table.setRowCount(0)
+            self._why_card.hide()
+            for chip in self._verdict_chips.values():
+                chip.setText("")
             clear_table(self._diag_individual_table)
             clear_table(self._diag_session_table)
             clear_table(self._diag_preprocess_table)
@@ -395,7 +466,90 @@ class PreviewScreen(QWidget):
         self._diag_session_table.show()
         self._diag_preprocess_table.show()
         _repopulate_session_combo(self._diag_session_combo, run_results)
+        self._render_quality_grid(run_results)
         self._render_diagnostics_for_current_selection()
+
+    # ── quality grid ─────────────────────────────────────────────────────
+
+    def _level_colour(self, level: str) -> str:
+        dark = theme.name == "dark"
+        return {
+            "good": "#3fa7b5" if dark else "#3a9a72",
+            "check": "#e8b64c" if dark else "#e0a92a",
+            "review": "#ff8a76" if dark else "#d1453b",
+        }.get(level, "#88949b")
+
+    @staticmethod
+    def _dot_icon(colour: str) -> QIcon:
+        """A filled circle; an icon, so a selected row's text colour cannot hide it."""
+        pixmap = QPixmap(12, 12)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(colour))
+        painter.drawEllipse(1, 1, 10, 10)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _render_quality_grid(self, run_results) -> None:
+        self._qualities = [assess_session(s) for s in run_results.sessions]
+        counts = count_verdicts(self._qualities, set())
+        for verdict, chip in self._verdict_chips.items():
+            chip.setText(f"{counts[verdict]} {verdict.lower()}")
+        table = self._quality_table
+        table.setRowCount(len(self._qualities))
+        for row, q in enumerate(self._qualities):
+            first = QTableWidgetItem(q.session_id)
+            table.setItem(row, 0, first)
+            for col, cell in enumerate(
+                (q.coverage, q.identity, q.crossings, q.jumps, q.interpolated), start=1
+            ):
+                item = QTableWidgetItem(cell.text)
+                item.setIcon(self._dot_icon(self._level_colour(cell.level)))
+                table.setItem(row, col, item)
+            verdict_item = QTableWidgetItem(q.verdict)
+            verdict_item.setIcon(self._dot_icon(self._level_colour(q.verdict.lower())))
+            table.setItem(row, len(_QUALITY_HEADERS) - 1, verdict_item)
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setFixedHeight(40 + 36 * max(1, len(self._qualities)))
+        if self._qualities:
+            table.selectRow(0)
+        self._show_reasons(self._qualities[0] if self._qualities else None)
+
+    def _selected_quality(self) -> SessionQuality | None:
+        rows = {i.row() for i in self._quality_table.selectedIndexes()}
+        if len(rows) != 1:
+            return None
+        row = next(iter(rows))
+        return self._qualities[row] if 0 <= row < len(self._qualities) else None
+
+    def _on_quality_row_selected(self) -> None:
+        quality = self._selected_quality()
+        self._show_reasons(quality)
+        if quality is not None:
+            self._diag_session_combo.setCurrentText(quality.session_id)
+
+    def _show_reasons(self, quality: SessionQuality | None) -> None:
+        if quality is None:
+            self._why_card.hide()
+            return
+        if quality.verdict == "Good":
+            self._why_title.setText(f"{quality.session_id} looks good")
+            self._why_body.setText("Every measure is within its limit.")
+        else:
+            word = "a check" if quality.verdict == "Check" else "review"
+            self._why_title.setText(f"Why {quality.session_id} needs {word}")
+            self._why_body.setText("\n".join(f"•  {r}" for r in quality.reasons))
+        self._why_card.show()
+
+    def _open_trajectories_for_selected(self) -> None:
+        quality = self._selected_quality()
+        if self._tabs is None or quality is None:
+            return
+        self._tabs.setCurrentIndex(3)
+        self._traj_session_combo.setCurrentText(quality.session_id)
 
     def _render_diagnostics_for_current_selection(self) -> None:
         run_results = self._store.run_results if self._store is not None else None

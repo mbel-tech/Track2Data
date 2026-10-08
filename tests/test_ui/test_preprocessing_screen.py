@@ -218,3 +218,57 @@ def test_velocity_threshold_jump_method_is_selectable(qtbot, tmp_path: Path) -> 
     screen._jump_method.setCurrentIndex(idx)
     screen.flush()
     assert store.manifest.preprocess.jump.method == "idtracker_velocity_threshold"
+
+
+# ── gaps between tracking intervals ──────────────────────────────────────────
+
+
+def test_bridging_gaps_between_intervals_is_off_by_default_with_a_30_second_limit(qtbot) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    screen = PreprocessingScreen()
+    qtbot.addWidget(screen)
+    assert screen._gap_across.isChecked() is False
+    assert screen._gap_across_limit.value() == 30.0
+    assert screen._gap_across_limit.isEnabled() is False  # nothing to set until it is on
+
+
+def test_the_interval_controls_roundtrip_through_the_store(qtbot, tmp_path: Path) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    store = _make_store(tmp_path)
+    screen = PreprocessingScreen(store)
+    qtbot.addWidget(screen)
+    screen._gap_across.setChecked(True)
+    screen._gap_across_limit.setValue(120.0)
+    screen.flush()
+
+    gap = store.manifest.preprocess.gap_fill
+    assert gap.across_tracking_intervals is True
+    assert gap.max_cross_interval_gap_s == 120.0
+
+    other = PreprocessingScreen(store)
+    qtbot.addWidget(other)
+    assert other._gap_across.isChecked() is True
+    assert other._gap_across_limit.value() == 120.0
+    assert other._gap_across_limit.isEnabled() is True
+
+
+def test_the_limit_needs_gap_filling_to_be_on(qtbot) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    screen = PreprocessingScreen()
+    qtbot.addWidget(screen)
+    screen._gap_across.setChecked(True)
+    screen._gap_enabled.setChecked(False)
+    assert screen._gap_across.isEnabled() is False
+    assert screen._gap_across_limit.isEnabled() is False
+
+
+def test_the_controls_say_what_the_estimate_is(qtbot) -> None:
+    from ui.preprocessing_screen import PreprocessingScreen
+
+    screen = PreprocessingScreen()
+    qtbot.addWidget(screen)
+    tip = screen._gap_across.toolTip().lower()
+    assert "straight line" in tip and "estimate" in tip and "identit" in tip

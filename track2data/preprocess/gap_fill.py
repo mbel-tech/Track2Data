@@ -27,7 +27,9 @@ def _find_nan_runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return runs
 
 
-def _fill_series(series: np.ndarray, max_gap: int) -> tuple[np.ndarray, int]:
+def _fill_series(
+    series: np.ndarray, max_gap: int, protected: np.ndarray | None = None
+) -> tuple[np.ndarray, int]:
     """Fill NaN gaps of at most *max_gap* frames via linear interpolation.
 
     Gaps longer than *max_gap* are left as NaN.
@@ -48,6 +50,8 @@ def _fill_series(series: np.ndarray, max_gap: int) -> tuple[np.ndarray, int]:
         gap_len = end - start
         if gap_len > max_gap:
             continue  # leave this gap as NaN
+        if protected is not None and protected[start:end].any():
+            continue  # a stretch that was never tracked is not this step's to fill
         # Need valid anchors on both sides
         if start == 0 or end == len(series):
             continue  # can't interpolate at the boundary
@@ -67,6 +71,7 @@ def fill_gaps(
     xy: np.ndarray,
     cfg: GapFillCfg,
     crossing_frame_mask: np.ndarray | None = None,
+    protected_rows: np.ndarray | None = None,
 ) -> tuple[np.ndarray, PPStepResult]:
     """Fill short NaN gaps in trajectories via linear interpolation.
 
@@ -88,6 +93,11 @@ def fill_gaps(
         interpolation is on firmer footing) versus not (no detection at
         all, interpolation is a weaker guess). Purely informational: does
         not change which gaps get filled.
+    protected_rows:
+        Optional ``(n_frames,)`` bool array of rows standing for video that was never tracked
+        (see ``preprocess/timeline_expand.py``). A NaN run touching one is left alone, so the
+        ordinary short-gap filler can never join two tracking intervals; only the cross-interval
+        step, with its own limit, does that.
 
     Returns
     -------
@@ -112,7 +122,9 @@ def fill_gaps(
     for k in range(n_animals):
         total_filled = 0
         for axis in range(2):
-            filled_series, count = _fill_series(xy[:, k, axis], cfg.max_gap_frames)
+            filled_series, count = _fill_series(
+                xy[:, k, axis], cfg.max_gap_frames, protected_rows
+            )
             out[:, k, axis] = filled_series
             if axis == 0:
                 total_filled = count

@@ -417,7 +417,7 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 > Top-down / Side view, a combo with a one-line explanation). It has its own
 > auto-commit and writes `store.update_scene`, never the calibration, so an
 > unchanged or blocked calibration cannot swallow it and a calibration edit
-> cannot reset it (D-033).
+> cannot reset it (D-036).
 
 **Stage:** Stage 3 (Calibration)  
 **Purpose:** Select between scalar px-per-cm vs. body-length calibration modes.

@@ -33,6 +33,19 @@ the blob layer, which lives in a pickle, so it needs `blob_diagnostics` and
 same applies to `CalibrationConfig.body_length_source = "blobs"`, which also changes
 `*_cm` values and is therefore not the default.
 
+**Zone transitions (Z-4, Z-7) can still count a transition across an unobserved gap.** In a
+session tracked in separate intervals, the last zone of one interval and the first zone of
+the next are counted as one transition, although the animal was not observed in between.
+Z-5, Z-6 and Z-9 do cut at the gap. See `D-032` in
+[`docs/dev/DECISIONS.md`](https://github.com/mbel-tech/Track2Data/blob/main/docs/dev/DECISIONS.md).
+
+**Interpolating across gaps between tracking intervals is an estimate, and is off by
+default.** The Preprocessing screen can fill a gap of up to 30 s (adjustable) with a straight
+line between the last and next observed positions. Those frames are marked
+`was_interpolated` and `in_tracking_interval = False`, and distance, speed and zone time
+include them. Report how much of a result rests on them (the *Interpolated* column of the
+quality grid).
+
 ## Input formats
 
 **idtracker.ai v4 output is not supported.** 6.x is supported and the legacy v5 layout

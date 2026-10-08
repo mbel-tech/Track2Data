@@ -263,6 +263,10 @@ Custom vertices (orange/green) can be dragged to fine-tune the outline. When the
 (at least 3 points), give it a **name** and a **level** (`main` or `secondary`) and press
 **Save Zone**.
 
+To reshape a saved zone, select it in the list and drag its vertices. A move that would leave the
+zone with no area (all vertices in a line), repeat a point, or make its edges cross is refused: a
+message says why, the handle jumps back and the zone stays as it was.
+
 If a zone's source resolution differs from a session's video, a yellow warning appears.
 
 ## 5. Metadata (optional)
@@ -321,11 +325,32 @@ step has an **Enabled** box; the raw data is never overwritten.
 
 | Step | What it does |
 |---|---|
-| **Gap fill** | Linearly interpolates tracking gaps up to *Max gap frames* |
+| **Gap fill** | Linearly interpolates tracking gaps up to *Max gap frames* (gaps between tracking intervals have their own option, below) |
 | **Jump detection** | Finds implausible position jumps (standard-deviation multiple, percentile, or idtracker.ai's own velocity threshold) and replaces them |
 | **Identity switch correction** | See below. Off by default |
 | **Smoothing** | Moving average or Savitzky–Golay, over *Window* frames |
 | **Coverage gate** | Warns when more than *Max NaN fraction* of an animal's frames are missing |
+
+### Sessions tracked in separate intervals
+
+idtracker.ai can track only some stretches of a video. Its trajectory file then holds just those
+frames, and Track2Data puts them back on the real timeline: speeds, smoothing and zone times are
+computed over the true elapsed time, and the stretches in between are **never read as adjacent
+frames** (that used to turn a move across a 40-second gap into one frame of motion).
+
+By default the untracked stretch stays empty: nothing is interpolated, distance is not counted across
+it and a stay in a zone is cut there. Tick **Interpolate across gaps between tracking intervals** to
+fill gaps of up to *Longest interval gap to fill* seconds (30 s by default) with a straight line
+between each animal's last and next observed position. This is an assumption about where the animal
+went, not a measurement:
+
+- Filled frames appear in the per-frame table with `was_interpolated` true and `in_tracking_interval`
+  false, and are counted by the *Interpolated* column of the quality grid (diagnostic D-11).
+- Distance, speed, activity and zone time include them; zone events on them carry `estimated`.
+- It needs stable identities and an observed position for that animal on both sides, and never
+  extrapolates. Sessions marked identity-free are never bridged.
+- A gap longer than the limit stays a break. The limit exists so one long gap cannot quietly be
+  replaced by a made-up path.
 
 <figure>
 <img src="images/06-preprocessing-identity-switch.png" alt="Identity switch correction">

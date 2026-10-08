@@ -90,6 +90,8 @@ class PathLength(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=[
             "Post-smoothing xy is used; gaps produce no displacement",
+            "An animal with no valid consecutive pair of positions has no measured "
+            "distance: it reports NaN (pixels and converted units), never 0",
             "Interpolated frames contribute a straight line, which understates "
             "the real path across a gap -- see D-11's frac_interpolated for how "
             "much of this value rests on them",
@@ -134,7 +136,13 @@ class PathLength(Metric):
             # Consecutive displacements, skipping pairs where either frame is NaN
             diff = traj[1:] - traj[:-1]  # (n_frames-1, 2)
             valid = ~(np.isnan(diff[:, 0]) | np.isnan(diff[:, 1]))
-            path_px = float(np.sqrt((diff[valid] ** 2).sum(axis=1)).sum())
+            # No valid consecutive pair means no displacement was ever measured: that is
+            # unavailable, not a distance of zero. (An empty sum is 0.0, which would read as
+            # "did not move" for an animal that was never tracked.)
+            if valid.any():
+                path_px = float(np.sqrt((diff[valid] ** 2).sum(axis=1)).sum())
+            else:
+                path_px = float("nan")
 
             row: dict = {
                 "session_id": session.session_id,
@@ -811,7 +819,11 @@ class FreezingBouts(Metric):
             "cfg['min_bout_frames'] (explicit override; else per derive_bout_criterion)",
             "cfg['derive_bout_criterion'] (bool, default False)",
         ],
-        assumptions=["Same as IL-4"],
+        assumptions=[
+            "Same as IL-4",
+            "An animal with no usable speed (all NaN) reports NaN count and durations, not 0 "
+            "bouts: nothing was classified. Missing speeds break a run, they never join two",
+        ],
         warnings=[
             "Discards short pauses; min duration is study-specific",
             "min_bout_frames_used and bout_criterion_effective report the "
@@ -984,8 +996,12 @@ class FreezingBouts(Metric):
             run_lengths = _true_run_lengths(inactive_per_animal[k])
             qualifying = [n for n in run_lengths if n >= min_bout_frames]
 
-            bout_count = len(qualifying)
-            if bout_count > 0:
+            bout_count: float = len(qualifying)
+            if bool(np.isnan(speed[:, k]).all()):
+                # Nothing was classified as active or inactive, so "no bouts" would claim a
+                # finding the data cannot support.
+                bout_count = total_duration = mean_duration = float("nan")
+            elif bout_count > 0:
                 total_duration = float(sum(qualifying) / fps)
                 mean_duration = float(total_duration / bout_count)
             else:

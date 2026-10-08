@@ -93,6 +93,7 @@ _EXPLICIT_UNITS: dict[str, str] = {
     "min_bout_frames_used": "frames",
     "min_dwell_frames_used": "frames",
     "min_visit_frames_used": "frames",
+    "origin_frame": "frames",
     "n_frames_total": "frames",
     "n_frames_used": "frames",
     "n_classified_frames": "frames",
@@ -106,7 +107,11 @@ _EXPLICIT_UNITS: dict[str, str] = {
     "bout_criterion_effective": "categorical",
     "depth_extent_source": "categorical",
     "home_base_stable": "boolean",
+    "after_gap": "boolean",
+    "estimated": "boolean",
+    "first_entry_after_gap": "boolean",
     "identity_stability_status": "categorical",
+    "identity_free_reason": "categorical",
 }
 
 #: Suffix -> unit, longest suffix first so "_px_s2" wins over "_px_s" and
