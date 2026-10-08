@@ -208,9 +208,7 @@ class PreviewScreen(QWidget):
         self._traj_source_combo.addItem("Processed", userData="processed")
         self._traj_source_combo.addItem("Raw", userData="raw")
         self._traj_source_combo.addItem("Raw + processed", userData="both")
-        self._traj_source_combo.currentIndexChanged.connect(
-            lambda _i: self._traj_view.set_source(self._traj_source_combo.currentData())
-        )
+        self._traj_source_combo.currentIndexChanged.connect(self._traj_on_source_changed)
         opts.addWidget(self._traj_source_combo)
         self._traj_zones_check = QCheckBox("Zones")
         self._traj_zones_check.setChecked(True)
@@ -274,6 +272,12 @@ class PreviewScreen(QWidget):
         self._traj_frame_label.setText(f"frame {frame}{t}")
         if self._traj_slider.value() != frame:
             self._traj_slider.setValue(frame)
+
+    def _traj_on_source_changed(self, _index: int) -> None:
+        # A bound method, not a lambda over ``self``: PySide holds a lambda's
+        # closure strongly, which makes the screen a reference cycle that is
+        # only freed at interpreter exit, after the QApplication is gone.
+        self._traj_view.set_source(self._traj_source_combo.currentData())
 
     def _traj_toggle_play(self, playing: bool) -> None:
         self._traj_play_btn.setText("⏸" if playing else "▶")

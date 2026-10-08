@@ -601,3 +601,26 @@ def test_quality_grid_clears_when_results_go_away(qtbot) -> None:
 
     assert screen._quality_table.rowCount() == 0
     assert screen._why_card.isHidden() is True
+
+
+def test_screen_is_freed_by_refcount_not_left_to_interpreter_exit(qtbot) -> None:
+    """Regression: a ``lambda`` over ``self`` in a connect() makes the screen a
+    reference cycle (PySide holds the closure strongly). An unregistered screen
+    then survives until interpreter shutdown, is torn down after the
+    QApplication, and aborts pytest at exit ("shared QObject was deleted
+    directly", exit 134). Connect bound methods instead."""
+    import gc
+    import weakref
+
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    gc.collect()
+    gc.disable()
+    try:
+        screen = PreviewScreen(ProjectStore())
+        ref = weakref.ref(screen)
+        del screen
+        assert ref() is None
+    finally:
+        gc.enable()
