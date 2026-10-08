@@ -113,6 +113,11 @@ class MetricParameter(BaseModel):
     derived: bool = False
     auto_label: str | None = None
     disabled_by: str | None = None
+    #: True for a tolerance that is a numerical zero, not a distance (1e-6 px/s means "not
+    #: moving" in any unit). A parameter in pixels with a fixed default that is NOT scale-free
+    #: means a different thing in a project whose lengths are not pixels, so such a project
+    #: must set it explicitly (Engine.validate).
+    scale_free: bool = False
 
 
 class Metric(ABC):

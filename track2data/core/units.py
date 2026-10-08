@@ -37,7 +37,8 @@ _UNITS_PER_CM: dict[str, float] = {
     "µm": 10_000.0,
 }
 
-#: Pixel-family suffix -> (tail appended after the unit). Longest first: "_px_s2" is not "_px".
+#: Pixel-family suffix -> the tail that follows the unit. No suffix here is the end of another
+#: ("a_px_s2" does not end in "_px_s"), so the order does not matter.
 _PIXEL_SUFFIXES: tuple[tuple[str, str], ...] = (
     ("_px_s2", "_s2"),
     ("_px_s", "_s"),

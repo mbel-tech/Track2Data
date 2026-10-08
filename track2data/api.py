@@ -59,6 +59,13 @@ from track2data.core.progress import (
     emit,
 )
 from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
+from track2data.core.units import (
+    PIXELS,
+    TOOL_UNITS,
+    effective_unit,
+    relabel_frame,
+    units_per_cm,
+)
 from track2data.readers import find_reader, read_session
 
 if TYPE_CHECKING:
@@ -609,7 +616,9 @@ class Engine:
         try:
             # Calibration.
             cfg = self._manifest.calibration
-            if cfg.mode == "scalar" and cfg.px_per_cm is not None:
+            if not session.has_pixel_frame:
+                psess = self._calibrate_native(psess)
+            elif cfg.mode == "scalar" and cfg.px_per_cm is not None:
                 from track2data.calibration.scalar import apply_scalar_calibration
                 psess = apply_scalar_calibration(psess, cfg)
             elif cfg.mode == "bodylength":
@@ -632,7 +641,8 @@ class Engine:
 
             # Zone assignment.
             zone_set = self._manifest.zones
-            if zone_set.rois:
+            if zone_set.rois and session.has_pixel_frame:
+                # Zones are drawn on the video frame; positions with no pixel frame are not in it.
                 from track2data.zones.geometry import assign_zones
                 main_zone, sec_zone = assign_zones(psess.xy, zone_set)
                 from dataclasses import replace
@@ -649,6 +659,28 @@ class Engine:
                 ),
             ) from exc
 
+        return psess
+
+    def _calibrate_native(self, psess: PreprocessedSession) -> PreprocessedSession:
+        """Calibration for positions with no pixel frame.
+
+        Body-length and per-session calibration need pixels, so they do not apply. An explicit
+        scalar factor is the user's own ("units per cm"). Otherwise, a unit someone confirmed
+        that is a known physical length gets its centimetre columns automatically; a unit that
+        is only the tool's own label, or already centimetres, gets none (there is nothing to
+        convert it with, or nothing to convert).
+        """
+        import dataclasses
+
+        cfg = self._manifest.calibration
+        if cfg.mode == "scalar" and cfg.px_per_cm is not None:
+            from track2data.calibration.scalar import apply_scalar_calibration
+
+            return apply_scalar_calibration(psess, cfg)
+        unit = self.coordinate_unit_for(psess.session)
+        per_cm = units_per_cm(unit)
+        if per_cm is not None and unit != "cm":
+            return dataclasses.replace(psess, px_per_cm=per_cm)
         return psess
 
     # ── metrics ────────────────────────────────────────────────────────────
@@ -693,6 +725,20 @@ class Engine:
 
         cfg.update(derive_metric_params(metric_cls.id, psess, self._manifest.zones))
         return cfg
+
+    def coordinate_unit_for(self, session: Session) -> str:
+        """What this session's length columns are named in: ``"px"``, ``"tu"`` (the tool's own
+        units, unconfirmed), or the unit the user confirmed in the calibration settings.
+
+        The confirmation is the same one a pixel project uses for its calibration unit label
+        (``length_unit_label`` plus ``length_unit_confirmed_by_user``); a tracker's own "mm" is
+        a suggestion for that label, never a fact (see ``core/units.py``).
+        """
+        cfg = self._manifest.calibration
+        return effective_unit(
+            has_pixel_frame=session.has_pixel_frame,
+            confirmed_label=cfg.length_unit_label if cfg.length_unit_confirmed_by_user else None,
+        )
 
     def identity_free_for(
         self, session: Session, explicit: bool | None = None
@@ -1109,6 +1155,7 @@ class Engine:
         tracking_log = session.tracking_log or {}
 
         is_identity_free = self.identity_free_for(session, identity_free)
+        unit = self.coordinate_unit_for(session)
         # Which of the two inputs actually produced the verdict, so a
         # reader of the export can tell "idtracker.ai said so" from "a human
         # overruled idtracker.ai" -- they warrant different scrutiny.
@@ -1142,6 +1189,11 @@ class Engine:
             keypoint_selection=(
                 session.keypoints.provenance() if session.keypoints is not None else None
             ),
+            coordinate_unit=unit,
+            coordinate_unit_reported=session.reported_unit,
+            coordinate_unit_confirmed=(
+                not session.has_pixel_frame and unit != TOOL_UNITS
+            ),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,
             trajectory_variant=session.trajectory_variant,
@@ -1169,16 +1221,21 @@ class Engine:
             length_calibration_rel_sd=cal_rel_sd,
         )
 
+        # After all computation: a length is named for the unit it is in. A pixel project gets
+        # the very same objects back, so nothing about its export can change.
+        def named(frames: dict[str, Any]) -> dict[str, Any]:
+            return {k: relabel_frame(v, unit) for k, v in frames.items()}
+
         return ExportPayload(
             session_id=psess.session_id,
             project_name=self._manifest.project_name,
             project_hash=self._manifest.project_hash(),
             app_version=self._manifest.app_version,
-            fish_by_frame=fish_by_frame,
-            individual_metrics=individual_metrics,
-            group_metrics=group_metrics,
-            zone_metrics=zone_metrics,
-            diagnostic_metrics=diagnostic_metrics,
+            fish_by_frame=relabel_frame(fish_by_frame, unit),
+            individual_metrics=named(individual_metrics),
+            group_metrics=named(group_metrics),
+            zone_metrics=named(zone_metrics),
+            diagnostic_metrics=named(diagnostic_metrics),
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
@@ -1475,7 +1532,10 @@ class Engine:
             from track2data.exporters.schema import build_codebook
 
             codebook_path = out_dir / "codebook.csv"
-            build_codebook().to_csv(
+            unit = next(
+                (r.summary.coordinate_unit for r in results if r.summary is not None), PIXELS
+            )
+            build_codebook(coordinate_unit=unit).to_csv(
                 codebook_path, index=False, encoding="utf-8", lineterminator="\n"
             )
             written.append(codebook_path)
@@ -1751,6 +1811,7 @@ class Engine:
                     is_identity_free=ref.is_identity_free(),
                     px_per_cm=psess.px_per_cm,
                     trajectory_sha256=self._hash_and_check_input(session, ref),
+                    coordinate_unit=self.coordinate_unit_for(session),
                 ),
             )
         except OperationCancelled:
@@ -1814,6 +1875,102 @@ class Engine:
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
         issues.extend(self._identity_selection_issues())
+        issues.extend(self._unit_issues())
+        return issues
+
+    def _unit_issues(self) -> list[str]:
+        """Blocking problems that come from a project's length units not being pixels.
+
+        Only sessions whose reader may lack a pixel frame are opened to find out; every other
+        reader is pixels by declaration, so an idtracker.ai project costs nothing here.
+        """
+        from track2data.readers import find_reader
+
+        sessions = self._manifest.sessions
+        units: dict[str, tuple[str, str | None]] = {}
+        for ref in sessions:
+            reader = find_reader(ref.reader) if ref.reader else None
+            if reader is None or reader.coordinate_frame == "image_px":
+                units[ref.session_id] = (PIXELS, None)
+                continue
+            try:
+                session = self.import_ref(ref)
+            except Exception:
+                continue  # the run reports an unreadable session; this check is about units
+            unit = self.coordinate_unit_for(session)
+            units[ref.session_id] = (unit, session.reported_unit if unit == TOOL_UNITS else None)
+        if all(u == PIXELS for u, _ in units.values()):
+            return []
+
+        issues: list[str] = []
+        by_unit: dict[tuple[str, str | None], list[str]] = {}
+        for sid, key in units.items():
+            by_unit.setdefault(key, []).append(sid)
+        if len(by_unit) > 1:
+            parts = []
+            for (unit, reported), ids in by_unit.items():
+                if unit == TOOL_UNITS:
+                    said = f" that the tool calls '{reported}'" if reported else ""
+                    named = f"tool units{said}"
+                else:
+                    named = unit
+                parts.append(f"{named}: {', '.join(ids)}")
+            issues.append(
+                "These sessions use different length units ("
+                + "; ".join(parts)
+                + "). Their length columns would carry different units under one name, so they "
+                "cannot be run together. Run them as separate projects, or confirm the unit in "
+                "the calibration settings if they are really the same."
+            )
+
+        native = [sid for sid, (unit, _) in units.items() if unit != PIXELS]
+        if self._manifest.zones.rois:
+            issues.append(
+                "Zones are drawn on the video frame, and these sessions have no pixel frame: "
+                f"{', '.join(native)}. Remove the zones, or run these sessions in their own "
+                "project."
+            )
+        issues.extend(self._pixel_default_issues())
+        cfg = self._manifest.calibration
+        if (
+            cfg.mode == "scalar"
+            and cfg.length_unit_confirmed_by_user
+            and cfg.length_unit_label == "cm"
+        ):
+            issues.append(
+                "The lengths are already in centimetres, so a scalar calibration would add a "
+                "second set of *_cm columns. Choose another calibration mode."
+            )
+        return issues
+
+    def _pixel_default_issues(self) -> list[str]:
+        """Selected metrics with a fixed default in pixels, in a project that is not in pixels.
+
+        A 20 px bin or a 50 px radius means something else (or nothing) in another unit, and
+        nothing about synthetic or even real data would show it. The user must state the value.
+        """
+        import track2data.metrics as registry
+
+        sel = self._manifest.metrics
+        issues = []
+        for metric_id in [*sel.individual, *sel.group, *sel.zone]:
+            metric_cls = registry.get(metric_id)
+            if metric_cls is None:
+                continue
+            given = sel.config.get(metric_id, {})
+            for param in getattr(metric_cls, "parameters", None) or []:
+                if (
+                    param.unit in ("px", "px/s", "px^2")
+                    and param.default is not None
+                    and not param.derived
+                    and not param.scale_free
+                    and given.get(param.name) is None
+                ):
+                    issues.append(
+                        f"{metric_id} uses '{param.name}' = {param.default:g} {param.unit} by "
+                        "default, and this project's lengths are not in pixels. Set it in the "
+                        "metric's settings, in the project's own length unit."
+                    )
         return issues
 
     def consistency_warnings(self) -> list[str]:
@@ -1870,6 +2027,7 @@ class Engine:
                     calibration_mode=mode,
                     is_identity_free=ref.is_identity_free(),
                     px_per_cm=self._resolve_px_per_cm(session),
+                    coordinate_unit=self.coordinate_unit_for(session),
                 )
             )
         return summaries

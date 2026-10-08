@@ -76,3 +76,40 @@ def write_toy_session(folder: Path, *, n_frames: int = 60, seed: int = 0) -> Pat
             rows.append((frame, animal, *position))
     pd.DataFrame(rows, columns=["frame", "id", "x", "y"]).to_csv(folder / "toy.csv", index=False)
     return folder
+
+
+NATIVE_OPTIONS = {"fps": 25.0}
+
+
+class ToyNativeReader(ToyCsvReader):
+    """The toy tracker as one that reports no pixel frame: its numbers are in "tool units"
+    that the tool calls millimetres, and it records no frame size.
+
+    Stands in for the real readers of such trackers (a ToxTrac RealSpace table, an Anipose
+    triangulation) so the export, the calibration and the pre-flight checks can be tested before
+    any of them exists.
+    """
+
+    name = "toy_native"
+    display_name: ClassVar[str] = "Toy tracker (no pixel frame)"
+    coordinate_frame = "physical_unaligned"
+    parameters: ClassVar[tuple[ReaderParameter, ...]] = (
+        ReaderParameter(name="fps", label="Frame rate", kind="float", required=True),
+        ReaderParameter(
+            name="reported_unit", label="Unit the tool reports", kind="str", default="mm"
+        ),
+    )
+
+    def read(self, folder: Path, *, allow_pickle: bool = False, options: Any = None) -> Session:
+        base = super().read(
+            folder,
+            options={"fps": options["fps"], "width_px": 1, "height_px": 1},
+        )
+        return base.model_copy(
+            update={
+                "reader": self.name,
+                "coordinate_unit": "tu",
+                "reported_unit": options.get("reported_unit") or "mm",
+                "video": base.video.model_copy(update={"width_px": 0, "height_px": 0}),
+            }
+        )

@@ -101,6 +101,13 @@ class SessionProvenance:
     # n_keypoints). None for a tracker with one point per animal.
     keypoint_selection: dict[str, Any] | None = None
 
+    # What the length columns are named in (core/units.py): "px", "tu" (the tool's own units,
+    # not yet confirmed to be anything), or a unit someone confirmed ("mm"). A tracker's own
+    # label for its units ("mm") is recorded beside it, never believed on its own.
+    coordinate_unit: str = "px"
+    coordinate_unit_reported: str | None = None
+    coordinate_unit_confirmed: bool = False
+
 
 @dataclass
 class ExportPayload:

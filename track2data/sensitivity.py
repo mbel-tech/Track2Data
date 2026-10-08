@@ -109,9 +109,12 @@ def run_sensitivity(
     """
     import pandas as pd
 
+    from track2data.core.units import relabel_column
     from track2data.exporters.schema import unit_for_column
 
     grid = grid or SensitivityGrid()
+    # Named as the export names them, so a sweep row joins to the codebook.
+    length_unit = engine.coordinate_unit_for(session)
     base_config = engine.manifest.preprocess
 
     rows: list[dict[str, Any]] = []
@@ -153,9 +156,9 @@ def run_sensitivity(
                         "session_id": session.session_id,
                         "individual_id": record.get("individual_id", pd.NA),
                         "metric_id": metric_id,
-                        "column": column,
+                        "column": relabel_column(column, length_unit),
                         "value": record[column],
-                        "unit": unit_for_column(column),
+                        "unit": unit_for_column(relabel_column(column, length_unit), length_unit),
                         "error": pd.NA,
                     })
 

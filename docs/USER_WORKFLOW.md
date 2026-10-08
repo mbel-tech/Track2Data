@@ -373,6 +373,24 @@ the user wants to reuse one zone set across mirrored videos).
 | BL mode, ≥ 1 session below sample threshold | *"<N> session(s) have fewer than <min> body-length samples and will be skipped for cm-based metrics. You can lower the threshold or switch to scalar mode."* (banner) | warning |
 | BL mode, **all** sessions below threshold | *"No session has enough body-length samples for body-length calibration. Switch to scalar mode or re-run idtracker.ai with longer segmentation."* (modal blocks advance) | error |
 | Orientation tag empty | (allowed; defaults to "default") | — |
+| Sessions mix pixels and tool units (or tool units the tools name differently) | *"These sessions use different length units (px: a, b; tool units that the tool calls 'mm': c). Their length columns would carry different units under one name, so they cannot be run together. Run them as separate projects, or confirm the unit in the calibration settings if they are really the same."* | error, blocks the run |
+| Zones are defined and a session has no pixel frame | *"Zones are drawn on the video frame, and these sessions have no pixel frame: ..."* | error, blocks the run |
+| A selected metric has a fixed default in pixels and the project is not in pixels | *"IL-9 uses 'bin_size_px' = 20 px by default, and this project's lengths are not in pixels. Set it in the metric's settings, in the project's own length unit."* | error, blocks the run |
+| Lengths are already in centimetres and Scalar mode is chosen | *"The lengths are already in centimetres, so a scalar calibration would add a second set of *_cm columns. Choose another calibration mode."* | error, blocks the run |
+| Sessions with no pixel frame, unit unconfirmed | *"Some sessions have no pixel frame: their positions are in the tool's own units ... Their length columns are named *_tu ..."* | warning (pre-flight) |
+
+**Sessions with no pixel frame.** A few trackers (a 3-D triangulation, a tool that reports
+only millimetres) have no pixel frame, so their positions are in the tool's own units. The
+numbers are computed exactly as for pixels; what differs is how the columns are named:
+
+- Until you confirm the unit, length columns end in `_tu` ("tool units": `speed_tu_s`,
+  `path_length_tu`), the codebook says "tool units", and the README says the unit is **not
+  confirmed**, quoting what the tool calls it. No centimetre columns are written.
+- To confirm, pick the real unit in the unit box and tick the confirmation. The columns are then
+  named for it (`speed_mm_s`), and for a known physical length (mm, cm, m, um) the centimetre
+  columns appear too. In Scalar mode the number is then "units per cm", not "pixels per cm".
+- Zones and the background image do not apply (there is no video frame to draw them on), and
+  IL-3 / IL-14 measure from the extent of the tracked positions when there is no arena zone.
 
 **Saved at advance:** `CalibrationConfig` (mode, px_per_cm or
 min_samples), per-session orientation tag.

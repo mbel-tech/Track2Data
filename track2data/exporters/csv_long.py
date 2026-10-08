@@ -143,7 +143,12 @@ class CsvLongExporter(Exporter):
             **p.zone_metrics,
             **p.diagnostic_metrics,
         }
-        written.append(_write_csv(long_table(all_metrics), out_dir / "metrics_long.csv"))
+        written.append(
+            _write_csv(
+                long_table(all_metrics, p.provenance.coordinate_unit),
+                out_dir / "metrics_long.csv",
+            )
+        )
 
         return written
 

@@ -21,7 +21,11 @@ _LISTED = 4
 
 def reader_advisories(summaries: Sequence[SessionSummary]) -> list[str]:
     """One plain-language warning per caveat, naming the sessions it applies to."""
-    return [*_unverified(summaries), *_missing_body_length(summaries)]
+    return [
+        *_unverified(summaries),
+        *_missing_body_length(summaries),
+        *_unconfirmed_units(summaries),
+    ]
 
 
 def _unverified(summaries: Sequence[SessionSummary]) -> list[str]:
@@ -41,7 +45,17 @@ def _unverified(summaries: Sequence[SessionSummary]) -> list[str]:
 
 
 def _missing_body_length(summaries: Sequence[SessionSummary]) -> list[str]:
-    lacking = [s for s in summaries if s.calibration_mode == "bodylength" and not s.has_body_length]
+    # A session with no pixel frame is told about its units separately (_unconfirmed_units):
+    # "stay in pixels" would be wrong for it.
+    lacking = [
+        s
+        for s in summaries
+        if (
+            s.calibration_mode == "bodylength"
+            and not s.has_body_length
+            and s.coordinate_unit == "px"
+        )
+    ]
     if not lacking:
         return []
     by_reader = _ids_by(lacking, key=lambda s: _label(s.reader))
@@ -51,6 +65,25 @@ def _missing_body_length(summaries: Sequence[SessionSummary]) -> list[str]:
         "skipped for them and their columns stay in pixels. Affected sessions, by reader: "
         f"{detail}. To get real-unit columns, choose 'scalar' calibration and give pixels per "
         "cm (or 'session' calibration, for sessions that carry their own length unit)."
+    ]
+
+
+def _unconfirmed_units(summaries: Sequence[SessionSummary]) -> list[str]:
+    """Sessions with no pixel frame whose unit nobody has confirmed."""
+    unconfirmed = [s for s in summaries if s.coordinate_unit == "tu"]
+    if not unconfirmed:
+        return []
+    by_reader = _ids_by(unconfirmed, key=lambda s: _label(s.reader))
+    detail = "; ".join(f"{label}: {_listed(ids)}" for label, ids in by_reader.items())
+    said = sorted({s.reported_unit for s in unconfirmed if s.reported_unit})
+    tool = f" (the tool calls them {', '.join(repr(u) for u in said)})" if said else ""
+    return [
+        "Some sessions have no pixel frame: their positions are in the tool's own units"
+        f"{tool}, which nobody has confirmed. Their length columns are named *_tu (tool "
+        "units) and no centimetre columns are written. Confirm the unit in the calibration "
+        "settings to name the columns for it (and, for a known physical length, add "
+        "centimetres), or choose 'scalar' calibration and give units per cm. Zones and the "
+        f"background image do not apply to them. Affected sessions, by reader: {detail}."
     ]
 
 

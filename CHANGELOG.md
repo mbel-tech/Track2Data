@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Trackers with no pixel frame can now be read (native units).** A session records whether its
+  positions are in pixels or in the tool's own units. For the latter, every length column is
+  named for the unit at export (`speed_tu_s`, or `speed_mm_s` once you confirm the unit), the
+  codebook and long table say so, and the README states the unit and whether it is confirmed;
+  a tracker's own "mm" is never believed without that confirmation. Pixel projects export
+  exactly as before. A project must use one unit (mixed units are blocked before the run), zones
+  do not apply without a pixel frame, and metrics whose defaults are in pixels (GL-13, IL-9,
+  IL-10, IL-14) need an explicit value; IL-3 and IL-14 measure from the extent of the tracked
+  positions when no arena zone exists. No reader uses this yet; ToxTrac and Anipose are next.
+  The preprocessed-session cache schema is now 3.
 - **Ctrax raw `.mat` input** ("Save Tracks as Matlab File"). One session per file; the frame
   rate comes from the file's timestamps (an average over the whole span) and the frame size is
   asked for, because Ctrax measures y from the bottom and the height is needed to put it back in

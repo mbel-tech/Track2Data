@@ -222,6 +222,7 @@ class Polarisation(Metric):
             default=1e-6,
             minimum=0.0,
             unit="px/s",
+            scale_free=True,
             help="Animals slower than this are excluded from each frame's heading average.",
         ),
     ]
@@ -921,6 +922,7 @@ class RotationalOrder(Metric):
             default=1e-6,
             minimum=0.0,
             unit="px/s",
+            scale_free=True,
             help="Animals slower than this are excluded from each frame's rotation term.",
         ),
     ]
@@ -1266,6 +1268,7 @@ class OrderStateClassification(Metric):
             default=1e-6,
             minimum=0.0,
             unit="px/s",
+            scale_free=True,
             help="Same threshold GL-3/GL-8 use to exclude stationary animals per frame.",
         ),
     ]

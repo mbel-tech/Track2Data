@@ -264,6 +264,7 @@ class ReadmeExporter(Exporter):
             f"| Reader options | {_options_cell(p.reader_options)} |",
             f"| Source file(s) | {_files_cell(p.source_files)} |",
             f"| Frames / animals | {p.n_frames} / {p.n_animals} |",
+            f"| Coordinate unit | {_unit_cell(p)} |",
             *_position_rows(p),
             f"| Stable identities | {p.has_stable_identities} |",
             f"| Tracked without identification | {_tri(p.track_wo_identities)} |",
@@ -330,6 +331,24 @@ def _options_cell(options: dict[str, object]) -> str:
     if not options:
         return "*(none)*"
     return _cell(", ".join(f"{name}={value}" for name, value in sorted(options.items())))
+
+
+def _unit_cell(p: SessionProvenance) -> str:
+    """What the length columns are in, and whether anyone confirmed it."""
+    if p.coordinate_unit == "px":
+        return "px (pixels of the video frame)"
+    if p.coordinate_unit_confirmed:
+        return _cell(f"{p.coordinate_unit} (confirmed by user)")
+    if p.coordinate_unit_reported:
+        said = f"the tool calls them '{p.coordinate_unit_reported}'"
+    else:
+        said = "the tool does not say what they are"
+    return _cell(
+        f"tool units ({said}; **not confirmed**: confirm the unit in the calibration "
+        "settings before reading any column as a physical length). The columns are named "
+        "`*_tu`; there is no pixel frame, so zones and the background image do not apply and "
+        "IL-3 / IL-14 measure from the extent of the tracked positions"
+    )
 
 
 def _position_rows(p: SessionProvenance) -> list[str]:

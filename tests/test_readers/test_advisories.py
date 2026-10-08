@@ -213,3 +213,53 @@ def test_the_summary_records_whether_the_session_carries_a_body_length() -> None
     without = SessionSummary.from_session(session(None), calibration_mode="x")
     assert with_it.has_body_length is True
     assert without.has_body_length is False
+
+
+def _native(session_id: str, reader: str, *, unit: str = "tu", reported: str | None = "mm"):
+    return SessionSummary(
+        session_id=session_id,
+        reader=reader,
+        fps=25.0,
+        n_frames=100,
+        n_animals=2,
+        width_px=0,
+        height_px=0,
+        length_unit=None,
+        calibration_mode="bodylength",
+        has_body_length=False,
+        coordinate_unit=unit,
+        reported_unit=reported,
+    )
+
+
+class TestSessionsWithNoPixelFrame:
+    def test_an_unconfirmed_unit_is_said_once_with_what_the_tool_calls_it(self) -> None:
+        advisories = reader_advisories(
+            [_native("a", "adv_verified"), _native("b", "adv_verified")]
+        )
+        assert len(advisories) == 1
+        text = advisories[0]
+        assert "no pixel frame" in text and "*_tu" in text and "'mm'" in text
+        assert "a, b" in text and "Verified tool" in text
+
+    def test_it_never_says_the_columns_stay_in_pixels(self) -> None:
+        text = " ".join(reader_advisories([_native("a", "adv_verified")]))
+        assert "stay in pixels" not in text
+
+    def test_a_confirmed_unit_needs_no_advisory(self) -> None:
+        assert reader_advisories([_native("a", "adv_verified", unit="mm")]) == []
+
+    def test_a_tool_that_does_not_say_what_its_units_are_is_not_quoted(self) -> None:
+        (text,) = reader_advisories([_native("a", "adv_verified", reported=None)])
+        assert "tool calls them" not in text
+
+    def test_pixel_sessions_beside_them_keep_their_own_advisory(self) -> None:
+        advisories = reader_advisories(
+            [
+                _native("nat1", "adv_verified"),
+                _summary("pix1", "adv_verified", mode="bodylength", has_body_length=False),
+            ]
+        )
+        assert len(advisories) == 2
+        body = next(a for a in advisories if "bodylength" in a)
+        assert "pix1" in body and "nat1" not in body

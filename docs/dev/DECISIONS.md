@@ -712,7 +712,8 @@ whose trajectory lacks the key.
 
 ### D-031 · Accepted for the tiers not yet built (pose, native units, fragments, 3-D)
 
-**Status:** accepted; not implemented. The reasoning is in
+**Status:** accepted. Implemented since: pose (T1-1), fragments (T2-1) and native units
+(D-032); 3-D is still to come. The reasoning is in
 `docs/tracker-formats/2026-10-07-tracker-import-design.md` §4.6-4.9.
 
 **Decision:** *Pose.* One keypoint (the user's choice; default the best-covered)
@@ -731,3 +732,42 @@ Metrics use a chosen 2-D plane (default x, y); z is kept.
 physical quantities. Recording them before the readers exist keeps each reader's
 review about the format, not about re-deciding the policy.
 
+---
+
+### D-032 · Native units: the names change at the export boundary, one unit per project
+
+**Status:** accepted; implemented (G-units, no reader in it). Refines the units clause of D-031.
+
+**Decision:** A session records what its positions are in: `coordinate_unit` is `"px"` (an
+image's pixel frame, the default and every existing reader) or `"tu"` (the tool's own units,
+for a tracker that reports no pixel frame), and `reported_unit` is what the tool *calls* them.
+The pipeline's arithmetic is unit-agnostic and is **not** changed. What changes is the *name*:
+after all computation, every length column's pixel suffix (`_px`, `_px_s`, `_px_s2`, `_px2`) is
+renamed for the project's unit (`_tu`, or a confirmed unit such as `_mm`) in the per-frame
+table, every metric table, the long table, the codebook and the README. A pixel project gets
+the very same objects back, so its export is byte-identical.
+
+A tracker's own label is never believed on its own (one real ToxTrac export labels pixels
+"mm"): until the user confirms the unit, with the calibration unit label and "confirmed by user"
+box that pixel projects already have, columns are named in tool units and the README says the
+label is unconfirmed. A confirmed, known physical length (mm, cm, m, um) also gets centimetre
+columns; an unknown label is used for the names but gets none. A label that would collide with
+another column family (`s`, `bl`, `rad`, ...) is not used.
+
+A project has **one** coordinate unit. `validate()` blocks a project that mixes pixel and
+non-pixel sessions, or tool units the tools name differently, because the merged and long
+tables share column names across sessions and no rename can make two units share a name
+honestly. It also blocks: zones (drawn on the video frame) in a project with such sessions;
+and a selected metric whose parameter has a fixed default in pixels (GL-13, IL-9, IL-10, IL-14)
+until the user states the value in the project's own unit. Numerical-zero tolerances
+(`scale_free`) and data-driven or derived parameters are exempt.
+
+Positions with no pixel frame store a frame size of 0 (`has_pixel_frame` is false). IL-3 and
+IL-14, which fall back to the video frame when there is no arena zone, use the extent of the
+tracked positions instead, with a log warning and a README note.
+
+**Rationale:** Renaming inside the pipeline would touch 294 `_px` sites in 28 files and put
+the byte-identical guarantee for every existing project at risk. Relabelling once at the
+boundary leaves the arithmetic alone, makes a mislabelled export impossible by construction
+(a pixel-named column in a non-pixel project reads as "unknown" in the codebook), and keeps the
+decision about a tool's scale where it belongs: with the person who can check it.

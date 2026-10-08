@@ -319,3 +319,87 @@ def test_z2_total_area_is_never_negative_for_an_over_subtracted_zone() -> None:
     result = derive_metric_params("Z-2", psess, zone_set)
 
     assert result["total_arena_area"] <= 0.0  # the malformed input is preserved as-is
+
+
+# ── no pixel frame: the arena is the extent of the tracked positions ─────────
+
+
+def _native_psess(xy: np.ndarray):
+    """A session whose positions have no pixel frame: no frame size to fall back on."""
+    psess = _make_psess(width_px=0, height_px=0, xy=xy)
+    session = psess.session.model_copy(update={"coordinate_unit": "tu"})
+    return PreprocessedSession(
+        session=session, xy=xy, kinematics=psess.kinematics, main_zone=None
+    )
+
+
+def _wandering(n: int = 12) -> np.ndarray:
+    xy = np.zeros((n, 2, 2))
+    xy[:, 0, 0] = np.linspace(100, 300, n)  # x spans 100..300
+    xy[:, 0, 1] = np.linspace(50, 450, n)  # y spans 50..450
+    xy[:, 1, 0] = np.linspace(120, 280, n)
+    xy[:, 1, 1] = np.linspace(80, 420, n)
+    return xy
+
+
+def test_il3_without_a_pixel_frame_measures_from_the_middle_of_where_the_animals_were() -> None:
+    result = derive_metric_params("IL-3", _native_psess(_wandering()), ZoneSet())
+    assert result["centre"] == pytest.approx([200.0, 250.0])
+    assert result["arena_radius"] == pytest.approx(100.0)  # min(200, 400) / 2, as for a bbox
+
+
+def test_il3_without_a_pixel_frame_never_uses_the_frame_size() -> None:
+    result = derive_metric_params("IL-3", _native_psess(_wandering()), ZoneSet())
+    assert result["centre"] != [0.0, 0.0] and result["arena_radius"] > 0
+
+
+def test_il3_per_animal_values_are_filled_for_every_animal_without_a_pixel_frame() -> None:
+    result = derive_metric_params("IL-3", _native_psess(_wandering()), ZoneSet())
+    assert len(result["centres"]) == 2 and len(result["arena_radii"]) == 2
+    assert result["centres"][1] == pytest.approx([200.0, 250.0])
+
+
+def test_il3_without_a_pixel_frame_ignores_missing_positions() -> None:
+    xy = _wandering()
+    xy[3, 0, :] = np.nan
+    result = derive_metric_params("IL-3", _native_psess(xy), ZoneSet())
+    assert result["centre"] == pytest.approx([200.0, 250.0])
+
+
+def test_il3_without_a_pixel_frame_and_without_any_position_does_not_crash() -> None:
+    xy = np.full((5, 2, 2), np.nan)
+    result = derive_metric_params("IL-3", _native_psess(xy), ZoneSet())
+    assert result["arena_radius"] == 0.0
+
+
+def test_il14_without_a_pixel_frame_uses_the_box_around_the_positions() -> None:
+    result = derive_metric_params("IL-14", _native_psess(_wandering()), ZoneSet())
+    assert sorted(result["arena_polygon_vertices"]) == [
+        (100.0, 50.0),
+        (100.0, 450.0),
+        (300.0, 50.0),
+        (300.0, 450.0),
+    ]
+    assert len(result["arena_polygon_vertices_per_animal"]) == 2
+
+
+def test_the_fallback_says_so_in_the_log(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="track2data.metrics.derived"):
+        derive_metric_params("IL-3", _native_psess(_wandering()), ZoneSet())
+    assert any("extent of the tracked positions" in r.getMessage() for r in caplog.records)
+
+
+def test_a_pixel_session_still_uses_the_frame() -> None:
+    xy = _wandering()
+    result = derive_metric_params("IL-3", _make_psess(1000, 800, xy=xy), ZoneSet())
+    assert result["centre"] == pytest.approx([500.0, 400.0])
+    result14 = derive_metric_params("IL-14", _make_psess(1000, 800, xy=xy), ZoneSet())
+    assert (1000, 800) in [tuple(v) for v in result14["arena_polygon_vertices"]]
+
+
+def test_zones_still_win_over_the_extent_fallback() -> None:
+    roi = ROI(name="arena", level="main", vertices=[(0, 0), (1000, 0), (1000, 1000), (0, 1000)])
+    result = derive_metric_params("IL-3", _native_psess(_wandering()), ZoneSet(rois=[roi]))
+    assert result["centre"] == pytest.approx([500.0, 500.0])

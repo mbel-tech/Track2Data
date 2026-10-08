@@ -62,6 +62,33 @@ def _bbox_centre_and_inscribed_radius(
     return centre, radius
 
 
+def _tracked_extent(psess: PreprocessedSession) -> list[tuple[float, float]]:
+    """The corners of the box around every tracked position, for a session with no pixel frame.
+
+    Such a session has no video frame to fall back on (its size is 0), so with no zones the
+    arena is taken to be the extent of where the animals were. That is a property of the
+    recording, not of the apparatus, and the log and the README both say so. No position at all
+    gives a single point, which makes the arena radius 0.
+    """
+    logger.warning(
+        "%s has no pixel frame and no arena zone: IL-3 / IL-14 measure from the extent of the "
+        "tracked positions, not from the apparatus.",
+        psess.session.session_id,
+    )
+    points = np.asarray(psess.xy, dtype=np.float64).reshape(-1, 2)
+    points = points[np.isfinite(points).all(axis=1)]
+    if not len(points):
+        return [(0.0, 0.0)]
+    low, high = points.min(axis=0), points.max(axis=0)
+    return [(float(low[0]), float(low[1])), (float(high[0]), float(high[1]))]
+
+
+def _extent_box(corners: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+    xs = [c[0] for c in corners]
+    ys = [c[1] for c in corners]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 def _arena_geometry_by_name(
     main_rois: list,
 ) -> dict[str, tuple[list[float], float]]:
@@ -131,6 +158,9 @@ def _derive_il3(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]
         geometry = _arena_geometry_by_name(main_rois)
         largest = max(main_rois, key=roi_area_px2).name
         centre, radius = geometry[largest]
+    elif not psess.session.has_pixel_frame:
+        geometry = {}
+        centre, radius = _bbox_centre_and_inscribed_radius(_tracked_extent(psess))
     else:
         video = psess.session.video
         geometry = {}
@@ -196,6 +226,10 @@ def _derive_il14(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any
         }
         largest = max(areas_by_name, key=lambda n: areas_by_name[n])
         session_vertices = vertices_by_name[largest]
+    elif not psess.session.has_pixel_frame:
+        vertices_by_name = {}
+        low_x, low_y, high_x, high_y = _extent_box(_tracked_extent(psess))
+        session_vertices = [(low_x, low_y), (high_x, low_y), (high_x, high_y), (low_x, high_y)]
     else:
         video = psess.session.video
         vertices_by_name = {}

@@ -84,6 +84,11 @@ class SessionSummary:
     # calibration cannot run and the session is exported in pixels only. Defaults to True so a
     # summary built without the fact never raises that warning.
     has_body_length: bool = True
+    # What the length columns are named in (core/units.py): "px", "tu" (the tool's own
+    # units, not yet confirmed), or a unit the user confirmed. reported_unit is what the
+    # tool itself calls them, if it says.
+    coordinate_unit: str = "px"
+    reported_unit: str | None = None
     # Spread of the Validator's length-calibration clicks behind length_unit
     # (see calibration/session_unit.length_calibration_spread). rel_sd is None
     # with fewer than two usable clicks: no estimate, not zero error.
@@ -110,6 +115,7 @@ class SessionSummary:
         is_identity_free: bool = False,
         px_per_cm: float | None = None,
         trajectory_sha256: str = "",
+        coordinate_unit: str | None = None,
     ) -> SessionSummary:
         """Build from a freshly-read engine ``Session``."""
         from track2data.calibration.session_unit import length_calibration_spread
@@ -136,6 +142,8 @@ class SessionSummary:
                 tuple(session.id_image_size) if session.id_image_size else None
             ),
             has_body_length=session.body_length_px is not None,
+            coordinate_unit=coordinate_unit or session.coordinate_unit,
+            reported_unit=session.reported_unit,
             length_calibration_n=cal_n,
             length_calibration_rel_sd=cal_rel_sd,
         )

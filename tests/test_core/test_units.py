@@ -51,7 +51,7 @@ class TestRelabellingAColumn:
     def test_pixels_relabel_to_themselves(self) -> None:
         assert relabel_column("speed_px_s", PIXELS) == "speed_px_s"
 
-    def test_the_longest_suffix_wins(self) -> None:
+    def test_each_family_is_read_whole(self) -> None:
         # "_px_s2" must not be read as "_px" + "_s2".
         assert relabel_column("a_px_s2", "mm") == "a_mm_s2"
 

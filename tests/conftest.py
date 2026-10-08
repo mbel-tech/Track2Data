@@ -546,3 +546,14 @@ def toy_folder(tmp_path: Path) -> Path:
     from tests.support.toy_reader import write_toy_session
 
     return write_toy_session(tmp_path / "trial1")
+
+
+@pytest.fixture
+def toy_native_reader() -> Iterator[None]:
+    """Register the no-pixel-frame toy reader for the length of one test."""
+    from tests.support.toy_reader import ToyNativeReader
+    from track2data import readers
+
+    readers.register(ToyNativeReader)
+    yield
+    readers._REGISTRY.remove(ToyNativeReader)

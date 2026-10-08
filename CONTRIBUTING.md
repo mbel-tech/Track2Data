@@ -174,6 +174,14 @@ only), `to_nan` maps infinity and format sentinels to NaN, and `assemble_session
 `Session` after checking it, because the model itself checks nothing. Never put a keypoint
 likelihood in `id_probabilities`: that means identity confidence and feeds the identity metrics.
 
+A tracker that reports **no pixel frame** (a 3-D triangulation; a tool with only millimetres) sets
+`coordinate_unit="tu"` (and `reported_unit` to what the tool calls its units) in `assemble_session`,
+which then needs no frame size, and declares `coordinate_frame` as something other than
+`"image_px"` on the reader class so `validate()` knows to check the project's units. The
+pipeline needs nothing else: columns are named for the unit at export, and a tool's own unit
+label is only ever a suggestion for the user to confirm (D-032). A tracker that gives pixels
+*and* a scale (ToxTrac with its pixel twin, TRex `cm_per_pixel`) should return pixels.
+
 ### Metric references
 
 Every specific, findable work a metric cites lives in exactly one place: `track2data/metrics/references.py`,
