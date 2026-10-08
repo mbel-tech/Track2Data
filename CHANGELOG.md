@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Teal Field interface refresh.** Light and dark themes (system default, remembered), a
+  painted stage sidebar with live summaries, a footer bar in place of the toolbar, a run-log
+  drawer, toasts, and a restyle of all nine screens. New with it: a command palette (Ctrl+K), a
+  Sessions detail pane and tracked-coverage column, Calibration mode cards, a Processing setup
+  check with a segmented workers control, a Preview quality grid (traffic-light cells and a plain
+  "why this needs a look" card per session), editable saved zones (drag the white handles, delete),
+  a metrics preset pill with per-tab counts, and an export receipt dialog. Atkinson Hyperlegible
+  and IBM Plex Mono load from `app/resources/fonts/` when present.
 - **Ctrax raw `.mat` input** ("Save Tracks as Matlab File"). One session per file; the frame
   rate comes from the file's timestamps (an average over the whole span) and the frame size is
   asked for, because Ctrax measures y from the bottom and the height is needed to put it back in
