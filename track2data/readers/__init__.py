@@ -21,6 +21,7 @@ from track2data.readers.idtrackerai.reader import IDTrackerAiReader
 from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
 from track2data.readers.params import resolve_options
+from track2data.readers.sleap_analysis import SleapAnalysisReader
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def _load_entry_points() -> None:
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
 register(DeepLabCutReader)
+register(SleapAnalysisReader)
 _load_entry_points()
 
 

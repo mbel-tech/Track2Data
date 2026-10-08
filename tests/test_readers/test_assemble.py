@@ -84,8 +84,31 @@ class TestReducingToOneKeypoint:
         r = reduce_keypoints(pose(), NAMES, conf, cutoff=0.6)
         assert r.selection.keypoint == "tail"
 
-    def test_a_full_tie_goes_to_the_first_keypoint(self) -> None:
-        assert reduce_keypoints(pose(), NAMES).selection.keypoint == "snout"
+    def test_a_full_tie_goes_to_the_keypoint_nearest_the_middle_of_the_skeleton(self) -> None:
+        # snout, ear, tail sit 0, 1, 2 px apart: "ear" is the middle one, so the least jittery
+        # stand-in for the animal. A real keypoint, never the centroid itself.
+        r = reduce_keypoints(pose(), NAMES)
+        assert r.selection.keypoint == "ear" and r.selection.chosen_by == "coverage"
+        assert r.raw_xy[0, 0].tolist() == [1.0, 100.0]
+
+    def test_equally_central_keypoints_go_to_the_first(self) -> None:
+        xy = pose()[:, :, :2, :]  # two keypoints are equally far from their own middle
+        assert reduce_keypoints(xy, NAMES[:2]).selection.keypoint == "snout"
+
+    def test_equal_confidence_does_not_stop_the_centrality_rule(self) -> None:
+        conf = np.full((10, 2, 3), 0.9)
+        r = reduce_keypoints(pose(), NAMES, conf, cutoff=0.6)
+        assert r.selection.keypoint == "ear"
+
+    def test_a_wobbly_keypoint_loses_to_a_steady_one_when_both_are_fully_covered(self) -> None:
+        xy = pose()
+        xy[:, :, 0, 0] += np.where(np.arange(10) % 2 == 0, 40.0, -40.0)[:, None]  # far, erratic
+        assert reduce_keypoints(xy, NAMES).selection.keypoint != "snout"
+
+    def test_centrality_is_only_judged_where_a_position_survives(self) -> None:
+        xy = pose()
+        xy[:5, :, 1, :] = np.nan  # the middle keypoint is missing half the time: coverage first
+        assert reduce_keypoints(xy, NAMES).selection.keypoint != "ear"
 
     def test_positions_below_the_cutoff_are_missing_and_the_rest_are_kept(self) -> None:
         conf = np.ones((10, 2, 3))
@@ -274,3 +297,10 @@ class TestAssemblingASession:
         assert caught.value.subject == "tracking_intervals"
         ok = self.build(tracking_intervals=[(100, 105), (200, 205)])
         assert ok.tracking_intervals == [(100, 105), (200, 205)]
+
+
+class TestTieBreaksSurviveRoundingNoise:
+    def test_confidences_equal_up_to_rounding_noise_are_a_tie_and_centrality_decides(self) -> None:
+        conf = np.full((10, 2, 3), 0.9)
+        conf[:, :, 0] += 1e-12  # a float-noise "win" for the first keypoint must not decide
+        assert reduce_keypoints(pose(), NAMES, conf, cutoff=0.6).selection.keypoint == "ear"

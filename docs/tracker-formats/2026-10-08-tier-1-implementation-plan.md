@@ -12,6 +12,29 @@ lands.
 | T1-3 | `feat/reader-dlc-h5` | DeepLabCut `.h5` | G-H5 spike |
 | T1-4 | `feat/reader-sleap-analysis` | SLEAP analysis HDF5 | T1-1 |
 
+## PR T1-4: SLEAP analysis HDF5 (built)
+
+`readers/sleap_analysis.py`, `Peeker.hdf5_root` (a read-only look at an HDF5 file's top level: names,
+kinds, shapes, attributes and small text datasets; no numeric data), `tests/support/sleap.py`.
+Against the real files: `sleap_named_tracks` and `sleap_no_tracks` pass every contract test.
+
+**Two decisions to look at.**
+
+- *Tie-break among equally covered keypoints is now centrality, not "first".* The real SLEAP EPM
+  file has six nodes, all but two nearly fully covered, and the first (`snout`) is the jitteriest.
+  Ties now go to higher mean confidence, then to the node nearest the middle of the skeleton, then
+  the first. Still a real keypoint, never the centroid itself (T1-1's rule).
+- *The suite's alignment check ignores frames where its own reference jumps.* The reference series
+  is the mean of whichever keypoints are visible, so it jumps when one appears or disappears. On the
+  real SLEAP EPM file its median speed is 16.6 px/frame on the 7 % of frames where the visible set
+  changes, against 1.7 elsewhere, and no single node, including the centre node, correlated with it
+  above 0.44; against a steady body mean the centre node correlates at 0.80 and the reference only
+  0.52. `tests/real_samples/test_reader_contract.py` now leaves those frames out. The lag-0 and
+  not-shifted-by-a-frame checks are unchanged, and shifting the reader by one frame still fails them.
+
+**Not here.** Axis orders other than the standard one (no real sample), the sleap-io writer's CSV
+layouts, `.slp` projects (the scan names them and says to export the analysis file).
+
 ## PR T1-1: the pose core (built)
 
 **What exists now.**

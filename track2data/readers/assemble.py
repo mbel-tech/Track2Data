@@ -17,6 +17,7 @@ Two rules are deliberate:
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -103,10 +104,13 @@ def reduce_keypoints(
         best = np.flatnonzero(coverage == coverage.max())
         if len(best) > 1 and confidence is not None:
             conf = np.asarray(confidence, dtype=np.float64)
-            means = [float(np.nanmean(np.where(ok[..., k], conf[..., k], np.nan))) for k in best]
-            chosen = int(best[int(np.nanargmax(means))])
-        else:
-            chosen = int(best[0])
+            means = np.array(
+                [float(np.nanmean(np.where(ok[..., k], conf[..., k], np.nan))) for k in best]
+            )
+            best = best[means >= np.nanmax(means) - 1e-9]
+        if len(best) > 1:
+            best = best[[_most_central(plane_xy, ok, best)]]
+        chosen = int(best[0])
         chosen_by = "coverage"
     if coverage[chosen] <= 0.0:
         raise _no_positions(cutoff_used)
@@ -121,6 +125,24 @@ def reduce_keypoints(
         plane=(_AXES[plane[0]], _AXES[plane[1]]),
     )
     return Reduction(raw_xy=raw, selection=selection, coverage=by_name)
+
+
+def _most_central(plane_xy: np.ndarray, ok: np.ndarray, candidates: np.ndarray) -> int:
+    """Which of *candidates* (indices) is, on average, nearest the middle of the animal's skeleton.
+
+    The middle is the mean of the keypoints that have a position, frame by frame. It only ranks
+    the candidates; the position that is used is always the chosen keypoint's own. Among equally
+    covered keypoints the central one (a body or centre node) is the steadiest stand-in for the
+    animal, where a head or a tail tip jitters. Returns the position within *candidates*; ties go
+    to the first.
+    """
+    valid = np.where(ok[..., None], plane_xy, np.nan)  # (F, A, K, 2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # frames where nothing is visible
+        middle = np.nanmean(valid, axis=2, keepdims=True)  # (F, A, 1, 2)
+        distance = np.linalg.norm(valid[:, :, candidates, :] - middle, axis=-1)  # (F, A, C)
+        mean_distance = np.nanmean(distance, axis=(0, 1))
+    return int(np.nanargmin(mean_distance))
 
 
 def _no_positions(cutoff: float | None) -> DataValidationError:
