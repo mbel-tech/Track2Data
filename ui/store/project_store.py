@@ -29,6 +29,7 @@ from track2data.core.models import (
     PreprocessConfig,
     ProjectManifest,
     RunResult,
+    SceneConfig,
     SessionRef,
     ZoneSet,
 )
@@ -129,6 +130,7 @@ class ProjectStore(QObject):
     sessionsChanged    = Signal()
     calibrationChanged = Signal()
     zonesChanged       = Signal()
+    sceneChanged       = Signal()
     metadataChanged    = Signal()
     preprocessChanged  = Signal()
     metricsChanged     = Signal()
@@ -324,6 +326,12 @@ class ProjectStore(QObject):
             return
         self._manifest = self._manifest.model_copy(update={"zones": zone_set})
         self.zonesChanged.emit()
+
+    def update_scene(self, scene: SceneConfig) -> None:
+        if self._manifest is None:
+            return
+        self._manifest = self._manifest.model_copy(update={"scene": scene})
+        self.sceneChanged.emit()
 
     def update_preprocess(self, cfg: PreprocessConfig) -> None:
         if self._manifest is None:
