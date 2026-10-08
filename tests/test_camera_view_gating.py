@@ -154,3 +154,65 @@ def test_a_fully_available_selection_adds_no_warning(monkeypatch) -> None:
 
     assert not any("camera view" in w for w in engine.consistency_warnings())
     assert not any("camera view" in i for i in engine.validate())
+
+
+# ── provenance ───────────────────────────────────────────────────────────────
+
+
+def _tank_zones():
+    from track2data.core.models import ROI, ZoneSet
+
+    return ZoneSet(
+        rois=[ROI(name="tank", level="main", vertices=[(0, 100), (400, 100), (400, 400), (0, 400)])]
+    )
+
+
+def test_the_payload_records_the_declared_view() -> None:
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("side", ["IL-1"]))
+
+    payload = engine.build_payload(psess, engine.compute_metrics(psess))
+
+    assert payload.provenance.camera_view == "side"
+
+
+def test_the_payload_defaults_to_an_unset_view() -> None:
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("unknown", ["IL-1"]))
+
+    payload = engine.build_payload(psess, engine.compute_metrics(psess))
+
+    assert payload.provenance.camera_view == "unknown"
+    assert payload.provenance.water_column is None
+
+
+def test_the_water_column_is_recorded_when_depth_was_computed() -> None:
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("side", ["IL-15"], zones=_tank_zones()))
+
+    results = engine.compute_metrics(psess)
+    payload = engine.build_payload(psess, results)
+
+    assert "IL-15" in results
+    assert payload.provenance.water_column == {
+        "top_px": 100.0,
+        "bottom_px": 400.0,
+        "source": "zone:tank",
+    }
+
+
+def test_no_water_column_is_recorded_when_depth_was_not_computed() -> None:
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("side", ["IL-1"], zones=_tank_zones()))
+
+    payload = engine.build_payload(psess, engine.compute_metrics(psess))
+
+    assert payload.provenance.water_column is None
+
+
+def test_the_project_summary_names_the_view_only_when_declared() -> None:
+    engine_side = Engine(_manifest("side", ["IL-1"]))
+    engine_default = Engine(_manifest("unknown", ["IL-1"]))
+
+    assert "Camera view: side view" in engine_side._project_readme_text([], [])
+    assert "Camera view" not in engine_default._project_readme_text([], [])

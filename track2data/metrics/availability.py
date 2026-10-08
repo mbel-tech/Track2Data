@@ -15,6 +15,11 @@ from typing import Any
 _VIEW_WORDS = {"unknown": "not set", "top": "top-down", "side": "side view"}
 
 
+def view_label(camera_view: str) -> str:
+    """A camera view in words ("side view"), for sentences and tables."""
+    return _VIEW_WORDS.get(camera_view, camera_view)
+
+
 def view_unavailable_reason(metric_cls: Any, camera_view: str) -> str | None:
     """Why *metric_cls* cannot run for a project with *camera_view*, or None when it can.
 

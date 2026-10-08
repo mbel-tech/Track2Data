@@ -1172,7 +1172,20 @@ class Engine:
         # display name and whether it was ever tested on real output; the manifest entry knows
         # who chose it and with which options. A reader that is no longer registered has neither.
         reader_cls = find_reader(session.reader)
+        camera_view = self.camera_view_for(session)
+        water_column = None
+        from track2data.metrics import get as _get_metric
+        from track2data.metrics.availability import view_dependent_metrics
+
+        if view_dependent_metrics(metric_results, "side", _get_metric):
+            from track2data.metrics.derived import derive_metric_params
+
+            water_column = derive_metric_params("IL-15", psess, self._manifest.zones)[
+                "water_column"
+            ]
         provenance = SessionProvenance(
+            camera_view=camera_view,
+            water_column=water_column,
             reader=session.reader,
             source_software=(reader_cls.display_name or reader_cls.name) if reader_cls else None,
             reader_verification=reader_cls.verification if reader_cls else None,
@@ -1526,6 +1539,14 @@ class Engine:
             logger.exception("Could not write the run summary to %s", out_dir)
         return written
 
+    def _camera_view_summary(self) -> list[str]:
+        """One summary bullet naming the declared camera view; nothing when none was declared,
+        so a project that never set one keeps its summary exactly as it was."""
+        from track2data.metrics.availability import view_label
+
+        view = self._manifest.scene.camera_view
+        return [] if view == "unknown" else [f"- Camera view: {view_label(view)}"]
+
     def _project_readme_text(
         self,
         results: list[SessionRunResult],
@@ -1551,6 +1572,7 @@ class Engine:
             "",
             f"- Project hash: `{self._manifest.project_hash()}`",
             f"- Sessions processed: {len(ok)} of {len(results)}",
+            *self._camera_view_summary(),
             "",
             "Per-session outputs are in the subdirectory named after each "
             "session. `sessions.csv` lists every session's frame rate, group "

@@ -83,6 +83,12 @@ class SessionProvenance:
     length_calibration_n: int = 0
     length_calibration_rel_sd: float | None = None
 
+    # The camera view the project declared ("unknown" when none was), and -- only when a metric
+    # that needs a side view was computed -- the water column it was measured against:
+    # {"top_px", "bottom_px", "source"}. A depth is meaningless without both.
+    camera_view: str = "unknown"
+    water_column: dict[str, Any] | None = None
+
     # Which software produced the trajectories and how the reader that read them was chosen.
     # Every field above that is about idtracker.ai stays empty for any other tracker; these are
     # what a Methods section needs from a session that did not come from idtracker.ai. A reader

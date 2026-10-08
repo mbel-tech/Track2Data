@@ -1065,3 +1065,19 @@ def test_every_long_table_column_is_in_the_codebook(
     documented = set(codebook["column"])
     assert set(long_df["column"]) <= documented
     assert "unknown" not in set(codebook["unit"])
+
+
+def test_cli_list_metrics_shows_which_view_a_metric_needs() -> None:
+    """The CLI has no metric-selection UI, so this column is the only place to see which
+    metrics a camera view switches on."""
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+
+    result = CliRunner().invoke(cli, ["list-metrics", "--level", "individual"])
+
+    assert result.exit_code == 0
+    rows = {line.split()[0]: line for line in result.output.splitlines() if line[:3] == "IL-"}
+    assert "VIEW" in result.output.splitlines()[0]
+    assert "side view" in rows["IL-15"]
+    assert "side view" not in rows["IL-1"]
