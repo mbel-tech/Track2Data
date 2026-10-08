@@ -94,3 +94,46 @@ class TestDictSha256:
         assert len(digest) == 64
         assert digest == digest.lower()
         int(digest, 16)  # raises ValueError if not valid hex
+
+
+class TestFingerprintOfASingleFile:
+    """Formats that write one file per session (DeepLabCut, SLEAP, ...) put a *file* in
+    ``SessionRef.folder``. The fingerprint is part of the cache key, so a file that hashed to
+    nothing would make every such session share one cache entry and never refresh."""
+
+    def test_two_different_files_do_not_share_a_fingerprint(self, tmp_path) -> None:
+        from track2data.core.hashing import folder_fingerprint
+
+        a, b = tmp_path / "a.csv", tmp_path / "b.csv"
+        a.write_text("x")
+        b.write_text("x")
+        assert folder_fingerprint(a) != folder_fingerprint(b)
+
+    def test_editing_the_file_changes_it(self, tmp_path) -> None:
+        import os
+
+        from track2data.core.hashing import folder_fingerprint
+
+        f = tmp_path / "a.csv"
+        f.write_text("x")
+        before = folder_fingerprint(f)
+        f.write_text("xy")
+        assert folder_fingerprint(f) != before
+        stamp = f.stat().st_mtime_ns
+        mid = folder_fingerprint(f)
+        os.utime(f, ns=(stamp + 10**9, stamp + 10**9))
+        assert folder_fingerprint(f) != mid
+
+    def test_the_same_file_gives_the_same_fingerprint(self, tmp_path) -> None:
+        from track2data.core.hashing import folder_fingerprint
+
+        f = tmp_path / "a.csv"
+        f.write_text("x")
+        assert folder_fingerprint(f) == folder_fingerprint(f)
+
+    def test_a_folder_fingerprint_is_unchanged_by_this(self, tmp_path) -> None:
+        from track2data.core.hashing import folder_fingerprint
+
+        (tmp_path / "s").mkdir()
+        (tmp_path / "s" / "f.txt").write_text("x")
+        assert folder_fingerprint(tmp_path / "s") == folder_fingerprint(tmp_path / "s")

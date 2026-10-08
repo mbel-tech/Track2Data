@@ -29,6 +29,13 @@ def folder_fingerprint(folder: Path) -> str:
     but any edit, add or removal changes it."""
     h = hashlib.sha256()
     folder = Path(folder)
+    if folder.is_file():
+        # A format that writes one file per session (DeepLabCut, SLEAP, ...) puts the file here.
+        # Without this a file would hash to nothing: every such session would share one cache
+        # entry, and editing the file would never refresh it.
+        st = folder.stat()
+        h.update(f"{folder.name}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+        return h.hexdigest()
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
         st = path.stat()
         h.update(f"{path.relative_to(folder).as_posix()}|{st.st_size}|{st.st_mtime_ns}\n".encode())
