@@ -264,6 +264,7 @@ class ReadmeExporter(Exporter):
             f"| Reader options | {_options_cell(p.reader_options)} |",
             f"| Source file(s) | {_files_cell(p.source_files)} |",
             f"| Frames / animals | {p.n_frames} / {p.n_animals} |",
+            *_position_rows(p),
             f"| Stable identities | {p.has_stable_identities} |",
             f"| Tracked without identification | {_tri(p.track_wo_identities)} |",
             f"| Treated as identity-free | {p.identity_free_effective} "
@@ -329,6 +330,24 @@ def _options_cell(options: dict[str, object]) -> str:
     if not options:
         return "*(none)*"
     return _cell(", ".join(f"{name}={value}" for name, value in sorted(options.items())))
+
+
+def _position_rows(p: SessionProvenance) -> list[str]:
+    """The row saying which keypoint stood for the animal (pose trackers only)."""
+    s = p.keypoint_selection
+    if not s:
+        return []
+    how = "chosen by the user" if s.get("chosen_by") == "user" else "best coverage"
+    cutoff = s.get("cutoff")
+    cut = f"likelihood cutoff {cutoff:g}" if cutoff is not None else "no likelihood cutoff"
+    plane = ", ".join(s.get("plane") or ("x", "y"))
+    n = s["n_keypoints"]
+    text = (
+        f"keypoint `{s['keypoint']}` ({how}; {cut}; present in {100 * s['coverage']:.1f} % "
+        f"of frames and animals; plane {plane}). The file has {n} keypoints; the others are "
+        "stored but no metric uses them"
+    )
+    return [f"| Animal position | {_cell(text)} |"]
 
 
 def _files_cell(files: tuple[str, ...]) -> str:

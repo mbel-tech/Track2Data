@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Shared building blocks for pose readers** (`track2data/readers/assemble.py`), the groundwork for
+  DeepLabCut and SLEAP input. `Session.keypoints` (new, default `None`) keeps a pose tracker's
+  whole skeleton (float32, names, edges, likelihood, and which keypoint was used and why) beside
+  the one position per animal that metrics use; no metric reads it, so no number changes. The
+  export's README and `manifest.json` now say which keypoint stood for the animal, how it was
+  chosen, the likelihood cutoff and its coverage. The preprocessed-session cache schema is bumped
+  to 2, so older cache entries are rebuilt once.
 - **Formats we can name but not read are now named.** A scan recognises SLEAP `.slp`
   projects, `trx.mat`, FlyTracker `-track.mat`, DANNCE `save_data_AVG.mat`, Multi-Worm Tracker
   `.blobs`, AnimalTA detailed files, DeepLabCut 3-D tables and FicTrac logs, and says what to do
