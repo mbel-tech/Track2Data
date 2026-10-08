@@ -22,6 +22,12 @@ Usage (paths relative to the repo root):
     python .claude/skills/run-track2data/driver.py pages
     python .claude/skills/run-track2data/driver.py shot --page 7 -o out.png
     python .claude/skills/run-track2data/driver.py repl
+
+Adding sessions (scan -> confirm dialog -> add), as a user would, without a display:
+
+    driver.py scan PATH... [--shot dialog.png]        what the confirm dialog shows
+    driver.py confirm PATH... [--option fps=25 ...]   scan, fill options, press Add
+    driver.py shot-dialog PATH... -o dialog.png       picture of the dialog only
 """
 
 from __future__ import annotations
@@ -29,6 +35,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -56,9 +64,14 @@ if "QT_QPA_FONTDIR" not in os.environ:
 
 from PySide6.QtWidgets import (  # noqa: E402  -- must follow the env setup above
     QApplication,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
 )
 
 # Modal dialogs recorded by install_modal_guard(), newest last.
@@ -96,6 +109,33 @@ def install_modal_guard() -> None:
         print(f"  [modal intercepted] exec: {self.text()}", flush=True),
         QMessageBox.StandardButton.Ok,
     )[-1]
+
+    # A file picker blocks exactly like a message box, and "Add Folders..." opens one. Every way of
+    # opening one answers "cancelled" at once; drive the flow with `scan` / `confirm` instead.
+    def _picker(name: str, cancelled):
+        def _handler(*args, **kwargs):
+            title = next((a for a in args if isinstance(a, str)), "")
+            MODALS.append(f"file dialog: {name} -- {title}")
+            print(f"  [modal intercepted] file dialog: {name} -- {title}", flush=True)
+            return cancelled
+
+        return staticmethod(_handler)
+
+    for name, cancelled in (
+        ("getExistingDirectory", ""),
+        ("getOpenFileName", ("", "")),
+        ("getOpenFileNames", ([], "")),
+        ("getSaveFileName", ("", "")),
+    ):
+        setattr(QFileDialog, name, _picker(name, cancelled))
+
+    def _instance_exec(self, *_a, **_k):
+        MODALS.append("file dialog: exec")
+        print("  [modal intercepted] file dialog: exec", flush=True)
+        return QFileDialog.DialogCode.Rejected
+
+    QFileDialog.exec = _instance_exec  # type: ignore[method-assign]
+
 
 # Index -> label. Mirrors the `pages` list in app/main_window.py; the
 # sidebar shows 7 numbered stages but the stack holds 10 widgets, so
@@ -204,7 +244,9 @@ class Driver:
         out = Path(out_path).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        pixmap = self.win.grab()
+        return self._save(self.win.grab(), out)
+
+    def _save(self, pixmap, out: Path) -> Path:
         # QPixmap.save() returns False rather than raising -- notably when
         # the parent directory doesn't exist. Silently producing no file
         # is the worst outcome here, so check it.
@@ -222,6 +264,125 @@ class Driver:
                 "The window did not paint."
             )
         return out
+
+    # ── adding sessions: scan -> confirm dialog -> add ────────────────
+
+    def new_project(self, directory: str | Path, name: str = "driver_project") -> None:
+        """Create a project the way the Project screen does (never through its file picker)."""
+        self.goto("project")
+        self.type_into(name)
+        self.page_widget()._selected_dir = str(directory)
+        self.click("Create Project")
+        if not self.win._store.has_project:
+            raise SystemExit(f"could not create a project in {directory}: {MODALS[-1:]}")
+
+    @property
+    def import_screen(self):
+        return self.win._stack.widget(PAGES.index("import"))
+
+    def scan(self, *paths: str | Path, timeout: float = 60.0):
+        """Point the Sessions screen at *paths* and wait for the confirm dialog.
+
+        Returns the open dialog, or None when the scan failed (the screen then shows why).
+        """
+        self.goto("import")
+        screen = self.import_screen
+        screen._import_paths([Path(p) for p in paths])
+        deadline = time.monotonic() + timeout
+        while screen._scan_id is not None:
+            if time.monotonic() > deadline:
+                raise SystemExit(f"the scan did not finish within {timeout:.0f} s")
+            self.pump(1)
+            time.sleep(0.01)
+        self.pump()
+        return screen._dialog
+
+    def set_option(self, dialog, assignment: str) -> None:
+        """Set one option in the dialog's form, as typing it would (``name=value``)."""
+        name, sep, value = assignment.partition("=")
+        form = dialog.options_form
+        try:
+            control = form.widget_for(name.strip())
+        except KeyError:
+            known = ", ".join(sorted(form.values()) or ["none"]) if form.is_empty else ""
+            raise SystemExit(
+                f"unknown option {name!r} for this software" + (f" ({known})" if known else "")
+            ) from None
+        if not sep:
+            raise SystemExit(f"option {assignment!r} must look like name=value")
+        if isinstance(control, QDoubleSpinBox | QSpinBox):
+            control.setValue(float(value) if isinstance(control, QDoubleSpinBox) else int(value))
+        elif isinstance(control, QCheckBox):
+            control.setChecked(value.strip().lower() in {"1", "true", "yes", "on"})
+        elif isinstance(control, QComboBox):
+            control.setCurrentText(value)
+        elif isinstance(control, QLineEdit):
+            control.setText(value)
+        else:
+            raise SystemExit(f"option {name!r} cannot be set from the command line")
+        self.pump()
+
+    def confirm(self) -> int:
+        """Press Add in the open dialog; returns how many sessions were added.
+
+        Refuses, with the reasons the dialog itself gives, when Add is disabled.
+        """
+        dialog = self.import_screen._dialog
+        if dialog is None:
+            raise SystemExit(
+                "no confirm dialog is open (nothing was recognised, or the scan failed)"
+            )
+        if not dialog.ok_button.isEnabled():
+            raise SystemExit(
+                "cannot add yet:\n  " + dialog.ok_button.toolTip().replace("\n", "\n  ")
+            )
+        before = len(self.win._store.manifest.sessions)
+        dialog.ok_button.click()
+        self.pump()
+        return len(self.win._store.manifest.sessions) - before
+
+    def shot_dialog(self, out_path: str | Path) -> Path:
+        """Screenshot the confirm dialog on its own."""
+        dialog = self.import_screen._dialog
+        if dialog is None:
+            raise SystemExit("no confirm dialog is open to photograph")
+        out = Path(out_path).resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        return self._save(dialog.grab(), out)
+
+    def describe_dialog(self) -> str:
+        """The dialog's state as text: what a person looking at it would read."""
+        screen = self.import_screen
+        dialog = screen._dialog
+        if dialog is None:
+            return screen._scan_message.text() or "No dialog is open."
+        lines = [dialog.summary_label.text()]
+        if dialog.draft.is_empty:
+            lines.append(
+                dialog.empty_label.text()
+                .replace("<br>", "\n")
+                .replace("<b>", "")
+                .replace("</b>", "")
+            )
+            return "\n".join(lines)
+        lines.append(
+            f"Software: {dialog.reader_combo.currentText()} - {dialog.confidence_label.text()}"
+        )
+        if not dialog.unverified_label.isHidden():
+            lines.append("  (unverified: not yet checked against real output)")
+        lines.append(dialog.evidence_label.text())
+        for name, value in dialog.options_form.values().items():
+            lines.append(f"  option {name} = {value}")
+        for row in range(dialog.table.rowCount()):
+            ident = dialog.table.item(row, 1).text()
+            source = dialog.table.item(row, 2).text()
+            lines.append(f"  session {ident}  <- {source}")
+        if dialog.ok_button.isEnabled():
+            lines.append(dialog.ok_button.text())
+        else:
+            lines.append(f"{dialog.ok_button.text()} (disabled)")
+            lines.append("  " + dialog.problems_label.text())
+        return "\n".join(lines)
 
     def close(self) -> None:
         # Cancels any in-flight background task and waits for the pool to
@@ -254,8 +415,10 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     """Launch, drive a real flow, screenshot every page, verify state."""
     out_dir = Path(args.out_dir).resolve()
     drv = Driver()
-    print(f"platform={os.environ['QT_QPA_PLATFORM']} "
-          f"fontdir={os.environ.get('QT_QPA_FONTDIR', '(unset)')}")
+    print(
+        f"platform={os.environ['QT_QPA_PLATFORM']} "
+        f"fontdir={os.environ.get('QT_QPA_FONTDIR', '(unset)')}"
+    )
 
     store = drv.win._store
     assert not store.has_project, "expected no project open at startup"
@@ -302,10 +465,63 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def _open_scan(args: argparse.Namespace):
+    """A driver with a throwaway project, pointed at args.paths. Returns (driver, dialog)."""
+    drv = Driver()
+    workdir = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix="t2d-driver-"))
+    drv.new_project(workdir)
+    dialog = drv.scan(*args.paths)
+    return drv, dialog
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Scan and print what the confirm dialog shows; add nothing."""
+    drv, _dialog = _open_scan(args)
+    try:
+        print(drv.describe_dialog())
+        if args.shot and drv.import_screen._dialog is not None:
+            print(f"wrote {drv.shot_dialog(args.shot)}")
+        return 0
+    finally:
+        drv.close()
+
+
+def cmd_confirm(args: argparse.Namespace) -> int:
+    """Scan, apply --option name=value, press Add. Non-zero when adding is blocked."""
+    drv, dialog = _open_scan(args)
+    try:
+        if dialog is None:
+            print(drv.describe_dialog())
+            return 1
+        for assignment in args.option:
+            drv.set_option(dialog, assignment)
+        try:
+            added = drv.confirm()
+        except SystemExit as exc:
+            print(drv.describe_dialog())
+            print(exc)
+            return 1
+        print(f"Added {added} session{'s' if added != 1 else ''}")
+        return 0
+    finally:
+        drv.close()
+
+
+def cmd_shot_dialog(args: argparse.Namespace) -> int:
+    """Scan and write a picture of the confirm dialog (also its empty state)."""
+    drv, _dialog = _open_scan(args)
+    try:
+        print(f"wrote {drv.shot_dialog(args.out)}")
+        return 0
+    finally:
+        drv.close()
+
+
 def cmd_repl(_args: argparse.Namespace) -> int:
     """Line-oriented REPL, for driving the app from tmux or a pipe.
 
     Commands: goto <page> | click <label> | type <text> | shot <path>
+              scan <path> | option <name=value> | confirm | shot-dialog <path>
               state | pages | quit
     """
     drv = Driver()
@@ -328,6 +544,21 @@ def cmd_repl(_args: argparse.Namespace) -> int:
                 print("typed", flush=True)
             elif verb == "shot":
                 print(f"wrote {drv.shot(rest.strip())}", flush=True)
+            elif verb == "scan":
+                if drv.win._store.has_project is False:
+                    drv.new_project(tempfile.mkdtemp(prefix="t2d-driver-"))
+                drv.scan(rest.strip())
+                print(drv.describe_dialog(), flush=True)
+            elif verb == "option":
+                dialog = drv.import_screen._dialog
+                if dialog is None:
+                    raise SystemExit("no confirm dialog is open")
+                drv.set_option(dialog, rest.strip())
+                print(drv.describe_dialog(), flush=True)
+            elif verb == "confirm":
+                print(f"added {drv.confirm()}", flush=True)
+            elif verb == "shot-dialog":
+                print(f"wrote {drv.shot_dialog(rest.strip())}", flush=True)
             elif verb == "pages":
                 print(", ".join(f"{i}:{n}" for i, n in enumerate(PAGES)), flush=True)
             elif verb == "state":
@@ -359,6 +590,29 @@ def main() -> int:
     p_shot.add_argument("--page", default="project", help="index or name")
     p_shot.add_argument("-o", "--out", required=True)
     p_shot.set_defaults(func=cmd_shot)
+
+    def _scan_args(sub_parser: argparse.ArgumentParser) -> None:
+        sub_parser.add_argument("paths", nargs="+", help="folder(s) or file(s) to scan")
+        sub_parser.add_argument(
+            "--workdir", help="where the throwaway project goes (default: temp)"
+        )
+
+    p_scan = sub.add_parser("scan", help="scan folders and print what the confirm dialog shows")
+    _scan_args(p_scan)
+    p_scan.add_argument("--shot", help="also write a picture of the dialog here")
+    p_scan.set_defaults(func=cmd_scan)
+
+    p_confirm = sub.add_parser("confirm", help="scan, fill options, press Add")
+    _scan_args(p_confirm)
+    p_confirm.add_argument(
+        "--option", action="append", default=[], metavar="NAME=VALUE", help="set a reader option"
+    )
+    p_confirm.set_defaults(func=cmd_confirm)
+
+    p_dialog = sub.add_parser("shot-dialog", help="scan and screenshot the confirm dialog")
+    _scan_args(p_dialog)
+    p_dialog.add_argument("-o", "--out", required=True)
+    p_dialog.set_defaults(func=cmd_shot_dialog)
 
     sub.add_parser("repl", help="stdin command loop").set_defaults(func=cmd_repl)
 
