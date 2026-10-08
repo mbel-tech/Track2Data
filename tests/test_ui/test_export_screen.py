@@ -74,6 +74,7 @@ def test_screen_constructs_without_a_store(qtbot) -> None:
     from ui.export_screen import ExportScreen
 
     screen = ExportScreen()
+    qtbot.addWidget(screen)
     assert screen is not None
 
 
@@ -83,6 +84,7 @@ def test_export_button_disabled_until_a_project_is_open(qtbot, tmp_path: Path) -
 
     store = ProjectStore()
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     assert screen._export_btn.isEnabled() is False
 
     store.new_project("p", tmp_path)
@@ -96,6 +98,7 @@ def test_cancel_button_disabled_until_an_export_is_in_flight(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     assert screen._cancel_btn.isEnabled() is False
 
 
@@ -106,6 +109,7 @@ def test_checkbox_list_reflects_registered_exporters(qtbot) -> None:
     from ui.export_screen import ExportScreen
 
     screen = ExportScreen()
+    qtbot.addWidget(screen)
     assert set(screen._checks.keys()) == set(list_exporters())
     # A known exporter gets its pretty label, not the bare registry name.
     assert screen._checks["csv_long"].text() == "CSV Long"
@@ -118,6 +122,7 @@ def test_readme_forced_on_and_disabled_when_another_format_checked(qtbot) -> Non
     from ui.export_screen import ExportScreen
 
     screen = ExportScreen()
+    qtbot.addWidget(screen)
     readme_cb = screen._checks["readme"]
     assert readme_cb.isEnabled() is True  # free when nothing else is checked
 
@@ -166,6 +171,7 @@ def test_export_uses_project_dir_exports_timestamp_default(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
@@ -196,6 +202,7 @@ def test_run_export_without_a_project_shows_warning_and_does_not_submit(
 
     store = ProjectStore()
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     started: list[object] = []
     store.tasks.taskStarted.connect(started.append)
 
@@ -216,6 +223,7 @@ def test_export_runs_end_to_end_and_writes_real_files(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)  # forces readme on too
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
@@ -245,6 +253,7 @@ def test_export_persists_selected_targets_via_update_export_targets(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)  # forces readme on too
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
@@ -261,6 +270,7 @@ def test_export_logs_genuine_rerun_note_before_submitting(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)
 
     logs: list[str] = []
@@ -282,6 +292,7 @@ def test_receipt_action_buttons_disabled_until_a_successful_export(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     assert screen._open_folder_btn.isEnabled() is False
     assert screen._copy_cli_btn.isEnabled() is False
 
@@ -293,6 +304,7 @@ def test_receipt_table_populated_with_correct_file_size_and_hash(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
@@ -320,6 +332,7 @@ def test_open_folder_button_opens_last_output_directory(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
@@ -345,6 +358,7 @@ def test_copy_cli_equivalent_builds_expected_command_and_sets_clipboard(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)  # forces readme on too
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
@@ -395,6 +409,7 @@ def test_cancel_button_stops_an_in_flight_export(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ExportScreen(store)
+    qtbot.addWidget(screen)
     screen._checks["csv_long"].setChecked(True)
 
     screen._run_export()

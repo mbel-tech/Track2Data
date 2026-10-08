@@ -58,7 +58,7 @@ from track2data.core.progress import (
     ProgressEvent,
     emit,
 )
-from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
+from track2data.core.timeline import timeline_problem
 from track2data.readers import find_reader, read_session
 
 if TYPE_CHECKING:
@@ -337,18 +337,26 @@ class Engine:
         return scan(roots, budget=budget, progress=progress, token=token)
 
     def import_session(self, folder: Path) -> Session:
-        """Auto-detect reader and return a Session for *folder*.
+        """Auto-detect the reader, read *folder* and apply the project's import settings.
 
-        Trajectory formats that execute code on load are refused unless this
-        project has opted in via ``security.allow_pickle_trajectories``. A
-        folder that also carries an h5 or csv trajectory imports normally
-        either way -- the reader falls through to it.
+        Trajectory formats that execute code on load are refused unless this project has
+        opted in via ``security.allow_pickle_trajectories``. A folder that also carries an h5
+        or csv trajectory imports normally either way -- the reader falls through to it.
         """
-        folder = Path(folder)
-        allow_pickle = self._manifest.security.allow_pickle_trajectories
-        session = read_session(folder, allow_pickle=allow_pickle)
+        session = read_session(
+            Path(folder), allow_pickle=self._manifest.security.allow_pickle_trajectories
+        )
+        return self._apply_import_settings(session)
 
-        if self._manifest.calibration.body_length_source == "blobs":
+    def _apply_import_settings(self, session: Session) -> Session:
+        """Settings that act on a freshly read session: blob-derived body lengths, tracker
+        corrections and the video override. The one place they are applied, so a saved reader
+        and an auto-detected one behave the same. Blob files are idtracker.ai's, so other
+        readers' sessions skip the enrichment (the video override still applies)."""
+        allow_pickle = self._manifest.security.allow_pickle_trajectories
+        blob_capable = session.reader.startswith("idtrackerai")
+
+        if self._manifest.calibration.body_length_source == "blobs" and blob_capable:
             if allow_pickle:
                 from track2data.readers.idtrackerai.blobs import (
                     enrich_session_with_blob_body_length,
@@ -372,7 +380,7 @@ class Engine:
                     session.session_id,
                 )
 
-        if self._manifest.blob_diagnostics:
+        if self._manifest.blob_diagnostics and blob_capable:
             if allow_pickle:
                 from track2data.readers.idtrackerai.blobs import (
                     enrich_session_with_blob_corrections,
@@ -388,6 +396,11 @@ class Engine:
                     session.session_id,
                 )
 
+        return self._apply_video_override(session)
+
+    def _apply_video_override(self, session: Session) -> Session:
+        """Point *session* at the replacement video the manifest records under its id, when
+        that file exists. Only the path changes; fps, size and frame count stay."""
         override = self._manifest.video_overrides.get(session.session_id)
         if override is not None and Path(override).exists():
             session = session.model_copy(
@@ -424,27 +437,32 @@ class Engine:
         and the export all key on one name whatever id the reader derived from the files.
         """
         if ref.reader is None:
+            # Settings are applied inside import_session, once; only the override is looked
+            # up again below, because the manifest keys it by the entry's id and the reader
+            # may have derived another.
             session = self.import_session(ref.folder)
-        else:
-            try:
-                session = read_session(
-                    Path(ref.folder),
-                    reader=ref.reader,
-                    options=ref.reader_options,
-                    allow_pickle=self._manifest.security.allow_pickle_trajectories,
-                )
-            except ImportError_ as exc:
-                if exc.code != "READER_UNKNOWN":
-                    raise
-                raise ImportError_(
-                    f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
-                    "which is not available here",
-                    code="READER_NOT_AVAILABLE",
-                    subject=ref.reader,
-                    remediation="Install the plug-in that provides this reader, or remove the "
-                    "session and add it again so a reader is detected afresh.",
-                ) from exc
-        return session.model_copy(update={"session_id": ref.session_id})
+            session = session.model_copy(update={"session_id": ref.session_id})
+            return self._apply_video_override(session)
+        try:
+            session = read_session(
+                Path(ref.folder),
+                reader=ref.reader,
+                options=ref.reader_options,
+                allow_pickle=self._manifest.security.allow_pickle_trajectories,
+            )
+        except ImportError_ as exc:
+            if exc.code != "READER_UNKNOWN":
+                raise
+            raise ImportError_(
+                f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
+                "which is not available here",
+                code="READER_NOT_AVAILABLE",
+                subject=ref.reader,
+                remediation="Install the plug-in that provides this reader, or remove the "
+                "session and add it again so a reader is detected afresh.",
+            ) from exc
+        session = session.model_copy(update={"session_id": ref.session_id})
+        return self._apply_import_settings(session)
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -482,7 +500,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 2
+    _CACHE_SCHEMA = 6
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is
@@ -513,6 +531,7 @@ class Engine:
                 "schema": self._CACHE_SCHEMA,
                 "app": __version__,
                 "reader_options": ref.reader_options,
+                "import_settings": self._import_settings_fingerprint(ref),
                 "preprocess": m.preprocess.model_dump(mode="json"),
                 "calibration": m.calibration.model_dump(mode="json"),
                 "zones": m.zones.model_dump(mode="json"),
@@ -520,6 +539,26 @@ class Engine:
         )
         store = CacheStore(self._cache_dir)
         return store, store.key(reader_name, folder_fingerprint(ref.folder), config_hash)
+
+    def _import_settings_fingerprint(self, ref: SessionRef) -> dict[str, Any]:
+        """The project settings, besides the configs, that change what importing *ref* returns.
+
+        The cache holds the imported session along with its preprocessed arrays, so any
+        setting :meth:`_apply_import_settings` acts on has to be in the key, or a rerun
+        after changing it would be served the old session. Pickle permission decides whether
+        the blob enrichment can happen at all. The video override is keyed by the manifest's
+        id for this entry, so another session's override never invalidates this one; whether
+        the file exists is part of it because a missing file is ignored on import.
+        """
+        m = self._manifest
+        override = m.video_overrides.get(ref.session_id)
+        return {
+            "allow_pickle_trajectories": m.security.allow_pickle_trajectories,
+            "blob_diagnostics": m.blob_diagnostics,
+            "video_override": (
+                None if override is None else [str(override), Path(override).exists()]
+            ),
+        }
 
     def preprocess_ref(self, ref: SessionRef) -> PreprocessedSession:
         """Preprocess the session a manifest entry describes, reusing/filling the cache
@@ -585,7 +624,20 @@ class Engine:
         """
         from track2data.preprocess.pipeline import run as pp_run
 
-        psess = pp_run(session, self._manifest.preprocess, check=self._cancel_check)
+        problem = timeline_problem(session.tracking_intervals, int(session.raw_xy.shape[0]))
+        if problem is not None:
+            logger.warning(
+                "Session %s: %s; frame numbers and times fall back to the stored row position "
+                "and are not verified video times.",
+                session.session_id,
+                problem,
+            )
+        psess = pp_run(
+            session,
+            self._manifest.preprocess,
+            check=self._cancel_check,
+            bridge_allowed=not self.identity_free_for(session),
+        )
         return self.apply_calibration_and_zones(psess)
 
     def apply_calibration_and_zones(
@@ -726,6 +778,13 @@ class Engine:
                 return ref.identity_free_override
         return session.track_wo_identities is True
 
+    def _identity_free_override(self, session_id: str) -> bool | None:
+        """The user's own identity-free answer for *session_id*, None when they gave none."""
+        for ref in self._manifest.sessions:
+            if ref.session_id == session_id:
+                return ref.identity_free_override
+        return None
+
     def identity_skipped_metrics(self, identity_free: bool) -> dict[str, str]:
         """Selected metric ids that an identity-free session must not run,
         mapped to the reason, for the export record.
@@ -798,12 +857,6 @@ class Engine:
             df = self._compute_one(
                 cls, slice_psess(psess, w.start_row, w.stop_row), window_cfg, identity_free
             )
-            if cls.id == "Z-5" and not df.empty:
-                # event frame/time are relative to the slice; keep them on the
-                # session axis, as in an unbinned run
-                df = df.copy()
-                df["frame"] = df["frame"] + w.start_row
-                df["t_s"] = df["t_s"] + w.start_row / psess.fps
             parts.append(_with_bin_columns(df, w))
         non_empty = [p for p in parts if not p.empty]
         if not non_empty:
@@ -850,7 +903,12 @@ class Engine:
         # D-5 IdentityStability is precisely the record of that fact, so
         # suppressing the diagnostics would remove the evidence for the
         # skips below.
-        results.update(compute_all_diagnostics(psess))
+        results.update(
+            compute_all_diagnostics(
+                psess,
+                identity_free_declared=self._identity_free_override(psess.session_id),
+            )
+        )
 
         sel = self._manifest.metrics
 
@@ -959,7 +1017,7 @@ class Engine:
 
         ``frame``/``time_s`` are the true video frame/time when
         ``Session.tracking_intervals`` reconciles with the array length
-        (see ``_map_array_index_to_true_frame``); ``in_tracking_interval``
+        (see ``PreprocessedSession.timeline``); ``in_tracking_interval``
         records whether that mapping was trusted (True) or the raw array
         position was used as a fallback (NaN -- not False, since "outside
         the interval" is not what an unreconciled mapping means).
@@ -971,14 +1029,15 @@ class Engine:
         n_animals = psess.n_animals
         fps = psess.fps
 
-        true_frame_per_row, mapping_valid = _map_array_index_to_true_frame(
-            psess.session.tracking_intervals, n_frames
-        )
+        true_frame_per_row, mapping_valid = psess.timeline()
         frames = np.repeat(true_frame_per_row, n_animals)
         individuals = np.tile(np.arange(n_animals), n_frames)
         time_s = frames / fps
         in_interval_fill = True if mapping_valid else np.nan
         in_interval = np.full(n_frames * n_animals, in_interval_fill)
+        if psess.tracked_mask is not None:
+            # rows inserted for unobserved video are estimates, not tracked frames
+            in_interval = np.repeat(psess.tracked_mask, n_animals)
 
         xy_flat = psess.xy.reshape(-1, 2)
         speed_flat = psess.kinematics.speed_px_s.reshape(-1)
@@ -996,6 +1055,9 @@ class Engine:
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
+        if psess.separator_mask is not None:
+            # a separator row only keeps two tracking intervals apart; it is not a frame
+            df["_separator"] = np.repeat(psess.separator_mask, n_animals)
 
         # Distinct from was_interpolated, which covers only gap-filled frames
         # that started as NaN. A jump-replaced position started as a real
@@ -1038,7 +1100,7 @@ class Engine:
             ]
 
         threshold = self._manifest.metrics.quality_threshold
-        id_prob = psess.session.id_probabilities
+        id_prob = psess.id_probabilities_aligned
         if id_prob is not None:
             df["id_probability"] = id_prob.reshape(-1)
         elif threshold > 0:
@@ -1067,6 +1129,9 @@ class Engine:
         self._attach_metadata(
             df, psess, self.identity_free_for(psess.session, identity_free)
         )
+
+        if "_separator" in df.columns:
+            df = df[~df["_separator"]].drop(columns="_separator")
 
         return df.sort_values(["session_id", "individual_id", "frame"]).reset_index(
             drop=True

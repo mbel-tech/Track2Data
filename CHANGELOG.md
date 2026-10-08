@@ -958,6 +958,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The test process no longer aborts at exit.** After every GUI test passed, pytest could crash in Qt
+  teardown (`QObject: shared QObject was deleted directly`, exit 134), failing the CI test jobs.
+  Standalone screens, tables and dialogs created in tests are now registered with pytest-qt so they
+  are destroyed before Qt shuts down. Test-only change; the cleanup comes from the GUI audit's
+  reproduction of the same crash in the Preview tests.
+
+- **Sessions tracked in separate intervals are processed on real elapsed time.** The stored rows were
+  treated as consecutive frames, so a move between two stationary stretches 40 seconds apart read as
+  ~1,060 px/s, and smoothing, speed, acceleration and jump detection all worked on that. Each
+  unobserved stretch is now kept as a break (one NaN separator row, never exported), so no value is
+  computed across it. New **Interpolate across gaps between tracking intervals** option on the
+  Preprocessing screen (off by default; limit 30 s, adjustable) rebuilds gaps up to that length frame
+  by frame as a straight line between each animal's last and next observed position. These frames are
+  estimates: `was_interpolated` true, `in_tracking_interval` false, tracker confidence left empty,
+  counted by D-11 and flagged on Z-5 events (`estimated`). Needs stable identities and an observed
+  position on both sides; never extrapolates; identity-free sessions are never bridged. Sessions
+  without such gaps are unchanged. Cache schema 6. If you analysed multi-interval sessions, re-run:
+  speed, acceleration and everything derived from them near the junctions changes.
+
+- **Zone events now use the same clock as the per-frame table.** Z-5 reported the stored row
+  number as `frame` and `row / fps` as `t_s`, so with tracking that started after frame 0 an
+  entry showed at 0.4 s while the same observation was at 40.4 s (frame 1010) in
+  `master_fish_by_frame`, and disjoint intervals added the omitted spans on top. Z-5 now reports the
+  original video frame and `t_s = frame / fps`; time bins no longer add a second offset. Sessions
+  starting at frame 0 are unchanged. Frames that were not tracked are never bridged: a stay is cut
+  at a gap, no exit is invented there, and an `enter` that is only the first observed frame after a
+  gap carries `after_gap = True` (new column). Z-9 drops a visit that began in a gap. Z-6 keeps
+  "time since the start of tracking" but now reports `origin_frame` and `first_entry_after_gap`, and
+  time omitted between intervals counts as elapsed time. Interval metadata that overlaps, is out of
+  order or does not match the data now logs a warning and falls back to the row position. Cache
+  schema 5. If you exported zone events from sessions with a tracking interval, re-export.
+
+- **The Preview quality grid no longer calls poor identification "Good".** A session with identities
+  requested but only 10 % of animals identified was shown as Good with Identity "n/a", because D-5
+  reports `identity_free` for it as well as for sessions tracked without identities on purpose. D-5
+  now also records why (`identity_free_reason`: declared, low_identification, unknown,
+  not_applicable) and the identification rate (`identified_fraction`). The grid leaves deliberate
+  identity-free tracking (including your Identity-free tick) unjudged, flags low identification with
+  its rate, and shows "Unknown" when the tracker does not say. `identity_stability_status` values
+  are unchanged.
+- **The crossing percentage in the grid now means what it says.** It was D-8's share of *fragment
+  duration* worded as a share of frames, which falls as the group grows (10 crossed frames of 100
+  with five animals read 2.0 %). D-8 gains `crossing_unique_frame_fraction` (the share of tracked
+  frames with animals in contact, overlaps counted once) and the grid uses it, with the 2 % / 5 %
+  limits that were written for a share of frames. `crossing_frame_fraction` keeps its meaning and is
+  documented as a fragment-duration share.
+
+- **Dragging a zone vertex can no longer ruin the zone.** The edit was applied without checking the
+  shape, so a normal drag could collapse a polygon to zero area (zone assignment then matched
+  nothing) while the zone stayed in the project. An edit is now refused, with a message and the
+  handle restored, if it would leave fewer than three distinct points, a non-finite coordinate, edges
+  that cross, or no area. Name, level, sign and the other zones are untouched. Polygons imported
+  from a tracker's `roi_list` are not subject to this rule; the engine still repairs them.
+
+- **Distance and freezing no longer report zero for an animal that was never measured.** IL-1
+  returned `path_length_px = 0` (and 0 cm / 0 BL) for an animal with no valid pair of consecutive
+  positions, and IL-7 returned 0 bouts and 0 s of freezing for an animal with no usable speed.
+  Both are now NaN, in whole-session and time-bin results and in every export. A real zero (valid
+  positions that did not move; usable speeds with no qualifying bout) is unchanged, a partly
+  observed path keeps its observed length, and missing speeds still break bouts. If you analysed
+  sessions where some animals were poorly tracked, re-export: those animals used to contribute
+  zeros.
+
+- **The session cache honours import settings.** The cache key left out blob diagnostics, pickle
+  permission and the session's video override, so after changing one of them a rerun could be
+  served the old session: no correction data, fallback body lengths, or the old video path.
+  All three are in the key now (the video override only for the session it belongs to, by the
+  manifest's session id), so a changed setting re-imports once. Revoking pickle permission
+  re-imports without any blob data. Cache schema 4.
+
+- **A reader saved with a session now gets the project's import settings.** Sessions added through
+  the confirmation workflow record their reader, and that import path skipped blob-derived body
+  lengths, tracker-correction diagnostics and the replacement video. All three now apply on every
+  import path, once, under the same pickle permission. The replacement video is looked up under
+  the manifest's session id, which can differ from the id the reader derives. Blob enrichment is
+  limited to idtracker.ai readers. Cached sessions made by the faulty path are not reused (cache
+  schema 3), so a rerun may recompute once.
+
 - **A session in the legacy idtracker.ai layout could not be opened by auto-detection.**
   A raw `trajectories.npy` array beside a `video_object.npy` was claimed first by the
   unified reader, which then failed with `IDT_FORMAT_AMBIGUOUS` ("expected a dict, got

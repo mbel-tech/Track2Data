@@ -513,3 +513,150 @@ def test_edit_vertex_without_a_selected_zone_does_nothing(qtbot, tmp_path) -> No
     screen = ZonesScreen(_two_zone_store(tmp_path))
     qtbot.addWidget(screen)
     assert screen._canvas.edit_vertex(0, 1.0, 1.0) is False
+
+
+# ── an edit that would ruin a zone is refused ────────────────────────────────
+
+
+def _warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    from PySide6.QtWidgets import QMessageBox
+
+    shown: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda _p, title, text: shown.append(text))
+    )
+    return shown
+
+
+def _triangle_screen(qtbot, tmp_path):
+    from track2data.core.models import ROI, ZoneSet
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    store.update_zones(
+        ZoneSet(
+            rois=[
+                ROI(name="tri", level="main", vertices=[(0, 0), (100, 0), (0, 100)]),
+                ROI(name="other", level="main", vertices=[(200, 200), (300, 200), (250, 300)]),
+            ]
+        )
+    )
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._zone_list.setCurrentRow(0)
+    return store, screen
+
+
+def test_a_collinear_edit_is_refused_and_the_zone_is_kept(
+    qtbot, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, screen = _triangle_screen(qtbot, tmp_path)
+    shown = _warnings(monkeypatch)
+    before = [r.model_copy() for r in store.manifest.zones.rois]
+
+    screen._canvas.edit_vertex(2, 50.0, 0.0)  # all three vertices on the x axis
+
+    assert store.manifest.zones.rois == before
+    assert len(shown) == 1 and "area" in shown[0]
+    assert screen._zone_list.currentRow() == 0  # still selected
+    assert screen._zone_info.text() == "3 vertices · 5000 px²"  # reports the kept shape
+
+
+def test_a_refused_edit_puts_the_handle_back(
+    qtbot, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _store, screen = _triangle_screen(qtbot, tmp_path)
+    _warnings(monkeypatch)
+    screen._canvas.edit_vertex(2, 50.0, 0.0)
+    handle = screen._canvas._handle_items[2].rect().center()
+    assert (handle.x(), handle.y()) == (0.0, 100.0)
+
+
+def test_a_self_intersecting_edit_is_refused(
+    qtbot, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from track2data.core.models import ROI, ZoneSet
+
+    store, screen = _triangle_screen(qtbot, tmp_path)
+    store.update_zones(
+        ZoneSet(
+            rois=[
+                ROI(name="sq", level="main", vertices=[(0, 0), (100, 0), (100, 100), (0, 100)])
+            ]
+        )
+    )
+    screen._zone_list.setCurrentRow(0)
+    shown = _warnings(monkeypatch)
+    screen._canvas.edit_vertex(1, 0.0, 100.0)  # swaps two corners into a bowtie
+    assert len(shown) == 1 and "cross" in shown[0]
+    assert tuple(store.manifest.zones.rois[0].vertices[1]) == (100, 0)
+
+
+def test_a_valid_move_is_saved_and_changes_the_area(
+    qtbot, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, screen = _triangle_screen(qtbot, tmp_path)
+    shown = _warnings(monkeypatch)
+    screen._canvas.edit_vertex(2, 0.0, 200.0)
+    assert shown == []
+    assert tuple(store.manifest.zones.rois[0].vertices[2]) == (0.0, 200.0)
+    assert screen._zone_info.text() == "3 vertices · 10000 px²"
+
+
+def test_an_edit_keeps_the_zones_name_level_sign_and_the_other_zones(
+    qtbot, tmp_path
+) -> None:
+    store, screen = _triangle_screen(qtbot, tmp_path)
+    screen._canvas.edit_vertex(1, 120.0, 0.0)
+    tri, other = store.manifest.zones.rois
+    assert (tri.name, tri.level, tri.sign) == ("tri", "main", "+")
+    assert other.name == "other" and len(other.vertices) == 3
+
+
+def test_the_store_refuses_a_bad_shape_directly(tmp_path) -> None:
+    from track2data.core.errors import ZoneValidationError
+    from track2data.core.models import ROI, ZoneSet
+
+    store = _make_store(tmp_path)
+    store.update_zones(ZoneSet(rois=[ROI(name="t", vertices=[(0, 0), (10, 0), (0, 10)])]))
+    with pytest.raises(ZoneValidationError):
+        store.update_zone_vertices(0, [(0, 0), (10, 0), (5, 0)])
+    assert store.manifest.zones.rois[0].vertices == [(0, 0), (10, 0), (0, 10)]
+
+
+def test_importing_a_tracker_polygon_is_not_subject_to_the_edit_rule(tmp_path) -> None:
+    """update_zones still accepts what a tracker's roi_list contains (the engine repairs it)."""
+    from track2data.core.models import ROI, ZoneSet
+
+    store = _make_store(tmp_path)
+    bowtie = [(0, 0), (10, 10), (10, 0), (0, 10)]
+    store.update_zones(ZoneSet(rois=[ROI(name="imported", vertices=bowtie)]))
+    assert len(store.manifest.zones.rois) == 1
+
+
+def test_a_real_mouse_drag_onto_a_degenerate_shape_is_refused(
+    qtbot, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtTest import QTest
+
+    store, screen = _triangle_screen(qtbot, tmp_path)
+    screen.resize(1100, 800)
+    screen.show()
+    qtbot.waitExposed(screen)
+    shown = _warnings(monkeypatch)
+    canvas = screen._canvas
+    view = canvas.viewport()
+
+    def at(x: float, y: float) -> QPoint:
+        return canvas.mapFromScene(QPointF(x, y))
+
+    # Press on the third vertex (0, 100), drag it onto the x axis, release.
+    QTest.mousePress(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0, 100))
+    QTest.mouseMove(view, at(50, 0))
+    QTest.mouseRelease(view, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(50, 0))
+
+    assert len(shown) == 1
+    assert tuple(store.manifest.zones.rois[0].vertices[2]) == (0, 100)
+    handle = canvas._handle_items[2].rect().center()
+    assert (round(handle.x()), round(handle.y())) == (0, 100)

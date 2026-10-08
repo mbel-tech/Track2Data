@@ -63,6 +63,7 @@ def test_load_csv_persists_a_metadata_source_on_the_store(
 
     store = _make_store(tmp_path)
     screen = MetadataScreen(store)
+    qtbot.addWidget(screen)
 
     screen._load_csv()
 
@@ -89,6 +90,7 @@ def test_load_csv_with_no_store_does_not_raise(
     )
 
     screen = MetadataScreen()
+    qtbot.addWidget(screen)
     screen._load_csv()  # must not raise
 
 
@@ -106,6 +108,7 @@ def test_skip_metadata_still_clears_any_previously_loaded_source(
 
     store = _make_store(tmp_path)
     screen = MetadataScreen(store)
+    qtbot.addWidget(screen)
     screen._load_csv()
     assert store.manifest.metadata_source is not None
 

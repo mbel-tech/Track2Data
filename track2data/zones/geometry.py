@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import math
 import warnings
 from typing import TYPE_CHECKING
 
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
 
+from track2data.core.errors import ZoneValidationError
 from track2data.core.models import ROI, ZoneSet
 
 if TYPE_CHECKING:
@@ -29,6 +31,49 @@ def _make_valid_polygon(vertices: list[tuple[float, float]]) -> Polygon:
     if not poly.is_valid:
         poly = poly.buffer(0)
     return poly
+
+
+def _shape_error(message: str, remediation: str) -> ZoneValidationError:
+    return ZoneValidationError(
+        message, code="ZONE_INVALID_SHAPE", remediation=remediation
+    )
+
+
+def validate_vertices(vertices: list[tuple[float, float]]) -> None:
+    """Raise ``ZoneValidationError`` unless *vertices* describe a usable zone.
+
+    The rule for interactive edits and hand-drawn zones: finite coordinates, at least three
+    distinct points, edges that do not cross or touch each other, and a real area. This is
+    deliberately stricter than the engine's ``buffer(0)`` repair, which exists so that a
+    tracker's own ``roi_list`` polygons still load; an edit the user makes should never be
+    silently reinterpreted as a different polygon, so it is refused instead.
+    """
+    try:
+        pts = [(float(x), float(y)) for x, y in vertices]
+    except (TypeError, ValueError) as exc:
+        raise _shape_error(
+            "Zone vertices must be (x, y) numbers.", "Move the point again."
+        ) from exc
+    keep = "The zone was not changed. Drag the point to a different place."
+    if len(pts) < 3:
+        raise _shape_error(f"A zone needs at least 3 vertices; this has {len(pts)}.", keep)
+    if not all(math.isfinite(c) for p in pts for c in p):
+        raise _shape_error("Every vertex coordinate must be a finite number.", keep)
+    if len(set(pts)) < 3:
+        raise _shape_error("A zone needs at least 3 distinct vertices.", keep)
+
+    n = len(pts)
+    edges = [LineString([pts[i], pts[(i + 1) % n]]) for i in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            adjacent = j == i + 1 or (i == 0 and j == n - 1)
+            if not adjacent and edges[i].intersects(edges[j]):
+                raise _shape_error("The zone's edges would cross each other.", keep)
+
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    extent = max(max(xs) - min(xs), max(ys) - min(ys))
+    if Polygon(pts).area <= 1e-9 * extent * extent:
+        raise _shape_error("The zone would have no area (its vertices are in a line).", keep)
 
 
 def _group_by_name(

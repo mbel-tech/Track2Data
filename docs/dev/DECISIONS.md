@@ -731,3 +731,75 @@ Metrics use a chosen 2-D plane (default x, y); z is kept.
 physical quantities. Recording them before the readers exist keeps each reader's
 review about the format, not about re-deciding the policy.
 
+---
+
+### D-032 · One row-to-frame timeline; zone events and latency follow it
+
+**Decision:** Which video frame a stored trajectory row is comes from one place,
+`PreprocessedSession.timeline()` (built on `core/timeline.py`): the per-frame table,
+time bins and the zone events all use it, and a window cut from a session carries its
+rows' original frames. Z-5 reports the original `frame` and `t_s = frame / fps`, as the
+per-frame table does. Z-6 keeps its meaning, time since the start of tracked observation,
+but says where that is (`origin_frame`) and counts time omitted between tracking intervals
+as elapsed time. Each unbroken stretch of video is read on its own: no exit is invented
+where observation stops, the first observed frame in a zone after a gap is an enter flagged
+`after_gap`, and Z-9 drops a visit that began in a gap. Malformed or non-reconciling
+intervals fall back to the row position with a logged warning, and an array that already
+spans the whole timeline is not expanded twice.
+
+**Rationale:** Two clocks for one observation made event logs disagree with the trajectory
+by the tracking start (40 s in the reported case) and by every omitted span. Redefining
+latency as absolute video time would have silently changed a published meaning, so the
+origin is explicit instead. Z-4 and Z-7 still count a transition between the last zone of
+one interval and the first of the next; that is a known limit, not yet addressed.
+
+---
+
+### D-033 · The quality grid separates choice from failure and counts crossings by frame
+
+**Decision:** D-5 keeps its `identity_stability_status` values and adds
+`identity_free_reason` (`declared`, `low_identification`, `unknown`, `not_applicable`) and
+`identified_fraction`; the user's Identity-free tick counts as `declared`. The Preview grid
+leaves `declared` and `not_applicable` unjudged and flags the others. D-8 keeps
+`crossing_frame_fraction` (a share of fragment duration, which falls as the group grows)
+and adds `crossing_unique_frame_fraction` (frames with a crossing over tracked frames); the
+grid uses the new one with the limits that were already written for a share of frames.
+
+**Rationale:** `identity_free` meant both "tracked without identities on purpose" and
+"identification failed", so a 10 % identification session read Good. Adding fields rather
+than changing existing values keeps every consumer of the old columns working.
+
+---
+
+### D-034 · No usable data is NaN, not zero (IL-1, IL-7)
+
+**Decision:** IL-1 reports NaN when an animal has no valid pair of consecutive positions,
+and IL-7 reports NaN count and durations when it has no usable speed. Valid data with no
+movement or no qualifying bout stays 0, and the mean duration with zero observed bouts keeps
+its historical 0.
+
+**Rationale:** An empty sum is 0.0, which reads as "did not move" for an animal that was
+never tracked; if tracking failures differ by condition, that biases group comparisons.
+
+---
+
+### D-035 · Gaps between tracking intervals: real time, a separator, optional bridging
+
+**Decision:** A session stored as tracking intervals is put on real elapsed time before any
+temporal step. Each unobserved stretch becomes either rows (bridged: one per missing frame,
+a straight line between the animal's last and next observed positions) or a single all-NaN
+separator row, so no step reads two intervals as adjacent frames. Bridging is off by default
+(`GapFillCfg.across_tracking_intervals`), limited to `max_cross_interval_gap_s` (30 s) counted in
+real missing frames, requires stable identities (and no identity-free override) and an observed
+anchor on both sides per animal, never extrapolates, and is refused outright when the rebuilt arrays
+would exceed 50 million cells. The tracker's own `Session` stays compact; the processed session
+carries `frame_index`, `tracked_mask`, `separator_mask` and row-aligned raw positions and
+identification probabilities. Inserted rows are `was_interpolated`, `in_tracking_interval = false`,
+and have NaN confidence; separators are never exported. Distance, speed, activity and zone time
+include estimated frames, which D-11 counts and Z-5 flags (`estimated`).
+
+**Rationale:** The compact array made the move between two stationary stretches look like
+~1,060 px/s, and every derivative (smoothing, speed, acceleration) inherited it. Rebuilding only the
+gaps the user chose keeps memory bounded, keeps an estimate visibly an estimate, and leaves a
+contiguous session byte-for-byte on its old path.
+

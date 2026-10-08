@@ -65,6 +65,7 @@ def test_screen_constructs_without_a_store(qtbot) -> None:
     from ui.processing_screen import ProcessingScreen
 
     screen = ProcessingScreen()
+    qtbot.addWidget(screen)
     assert screen is not None
 
 
@@ -74,6 +75,7 @@ def test_run_button_disabled_until_a_project_is_open(qtbot) -> None:
 
     store = ProjectStore()
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
     assert screen._run_btn.isEnabled() is False
 
     store.new_project("p", Path("."))
@@ -85,6 +87,7 @@ def test_cancel_button_disabled_until_a_run_is_in_flight(qtbot, tmp_path: Path) 
 
     store = _make_empty_store(tmp_path)
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
     assert screen._cancel_btn.isEnabled() is False
 
 
@@ -105,6 +108,7 @@ def test_start_run_without_a_project_shows_warning_and_does_not_submit(
 
     store = ProjectStore()
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
     started: list[object] = []
     store.tasks.taskStarted.connect(started.append)
 
@@ -127,6 +131,7 @@ def test_start_run_with_validation_issues_shows_them_and_does_not_submit(
 
     store = _make_empty_store(tmp_path)  # no sessions, no metrics -> issues
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
     started: list[object] = []
     store.tasks.taskStarted.connect(started.append)
 
@@ -147,6 +152,7 @@ def test_start_run_happy_path_toggles_buttons_and_sets_run_results(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
         screen.start_run()
@@ -168,6 +174,7 @@ def test_start_run_writes_real_output_files_and_pumps_progress(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
 
     percents: list[int] = []
     store.taskProgress.connect(lambda _tid, pct: percents.append(pct))
@@ -192,6 +199,7 @@ def test_start_run_updates_per_session_status_table(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
 
     assert screen._status_table.rowCount() == 1  # one row per manifest session
 
@@ -210,6 +218,7 @@ def test_start_run_uses_project_dir_exports_timestamp_default(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
 
     with qtbot.waitSignal(store.taskFinished, timeout=15000):
         screen.start_run()
@@ -245,6 +254,7 @@ def test_cancel_button_stops_an_in_flight_run(
 
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
 
     screen.start_run()
     qtbot.waitUntil(lambda: screen._cancel_btn.isEnabled(), timeout=2000)

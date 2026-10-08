@@ -181,6 +181,7 @@ def test_screen_constructs_without_a_store(qtbot) -> None:
     from ui.preview_screen import PreviewScreen
 
     screen = PreviewScreen()
+    qtbot.addWidget(screen)
     assert screen is not None
     assert screen._diag_placeholder.text() == "Run the pipeline to see diagnostics."
     assert screen._metrics_placeholder.text() == "Run the pipeline to see metric previews."
@@ -195,6 +196,7 @@ def test_diagnostics_tab_shows_placeholder_before_any_run(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     assert store.run_results is None
     assert screen._diag_placeholder.text() == "Run the pipeline to see diagnostics."
@@ -211,6 +213,7 @@ def test_metrics_tab_shows_placeholder_before_any_run(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     assert screen._metrics_placeholder.text() == "Run the pipeline to see metric previews."
     assert screen._metrics_placeholder.isHidden() is False
@@ -228,6 +231,7 @@ def test_diagnostics_and_metrics_tabs_show_placeholder_when_run_has_no_sessions(
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     store.set_run_results(RunResult(sessions=[]))
 
@@ -246,6 +250,7 @@ def test_diagnostics_tab_populates_after_set_run_results(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     store.set_run_results(RunResult(sessions=[_session1()]))
 
@@ -288,6 +293,7 @@ def test_diagnostics_tab_session_selector_switches_sessions(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
     store.set_run_results(RunResult(sessions=[_session1(), _session2()]))
 
     assert screen._diag_session_combo.count() == 2
@@ -312,6 +318,7 @@ def test_diagnostics_tab_shows_preprocess_steps_table(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     store.set_run_results(RunResult(sessions=[_session3_with_preprocess_report()]))
 
@@ -336,6 +343,7 @@ def test_diagnostics_tab_preprocess_table_empty_when_report_is_none(qtbot) -> No
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     store.set_run_results(RunResult(sessions=[_session1()]))
 
@@ -350,6 +358,7 @@ def test_diagnostics_tab_preprocess_table_empty_when_report_has_no_steps(qtbot) 
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     session = _session1()
     session.preprocess_report = PreprocessReport(steps=[])
@@ -370,6 +379,7 @@ def test_diagnostics_tab_preprocess_table_clears_when_switching_to_a_reportless_
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
     store.set_run_results(
         RunResult(sessions=[_session3_with_preprocess_report(), _session1()])
     )
@@ -394,6 +404,7 @@ def test_metrics_tab_populates_after_set_run_results(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     store.set_run_results(RunResult(sessions=[_session1()]))
 
@@ -417,6 +428,7 @@ def test_metrics_tab_session_selector_updates_available_metric_ids(qtbot) -> Non
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
     store.set_run_results(RunResult(sessions=[_session1(), _session2()]))
 
     # s1 has two metric previews (IL-1, GL-1); s2 has only IL-1.
@@ -440,6 +452,7 @@ def test_run_results_changed_rerenders_diagnostics_and_metrics_tabs(qtbot) -> No
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
 
     store.set_run_results(RunResult(sessions=[_session1()]))
     first_accuracy = _find_row(screen._diag_session_table, metric_id="D-2")["estimated_accuracy"]
@@ -562,6 +575,7 @@ def test_quality_grid_has_a_row_verdict_chips_and_reasons_per_session(qtbot) -> 
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
     store.set_run_results(RunResult(sessions=[_session1()]))
 
     table = screen._quality_table
@@ -581,6 +595,7 @@ def test_quality_grid_clears_when_results_go_away(qtbot) -> None:
 
     store = ProjectStore()
     screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
     store.set_run_results(RunResult(sessions=[_session1()]))
     store.set_run_results(None)
 

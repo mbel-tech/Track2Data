@@ -78,6 +78,7 @@ class TestTheFileDialogGuard:
     def test_an_instance_dialog_returns_at_once_as_cancelled(self, qtbot, driver_module) -> None:
         driver_module.install_modal_guard()
         dialog = QFileDialog()
+        qtbot.addWidget(dialog)
         assert dialog.exec() == QFileDialog.DialogCode.Rejected
 
 

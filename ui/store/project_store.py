@@ -325,6 +325,24 @@ class ProjectStore(QObject):
         self._manifest = self._manifest.model_copy(update={"zones": zone_set})
         self.zonesChanged.emit()
 
+    def update_zone_vertices(self, index: int, vertices: list[tuple[float, float]]) -> None:
+        """Replace one zone's vertices after checking the new shape.
+
+        Raises ``ZoneValidationError`` and changes nothing if the shape is unusable, so a
+        mouse drag can never leave a named zone with no area. Name, level and sign of the
+        zone, and every other zone, are kept. ``update_zones`` stays unchecked on purpose:
+        it also loads a tracker's own polygons, which the engine repairs.
+        """
+        if self._manifest is None:
+            return
+        from track2data.zones.geometry import validate_vertices
+
+        validate_vertices(vertices)
+        zones = self._manifest.zones
+        rois = list(zones.rois)
+        rois[index] = rois[index].model_copy(update={"vertices": [tuple(v) for v in vertices]})
+        self.update_zones(zones.model_copy(update={"rois": rois}))
+
     def update_preprocess(self, cfg: PreprocessConfig) -> None:
         if self._manifest is None:
             return
