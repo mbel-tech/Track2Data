@@ -158,3 +158,13 @@ def test_a_cloud_only_placeholder_is_never_opened_or_reported(tmp_path: Path) ->
     path = tmp_path / "a.slp"
     index = ScanIndex([tmp_path], [IndexEntry(path, False, 10, cloud_only=True)])
     assert find_unreadable(index, Peeker(None, index)) == ()
+
+
+def test_a_file_in_a_subfolder_of_a_readable_session_is_not_reported(
+    tiny_real_session: Path, tmp_path: Path
+) -> None:
+    import shutil
+
+    shutil.copytree(tiny_real_session, tmp_path / "s1")
+    _write(tmp_path / "s1" / "a" / "stray.slp")
+    assert scan([tmp_path]).recognised == ()

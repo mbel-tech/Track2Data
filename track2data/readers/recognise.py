@@ -175,8 +175,14 @@ def find_unreadable(
     """
     counts: dict[str, int] = {}
     examples: dict[str, Path] = {}
+    # The walk lists a folder before what is inside it, so "inside a claimed folder" can be carried
+    # down one level at a time instead of searching every entry's ancestors.
+    covered = set(claimed)
     for entry in index.walk():
-        if entry.cloud_only or any(folder in entry.path.parents for folder in claimed):
+        if entry.path in covered or entry.path.parent in covered:
+            covered.add(entry.path)
+            continue
+        if entry.cloud_only:
             continue
         for fmt in formats:
             try:
