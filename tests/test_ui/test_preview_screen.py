@@ -554,3 +554,35 @@ def test_trajectories_tab_without_sessions_says_so(qtbot) -> None:
     screen = PreviewScreen()
     qtbot.addWidget(screen)
     assert not screen._traj_load_btn.isEnabled()
+
+
+def test_quality_grid_has_a_row_verdict_chips_and_reasons_per_session(qtbot) -> None:
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+    store.set_run_results(RunResult(sessions=[_session1()]))
+
+    table = screen._quality_table
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "s1"
+    # the worst animal in the fixture is covered in 80 % of frames: below the 85 % line
+    assert table.item(0, 1).text() == "80.0 %"
+    assert table.item(0, 6).text() == "Review"
+    assert screen._verdict_chips["Review"].text() == "1 review"
+    assert screen._why_card.isHidden() is False
+    assert "Only 80.0 %" in screen._why_body.text()
+
+
+def test_quality_grid_clears_when_results_go_away(qtbot) -> None:
+    from ui.preview_screen import PreviewScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    screen = PreviewScreen(store)
+    store.set_run_results(RunResult(sessions=[_session1()]))
+    store.set_run_results(None)
+
+    assert screen._quality_table.rowCount() == 0
+    assert screen._why_card.isHidden() is True
