@@ -132,7 +132,7 @@ class MetricsScreen(QWidget):
         self._search.textChanged.connect(self._apply_search)
         tools.addWidget(self._search, 1)
         self._preset_combo = QComboBox()
-        self._preset_combo.addItem("Presets…")
+        self._preset_combo.addItem("Preset: None")
         for name in PRESETS:
             self._preset_combo.addItem(name)
         self._preset_combo.setToolTip("Replace the current selection with a preset")
@@ -264,6 +264,28 @@ class MetricsScreen(QWidget):
             f"Selected: {n_ind + n_grp + n_zone} / {total} metrics "
             f"({n_ind} individual · {n_grp} group · {n_zone} zone)"
         )
+        for index, (name, table) in enumerate(self._tables()):
+            checked = len(self._checked_ids(table))
+            self._tabs.setTabText(index, f"{name} {checked}/{table.rowCount()}")
+        self._preset_combo.setItemText(0, f"Preset: {self.current_preset_name()}")
+
+    def current_preset_name(self) -> str:
+        """The preset the ticked metrics exactly match, "None" when nothing is
+        ticked, otherwise "Custom"."""
+        selected = {
+            mid for _n, table in self._tables() for mid in self._checked_ids(table)
+        }
+        if not selected:
+            return "None"
+        everything = {
+            table.item(row, _COL_INCLUDE).data(_ROLE_METRIC_ID)
+            for _n, table in self._tables()
+            for row in range(table.rowCount())
+        }
+        for name, ids in PRESETS.items():
+            if selected == (everything if ids is None else set(ids)):
+                return name
+        return "Custom"
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         self._update_counter()

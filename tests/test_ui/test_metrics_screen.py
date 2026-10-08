@@ -950,3 +950,34 @@ def test_timepoint_preserved_when_other_fields_are_applied(qtbot) -> None:
     screen.flush()
     assert store.manifest.metrics.timepoint_minutes == 10
     assert store.manifest.metrics.individual == ["IL-1"]
+
+
+def test_preset_pill_names_the_matching_preset_and_goes_custom_on_edit(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    assert screen._preset_combo.itemText(0) == "Preset: None"
+
+    screen.apply_preset("Standard locomotor")
+    assert screen.current_preset_name() == "Standard locomotor"
+    assert screen._preset_combo.itemText(0) == "Preset: Standard locomotor"
+
+    extra = _row_for_id(screen._ind_table, "IL-3")
+    screen._ind_table.item(extra, 0).setCheckState(Qt.CheckState.Checked)
+    assert screen._preset_combo.itemText(0) == "Preset: Custom"
+
+    screen.apply_preset("All metrics")
+    assert screen.current_preset_name() == "All metrics"
+
+
+def test_tab_titles_carry_selected_over_total_counts(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+    total = screen._ind_table.rowCount()
+    assert screen._tabs.tabText(0) == f"Individual 0/{total}"
+
+    screen.apply_preset("Standard locomotor")
+    assert screen._tabs.tabText(0) == f"Individual 3/{total}"
