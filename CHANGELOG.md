@@ -958,6 +958,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Zone occupancy no longer counts the gap marker between tracking intervals as a frame.** Time in
+  zone (Z-1), area-corrected occupancy (Z-2) and the zone preference index (Z-8) divided by every
+  processed row, including the single NaN separator row kept at each unfilled gap, so a session with
+  short intervals read slightly low (20 tracked frames all in a zone gave 95 %, not 100 %). They now
+  divide by real frames. Added an end-to-end test that runs every metric and exporter on a
+  multi-interval session, with gaps kept as breaks or bridged, whole-session and time-binned.
+
 - **Project saving and result freshness (GUI).** Changes are saved automatically after a short pause
   (footer: *Unsaved changes* / *Saved* / *Not saved*); Save, Close, New and Open first commit pending
   edits, including a number typed but not yet confirmed, and are blocked when saving fails, so a
