@@ -958,6 +958,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A reader saved with a session now gets the project's import settings.** Sessions added through
+  the confirmation workflow record their reader, and that import path skipped blob-derived body
+  lengths, tracker-correction diagnostics and the replacement video. All three now apply on every
+  import path, once, under the same pickle permission. The replacement video is looked up under
+  the manifest's session id, which can differ from the id the reader derives. Blob enrichment is
+  limited to idtracker.ai readers. Cached sessions made by the faulty path are not reused (cache
+  schema 3), so a rerun may recompute once.
+
 - **A session in the legacy idtracker.ai layout could not be opened by auto-detection.**
   A raw `trajectories.npy` array beside a `video_object.npy` was claimed first by the
   unified reader, which then failed with `IDT_FORMAT_AMBIGUOUS` ("expected a dict, got

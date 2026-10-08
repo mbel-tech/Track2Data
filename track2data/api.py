@@ -337,18 +337,26 @@ class Engine:
         return scan(roots, budget=budget, progress=progress, token=token)
 
     def import_session(self, folder: Path) -> Session:
-        """Auto-detect reader and return a Session for *folder*.
+        """Auto-detect the reader, read *folder* and apply the project's import settings.
 
-        Trajectory formats that execute code on load are refused unless this
-        project has opted in via ``security.allow_pickle_trajectories``. A
-        folder that also carries an h5 or csv trajectory imports normally
-        either way -- the reader falls through to it.
+        Trajectory formats that execute code on load are refused unless this project has
+        opted in via ``security.allow_pickle_trajectories``. A folder that also carries an h5
+        or csv trajectory imports normally either way -- the reader falls through to it.
         """
-        folder = Path(folder)
-        allow_pickle = self._manifest.security.allow_pickle_trajectories
-        session = read_session(folder, allow_pickle=allow_pickle)
+        session = read_session(
+            Path(folder), allow_pickle=self._manifest.security.allow_pickle_trajectories
+        )
+        return self._apply_import_settings(session)
 
-        if self._manifest.calibration.body_length_source == "blobs":
+    def _apply_import_settings(self, session: Session) -> Session:
+        """Settings that act on a freshly read session: blob-derived body lengths, tracker
+        corrections and the video override. The one place they are applied, so a saved reader
+        and an auto-detected one behave the same. Blob files are idtracker.ai's, so other
+        readers' sessions skip the enrichment (the video override still applies)."""
+        allow_pickle = self._manifest.security.allow_pickle_trajectories
+        blob_capable = session.reader.startswith("idtrackerai")
+
+        if self._manifest.calibration.body_length_source == "blobs" and blob_capable:
             if allow_pickle:
                 from track2data.readers.idtrackerai.blobs import (
                     enrich_session_with_blob_body_length,
@@ -372,7 +380,7 @@ class Engine:
                     session.session_id,
                 )
 
-        if self._manifest.blob_diagnostics:
+        if self._manifest.blob_diagnostics and blob_capable:
             if allow_pickle:
                 from track2data.readers.idtrackerai.blobs import (
                     enrich_session_with_blob_corrections,
@@ -388,6 +396,11 @@ class Engine:
                     session.session_id,
                 )
 
+        return self._apply_video_override(session)
+
+    def _apply_video_override(self, session: Session) -> Session:
+        """Point *session* at the replacement video the manifest records under its id, when
+        that file exists. Only the path changes; fps, size and frame count stay."""
         override = self._manifest.video_overrides.get(session.session_id)
         if override is not None and Path(override).exists():
             session = session.model_copy(
@@ -424,27 +437,32 @@ class Engine:
         and the export all key on one name whatever id the reader derived from the files.
         """
         if ref.reader is None:
+            # Settings are applied inside import_session, once; only the override is looked
+            # up again below, because the manifest keys it by the entry's id and the reader
+            # may have derived another.
             session = self.import_session(ref.folder)
-        else:
-            try:
-                session = read_session(
-                    Path(ref.folder),
-                    reader=ref.reader,
-                    options=ref.reader_options,
-                    allow_pickle=self._manifest.security.allow_pickle_trajectories,
-                )
-            except ImportError_ as exc:
-                if exc.code != "READER_UNKNOWN":
-                    raise
-                raise ImportError_(
-                    f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
-                    "which is not available here",
-                    code="READER_NOT_AVAILABLE",
-                    subject=ref.reader,
-                    remediation="Install the plug-in that provides this reader, or remove the "
-                    "session and add it again so a reader is detected afresh.",
-                ) from exc
-        return session.model_copy(update={"session_id": ref.session_id})
+            session = session.model_copy(update={"session_id": ref.session_id})
+            return self._apply_video_override(session)
+        try:
+            session = read_session(
+                Path(ref.folder),
+                reader=ref.reader,
+                options=ref.reader_options,
+                allow_pickle=self._manifest.security.allow_pickle_trajectories,
+            )
+        except ImportError_ as exc:
+            if exc.code != "READER_UNKNOWN":
+                raise
+            raise ImportError_(
+                f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
+                "which is not available here",
+                code="READER_NOT_AVAILABLE",
+                subject=ref.reader,
+                remediation="Install the plug-in that provides this reader, or remove the "
+                "session and add it again so a reader is detected afresh.",
+            ) from exc
+        session = session.model_copy(update={"session_id": ref.session_id})
+        return self._apply_import_settings(session)
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -482,7 +500,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 2
+    _CACHE_SCHEMA = 3
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is
