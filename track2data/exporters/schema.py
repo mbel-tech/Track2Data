@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from track2data.core.units import PIXELS, native_unit_for_column, relabel_column
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -137,17 +139,28 @@ _PREFIX_UNITS: tuple[tuple[str, str], ...] = (
 )
 
 
-def unit_for_column(column: str) -> str:
+def unit_for_column(column: str, coordinate_unit: str = PIXELS) -> str:
     """The unit a column's values are expressed in.
 
     Returns ``"identifier"`` for key columns and ``"unknown"`` when no rule
     matches -- deliberately, rather than guessing. A wrong unit in a codebook
     is worse than an absent one, because it will be believed.
+
+    *coordinate_unit* is the project's length unit (``core/units.py``): in a
+    project whose lengths are not pixels the length columns are named for that
+    unit (``speed_mm_s``), and a pixel-named column there is "unknown" rather
+    than quietly believed to be pixels.
     """
     if column in IDENTIFIER_COLUMNS:
         return "identifier"
     if column in _EXPLICIT_UNITS:
         return _EXPLICIT_UNITS[column]
+    if coordinate_unit != PIXELS:
+        native = native_unit_for_column(column, coordinate_unit)
+        if native is not None:
+            return native
+        if relabel_column(column, "x") != column:  # it still has a pixel-family name
+            return "unknown"
     for suffix, unit in _SUFFIX_UNITS:
         if column.endswith(suffix):
             return unit
@@ -157,11 +170,18 @@ def unit_for_column(column: str) -> str:
     return "unknown"
 
 
-def build_codebook(metric_ids: list[str] | None = None) -> pd.DataFrame:
+def build_codebook(
+    metric_ids: list[str] | None = None, coordinate_unit: str = PIXELS
+) -> pd.DataFrame:
     """One row per exported column, with its unit, metric and citation.
 
     Parameters
     ----------
+    coordinate_unit:
+        The project's length unit. Not pixels: the length columns are listed
+        under the names they are exported with (``speed_mm_s``, not
+        ``speed_px_s``), so a reader looking up a column they find in the data
+        finds it.
     metric_ids:
         Restrict to these metrics. Defaults to the whole registry, which is
         what an export wants: a reader should be able to look up any column
@@ -179,10 +199,11 @@ def build_codebook(metric_ids: list[str] | None = None) -> pd.DataFrame:
         if metric_cls is None:
             continue
         doc = metric_cls.documentation
-        for column in metric_cls.output_columns:
+        for registry_column in metric_cls.output_columns:
+            column = relabel_column(registry_column, coordinate_unit)
             rows.append({
                 "column": column,
-                "unit": unit_for_column(column),
+                "unit": unit_for_column(column, coordinate_unit),
                 "level": metric_cls.level,
                 "metric_id": metric_cls.id,
                 "metric_name": metric_cls.label,
@@ -203,8 +224,14 @@ def build_codebook(metric_ids: list[str] | None = None) -> pd.DataFrame:
     return df.sort_values(["column", "metric_id"]).reset_index(drop=True)
 
 
-def long_table(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
+def long_table(
+    metrics: dict[str, pd.DataFrame], coordinate_unit: str = PIXELS
+) -> pd.DataFrame:
     """Melt per-metric result frames into one long table.
+
+    *coordinate_unit* is the project's length unit; the frames already carry
+    its column names (``Engine.build_payload`` relabels them), and this only
+    reads the unit back from them.
 
     ``session_id, individual_id, zone_name, metric_id, column, value, unit`` --
     one row per measured value. Unlike ``trial_activity_summary.csv`` this
@@ -252,7 +279,7 @@ def long_table(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
         return pd.DataFrame(columns=ordered)
 
     out = pd.concat(frames, ignore_index=True)
-    out["unit"] = out["column"].map(unit_for_column)
+    out["unit"] = out["column"].map(lambda c: unit_for_column(c, coordinate_unit))
     for column in ordered:
         if column not in out.columns:
             out[column] = pd.NA

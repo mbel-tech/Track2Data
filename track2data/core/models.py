@@ -239,6 +239,22 @@ class Session(BaseModel):
     # means "not read", never "no corrections".
     tracker_corrected_frames: set[int] | None = None
 
+    # ── coordinate unit ──────────────────────────────────────────────────────
+    # What raw_xy is expressed in: "px" (an image's pixel frame, the default and what every
+    # idtracker.ai / DeepLabCut / SLEAP / Ctrax session is) or "tu", the tool's own units, for a
+    # tracker that reports no pixel frame (a triangulation in board units, a tool that gives only
+    # millimetres). See track2data/core/units.py. The arithmetic does not care; the names do.
+    coordinate_unit: str = "px"
+    # What the tool *calls* those units ("mm"), if it says. Never believed on its own: it only
+    # suggests the label to confirm, because a tracker's "mm" may be pixels with an offset.
+    reported_unit: str | None = None
+
+    @property
+    def has_pixel_frame(self) -> bool:
+        """Whether positions are in the video's pixel frame (zones, the background image and the
+        frame-size arena fallback only make sense then)."""
+        return self.coordinate_unit == "px"
+
     # ── pose readers ─────────────────────────────────────────────────────────
     # The whole skeleton, when the tracker gave one (DeepLabCut, SLEAP, ...). raw_xy is the one
     # keypoint named in keypoints.selection. Stored only; None for trackers with one point.

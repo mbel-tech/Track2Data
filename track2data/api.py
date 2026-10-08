@@ -482,7 +482,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 2
+    _CACHE_SCHEMA = 3
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is

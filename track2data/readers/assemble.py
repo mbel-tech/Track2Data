@@ -26,6 +26,7 @@ import numpy as np
 
 from track2data.core.errors import DataValidationError
 from track2data.core.models import KeypointData, KeypointSelection, Session, VideoInfo
+from track2data.core.units import PIXELS
 
 #: A skeleton larger than this is not kept unless the reader is told to (it is stored only).
 SKELETON_MAX_BYTES = 256 * 1024 * 1024
@@ -200,8 +201,8 @@ def assemble_session(
     folder: Path,
     reader: str,
     fps: float,
-    width_px: int,
-    height_px: int,
+    width_px: int | None,
+    height_px: int | None,
     raw_xy: np.ndarray,
     has_stable_identities: bool,
     track_wo_identities: bool | None = None,
@@ -211,13 +212,24 @@ def assemble_session(
     keypoints: KeypointData | None = None,
     trajectory_source: Path | None = None,
     trajectory_format: str | None = None,
+    coordinate_unit: str = PIXELS,
+    reported_unit: str | None = None,
 ) -> Session:
     """A ``Session`` from a reader's arrays, after checking that they can be true.
 
     Raises ``DataValidationError`` (code ``READER_OUTPUT_INVALID``, ``subject`` naming the field)
     for a frame rate or frame size that cannot be real, positions of the wrong shape, or parts
     that disagree with each other.
+
+    A session whose positions are not in a pixel frame (``coordinate_unit`` other than ``"px"``)
+    needs no frame size: pass ``None`` and 0 is stored, meaning "no pixel frame". A size that is
+    given must still be sane. A pixel session always needs a real one.
     """
+    if not coordinate_unit:
+        raise _invalid(
+            "coordinate_unit", "The coordinate unit is empty.", "Name the unit, such as 'px'."
+        )
+    no_frame = coordinate_unit != PIXELS
     if not (isinstance(fps, int | float) and math.isfinite(fps) and fps > 0):
         raise _invalid(
             "fps",
@@ -225,6 +237,8 @@ def assemble_session(
             "Give the frame rate of the video.",
         )
     for name, value in (("width_px", width_px), ("height_px", height_px)):
+        if value is None and no_frame:
+            continue
         if not (isinstance(value, int | float) and math.isfinite(value) and value >= 1):
             raise _invalid(
                 name,
@@ -268,8 +282,13 @@ def assemble_session(
         folder=Path(folder),
         reader=reader,
         video=VideoInfo(
-            fps=float(fps), n_frames=n_frames, width_px=int(width_px), height_px=int(height_px)
+            fps=float(fps),
+            n_frames=n_frames,
+            width_px=int(width_px or 0),
+            height_px=int(height_px or 0),
         ),
+        coordinate_unit=coordinate_unit,
+        reported_unit=reported_unit,
         n_animals=n_animals,
         trajectory_variant=trajectory_variant,  # type: ignore[arg-type]
         has_stable_identities=has_stable_identities,
