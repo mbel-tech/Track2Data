@@ -11,12 +11,15 @@ a class attribute; the content comes verbatim from
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pandas as pd
 from pydantic import BaseModel, model_validator
 
 from track2data.metrics.references import Reference
+
+if TYPE_CHECKING:
+    from track2data.core.models import CameraView
 
 
 class MetricDocumentation(BaseModel):
@@ -131,6 +134,11 @@ class Metric(ABC):
     level: ClassVar[Literal["individual", "group", "zone", "diagnostic"]]
     priority: ClassVar[Literal["primary", "optional", "advanced", "diagnostic"]]
     requires_identity: ClassVar[bool]
+    # The camera views this metric is meaningful for; None = any view, which is the safe default
+    # (a legacy project declares none). A set rather than one required value so a later
+    # "top-down or not set" gate cannot lock out legacy projects. Read it through
+    # metrics/availability.py, never directly: test doubles predate the attribute.
+    valid_camera_views: ClassVar[frozenset[CameraView] | None] = None
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False

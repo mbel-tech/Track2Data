@@ -1,0 +1,61 @@
+"""Which metrics a project's camera view rules out, and why."""
+
+from __future__ import annotations
+
+import pytest
+
+from track2data.metrics.availability import view_skipped_metrics, view_unavailable_reason
+
+
+class _AnyView:
+    id = "IL-ANY"
+
+
+class _SideOnly:
+    id = "IL-SIDE"
+    valid_camera_views = frozenset({"side"})
+
+
+class _TopOrUnknown:
+    id = "IL-TOP"
+    valid_camera_views = frozenset({"top", "unknown"})
+
+
+@pytest.mark.parametrize("view", ["unknown", "top", "side"])
+def test_a_metric_that_declares_no_views_is_never_ruled_out(view: str) -> None:
+    """The default is 'any view': a metric (or a test double) with no attribute is unaffected."""
+    assert view_unavailable_reason(_AnyView, view) is None
+
+
+@pytest.mark.parametrize(
+    ("cls", "view", "available"),
+    [
+        (_SideOnly, "side", True),
+        (_SideOnly, "top", False),
+        (_SideOnly, "unknown", False),
+        (_TopOrUnknown, "top", True),
+        (_TopOrUnknown, "unknown", True),
+        (_TopOrUnknown, "side", False),
+    ],
+)
+def test_truth_table(cls: type, view: str, available: bool) -> None:
+    assert (view_unavailable_reason(cls, view) is None) is available
+
+
+def test_the_reason_names_the_needed_view_the_actual_view_and_the_fix() -> None:
+    reason = view_unavailable_reason(_SideOnly, "unknown")
+    assert reason is not None
+    assert "side" in reason
+    assert "not set" in reason
+    assert "Calibration" in reason
+
+    top_reason = view_unavailable_reason(_SideOnly, "top")
+    assert top_reason is not None
+    assert "top-down" in top_reason
+
+
+def test_view_skipped_metrics_maps_only_the_ruled_out_ids() -> None:
+    registry = {"IL-ANY": _AnyView, "IL-SIDE": _SideOnly}
+    skipped = view_skipped_metrics(["IL-ANY", "IL-SIDE", "IL-GONE"], "unknown", registry.get)
+    assert set(skipped) == {"IL-SIDE"}
+    assert view_skipped_metrics(["IL-ANY", "IL-SIDE"], "side", registry.get) == {}
