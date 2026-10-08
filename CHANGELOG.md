@@ -17,6 +17,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   fixes (a name, suffix, folder or header row); nothing is added.
 - **GUI driver verbs `scan`, `confirm` and `shot-dialog`** drive the scan, the confirm dialog and
   Add as a user would, and a guard makes every file picker answer "cancelled" instead of blocking.
+- **Wiki: the pages between an export and a result.** Five new pages in
+  `docs/wiki/`, written for the step the repository documentation did not
+  cover — what to do with the numbers once they exist. *Analysis Recipes*
+  works four designs (open-field thigmotaxis, shoaling cohesion, activity and
+  freezing, within-session habituation) from `metrics_long.csv` to a fitted
+  model, naming the metrics to select and the columns they produce.
+  *Statistics and Pseudoreplication* states the unit of replication for each
+  metric family — notably that every GL-\* metric is one value per session, so
+  a tank of eight fish is one observation — plus bounded-ratio models, count
+  offsets, circular headings and a reporting checklist. *Glossary* maps every
+  term to the column that carries it. *Known Issues* is the dated list of what
+  is currently wrong or in flux, which a tagged release cannot hold.
+  *Reanalysing After a Metric Fix* answers the question the pre-1.0 warning
+  raises: whether a dataset exported weeks ago is still current, via
+  `manifest.json`, the changelog and a diff of the long tables.
+
+  The wiki is now published from `docs/wiki/` by `.github/workflows/wiki.yml`
+  rather than copied by hand, which had already drifted in three of six pages
+  within a day. `scripts/check_wiki.py` — in the test gate via
+  `tests/test_docs/test_wiki.py` — resolves every `[[wiki link]]`, checks every
+  repository link points at a file and heading that exist, rejects relative
+  links (they do not resolve from a wiki page) and fails on a page orphaned
+  from `_Sidebar.md`. A `_Footer.md` now carries the licence and the
+  version-scope caveat on every page, and `README.md` links the wiki at last:
+  wiki pages are excluded from code search and from search-engine crawling, so
+  an unlinked wiki is unreachable.
 - **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
   `session_*` folders to settle what the synthetic tests cannot: how far the
   blob-derived body length sits from the session-wide value (issue #72), how

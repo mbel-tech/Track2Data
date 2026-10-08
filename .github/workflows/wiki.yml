@@ -1,0 +1,62 @@
+# Publish docs/wiki/ to the GitHub wiki.
+#
+# The wiki is a second repository with no pull requests and no CI, so pages edited there
+# are unreviewed and unchecked -- and this project has already watched a hand-copied wiki
+# drift from its source within a day. So docs/wiki/ is the source of truth, reviewed like
+# code (scripts/check_wiki.py runs in the test gate), and this workflow is the only writer.
+# Tick Settings -> Features -> Wikis -> "Restrict editing to collaborators only" to keep it
+# that way.
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - "scripts/check_wiki.py"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to wiki
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the wiki source
+        # Same check as tests/test_docs/test_wiki.py, run here too so a broken link can
+        # never reach the published wiki even if the gate was bypassed.
+        run: python scripts/check_wiki.py
+
+      - name: Publish
+        # The default GITHUB_TOKEN can push to the wiki repository. If an organisation
+        # policy blocks that, add a fine-grained PAT with wiki write access as the
+        # WIKI_TOKEN secret and it is used instead.
+        env:
+          TOKEN: ${{ secrets.WIKI_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --quiet \
+            "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+          rm -f wiki/*.md
+          cp docs/wiki/*.md wiki/
+          rm -f wiki/README.md          # docs/wiki/README.md documents the source, not the wiki
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "wiki already up to date"
+          else
+            git commit -m "Publish wiki from ${GITHUB_SHA::7}"
+            git push --quiet
+            echo "wiki updated"
+          fi
