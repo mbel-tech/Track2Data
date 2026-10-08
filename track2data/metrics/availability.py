@@ -30,9 +30,8 @@ def view_unavailable_reason(metric_cls: Any, camera_view: str) -> str | None:
     if valid is None or camera_view in valid:
         return None
     return (
-        f"needs a recording made from this view: {required_views_text(metric_cls)}; the "
-        f"project's camera view is {_VIEW_WORDS.get(camera_view, camera_view)} "
-        "(set it on the Calibration screen)"
+        f"needs a {required_views_text(metric_cls)} recording; the project's camera view is "
+        f"{_VIEW_WORDS.get(camera_view, camera_view)} (set it on the Calibration screen)"
     )
 
 

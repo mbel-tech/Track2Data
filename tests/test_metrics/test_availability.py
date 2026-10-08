@@ -45,7 +45,7 @@ def test_truth_table(cls: type, view: str, available: bool) -> None:
 def test_the_reason_names_the_needed_view_the_actual_view_and_the_fix() -> None:
     reason = view_unavailable_reason(_SideOnly, "unknown")
     assert reason is not None
-    assert "side" in reason
+    assert reason.startswith("needs a side view recording")
     assert "not set" in reason
     assert "Calibration" in reason
 
