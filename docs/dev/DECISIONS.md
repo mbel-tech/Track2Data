@@ -834,3 +834,10 @@ meaningless y axis and look plausible. Clipping would manufacture "at the surfac
 floor" occupancy out of reflections and tracker noise. The canvas fix is here because depth is
 only right if the zones are in the video's own pixels, which they were not for any tracker but
 idtracker.ai.
+
+**Unverified:** that an idtracker.ai session's `background.png` has the video's pixel size. The
+Zones canvas for an idtracker.ai session is sized from that image, while the frame size the zone
+set now records comes from the session. IL-3, IL-14, IL-15 and every zone metric already rested on
+the two agreeing. The only idtracker.ai sessions in the repository are synthetic (`tests/conftest.py`
+writes a placeholder PNG), so this could not be checked; check it on a real session before relying
+on it, and if they differ, the recorded size would hide the discrepancy.
