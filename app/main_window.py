@@ -13,6 +13,7 @@ Implements the QMainWindow shell described in UI_DESIGN.md §3:
 from __future__ import annotations
 
 from datetime import datetime
+from functools import partial
 
 from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import (
@@ -263,6 +264,36 @@ class MainWindow(QMainWindow):
         row.addWidget(self._btn_next)
         return bar
 
+    def palette_commands(self) -> list:
+        """Everything the palette offers; each entry runs what the menus run."""
+        from app.navigation import STAGES
+        from ui.dialogs.command_palette import Command
+
+        has_project = self._store.has_project
+        has_run = self._store.run_results is not None
+        commands = [
+            Command("Go to", label, partial(self._go_to_page, first_page))
+            for label, first_page in STAGES
+        ]
+        commands += [
+            Command("Run", "Run pipeline", self._action_run, "Ctrl+R", has_project),
+            Command("Run", "Validate", self._action_validate, "Ctrl+Shift+V", has_project),
+            Command("Run", "Export…", self._action_export, "Ctrl+E", has_run),
+            Command("View", "Show or hide the run log", lambda: self._toggle_log(), "Ctrl+L"),
+            Command("View", "Switch theme", theme.toggle),
+            Command("File", "Save project", self._action_save_project, "Ctrl+S", has_project),
+            Command("File", "New project…", self._action_new_project, "Ctrl+N"),
+            Command("File", "Open project…", self._action_open_project, "Ctrl+O"),
+            Command("Help", "Open the user guide", self._action_open_guide),
+        ]
+        return commands
+
+    def open_palette(self) -> None:
+        from ui.dialogs.command_palette import CommandPalette
+
+        self._palette = CommandPalette(self.palette_commands(), self)
+        self._palette.open()
+
     def show_toast(self, text: str) -> None:
         self._toast.show_message(text)
 
@@ -346,6 +377,9 @@ class MainWindow(QMainWindow):
         self._log_action = QAction("Run &log", self, shortcut="Ctrl+L", checkable=True)
         self._log_action.toggled.connect(lambda on: self._toggle_log(bool(on)))
         view_menu.addAction(self._log_action)
+        view_menu.addAction(
+            QAction("&Command palette…", self, shortcut="Ctrl+K", triggered=self.open_palette)
+        )
         theme_menu = view_menu.addMenu("&Theme")
         group = QActionGroup(self)
         self._theme_actions: dict[str, QAction] = {}

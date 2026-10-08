@@ -156,3 +156,9 @@ QLabel[check="err"] { background: #ff8a76; color: #2a1a17; border-radius: 9px; f
 QFrame[card="true"] QLabel[check="ok"] { background: #3fa7b5; color: #06181b; border-radius: 9px; font-size: 11px; font-weight: 700; }
 QFrame[card="true"] QLabel[check="warn"] { background: #e8b64c; color: #1b1503; border-radius: 9px; font-size: 11px; font-weight: 700; }
 QFrame[card="true"] QLabel[check="err"] { background: #ff8a76; color: #2a1a17; border-radius: 9px; font-size: 11px; font-weight: 700; }
+
+QDialog#CommandPalette { background: #181d20; border: 1px solid #2a3237; border-radius: 16px; }
+QLineEdit#PaletteSearch { font-size: 16px; padding: 10px 14px; }
+QListWidget#PaletteList { border: none; font-family: "IBM Plex Mono", Consolas, Menlo, monospace; font-size: 13px; background: transparent; }
+QListWidget#PaletteList::item { padding: 8px 10px; border-radius: 8px; }
+QListWidget#PaletteList::item:selected { background: #172327; color: #e3e8ea; }
