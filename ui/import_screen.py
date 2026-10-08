@@ -324,7 +324,7 @@ class ImportScreen(QWidget):
             minutes = facts.n_frames / facts.fps / 60 if facts.fps else 0
             rows += [
                 ("Frame rate", f"{facts.fps:g} fps"),
-                ("Frames", f"{facts.n_frames:,} ({minutes:.0f} min)".replace(",", " ")),
+                ("Frames", f"{facts.n_frames:,} ({minutes:.0f} min)".replace(",", chr(0x202F))),
                 ("Animals", str(facts.n_animals)),
             ]
         rows.append(("Video", video_text))
