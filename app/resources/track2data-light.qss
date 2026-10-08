@@ -141,3 +141,8 @@ QListWidget::item { padding: 6px 8px; }
 QListWidget::item:selected { background: #eef5f5; color: #1d2b30; }
 QListWidget#StageList { background: #1c5866; border: none; border-radius: 0; }
 QLabel[role="ok"] { color: #1c5866; font-size: 13.5px; }
+
+QCheckBox[switch="true"]::indicator { width: 34px; height: 20px; border: none; border-radius: 10px; background: transparent; image: url(:/icons/switch-off-light.svg); }
+QCheckBox[switch="true"]::indicator:checked { image: url(:/icons/switch-on-light.svg); background: transparent; border: none; }
+QGroupBox { background: #ffffff; border: 1px solid #e6dfd0; border-radius: 12px; margin-top: 14px; padding: 18px 16px 12px 16px; font-size: 15px; }
+QLabel[banner="warn"] { background: #fbefd0; color: #6e4f00; border-radius: 10px; padding: 10px 12px; }
