@@ -88,7 +88,7 @@ def plan_expansion(
     for i, count in zip(gap_at, inserted, strict=True):
         row_of_source[previous:i] += shift
         shift += count
-        previous = i
+        previous = int(i)
     row_of_source[previous:] += shift
 
     frame_index[row_of_source] = frames
