@@ -471,7 +471,7 @@ class MainWindow(QMainWindow):
         from app.navigation import PAGE_TO_STAGE, STAGES
 
         if page > 0:
-            self._btn_back.setText(f"← {STAGES[PAGE_TO_STAGE[page - 1]][0]}")
+            self._btn_back.setText(f"← {STAGES[PAGE_TO_STAGE[page - 1]][0]}".replace("&", "&&"))
         else:
             self._btn_back.setText("← Back")
         if page == 8:
@@ -479,7 +479,8 @@ class MainWindow(QMainWindow):
         elif page >= self._stack.count() - 1:
             text, role = "Done", "primary"
         else:
-            text, role = f"Next: {STAGES[PAGE_TO_STAGE[page + 1]][0]} →", "primary"
+            text = f"Next: {STAGES[PAGE_TO_STAGE[page + 1]][0]} →".replace("&", "&&")
+            role = "primary"
         self._btn_next.setText(text)
         if self._btn_next.property("role") != role:
             self._btn_next.setProperty("role", role)

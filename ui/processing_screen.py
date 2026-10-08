@@ -20,7 +20,11 @@ import functools
 from datetime import UTC, datetime
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -74,20 +78,21 @@ class ProcessingScreen(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Processing")
         title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Validate the pipeline configuration and run preprocessing + "
-            "metric extraction across all sessions."
+            "Check the setup, then run import → preprocess → metrics for every session."
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
+
+        root.addWidget(self._build_setup_check())
 
         # ── buttons ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -124,7 +129,7 @@ class ProcessingScreen(QWidget):
         root.addWidget(self._progress)
 
         self._status_label = QLabel("Ready")
-        self._status_label.setStyleSheet("font-size: 13px;")
+        self._status_label.setProperty("role", "faint")
         root.addWidget(self._status_label)
 
         self._status_table = QTableWidget(0, 4)
@@ -135,9 +140,133 @@ class ProcessingScreen(QWidget):
             0, QHeaderView.ResizeMode.Stretch
         )
         self._status_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._status_table.verticalHeader().hide()
+        self._status_table.verticalHeader().setDefaultSectionSize(40)
+        self._status_table.setShowGrid(False)
         root.addWidget(self._status_table)
 
+        root.addWidget(self._build_cli_box())
         root.addStretch()
+        self._workers.valueChanged.connect(self._refresh_cli_box)
+        self._refresh_setup_check()
+        self._refresh_cli_box()
+
+    # ── setup check and headless command ────────────────────────────────────
+
+    #: (check name, wizard page whose status it shows)
+    _CHECKS = (
+        ("Sessions", 1), ("Calibration", 2), ("Zones", 3),
+        ("Metadata", 4), ("Preprocessing", 5), ("Metrics", 6),
+    )
+
+    def _build_setup_check(self) -> QFrame:
+        card = QFrame()
+        card.setProperty("card", True)
+        col = QVBoxLayout(card)
+        col.setContentsMargins(18, 14, 18, 16)
+        col.setSpacing(10)
+        self._check_title = QLabel("Setup check")
+        self._check_title.setObjectName("CardTitle")
+        col.addWidget(self._check_title)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(10)
+        self._check_labels: dict[str, tuple[QLabel, QLabel]] = {}
+        for i, (name, _page) in enumerate(self._CHECKS):
+            dot = QLabel()
+            dot.setFixedSize(18, 18)
+            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            dot.setProperty("check", "ok")
+            text = QLabel()
+            text.setWordWrap(True)
+            cell = QHBoxLayout()
+            cell.setSpacing(10)
+            cell.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+            cell.addWidget(text, 1)
+            grid.addLayout(cell, i // 3, i % 3)
+            self._check_labels[name] = (dot, text)
+        col.addLayout(grid)
+        if self._store is not None:
+            for sig in (
+                self._store.projectChanged,
+                self._store.sessionsChanged,
+                self._store.calibrationChanged,
+                self._store.zonesChanged,
+                self._store.metadataChanged,
+                self._store.preprocessChanged,
+                self._store.metricsChanged,
+                self._store.runResultsChanged,
+            ):
+                sig.connect(self._refresh_setup_check)
+        return card
+
+    def _refresh_setup_check(self) -> None:
+        from ui.store.stage_status import compute_stage_statuses, stage_summaries
+
+        manifest = self._store.manifest if self._store is not None else None
+        has_run = self._store is not None and self._store.run_results is not None
+        infos = compute_stage_statuses(manifest, has_run_results=has_run)
+        summaries = stage_summaries(manifest, has_run_results=has_run)
+        problems = 0
+        for name, page in self._CHECKS:
+            info = infos[page]
+            optional = page in (3, 4)  # zones and metadata never block a run
+            if info.status == "valid":
+                kind, glyph = "ok", "✓"
+            elif info.status == "warning" or (info.status == "empty" and optional):
+                kind, glyph = "warn", "!"
+            else:
+                kind, glyph = "err", "!"
+                problems += 1
+            dot, text = self._check_labels[name]
+            dot.setText(glyph)
+            dot.setProperty("check", kind)
+            dot.style().unpolish(dot)
+            dot.style().polish(dot)
+            text.setText(f"<b>{name}</b><br>{summaries[page]}")
+            text.setToolTip(info.message)
+        if manifest is None:
+            self._check_title.setText("Setup check")
+        elif problems:
+            noun = "issue" if problems == 1 else "issues"
+            self._check_title.setText(f"{problems} {noun} to fix before running")
+        else:
+            self._check_title.setText("Ready to run")
+
+    def _build_cli_box(self) -> QFrame:
+        card = QFrame()
+        card.setProperty("card", True)
+        col = QVBoxLayout(card)
+        col.setContentsMargins(18, 12, 18, 12)
+        col.setSpacing(6)
+        head = QHBoxLayout()
+        label = QLabel("SAME RUN, HEADLESS")
+        label.setObjectName("SectionLabel")
+        head.addWidget(label)
+        head.addStretch()
+        copy = QPushButton("Copy command")
+        copy.setProperty("role", "link")
+        copy.setFlat(True)
+        copy.clicked.connect(self._copy_cli)
+        head.addWidget(copy)
+        col.addLayout(head)
+        self._cli_label = QLabel()
+        self._cli_label.setObjectName("CliSnippet")
+        self._cli_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        col.addWidget(self._cli_label)
+        return card
+
+    def cli_command(self) -> str:
+        name = "<project>"
+        if self._store is not None and self._store.manifest is not None:
+            name = self._store.manifest.project_name
+        return f"track2data run {name}.t2d.json --workers {self._workers.value()}"
+
+    def _refresh_cli_box(self) -> None:
+        self._cli_label.setText(self.cli_command())
+
+    def _copy_cli(self) -> None:
+        QApplication.clipboard().setText(self.cli_command())
 
     # ── run orchestration ────────────────────────────────────────────────────
 

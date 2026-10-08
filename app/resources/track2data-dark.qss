@@ -147,3 +147,12 @@ QGroupBox { background: #181d20; border: 1px solid #2a3237; border-radius: 12px;
 QLabel[banner="warn"] { background: #2b2414; color: #e8b64c; border-radius: 10px; padding: 10px 12px; }
 QLabel#Counter { font-weight: 700; font-size: 14px; }
 QPushButton[role="icon"] { padding: 0; border: none; border-radius: 14px; background: transparent; font-size: 15px; font-weight: 400; } QPushButton[role="icon"]:hover { background: rgba(138,151,155,0.2); }
+
+QLabel#CardTitle { font-size: 16px; font-weight: 700; }
+QLabel#CliSnippet { font-family: "IBM Plex Mono", Consolas, Menlo, monospace; font-size: 12px; background: #0d1012; color: #a3aeb4; border-radius: 8px; padding: 8px 10px; }
+QLabel[check="ok"] { background: #3fa7b5; color: #06181b; border-radius: 9px; font-size: 11px; font-weight: 700; }
+QLabel[check="warn"] { background: #e8b64c; color: #1b1503; border-radius: 9px; font-size: 11px; font-weight: 700; }
+QLabel[check="err"] { background: #ff8a76; color: #2a1a17; border-radius: 9px; font-size: 11px; font-weight: 700; }
+QFrame[card="true"] QLabel[check="ok"] { background: #3fa7b5; color: #06181b; border-radius: 9px; font-size: 11px; font-weight: 700; }
+QFrame[card="true"] QLabel[check="warn"] { background: #e8b64c; color: #1b1503; border-radius: 9px; font-size: 11px; font-weight: 700; }
+QFrame[card="true"] QLabel[check="err"] { background: #ff8a76; color: #2a1a17; border-radius: 9px; font-size: 11px; font-weight: 700; }
