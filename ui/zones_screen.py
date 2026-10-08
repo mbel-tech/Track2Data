@@ -31,11 +31,13 @@ Widgets:
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -77,115 +79,45 @@ class ZonesScreen(QWidget):
     # ── build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(48, 36, 48, 36)
-        outer.setSpacing(16)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── left: header, session picker, tools, canvas ──────────────────
+        left = QWidget()
+        root = QVBoxLayout(left)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(12)
+        outer.addWidget(left, 1)
 
         title = QLabel("Zones")
         title.setObjectName("PageTitle")
-        outer.addWidget(title)
+        root.addWidget(title)
 
         subtitle = QLabel(
-            "Load zone definitions from a CSV file, import them from an "
-            "idtracker.ai session, or clear the current zones."
+            "Draw regions on a frame. Zone metrics use these. You can also load zones from a "
+            "CSV file or import them from an idtracker.ai session."
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
-        outer.addWidget(subtitle)
+        root.addWidget(subtitle)
 
-        # Everything else -- zone list, session import, landmarks, the
-        # canvas, and the save-zone controls -- stacks a lot taller than
-        # a wizard page's fixed height once the canvas is in the mix, so
-        # it needs to scroll rather than being force-compressed into
-        # whatever space is left (which used to squash the zone-name/
-        # level form rows down to unreadable single-pixel-high text).
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(scroll.Shape.NoFrame)
-        inner = QWidget()
-        root = QVBoxLayout(inner)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(16)
-
-        # ── list ──────────────────────────────────────────────────────────
-        self._zone_list = QListWidget()
-        self._zone_list.setMinimumHeight(160)
-        root.addWidget(self._zone_list)
-
-        # ── buttons ───────────────────────────────────────────────────────
-        btn_row = QHBoxLayout()
-        load_btn = QPushButton("Load zones from CSV…")
-        load_btn.setProperty("role", "outline")
-        load_btn.clicked.connect(self._load_csv)
-        clear_btn = QPushButton("Clear Zones")
-        clear_btn.setProperty("role", "outline")
-        clear_btn.clicked.connect(self._clear_zones)
-        btn_row.addWidget(load_btn)
-        btn_row.addWidget(clear_btn)
-        btn_row.addStretch()
-        root.addLayout(btn_row)
-
-        # ── count ──────────────────────────────────────────────────────
-        self._count_label = QLabel("0 zones loaded")
-        self._count_label.setStyleSheet("font-size: 13px;")
-        root.addWidget(self._count_label)
-
-        # ── resolution-mismatch warning ──────────────────────────────────
-        self._mismatch_label = QLabel("")
-        self._mismatch_label.setWordWrap(True)
-        self._mismatch_label.setStyleSheet("color: #b8860b; font-size: 13px;")
-        self._mismatch_label.setVisible(False)
-        root.addWidget(self._mismatch_label)
-
-        # ── import from session ──────────────────────────────────────────
-        import_label = QLabel("Import from session:")
-        import_label.setStyleSheet("font-weight: bold;")
-        root.addWidget(import_label)
-
-        import_row = QFormLayout()
+        picker_row = QHBoxLayout()
+        picker_row.setSpacing(10)
+        session_label = QLabel("Session")
+        session_label.setObjectName("SectionLabel")
         self._session_combo = QComboBox()
-        import_row.addRow("Session:", self._session_combo)
-        root.addLayout(import_row)
-
-        import_btn_row = QHBoxLayout()
-        import_btn = QPushButton("Import ROIs from Session")
-        import_btn.setProperty("role", "outline")
-        import_btn.clicked.connect(self._import_from_session)
-        import_btn_row.addWidget(import_btn)
-        import_btn_row.addStretch()
-        root.addLayout(import_btn_row)
-
-        # ── landmarks (setup_points) ─────────────────────────────────────
-        # Named validator reference points, shown as guides only -- never
-        # auto-converted into ROI polygons, since a point set may mix
-        # arena corners with unrelated marks (e.g. a feeder) that would
-        # produce a nonsense hull. The user still draws/imports the
-        # actual ROI polygons above.
-        landmarks_label = QLabel("Landmarks (from the validator):")
-        landmarks_label.setStyleSheet("font-weight: bold;")
-        root.addWidget(landmarks_label)
-        self._landmarks_list = QListWidget()
-        self._landmarks_list.setMinimumHeight(80)
-        root.addWidget(self._landmarks_list)
-
-        # ── interactive canvas: click points to build a zone polygon ────
-        canvas_label = QLabel(
-            "Click points (or use the Rectangle / Circle tools) to outline a zone. "
-            "Saved zones are shown shaded."
-        )
-        canvas_label.setStyleSheet("font-weight: bold;")
-        root.addWidget(canvas_label)
-
-        self._canvas = ZoneCanvas()
-        root.addWidget(self._canvas)
-        self._canvas.selectionChanged.connect(self._on_canvas_selection_changed)
+        self._session_combo.setMinimumWidth(240)
+        picker_row.addWidget(session_label)
+        picker_row.addWidget(self._session_combo)
+        picker_row.addStretch()
+        root.addLayout(picker_row)
 
         canvas_btn_row = QHBoxLayout()
+        canvas_btn_row.setSpacing(8)
         self._custom_point_btn = QPushButton("Add Custom Point")
         self._custom_point_btn.setProperty("role", "outline")
         self._custom_point_btn.setCheckable(True)
-        self._custom_point_btn.toggled.connect(self._canvas.set_custom_point_mode)
-        canvas_btn_row.addWidget(self._custom_point_btn)
 
         # Shape tools: markers (default), or drag a rectangle / circle.
         self._tool_buttons: dict[str, QPushButton] = {}
@@ -197,53 +129,129 @@ class ZonesScreen(QWidget):
             ("circle", "Circle", "Drag from the centre outwards"),
         ):
             btn = QPushButton(text)
+            btn.setProperty("role", "segment")
             btn.setCheckable(True)
             btn.setToolTip(tip)
             btn.setChecked(tool == "points")
-            btn.clicked.connect(lambda _checked=False, t=tool: self._canvas.set_tool(t))
             tool_group.addButton(btn)
             canvas_btn_row.addWidget(btn)
             self._tool_buttons[tool] = btn
+        canvas_btn_row.addSpacing(8)
+        canvas_btn_row.addWidget(self._custom_point_btn)
         self._undo_btn = QPushButton("Undo point")
         self._undo_btn.setProperty("role", "outline")
         self._undo_btn.setToolTip("Remove the last vertex (Ctrl+Z)")
-        self._undo_btn.clicked.connect(self._canvas.undo_last_point)
         canvas_btn_row.addWidget(self._undo_btn)
         self._fit_btn = QPushButton("Fit")
         self._fit_btn.setProperty("role", "outline")
         self._fit_btn.setToolTip("Fit the image to the view. Wheel = zoom, middle-drag = pan.")
-        self._fit_btn.clicked.connect(self._canvas.fit_to_view)
         canvas_btn_row.addWidget(self._fit_btn)
         canvas_btn_row.addStretch()
         root.addLayout(canvas_btn_row)
 
+        canvas_card = QFrame()
+        canvas_card.setProperty("card", True)
+        card_col = QVBoxLayout(canvas_card)
+        card_col.setContentsMargins(10, 10, 10, 10)
+        self._canvas = ZoneCanvas()
+        card_col.addWidget(self._canvas)
+        root.addWidget(canvas_card, 1)
+
+        self._canvas.selectionChanged.connect(self._on_canvas_selection_changed)
+        self._custom_point_btn.toggled.connect(self._canvas.set_custom_point_mode)
+        for tool, btn in self._tool_buttons.items():
+            btn.clicked.connect(lambda _checked=False, t=tool: self._canvas.set_tool(t))
+        self._undo_btn.clicked.connect(self._canvas.undo_last_point)
+        self._fit_btn.clicked.connect(self._canvas.fit_to_view)
+
+        self._selection_count_label = QLabel("0 points selected")
+        self._selection_count_label.setProperty("role", "faint")
+        root.addWidget(self._selection_count_label)
+
+        # ── resolution-mismatch warning ──────────────────────────────────
+        self._mismatch_label = QLabel("")
+        self._mismatch_label.setWordWrap(True)
+        self._mismatch_label.setProperty("role", "warn")
+        self._mismatch_label.setVisible(False)
+        root.addWidget(self._mismatch_label)
+
+        # ── right: zone list and properties ──────────────────────────────
+        pane = QFrame()
+        pane.setObjectName("DetailPane")
+        pane.setFixedWidth(280)
+        pane_outer = QVBoxLayout(pane)
+        pane_outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        side = QVBoxLayout(inner)
+        side.setContentsMargins(18, 26, 18, 18)
+        side.setSpacing(10)
+        scroll.setWidget(inner)
+        pane_outer.addWidget(scroll)
+        outer.addWidget(pane)
+
+        zones_label = QLabel("ZONES")
+        zones_label.setObjectName("SectionLabel")
+        side.addWidget(zones_label)
+        self._zone_list = QListWidget()
+        self._zone_list.setMinimumHeight(140)
+        side.addWidget(self._zone_list)
+        self._count_label = QLabel("0 zones loaded")
+        self._count_label.setProperty("role", "faint")
+        side.addWidget(self._count_label)
+
+        btn_row = QHBoxLayout()
+        load_btn = QPushButton("Load CSV…")
+        load_btn.setProperty("role", "outline")
+        load_btn.clicked.connect(self._load_csv)
+        clear_btn = QPushButton("Clear")
+        clear_btn.setProperty("role", "outline")
+        clear_btn.clicked.connect(self._clear_zones)
+        btn_row.addWidget(load_btn)
+        btn_row.addWidget(clear_btn)
+        side.addLayout(btn_row)
+
+        import_btn = QPushButton("Import ROIs from Session")
+        import_btn.setProperty("role", "outline")
+        import_btn.clicked.connect(self._import_from_session)
+        side.addWidget(import_btn)
+
+        props_label = QLabel("NEW ZONE")
+        props_label.setObjectName("SectionLabel")
+        side.addSpacing(6)
+        side.addWidget(props_label)
         save_zone_form = QFormLayout()
         self._zone_name_edit = QLineEdit()
-        save_zone_form.addRow("Zone name:", self._zone_name_edit)
+        save_zone_form.addRow("Name", self._zone_name_edit)
         self._zone_level_combo = QComboBox()
         self._zone_level_combo.setEditable(True)
         self._zone_level_combo.addItems(["main", "secondary"])
-        save_zone_form.addRow("Level:", self._zone_level_combo)
-        root.addLayout(save_zone_form)
-
-        save_zone_row = QHBoxLayout()
+        save_zone_form.addRow("Level", self._zone_level_combo)
+        side.addLayout(save_zone_form)
         self._save_zone_btn = QPushButton("Save Zone")
         self._save_zone_btn.setProperty("role", "primary")
         self._save_zone_btn.setEnabled(False)
         self._save_zone_btn.clicked.connect(self._save_zone)
-        save_zone_row.addWidget(self._save_zone_btn)
-        self._selection_count_label = QLabel("0 points selected")
-        self._selection_count_label.setStyleSheet("font-size: 13px;")
-        save_zone_row.addWidget(self._selection_count_label)
-        save_zone_row.addStretch()
-        root.addLayout(save_zone_row)
+        side.addWidget(self._save_zone_btn)
+
+        # Named validator reference points, shown as guides only -- never
+        # auto-converted into ROI polygons, since a point set may mix
+        # arena corners with unrelated marks (e.g. a feeder) that would
+        # produce a nonsense hull.
+        landmarks_label = QLabel("LANDMARKS")
+        landmarks_label.setObjectName("SectionLabel")
+        side.addSpacing(6)
+        side.addWidget(landmarks_label)
+        self._landmarks_list = QListWidget()
+        self._landmarks_list.setMinimumHeight(80)
+        side.addWidget(self._landmarks_list)
+        side.addStretch()
 
         self._session_combo.currentTextChanged.connect(self._refresh_landmarks)
         self._session_combo.currentTextChanged.connect(self._refresh_canvas)
-
-        root.addStretch()
-        scroll.setWidget(inner)
-        outer.addWidget(scroll, 1)
 
     # ── slots: CSV load/clear ────────────────────────────────────────────
 

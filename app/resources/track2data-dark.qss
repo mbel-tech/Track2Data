@@ -131,3 +131,11 @@ QFrame[card="true"] QLabel, QFrame[card="true"] QRadioButton { background: trans
 QRadioButton { font-weight: 700; spacing: 8px; }
 QRadioButton::indicator { width: 14px; height: 14px; border-radius: 9px; border: 2px solid #3a444a; background: transparent; }
 QRadioButton::indicator:checked { width: 8px; height: 8px; border-radius: 9px; border: 5px solid #3fa7b5; background: #181d20; }
+
+QPushButton[role="segment"] { background: #20272b; color: #a3aeb4; border: none; border-radius: 14px; padding: 6px 14px; }
+QPushButton[role="segment"]:checked { background: #3fa7b5; color: #06181b; }
+QLabel[role="warn"] { color: #e8b64c; }
+QListWidget { background: #181d20; border: 1px solid #2a3237; border-radius: 10px; outline: 0; }
+QListWidget::item { padding: 6px 8px; }
+QListWidget::item:selected { background: #172327; color: #e3e8ea; }
+QListWidget#StageList { background: #0f1315; border: none; border-radius: 0; border-right: 1px solid #22292e; }
