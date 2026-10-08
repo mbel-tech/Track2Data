@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **DeepLabCut CSV input** (also Lightning Pose and EKS tables). The scan recognises prediction
+  tables, offers the keypoints and animals found, and asks for the frame rate and frame size the
+  file does not record (never defaulted). One real keypoint stands for the animal (the one you
+  name, else the best covered after a 0.6 likelihood cutoff), the whole skeleton is stored beside
+  it, `single` and positional `ind1...` animals are handled, and a likelihood column that is all
+  zero (EKS) is ignored rather than erasing the recording. Checked against the real two-mice and
+  EKS sample files. `.h5` and SLEAP follow.
 - **Shared building blocks for pose readers** (`track2data/readers/assemble.py`), the groundwork for
   DeepLabCut and SLEAP input. `Session.keypoints` (new, default `None`) keeps a pose tracker's
   whole skeleton (float32, names, edges, likelihood, and which keypoint was used and why) beside
