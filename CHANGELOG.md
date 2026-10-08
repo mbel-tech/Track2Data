@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Ctrax raw `.mat` input** ("Save Tracks as Matlab File"). One session per file; the frame
+  rate comes from the file's timestamps (an average over the whole span) and the frame size is
+  asked for, because Ctrax measures y from the bottom and the height is needed to put it back in
+  image coordinates. Ctrax track ids are fragments, not animals: every id is a slot, the session
+  is identity-free by construction, and an optional `top_n` keeps only the longest tracks.
+  Checked against the real 12,033-frame sample. `trx.mat` is not claimed (a different format).
+  The scan can now list the variables of a classic MATLAB file from its headers.
 - **SLEAP analysis HDF5 input** (File > Export Analysis HDF5). One session per file; frame rate
   and frame size are asked for (the file records neither); one real skeleton node stands for the
   animal and the whole skeleton, its edges and the point scores are stored beside it. The layout is

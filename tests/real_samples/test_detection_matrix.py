@@ -28,7 +28,7 @@ EXPECTED: dict[str, str | None] = {
     "trex_new_export": None,
     "trex_old_export": None,
     "animalta_fixed_csv": None,
-    "ctrax_raw_mat": None,
+    "ctrax_raw_mat": "ctrax_mat",
     "toxtrac_realspace": None,
 }
 

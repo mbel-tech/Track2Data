@@ -209,3 +209,80 @@ class TestHdf5Root:
         before = h5.read_bytes()
         Peeker().hdf5_root(h5, strings=("node_names",))
         assert h5.read_bytes() == before
+
+
+class TestMatVariables:
+    """The variables of a classic (v5) MATLAB file, from its headers only.
+
+    Uses scipy's header listing, which never reads the arrays' contents. A v7.3 file is HDF5
+    underneath and is not a v5 file: it is reported as None here (``hdf5_root`` reads those).
+    """
+
+    @pytest.fixture
+    def mat(self, tmp_path: Path) -> Path:
+        import scipy.io as sio
+
+        path = tmp_path / "a.mat"
+        sio.savemat(
+            path,
+            {
+                "x_pos": np.zeros((5, 1)),
+                "ntargets": np.ones((3, 1)),
+                "startframe": np.array([[0]], dtype=np.int64),
+            },
+        )
+        return path
+
+    def test_it_lists_names_with_shape_and_class(self, mat: Path) -> None:
+        info = Peeker().mat_variables(mat)
+        assert info is not None
+        assert info["x_pos"] == ((5, 1), "double")
+        assert info["startframe"] == ((1, 1), "int64")
+        assert set(info) == {"x_pos", "ntargets", "startframe"}
+
+    def test_a_compressed_file_is_listed_too(self, tmp_path: Path) -> None:
+        import scipy.io as sio
+
+        path = tmp_path / "c.mat"
+        sio.savemat(path, {"a": np.zeros((100, 100))}, do_compression=True)
+        assert Peeker().mat_variables(path) == {"a": ((100, 100), "double")}
+
+    @pytest.mark.parametrize("content", [b"", b"not matlab", b"MATLAB 5.0 MAT-file" + b"\0" * 200])
+    def test_anything_else_is_none(self, tmp_path: Path, content: bytes) -> None:
+        assert Peeker().mat_variables(_write(tmp_path / "x.mat", content)) is None
+
+    def test_a_truncated_file_never_raises_and_lists_at_most_what_survived(
+        self, mat: Path
+    ) -> None:
+        full = Peeker().mat_variables(mat)
+        data = mat.read_bytes()
+        mat.write_bytes(data[: len(data) // 2])
+        cut = Peeker().mat_variables(mat)
+        # None, or only the variables whose headers survived: the missing ones are what stops
+        # a reader from claiming it.
+        assert cut is None or set(cut) < set(full)
+
+    def test_a_v7_3_file_is_not_a_v5_file(self, tmp_path: Path) -> None:
+        import h5py
+
+        path = tmp_path / "v73.mat"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("a", data=np.zeros(3))
+        assert Peeker().mat_variables(path) is None
+
+    def test_a_missing_file_is_none(self, tmp_path: Path) -> None:
+        assert Peeker().mat_variables(tmp_path / "missing.mat") is None
+
+    def test_a_cloud_only_placeholder_is_never_opened(self, mat: Path) -> None:
+        index = ScanIndex([mat.parent], [IndexEntry(mat, False, 10, cloud_only=True)])
+        assert Peeker(index=index).mat_variables(mat) is None
+
+    def test_it_counts_against_the_peek_budget(self, mat: Path) -> None:
+        peek = Peeker(ScanBudget(max_peeks=1))
+        assert peek.mat_variables(mat) is not None
+        assert peek.mat_variables(mat) is None
+
+    def test_the_file_is_not_modified(self, mat: Path) -> None:
+        before = mat.read_bytes()
+        Peeker().mat_variables(mat)
+        assert mat.read_bytes() == before

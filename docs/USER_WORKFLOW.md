@@ -894,6 +894,14 @@ and headless CLI report the same identifier. The full list:
 | `SLEAP_UNREADABLE` | 2 | error | "<file> could not be read as HDF5." The file may be damaged or incomplete; export it from SLEAP again. |
 | `SLEAP_LAYOUT_AMBIGUOUS` | 2 | error | "<file> does not match the SLEAP analysis layout: <what disagrees>." The occupancy, node names or track names do not agree with `tracks`; the file is refused rather than guessed at. |
 | `SLEAP_LAYOUT_UNSUPPORTED` | 2 | error | "<file> declares the axis order <...>." Only the standard order (track, xy, node, frame) is read; export the file again from the SLEAP GUI. |
+| `CTRAX_NOT_A_RAW_FILE` | 2 | error | "<file> is not a raw Ctrax .mat file." This reader reads Ctrax's own file (variables `ntargets`, `x_pos`, `y_pos`, `identity`, `timestamps`). A `trx.mat` (a `trx` struct, from Ctrax, FlyTracker or JAABA) is a different format that is not read yet. |
+| `CTRAX_NO_FILE` | 2 | error | "Nothing to read at <path>." Fix: point at a Ctrax `.mat` file or a folder that holds one. |
+| `CTRAX_UNREADABLE` | 2 | error | "<file> could not be read as a MATLAB file." The file may be damaged or incomplete; save the tracks from Ctrax again. |
+| `CTRAX_INCONSISTENT` | 2 | error | "ntargets, the per-detection arrays and the timestamps disagree." The file may be damaged or from a different tool. |
+| `CTRAX_BAD_TIMESTAMPS` | 2 | error | "The timestamps give no frame rate (fewer than two frames, or they do not increase)." The frame rate is never guessed. |
+| `CTRAX_FRAME_TOO_SHORT` | 2 | error | "Positions reach <y> px from the bottom, more than the frame height you gave." Fix: give the video's real height; Ctrax measures y from the bottom, so it is needed to flip it. |
+| `CTRAX_DUPLICATE_TRACK` | 2 | error | "A track id appears twice in the same frame." A raw Ctrax file never does this; it may be damaged. |
+| `CTRAX_TOO_LARGE` | 2 | error | "One slot per track id would not fit in memory." Fix: set `top_n` to keep only the longest tracks. |
 | `DLC_BAD_VALUE` | 2 | error | "<file> has cells that are not numbers." An empty cell is missing data; a text cell is an error and is never silently turned into a gap. |
 
 The `IDT_*` codes are sourced from [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) §7.1 and become live when the reader rewrite lands.

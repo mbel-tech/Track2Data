@@ -53,7 +53,7 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 |---|---|---|---|---|
 | 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) | 1 | **built** (CSV); `.h5` planned | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` waits for the G-H5 decision |
 | 2 | SLEAP analysis HDF5 | 1 | **built** | `sleap_named_tracks`, `sleap_no_tracks` pass |
-| 3 | Ctrax raw `.mat`, `trx.mat`, FlyTracker | 2 | planned | `ctrax_raw_mat` |
+| 3 | Ctrax raw `.mat` (**built**), `trx.mat`, FlyTracker | 2 | raw `.mat` built; `trx.mat` waits for a real sample; FlyTracker recognise-only | `ctrax_raw_mat` passes |
 | 4 | ToxTrac `Tracking_RealSpace.txt` | 3 | planned | `toxtrac_realspace` |
 | 5 | Anipose pose-3d CSV (and DLC-3D) | 3 | planned | quirk tests only |
 | 6 | TRex `.npz` | 4 | planned | `trex_new_export`, `trex_old_export` |
@@ -103,3 +103,22 @@ Reads the file SLEAP writes from File > Export Analysis HDF5. Verified against t
 | Missing | NaN. |
 | Traps handled | A project with no tracks writes an empty *float64* `track_names`. A skeleton with no edges writes an empty `(0,)` `edge_inds`. Names are bytes and are decoded. |
 | Not yet | Other axis orders (no real sample), the sleap-io writer's CSV layouts, `.slp` projects. |
+
+
+### Ctrax raw `.mat` (`ctrax_mat`)
+
+The file Ctrax's "Save Tracks as Matlab File" writes. Verified against the real
+`2602_ISA3080_Low_5.mat` sample (12,033 frames, 159,765 detections, 193 track ids).
+
+| | |
+|---|---|
+| Session | One per `.mat` file. A folder of them is scanned and added together. |
+| Detect | A classic (v5) MATLAB file whose variables include `ntargets`, `x_pos`, `y_pos`, `identity`, `timestamps` and `startframe`, and **no** `trx`. A `trx.mat` (Ctrax / FlyTracker / JAABA struct) is a different format and is not claimed; v7.3 (HDF5) files are not claimed either, as there is no real sample of one. |
+| You supply | Frame width and **height** in pixels (the file records neither; height is needed to flip y). Optionally `top_n`: keep only that many of the longest tracks. The frame rate is **not** asked for: it is read from `timestamps`. |
+| Layout | Everything is per *detection*, concatenated frame by frame: frame `t` owns the next `ntargets[t]` rows. The counts, the per-detection arrays and the timestamps must agree, or the file is refused with `CTRAX_INCONSISTENT`. |
+| y axis | Ctrax measures y from the **bottom**. Positions are returned as `height - y`, in image coordinates (verified against AnimalTA on the same video: about 1 px with the flip, over 300 px without). |
+| Frame rate | `(n_frames - 1) / (last timestamp - first timestamp)`, an average over the whole span. A file whose timestamps wander by more than half a frame says so on the session instead of hiding it. |
+| Identity | Track ids are **fragments**, not animals: Ctrax starts a new id each time it loses a track. Every id becomes a slot, the session is identity-free by construction (`track_wo_identities`), and the scan says so. `top_n` keeps the longest tracks (ties to the lower id). A file whose slots would not fit in memory is refused with a request to set `top_n`. |
+| Frame offset | `startframe` greater than 0 is recorded as the tracking interval, so true frame numbers are kept. |
+| Missing | A frame with no detection for a track is NaN. |
+| Not yet | `trx.mat` (needs a real sample), v7.3 files, ellipse axes and angle (`maj_ax`, `min_ax`, `angle` are not used). |
