@@ -50,3 +50,22 @@ def view_skipped_metrics(
         if reason is not None:
             skipped[mid] = reason
     return skipped
+
+
+def view_dependent_metrics(
+    metric_ids: Iterable[str],
+    camera_view: str,
+    lookup: Callable[[str], Any],
+) -> list[str]:
+    """The ids in *metric_ids* that only run for views that include *camera_view*.
+
+    These are the metrics a project gets *because* it declared that view, so the screens use it
+    to ask for what such a view needs (a side view needs a water column) only when something
+    selected will use it.
+    """
+    needing: list[str] = []
+    for mid in metric_ids:
+        valid = getattr(lookup(mid), "valid_camera_views", None)
+        if valid is not None and camera_view in valid:
+            needing.append(mid)
+    return needing
