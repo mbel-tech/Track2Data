@@ -95,12 +95,12 @@ class ConfirmFormatDialog(QDialog):
         root.setSpacing(10)
 
         title = QLabel("Confirm tracking software")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;")
+        title.setStyleSheet("font-size: 20px; font-weight: bold;")
         root.addWidget(title)
 
         self.summary_label = QLabel()
         self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet("color: #555;")
+        self.summary_label.setStyleSheet("")
         root.addWidget(self.summary_label)
 
         self.truncated_label = QLabel(
@@ -142,7 +142,7 @@ class ConfirmFormatDialog(QDialog):
 
         self.evidence_label = QLabel()
         self.evidence_label.setWordWrap(True)
-        self.evidence_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.evidence_label.setStyleSheet(" font-size: 12px;")
         content.addWidget(self.evidence_label)
 
         self._options_holder = QVBoxLayout()
@@ -174,9 +174,11 @@ class ConfirmFormatDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch()
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setProperty("role", "outline")
         self.cancel_button.setAutoDefault(False)
         self.cancel_button.clicked.connect(self.reject)
         self.ok_button = QPushButton("Add")
+        self.ok_button.setProperty("role", "primary")
         self.ok_button.setDefault(True)
         self.ok_button.clicked.connect(self.accept)
         buttons.addWidget(self.cancel_button)

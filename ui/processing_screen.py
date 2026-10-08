@@ -78,7 +78,7 @@ class ProcessingScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Processing")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
@@ -86,17 +86,20 @@ class ProcessingScreen(QWidget):
             "metric extraction across all sessions."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── buttons ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self._validate_btn = QPushButton("Validate pipeline")
+        self._validate_btn.setProperty("role", "outline")
         self._validate_btn.clicked.connect(self._validate)
         self._run_btn = QPushButton("Run pipeline")
+        self._run_btn.setProperty("role", "accent")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.start_run)
         self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setProperty("role", "outline")
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.clicked.connect(self._cancel_run)
         btn_row.addWidget(self._validate_btn)
@@ -121,7 +124,7 @@ class ProcessingScreen(QWidget):
         root.addWidget(self._progress)
 
         self._status_label = QLabel("Ready")
-        self._status_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._status_label.setStyleSheet("font-size: 13px;")
         root.addWidget(self._status_label)
 
         self._status_table = QTableWidget(0, 4)

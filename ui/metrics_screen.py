@@ -113,11 +113,11 @@ class MetricsScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Metrics")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel("Choose which behavioural metrics to extract.")
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── search + presets ─────────────────────────────────────────────
@@ -136,7 +136,7 @@ class MetricsScreen(QWidget):
         tools.addWidget(self._preset_combo)
         root.addLayout(tools)
         self._search_hint = QLabel("")
-        self._search_hint.setStyleSheet("font-size: 12px; color: #777;")
+        self._search_hint.setStyleSheet("font-size: 12px;")
         root.addWidget(self._search_hint)
 
         self._tabs = QTabWidget()
@@ -152,14 +152,14 @@ class MetricsScreen(QWidget):
         root.addWidget(self._tabs, 1)
 
         self._counter = QLabel("")
-        self._counter.setStyleSheet("font-size: 13px; color: #2c3e50; font-weight: bold;")
+        self._counter.setStyleSheet("font-size: 13px; font-weight: bold;")
         root.addWidget(self._counter)
         self._diag_note = QLabel(
             "Diagnostic metrics (D-1 … D-10: coverage, accuracy, identity stability, …) "
             "are always computed and are not listed here."
         )
         self._diag_note.setWordWrap(True)
-        self._diag_note.setStyleSheet("font-size: 12px; color: #777;")
+        self._diag_note.setStyleSheet("font-size: 12px;")
         root.addWidget(self._diag_note)
 
         qform = QFormLayout()

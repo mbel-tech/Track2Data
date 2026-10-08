@@ -133,7 +133,7 @@ class ImportScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Sessions")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
@@ -142,7 +142,7 @@ class ImportScreen(QWidget):
             "to confirm before anything is added."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── table ─────────────────────────────────────────────────────────
@@ -165,11 +165,14 @@ class ImportScreen(QWidget):
         # ── buttons ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         add_btn = QPushButton("Add Folders…")
+        add_btn.setProperty("role", "accent")
         add_btn.setObjectName("add_folders")
         add_btn.clicked.connect(self._add_folders)
         remove_btn = QPushButton("Remove Selected")
+        remove_btn.setProperty("role", "outline")
         remove_btn.clicked.connect(self._remove_selected)
         self._locate_btn = QPushButton("Locate Video…")
+        self._locate_btn.setProperty("role", "outline")
         self._locate_btn.setToolTip(
             "Point the selected session at its video file. idtracker.ai records the path "
             "the video had on the machine it was tracked on, which is often not valid here."
@@ -191,6 +194,7 @@ class ImportScreen(QWidget):
         self._scan_bar = QProgressBar()
         self._scan_bar.setRange(0, 100)
         self._scan_cancel_btn = QPushButton("Cancel")
+        self._scan_cancel_btn.setProperty("role", "outline")
         self._scan_cancel_btn.clicked.connect(self._cancel_scan)
         scan_layout.addWidget(self._scan_label)
         scan_layout.addWidget(self._scan_bar, 1)
@@ -206,7 +210,7 @@ class ImportScreen(QWidget):
 
         # ── status ─────────────────────────────────────────────────────
         self._status_label = QLabel("0 sessions imported")
-        self._status_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._status_label.setStyleSheet("font-size: 13px;")
         root.addWidget(self._status_label)
 
         root.addStretch()

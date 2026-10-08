@@ -123,14 +123,14 @@ class PreviewScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Preview & Diagnostics")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
             "Inspect project summary, quality-control diagnostics, and metric previews."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── tabs ──────────────────────────────────────────────────────────
@@ -152,6 +152,7 @@ class PreviewScreen(QWidget):
         self._traj_session_combo = QComboBox()
         top.addWidget(self._traj_session_combo, 1)
         self._traj_load_btn = QPushButton("Load trajectories")
+        self._traj_load_btn.setProperty("role", "outline-primary")
         self._traj_load_btn.setEnabled(False)
         self._traj_load_btn.clicked.connect(self._load_trajectories)
         top.addWidget(self._traj_load_btn)
@@ -162,7 +163,7 @@ class PreviewScreen(QWidget):
             "changed, and where the animals spent their time."
         )
         self._traj_status.setWordWrap(True)
-        self._traj_status.setStyleSheet("font-size: 12px; color: #777;")
+        self._traj_status.setStyleSheet("font-size: 12px;")
         lay.addWidget(self._traj_status)
 
         self._traj_view = TrajectoryView()
@@ -285,7 +286,7 @@ class PreviewScreen(QWidget):
         summary_layout = QVBoxLayout(summary_w)
         self._summary_label = QLabel("(no project open)")
         self._summary_label.setWordWrap(True)
-        self._summary_label.setStyleSheet("font-size: 13px; color: #2c3e50;")
+        self._summary_label.setStyleSheet("font-size: 13px;")
         summary_layout.addWidget(self._summary_label)
         summary_layout.addStretch()
         return summary_w
@@ -295,7 +296,7 @@ class PreviewScreen(QWidget):
         diag_layout = QVBoxLayout(diag_w)
 
         self._diag_placeholder = QLabel("Run the pipeline to see diagnostics.")
-        self._diag_placeholder.setStyleSheet("color: #aaa; font-style: italic;")
+        self._diag_placeholder.setStyleSheet(" font-style: italic;")
         diag_layout.addWidget(self._diag_placeholder)
 
         selector_form = QFormLayout()
@@ -307,7 +308,7 @@ class PreviewScreen(QWidget):
         diag_layout.addLayout(selector_form)
 
         individual_label = QLabel("Per-individual (D-1 coverage, D-3 ID-probability stats)")
-        individual_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        individual_label.setStyleSheet("font-weight: bold;")
         diag_layout.addWidget(individual_label)
         self._diag_individual_table = QTableWidget()
         diag_layout.addWidget(self._diag_individual_table)
@@ -315,13 +316,13 @@ class PreviewScreen(QWidget):
         session_label = QLabel(
             "Session-level (D-2 accuracy, D-4 inconsistent frames, D-5 identity stability)"
         )
-        session_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        session_label.setStyleSheet("font-weight: bold;")
         diag_layout.addWidget(session_label)
         self._diag_session_table = QTableWidget()
         diag_layout.addWidget(self._diag_session_table)
 
         preprocess_label = QLabel("Preprocessing steps")
-        preprocess_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        preprocess_label.setStyleSheet("font-weight: bold;")
         diag_layout.addWidget(preprocess_label)
         self._diag_preprocess_table = QTableWidget()
         diag_layout.addWidget(self._diag_preprocess_table)
@@ -334,7 +335,7 @@ class PreviewScreen(QWidget):
         metric_layout = QVBoxLayout(metric_w)
 
         self._metrics_placeholder = QLabel("Run the pipeline to see metric previews.")
-        self._metrics_placeholder.setStyleSheet("color: #aaa; font-style: italic;")
+        self._metrics_placeholder.setStyleSheet(" font-style: italic;")
         metric_layout.addWidget(self._metrics_placeholder)
 
         selector_form = QFormLayout()

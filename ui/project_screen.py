@@ -46,11 +46,11 @@ class ProjectScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Project")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel("Create a new project or open an existing one.")
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── form ──────────────────────────────────────────────────────────
@@ -63,8 +63,9 @@ class ProjectScreen(QWidget):
 
         dir_row = QHBoxLayout()
         self._dir_label = QLabel("(no directory selected)")
-        self._dir_label.setStyleSheet("color: #666; font-style: italic;")
+        self._dir_label.setStyleSheet(" font-style: italic;")
         browse_btn = QPushButton("Browse…")
+        browse_btn.setProperty("role", "outline")
         browse_btn.setFixedWidth(90)
         browse_btn.clicked.connect(self._browse_dir)
         dir_row.addWidget(self._dir_label, 1)
@@ -76,8 +77,10 @@ class ProjectScreen(QWidget):
         # ── action buttons ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self._create_btn = QPushButton("Create Project")
+        self._create_btn.setProperty("role", "primary")
         self._create_btn.clicked.connect(self._create_project)
         open_btn = QPushButton("Open Project…")
+        open_btn.setProperty("role", "outline")
         open_btn.clicked.connect(self._open_project)
         btn_row.addWidget(self._create_btn)
         btn_row.addWidget(open_btn)
@@ -86,7 +89,7 @@ class ProjectScreen(QWidget):
 
         # ── status ─────────────────────────────────────────────────────
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("font-size: 13px; color: #2c3e50; margin-top: 8px;")
+        self._status_label.setStyleSheet("font-size: 13px; margin-top: 8px;")
         root.addWidget(self._status_label)
 
         root.addStretch()
@@ -98,7 +101,7 @@ class ProjectScreen(QWidget):
         if directory:
             self._selected_dir = directory
             self._dir_label.setText(directory)
-            self._dir_label.setStyleSheet("color: #2c3e50;")
+            self._dir_label.setStyleSheet("")
 
     def _create_project(self) -> None:
         name = self._name_edit.text().strip()

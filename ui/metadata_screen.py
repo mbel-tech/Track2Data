@@ -84,24 +84,26 @@ class MetadataScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Metadata")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
             "Import a trial-metadata CSV and map columns to canonical fields."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── file row ──────────────────────────────────────────────────────
         file_row = QHBoxLayout()
         load_btn = QPushButton("Load metadata CSV…")
+        load_btn.setProperty("role", "accent")
         load_btn.clicked.connect(self._load_csv)
         skip_btn = QPushButton("Skip metadata")
+        skip_btn.setProperty("role", "outline")
         skip_btn.clicked.connect(self._skip_metadata)
         self._file_label = QLabel("(no file loaded)")
-        self._file_label.setStyleSheet("color: #666; font-style: italic;")
+        self._file_label.setStyleSheet(" font-style: italic;")
         file_row.addWidget(load_btn)
         file_row.addWidget(skip_btn)
         file_row.addWidget(self._file_label, 1)
@@ -114,7 +116,7 @@ class MetadataScreen(QWidget):
 
         # ── column mapping ────────────────────────────────────────────────
         map_label = QLabel("Column mapping:")
-        map_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        map_label.setStyleSheet("font-weight: bold;")
         root.addWidget(map_label)
 
         # Stored on self (not just a local) so tests can inspect the
@@ -147,7 +149,7 @@ class MetadataScreen(QWidget):
         self._mapping_form.addRow("Match animals by:", self._match_mode)
 
         extra_label = QLabel("Also include these columns (e.g. weight, sex):")
-        extra_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        extra_label.setStyleSheet("font-weight: bold;")
         root.addWidget(extra_label)
         self._extra_list = QListWidget()
         self._extra_list.setMaximumHeight(110)
@@ -156,7 +158,7 @@ class MetadataScreen(QWidget):
 
         self._match_label = QLabel("")
         self._match_label.setWordWrap(True)
-        self._match_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._match_label.setStyleSheet("font-size: 13px;")
         root.addWidget(self._match_label)
 
         root.addStretch()
@@ -190,7 +192,7 @@ class MetadataScreen(QWidget):
             self._populate_preview(headers, data_rows)
             self._populate_combos(headers)
             self._file_label.setText(Path(path).name)
-            self._file_label.setStyleSheet("color: #2c3e50;")
+            self._file_label.setStyleSheet("")
             if self._store is not None:
                 csv_path = Path(path)
                 self._store.update_metadata_source(
@@ -256,7 +258,7 @@ class MetadataScreen(QWidget):
         if self._store is not None:
             self._store.update_metadata_source(None)
         self._file_label.setText("(skipped)")
-        self._file_label.setStyleSheet("color: #666; font-style: italic;")
+        self._file_label.setStyleSheet(" font-style: italic;")
         self._preview.setRowCount(0)
         self._preview.setColumnCount(0)
 
@@ -333,7 +335,7 @@ class MetadataScreen(QWidget):
         with self._auto.suppressed():
             self._fill_combos(rows[0])
         self._file_label.setText(src.path.name)
-        self._file_label.setStyleSheet("color: #2c3e50;")
+        self._file_label.setStyleSheet("")
 
     def _per_animal_notes(self, manifest, result) -> list[str]:
         """Problems with per-animal rows that the engine will only log: animals

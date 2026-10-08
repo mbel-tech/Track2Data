@@ -60,13 +60,13 @@ class CalibrationScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Calibration")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
             "Convert pixel distances to real-world units."
         )
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── mode selection ────────────────────────────────────────────────
@@ -91,7 +91,7 @@ class CalibrationScreen(QWidget):
         self._bl_label = QLabel(
             "Body length will be derived from session bounding boxes."
         )
-        self._bl_label.setStyleSheet("color: #555; font-size: 13px;")
+        self._bl_label.setStyleSheet(" font-size: 13px;")
         self._bl_label.setWordWrap(True)
         root.addWidget(self._bl_label)
 
@@ -106,6 +106,7 @@ class CalibrationScreen(QWidget):
         self._px_spin.setSuffix(" px per unit")
         scalar_form.addRow("Pixels per unit:", self._px_spin)
         self._measure_btn = QPushButton("Measure on frame…")
+        self._measure_btn.setProperty("role", "outline")
         self._measure_btn.setToolTip(
             "Click both ends of an object of known length on a session frame"
         )
@@ -123,7 +124,7 @@ class CalibrationScreen(QWidget):
             "Uses each session's own calibration ratio, recorded by the "
             "idtracker.ai validator's Length Calibration tool."
         )
-        session_info.setStyleSheet("color: #555; font-size: 13px;")
+        session_info.setStyleSheet(" font-size: 13px;")
         session_info.setWordWrap(True)
         session_layout.addWidget(session_info)
 
@@ -140,7 +141,7 @@ class CalibrationScreen(QWidget):
         session_layout.addWidget(self._confirm_check)
 
         readiness_label = QLabel("Per-session readiness:")
-        readiness_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        readiness_label.setStyleSheet("font-weight: bold;")
         session_layout.addWidget(readiness_label)
         self._readiness_list = QListWidget()
         self._readiness_list.setMinimumHeight(100)

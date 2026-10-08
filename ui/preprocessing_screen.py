@@ -71,13 +71,13 @@ class PreprocessingScreen(QWidget):
         outer.setSpacing(16)
 
         title = QLabel("Preprocessing")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         outer.addWidget(title)
 
         subtitle = QLabel(
             "Enable and configure the preprocessing pipeline steps."
         )
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         outer.addWidget(subtitle)
 
         # scrollable area for all groups

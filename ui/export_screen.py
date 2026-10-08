@@ -118,11 +118,11 @@ class ExportScreen(QWidget):
         root.setSpacing(16)
 
         title = QLabel("Export")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel("Choose export formats and target directory.")
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── exporter checkboxes ───────────────────────────────────────────
@@ -143,9 +143,10 @@ class ExportScreen(QWidget):
         # ── output directory ──────────────────────────────────────────────
         dir_row = QHBoxLayout()
         browse_btn = QPushButton("Browse output directory…")
+        browse_btn.setProperty("role", "outline")
         browse_btn.clicked.connect(self._browse_dir)
         self._dir_label = QLabel("(defaults to project exports directory)")
-        self._dir_label.setStyleSheet("color: #666; font-style: italic;")
+        self._dir_label.setStyleSheet(" font-style: italic;")
         dir_row.addWidget(browse_btn)
         dir_row.addWidget(self._dir_label, 1)
         root.addLayout(dir_row)
@@ -166,9 +167,11 @@ class ExportScreen(QWidget):
         # ── export / cancel buttons ─────────────────────────────────────────
         btn_row = QHBoxLayout()
         self._export_btn = QPushButton("Export")
+        self._export_btn.setProperty("role", "accent")
         self._export_btn.setEnabled(False)
         self._export_btn.clicked.connect(self._run_export)
         self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setProperty("role", "outline")
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.clicked.connect(self._cancel_export)
         btn_row.addWidget(self._export_btn)
@@ -177,7 +180,7 @@ class ExportScreen(QWidget):
         root.addLayout(btn_row)
 
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._status_label.setStyleSheet("font-size: 13px;")
         root.addWidget(self._status_label)
 
         # ── receipt table ────────────────────────────────────────────────
@@ -194,9 +197,11 @@ class ExportScreen(QWidget):
 
         receipt_btn_row = QHBoxLayout()
         self._open_folder_btn = QPushButton("Open folder")
+        self._open_folder_btn.setProperty("role", "outline")
         self._open_folder_btn.setEnabled(False)
         self._open_folder_btn.clicked.connect(self._open_output_folder)
         self._copy_cli_btn = QPushButton("Copy CLI equivalent")
+        self._copy_cli_btn.setProperty("role", "outline")
         self._copy_cli_btn.setEnabled(False)
         self._copy_cli_btn.clicked.connect(self._copy_cli_equivalent)
         receipt_btn_row.addWidget(self._open_folder_btn)
@@ -214,6 +219,7 @@ class ExportScreen(QWidget):
         self._snippet_combo.currentIndexChanged.connect(self._show_selected_snippet)
         snippet_top.addWidget(self._snippet_combo)
         self._snippet_copy_btn = QPushButton("Copy code")
+        self._snippet_copy_btn.setProperty("role", "outline")
         self._snippet_copy_btn.clicked.connect(self._copy_snippet)
         snippet_top.addWidget(self._snippet_copy_btn)
         snippet_top.addStretch()
@@ -261,7 +267,7 @@ class ExportScreen(QWidget):
     def _set_output_dir(self, directory: str) -> None:
         self._output_dir = directory
         self._dir_label.setText(directory)
-        self._dir_label.setStyleSheet("color: #2c3e50;")
+        self._dir_label.setStyleSheet("")
         self._check_overwrite()
 
     def _default_dir(self) -> Path:
@@ -353,10 +359,10 @@ class ExportScreen(QWidget):
         has_project = self._store is not None and self._store.has_project
         if has_project:
             self._dir_label.setText(str(self._resolved_out_dir()))
-            self._dir_label.setStyleSheet("color: #555;")
+            self._dir_label.setStyleSheet("")
         else:
             self._dir_label.setText("(defaults to project exports directory)")
-            self._dir_label.setStyleSheet("color: #666; font-style: italic;")
+            self._dir_label.setStyleSheet(" font-style: italic;")
         self._check_overwrite()
 
     def _on_task_finished(self, task_id: str, result: object) -> None:

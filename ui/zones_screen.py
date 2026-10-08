@@ -82,7 +82,7 @@ class ZonesScreen(QWidget):
         outer.setSpacing(16)
 
         title = QLabel("Zones")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         outer.addWidget(title)
 
         subtitle = QLabel(
@@ -90,7 +90,7 @@ class ZonesScreen(QWidget):
             "idtracker.ai session, or clear the current zones."
         )
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         outer.addWidget(subtitle)
 
         # Everything else -- zone list, session import, landmarks, the
@@ -115,8 +115,10 @@ class ZonesScreen(QWidget):
         # ── buttons ───────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         load_btn = QPushButton("Load zones from CSV…")
+        load_btn.setProperty("role", "outline")
         load_btn.clicked.connect(self._load_csv)
         clear_btn = QPushButton("Clear Zones")
+        clear_btn.setProperty("role", "outline")
         clear_btn.clicked.connect(self._clear_zones)
         btn_row.addWidget(load_btn)
         btn_row.addWidget(clear_btn)
@@ -125,7 +127,7 @@ class ZonesScreen(QWidget):
 
         # ── count ──────────────────────────────────────────────────────
         self._count_label = QLabel("0 zones loaded")
-        self._count_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._count_label.setStyleSheet("font-size: 13px;")
         root.addWidget(self._count_label)
 
         # ── resolution-mismatch warning ──────────────────────────────────
@@ -137,7 +139,7 @@ class ZonesScreen(QWidget):
 
         # ── import from session ──────────────────────────────────────────
         import_label = QLabel("Import from session:")
-        import_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        import_label.setStyleSheet("font-weight: bold;")
         root.addWidget(import_label)
 
         import_row = QFormLayout()
@@ -147,6 +149,7 @@ class ZonesScreen(QWidget):
 
         import_btn_row = QHBoxLayout()
         import_btn = QPushButton("Import ROIs from Session")
+        import_btn.setProperty("role", "outline")
         import_btn.clicked.connect(self._import_from_session)
         import_btn_row.addWidget(import_btn)
         import_btn_row.addStretch()
@@ -159,7 +162,7 @@ class ZonesScreen(QWidget):
         # produce a nonsense hull. The user still draws/imports the
         # actual ROI polygons above.
         landmarks_label = QLabel("Landmarks (from the validator):")
-        landmarks_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        landmarks_label.setStyleSheet("font-weight: bold;")
         root.addWidget(landmarks_label)
         self._landmarks_list = QListWidget()
         self._landmarks_list.setMinimumHeight(80)
@@ -170,7 +173,7 @@ class ZonesScreen(QWidget):
             "Click points (or use the Rectangle / Circle tools) to outline a zone. "
             "Saved zones are shown shaded."
         )
-        canvas_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        canvas_label.setStyleSheet("font-weight: bold;")
         root.addWidget(canvas_label)
 
         self._canvas = ZoneCanvas()
@@ -179,6 +182,7 @@ class ZonesScreen(QWidget):
 
         canvas_btn_row = QHBoxLayout()
         self._custom_point_btn = QPushButton("Add Custom Point")
+        self._custom_point_btn.setProperty("role", "outline")
         self._custom_point_btn.setCheckable(True)
         self._custom_point_btn.toggled.connect(self._canvas.set_custom_point_mode)
         canvas_btn_row.addWidget(self._custom_point_btn)
@@ -201,10 +205,12 @@ class ZonesScreen(QWidget):
             canvas_btn_row.addWidget(btn)
             self._tool_buttons[tool] = btn
         self._undo_btn = QPushButton("Undo point")
+        self._undo_btn.setProperty("role", "outline")
         self._undo_btn.setToolTip("Remove the last vertex (Ctrl+Z)")
         self._undo_btn.clicked.connect(self._canvas.undo_last_point)
         canvas_btn_row.addWidget(self._undo_btn)
         self._fit_btn = QPushButton("Fit")
+        self._fit_btn.setProperty("role", "outline")
         self._fit_btn.setToolTip("Fit the image to the view. Wheel = zoom, middle-drag = pan.")
         self._fit_btn.clicked.connect(self._canvas.fit_to_view)
         canvas_btn_row.addWidget(self._fit_btn)
@@ -222,11 +228,12 @@ class ZonesScreen(QWidget):
 
         save_zone_row = QHBoxLayout()
         self._save_zone_btn = QPushButton("Save Zone")
+        self._save_zone_btn.setProperty("role", "primary")
         self._save_zone_btn.setEnabled(False)
         self._save_zone_btn.clicked.connect(self._save_zone)
         save_zone_row.addWidget(self._save_zone_btn)
         self._selection_count_label = QLabel("0 points selected")
-        self._selection_count_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._selection_count_label.setStyleSheet("font-size: 13px;")
         save_zone_row.addWidget(self._selection_count_label)
         save_zone_row.addStretch()
         root.addLayout(save_zone_row)

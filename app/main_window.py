@@ -12,25 +12,36 @@ Implements the QMainWindow shell described in UI_DESIGN.md §3:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
+from datetime import datetime
+
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QDesktopServices,
+    QKeySequence,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
+    QFrame,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
-    QScrollArea,
-    QSizePolicy,
+    QPlainTextEdit,
+    QPushButton,
     QStackedWidget,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
 from app.navigation import WizardSidebar
 from app.state import ProjectStore
+from app.theme import RESOURCES, theme
 from track2data import __version__
 from ui.calibration_screen import CalibrationScreen
 from ui.export_screen import ExportScreen
@@ -51,34 +62,53 @@ APP_VERSION = __version__
 GUIDE_URL = "https://github.com/mbel-tech/Track2Data/blob/main/docs/guide/USER_GUIDE.md"
 
 
-class RunLogDock(QWidget):
-    """Scrollable Markdown run-log viewer (bottom dock)."""
+class RunLogDock(QPlainTextEdit):
+    """Run-log drawer: ``HH:MM:SS  message`` lines in a monospace pane."""
+
+    MAX_LINES = 200
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
+        self.setObjectName("RunLog")
+        self.setReadOnly(True)
+        self.setMaximumBlockCount(self.MAX_LINES)
+        self.setPlaceholderText("No activity yet.")
+        self.setFixedHeight(150)
+        self._n = 0
 
-        self._label = QLabel("No activity yet.")
-        self._label.setWordWrap(True)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self._label.setStyleSheet("color: #ddd; font-size: 11px; font-family: monospace;")
-        self._label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+    @property
+    def line_count(self) -> int:
+        return self._n
 
-        scroll = QScrollArea()
-        scroll.setWidget(self._label)
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("background: #1a1a2e; border: none;")
-        layout.addWidget(scroll)
+    def append(self, text: str) -> None:  # type: ignore[override]
+        stamp = datetime.now().strftime("%H:%M:%S")
+        for line in str(text).splitlines():
+            if line.strip():
+                self.appendPlainText(f"{stamp}  {line}")
+                self._n += 1
 
-        self._lines: list[str] = []
 
-    def append(self, text: str) -> None:
-        self._lines.append(text)
-        # Keep last 200 lines to avoid unbounded growth.
-        if len(self._lines) > 200:
-            self._lines = self._lines[-200:]
-        self._label.setText("\n".join(self._lines))
+class Toast(QLabel):
+    """Dark pill shown for a couple of seconds near the bottom of the window."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("Toast")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hide()
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+    def show_message(self, text: str, ms: int = 2200) -> None:
+        self.setText(text)
+        self.adjustSize()
+        parent = self.parentWidget()
+        x = (parent.width() - self.width()) // 2
+        self.move(QPoint(x, parent.height() - 76 - self.height()))
+        self.raise_()
+        self.show()
+        self._timer.start(ms)
 
 
 class MainWindow(QMainWindow):
@@ -114,8 +144,22 @@ class MainWindow(QMainWindow):
         # screen's own Run button (issue #22).
         self._processing_screen = pages[7]
         for page in pages:
+            page.setObjectName("Page")
             self._stack.addWidget(page)
-        self.setCentralWidget(self._stack)
+
+        # page content, run-log drawer (collapsed) and the footer bar
+        self._run_log = RunLogDock()
+        self._run_log.hide()
+        self._footer = self._build_footer()
+        central = QWidget()
+        col = QVBoxLayout(central)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        col.addWidget(self._stack, 1)
+        col.addWidget(self._run_log)
+        col.addWidget(self._footer)
+        self.setCentralWidget(central)
+        self._toast = Toast(central)
 
         # ── sidebar ────────────────────────────────────────────────────────
         self._sidebar = WizardSidebar()
@@ -125,20 +169,16 @@ class MainWindow(QMainWindow):
         sidebar_dock.setTitleBarWidget(self._make_sidebar_header())
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, sidebar_dock)
 
-        # ── run log dock ───────────────────────────────────────────────────
-        self._run_log = RunLogDock()
-        self._log_dock = QDockWidget("Run Log", self)
-        self._log_dock.setWidget(self._run_log)
-        self._log_dock.setMinimumHeight(100)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._log_dock)
-
         # ── chrome ────────────────────────────────────────────────────────
         self._build_menu()
-        self._build_toolbar()
+        self._build_actions()
         self._build_statusbar()
+        self.statusBar().hide()  # superseded by sidebar summaries and toasts
 
         # ── wire signals ──────────────────────────────────────────────────
         self._sidebar.stage_page_selected.connect(self._go_to_page)
+        self._sidebar.locked_clicked.connect(lambda _i: self.show_toast("Run the pipeline first"))
+        theme.changed.connect(self._on_theme_changed)
         self._store.projectChanged.connect(self._update_statusbar)
         self._store.sessionsChanged.connect(self._update_statusbar)
         self._store.projectChanged.connect(self._on_project_opened)
@@ -155,6 +195,7 @@ class MainWindow(QMainWindow):
         ):
             sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
+        self._store.runLogAppended.connect(lambda _t: self._update_log_toggle())
         self._store.pickleConsentRequired.connect(self._ask_pickle_consent)
         # taskStarted/taskCancelled are deliberately NOT forwarded onto
         # ProjectStore's own signals (see ProjectStore's docstring) --
@@ -163,6 +204,8 @@ class MainWindow(QMainWindow):
         self._store.tasks.taskCancelled.connect(self._on_task_cancelled)
         self._store.taskFinished.connect(self._on_task_finished)
 
+        theme.apply()
+        self.resize(1280, 800)
         # Start on page 0.
         self._go_to_page(0)
         self._refresh_stage_status()
@@ -171,16 +214,74 @@ class MainWindow(QMainWindow):
 
     def _make_sidebar_header(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet("background: #1a252f;")
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(10, 8, 10, 8)
-        lbl = QLabel("Track2Data")
-        lbl.setStyleSheet("color: #ecf0f1; font-weight: bold; font-size: 14px;")
-        ver = QLabel(f"v{APP_VERSION}")
-        ver.setStyleSheet("color: #7f8c8d; font-size: 10px;")
-        layout.addWidget(lbl)
-        layout.addWidget(ver)
+        w.setObjectName("SidebarHeader")
+        row = QHBoxLayout(w)
+        row.setContentsMargins(20, 18, 16, 14)
+        row.setSpacing(10)
+        logo = QLabel()
+        icon = RESOURCES / "icon.png"
+        if icon.exists():
+            logo.setPixmap(
+                QPixmap(str(icon)).scaled(
+                    32, 32, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        text = QVBoxLayout()
+        text.setSpacing(0)
+        name = QLabel("Track2Data")
+        name.setObjectName("AppName")
+        self._project_sub = QLabel(f"v{APP_VERSION}")
+        self._project_sub.setObjectName("ProjectSub")
+        text.addWidget(name)
+        text.addWidget(self._project_sub)
+        row.addWidget(logo)
+        row.addLayout(text, 1)
         return w
+
+    def _build_footer(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("FooterBar")
+        bar.setFixedHeight(56)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(24, 0, 24, 0)
+        row.setSpacing(10)
+        self._btn_back = QPushButton("← Back")
+        self._btn_back.setProperty("role", "outline")
+        self._btn_log = QPushButton("Run log · 0 lines ▴")
+        self._btn_log.setProperty("role", "link")
+        self._btn_log.setFlat(True)
+        self._btn_log.clicked.connect(lambda: self._toggle_log())
+        self._btn_run = QPushButton("⟶ Run pipeline")
+        self._btn_run.setProperty("role", "outline-primary")
+        self._btn_next = QPushButton("Next →")
+        self._btn_next.setProperty("role", "primary")
+        row.addWidget(self._btn_back)
+        row.addWidget(self._btn_log)
+        row.addStretch(1)
+        row.addWidget(self._btn_run)
+        row.addWidget(self._btn_next)
+        return bar
+
+    def show_toast(self, text: str) -> None:
+        self._toast.show_message(text)
+
+    def _toggle_log(self, visible: bool | None = None) -> None:
+        visible = (not self._run_log.isVisible()) if visible is None else visible
+        self._run_log.setVisible(visible)
+        self._log_action.blockSignals(True)
+        self._log_action.setChecked(visible)
+        self._log_action.blockSignals(False)
+        self._update_log_toggle()
+
+    def _update_log_toggle(self) -> None:
+        arrow = "▾" if self._run_log.isVisible() else "▴"
+        n = self._run_log.line_count
+        self._btn_log.setText(f"Run log · {n} line{'s' if n != 1 else ''} {arrow}")
+
+    def _on_theme_changed(self, name: str) -> None:
+        self._theme_pill.setText("◐ Dark" if name == "light" else "☀ Light")
+        self._theme_actions[name].setChecked(True)
 
     # ── menu bar ────────────────────────────────────────────────────────────
 
@@ -213,58 +314,90 @@ class MainWindow(QMainWindow):
 
         # Edit
         edit_menu = mb.addMenu("&Edit")
+        edit_menu.addAction(
+            QAction("&Undo", self, shortcut=QKeySequence.StandardKey.Undo, enabled=False)
+        )
+        edit_menu.addAction(
+            QAction("&Redo", self, shortcut=QKeySequence.StandardKey.Redo, enabled=False)
+        )
+        edit_menu.addSeparator()
         edit_menu.addAction(QAction("&Preferences…", self))  # Phase 3
 
         # Run
         run_menu = mb.addMenu("&Run")
         run_menu.addAction(
-            QAction("&Validate pipeline", self, triggered=self._action_validate)
+            QAction("&Validate", self, shortcut="Ctrl+Shift+V", triggered=self._action_validate)
         )
         run_menu.addAction(
-            QAction("&Run pipeline", self,
-                    shortcut="Ctrl+R",
-                    triggered=self._action_run)
+            QAction("&Run pipeline", self, shortcut="Ctrl+R", triggered=self._action_run)
         )
+        self._menu_cancel = QAction(
+            "&Cancel run", self, shortcut="Ctrl+.", enabled=False,
+            triggered=lambda: self._action_cancel(),
+        )
+        run_menu.addAction(self._menu_cancel)
         run_menu.addSeparator()
-        run_menu.addAction(QAction("&Export…", self, triggered=self._action_export))
+        run_menu.addAction(
+            QAction("&Export…", self, shortcut="Ctrl+E", triggered=self._action_export)
+        )
 
         # View
         view_menu = mb.addMenu("&View")
-        toggle_log = QAction("Toggle &Run Log", self,
-                             triggered=lambda: self._log_dock.setVisible(
-                                 not self._log_dock.isVisible()))
-        toggle_log.setCheckable(True)
-        toggle_log.setChecked(True)
-        view_menu.addAction(toggle_log)
+        self._log_action = QAction("Run &log", self, shortcut="Ctrl+L", checkable=True)
+        self._log_action.toggled.connect(lambda on: self._toggle_log(bool(on)))
+        view_menu.addAction(self._log_action)
+        theme_menu = view_menu.addMenu("&Theme")
+        group = QActionGroup(self)
+        self._theme_actions: dict[str, QAction] = {}
+        for key, label in (("light", "Light"), ("dark", "Dark")):
+            act = QAction(label, self, checkable=True)
+            act.triggered.connect(lambda _c=False, k=key: theme.apply(k))
+            group.addAction(act)
+            theme_menu.addAction(act)
+            self._theme_actions[key] = act
+        self._theme_actions[theme.initial()].setChecked(True)
 
         # Help
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(
-            QAction("&About Track2Data", self, triggered=self._action_about)
-        )
-        help_menu.addAction(
             QAction("Open &user guide", self, triggered=self._action_open_guide)
         )
+        help_menu.addSeparator()
+        help_menu.addAction(
+            QAction("&About Track2Data", self, triggered=self._action_about)
+        )
+
+        # theme pill on the right of the menu bar
+        self._theme_pill = QPushButton("◐ Dark")
+        self._theme_pill.setObjectName("ThemePill")
+        self._theme_pill.setFlat(True)
+        self._theme_pill.clicked.connect(theme.toggle)
+        mb.setCornerWidget(self._theme_pill, Qt.Corner.TopRightCorner)
 
     # ── toolbar ─────────────────────────────────────────────────────────────
 
-    def _build_toolbar(self) -> None:
-        tb = QToolBar("Main toolbar", self)
-        tb.setMovable(False)
-        self.addToolBar(tb)
-
+    def _build_actions(self) -> None:
+        """Back / Next / Run / Cancel stay QActions (the tests and the menu
+        share them); the footer buttons mirror them."""
         self._back_action = QAction("◀  Back", self, triggered=self._go_back)
         self._next_action = QAction("Next  ▶", self, triggered=self._go_next)
-        self._run_action  = QAction("▶  Run pipeline", self, triggered=self._action_run)
+        self._run_action = QAction("▶  Run pipeline", self, triggered=self._action_run)
         self._run_action.setEnabled(False)
         self._cancel_action = QAction("■  Cancel", self, triggered=self._action_cancel)
         self._cancel_action.setEnabled(False)
-
-        tb.addAction(self._back_action)
-        tb.addAction(self._next_action)
-        tb.addSeparator()
-        tb.addAction(self._run_action)
-        tb.addAction(self._cancel_action)
+        for btn, act in (
+            (self._btn_back, self._back_action),
+            (self._btn_next, self._next_action),
+            (self._btn_run, self._run_action),
+        ):
+            btn.clicked.connect(act.trigger)
+            act.changed.connect(
+                lambda b=btn, a=act: (b.setEnabled(a.isEnabled()), b.setToolTip(a.toolTip()))
+            )
+            btn.setEnabled(act.isEnabled())
+        self._cancel_action.changed.connect(
+            lambda: self._menu_cancel.setEnabled(self._cancel_action.isEnabled())
+        )
 
     # ── status bar ──────────────────────────────────────────────────────────
 
@@ -306,14 +439,21 @@ class MainWindow(QMainWindow):
 
     def _refresh_stage_status(self) -> None:
         from app.navigation import STAGES
-        from ui.store.stage_status import compute_stage_statuses
+        from ui.store.stage_status import compute_stage_statuses, stage_summaries
 
         self._page_statuses = compute_stage_statuses(
             self._store.manifest, has_run_results=self._store.run_results is not None
         )
+        has_run = self._store.run_results is not None
+        summaries = stage_summaries(self._store.manifest, has_run_results=has_run)
         for stage_index, (_label, first_page) in enumerate(STAGES):
             info = self._page_statuses[first_page]
-            self._sidebar.set_status(stage_index, info.status, info.message)
+            self._sidebar.set_status(
+                stage_index, info.status, info.message, summary=summaries[stage_index]
+            )
+        self._sidebar.set_locked(len(STAGES) - 1, not has_run)
+        manifest = self._store.manifest
+        self._project_sub.setText(manifest.project_name if manifest else f"v{APP_VERSION}")
         self._update_next_action()
 
     def _update_next_action(self) -> None:
@@ -325,6 +465,29 @@ class MainWindow(QMainWindow):
         reason = next_blocker(statuses, page) if statuses else None
         self._next_action.setEnabled(page < last and reason is None)
         self._next_action.setToolTip(reason or "Go to the next step")
+        self._refresh_footer_labels(page)
+
+    def _refresh_footer_labels(self, page: int) -> None:
+        from app.navigation import PAGE_TO_STAGE, STAGES
+
+        if page > 0:
+            self._btn_back.setText(f"← {STAGES[PAGE_TO_STAGE[page - 1]][0]}")
+        else:
+            self._btn_back.setText("← Back")
+        if page == 8:
+            text, role = "Export dataset →", "accent"
+        elif page >= self._stack.count() - 1:
+            text, role = "Done", "primary"
+        else:
+            text, role = f"Next: {STAGES[PAGE_TO_STAGE[page + 1]][0]} →", "primary"
+        self._btn_next.setText(text)
+        if self._btn_next.property("role") != role:
+            self._btn_next.setProperty("role", role)
+            self._btn_next.style().unpolish(self._btn_next)
+            self._btn_next.style().polish(self._btn_next)
+        ran = self._store.run_results is not None
+        self._btn_run.setText("⟶ Re-run pipeline" if ran else "⟶ Run pipeline")
+        self._btn_run.setVisible(page < 8)
 
     def _flush_current_page(self) -> None:
         """Commit the outgoing screen's debounced edits before leaving it."""
@@ -368,9 +531,9 @@ class MainWindow(QMainWindow):
     def _action_save_project(self) -> None:
         saved = self._store.save_project()
         if saved:
-            self.statusBar().showMessage(f"Saved: {saved}", 3000)
+            self.show_toast("Saved")
         else:
-            self.statusBar().showMessage("Nothing to save — open or create a project first.", 3000)
+            self.show_toast("Nothing to save — open or create a project first.")
 
     def _ask_pickle_consent(self, session_id: str, folder: str) -> None:
         """Ask once per project whether to load trajectories that execute code.
