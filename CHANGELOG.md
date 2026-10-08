@@ -958,6 +958,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The session cache honours import settings.** The cache key left out blob diagnostics, pickle
+  permission and the session's video override, so after changing one of them a rerun could be
+  served the old session: no correction data, fallback body lengths, or the old video path.
+  All three are in the key now (the video override only for the session it belongs to, by the
+  manifest's session id), so a changed setting re-imports once. Revoking pickle permission
+  re-imports without any blob data. Cache schema 4.
+
 - **A reader saved with a session now gets the project's import settings.** Sessions added through
   the confirmation workflow record their reader, and that import path skipped blob-derived body
   lengths, tracker-correction diagnostics and the replacement video. All three now apply on every

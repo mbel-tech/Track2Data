@@ -500,7 +500,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 3
+    _CACHE_SCHEMA = 4
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is
@@ -531,6 +531,7 @@ class Engine:
                 "schema": self._CACHE_SCHEMA,
                 "app": __version__,
                 "reader_options": ref.reader_options,
+                "import_settings": self._import_settings_fingerprint(ref),
                 "preprocess": m.preprocess.model_dump(mode="json"),
                 "calibration": m.calibration.model_dump(mode="json"),
                 "zones": m.zones.model_dump(mode="json"),
@@ -538,6 +539,26 @@ class Engine:
         )
         store = CacheStore(self._cache_dir)
         return store, store.key(reader_name, folder_fingerprint(ref.folder), config_hash)
+
+    def _import_settings_fingerprint(self, ref: SessionRef) -> dict[str, Any]:
+        """The project settings, besides the configs, that change what importing *ref* returns.
+
+        The cache holds the imported session along with its preprocessed arrays, so any
+        setting :meth:`_apply_import_settings` acts on has to be in the key, or a rerun
+        after changing it would be served the old session. Pickle permission decides whether
+        the blob enrichment can happen at all. The video override is keyed by the manifest's
+        id for this entry, so another session's override never invalidates this one; whether
+        the file exists is part of it because a missing file is ignored on import.
+        """
+        m = self._manifest
+        override = m.video_overrides.get(ref.session_id)
+        return {
+            "allow_pickle_trajectories": m.security.allow_pickle_trajectories,
+            "blob_diagnostics": m.blob_diagnostics,
+            "video_override": (
+                None if override is None else [str(override), Path(override).exists()]
+            ),
+        }
 
     def preprocess_ref(self, ref: SessionRef) -> PreprocessedSession:
         """Preprocess the session a manifest entry describes, reusing/filling the cache
