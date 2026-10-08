@@ -958,6 +958,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Distance and freezing no longer report zero for an animal that was never measured.** IL-1
+  returned `path_length_px = 0` (and 0 cm / 0 BL) for an animal with no valid pair of consecutive
+  positions, and IL-7 returned 0 bouts and 0 s of freezing for an animal with no usable speed.
+  Both are now NaN, in whole-session and time-bin results and in every export. A real zero (valid
+  positions that did not move; usable speeds with no qualifying bout) is unchanged, a partly
+  observed path keeps its observed length, and missing speeds still break bouts. If you analysed
+  sessions where some animals were poorly tracked, re-export: those animals used to contribute
+  zeros.
+
 - **The session cache honours import settings.** The cache key left out blob diagnostics, pickle
   permission and the session's video override, so after changing one of them a rerun could be
   served the old session: no correction data, fallback body lengths, or the old video path.

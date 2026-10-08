@@ -171,8 +171,8 @@ info-button modal (§6).
 | **Formula** | `Σ_t ‖xy[t+1, k] − xy[t, k]‖` over non-NaN frame pairs |
 | **Output columns** | `individual_id`, `path_length_px`, `path_length_cm`, `path_length_bl` |
 | **Units** | px / cm / BL |
-| **Assumptions** | Inter-frame displacement reflects real movement (not jump artefacts) |
-| **Warnings** | Under-smoothed data inflates path length; NaN gaps are skipped (not interpolated for this metric) |
+| **Assumptions** | Inter-frame displacement reflects real movement (not jump artefacts). A pair counts only when both positions are valid; an animal with no such pair has **no measured distance**, reported as NaN (px, cm and BL), never as 0. A legitimate 0 means valid pairs that did not move |
+| **Warnings** | Under-smoothed data inflates path length; NaN gaps are skipped (not interpolated for this metric), so a partly observed path is the length of its observed steps |
 | **Reference** | Standard kinematics |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
@@ -295,7 +295,7 @@ info-button modal (§6).
 | **Formula** | Run-length encode `inactive`; keep runs ≥ `min_bout_frames`. `min_bout_frames` defaults to a fixed **5 frames**. Switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`) to this session's own pooled inactive-run lengths across every individual, still falling back to the fixed 5 when that fit does not converge. The switch **overrides** an explicit `min_bout_frames`, which applies only while the switch is off. |
 | **Output columns** | `individual_id`, `freezing_bout_count`, `mean_freezing_duration_s`, `total_freezing_duration_s`, `min_bout_frames_used`, `bout_criterion_effective` |
 | **Units** | count; seconds; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
-| **Assumptions** | Same as IL-4 |
+| **Assumptions** | Same as IL-4. An animal with no usable speed at all (every value NaN) gets NaN for the count and both durations: nothing was classified, so "no bouts" is not a finding. With usable speeds and no qualifying run the count and total are 0 and the mean duration is 0 (the historical convention). Missing speeds break a run, they never join two |
 | **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_bout_frames` (int, frames, no declared default — resolved per the switch) |
 | **Warnings** | Discards short pauses; min duration is study-specific. `min_bout_frames_used`/`bout_criterion_effective` report the threshold actually applied and how it was derived (`fixed`, `log_survivorship`, or `fixed_fallback` when a requested fit did not converge). With the switch **on** the threshold is fit per session and can differ session to session — check `min_bout_frames_used` before comparing freezing-bout counts across sessions. |
 | **Reference** | Cachat et al. 2010, Nat. Protoc. 5(11):1786-1799 (measuring behavioral and endocrine responses to novelty stress in adult zebrafish) — DOI [10.1038/nprot.2010.140](https://doi.org/10.1038/nprot.2010.140) |
