@@ -50,6 +50,7 @@ def test_populate_table_sets_column_count_and_headers_from_df_columns(qtbot) -> 
 
     df = pd.DataFrame({"alpha": [1, 2], "beta": ["x", "y"]})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df)
 
@@ -63,6 +64,7 @@ def test_populate_table_sets_row_count_from_len_df(qtbot) -> None:
 
     df = pd.DataFrame({"v": [1, 2, 3]})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df)
 
@@ -74,6 +76,7 @@ def test_populate_table_truncates_to_max_rows(qtbot) -> None:
 
     df = pd.DataFrame({"v": list(range(10))})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df, max_rows=3)
 
@@ -87,6 +90,7 @@ def test_populate_table_formats_float_to_4_significant_figures(qtbot) -> None:
 
     df = pd.DataFrame({"v": [1.0 / 3.0]})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df)
 
@@ -98,6 +102,7 @@ def test_populate_table_renders_nan_as_empty_string(qtbot) -> None:
 
     df = pd.DataFrame({"v": [1.0, float("nan")]})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df)
 
@@ -110,6 +115,7 @@ def test_populate_table_renders_other_types_via_str(qtbot) -> None:
 
     df = pd.DataFrame({"session_id": ["abc"], "n": [5], "ok": [True]})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df)
 
@@ -124,6 +130,7 @@ def test_populate_table_called_twice_overwrites_previous_contents(qtbot) -> None
     from ui.widgets.dataframe_table import populate_table
 
     table = QTableWidget()
+    qtbot.addWidget(table)
     populate_table(table, pd.DataFrame({"a": [1, 2], "b": [3, 4]}))
     assert table.columnCount() == 2
     assert table.rowCount() == 2
@@ -141,6 +148,7 @@ def test_populate_table_handles_empty_dataframe(qtbot) -> None:
 
     df = pd.DataFrame({"a": pd.Series(dtype="float64"), "b": pd.Series(dtype="object")})
     table = QTableWidget()
+    qtbot.addWidget(table)
 
     populate_table(table, df)
 
@@ -155,6 +163,7 @@ def test_clear_table_resets_to_zero_rows_and_columns(qtbot) -> None:
     from ui.widgets.dataframe_table import clear_table, populate_table
 
     table = QTableWidget()
+    qtbot.addWidget(table)
     populate_table(table, pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}))
     assert table.rowCount() == 3
     assert table.columnCount() == 2

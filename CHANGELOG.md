@@ -958,6 +958,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The test process no longer aborts at exit.** After every GUI test passed, pytest could crash in Qt
+  teardown (`QObject: shared QObject was deleted directly`, exit 134), failing the CI test jobs.
+  Standalone screens, tables and dialogs created in tests are now registered with pytest-qt so they
+  are destroyed before Qt shuts down. Test-only change; the cleanup comes from the GUI audit's
+  reproduction of the same crash in the Preview tests.
+
 - **Sessions tracked in separate intervals are processed on real elapsed time.** The stored rows were
   treated as consecutive frames, so a move between two stationary stretches 40 seconds apart read as
   ~1,060 px/s, and smoothing, speed, acceleration and jump detection all worked on that. Each
