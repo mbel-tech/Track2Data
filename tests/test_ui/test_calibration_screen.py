@@ -295,3 +295,128 @@ def test_measure_on_frame_sets_the_scale(qtbot, tmp_path: Path, monkeypatch) -> 
     monkeypatch.setattr(ruler_dialog.RulerDialog, "exec", fake_exec)
     screen._measure_btn.click()
     assert screen._px_spin.value() == pytest.approx(30.0)
+
+
+# ── camera view ──────────────────────────────────────────────────────────────
+
+
+def _view_of(screen) -> str:
+    return screen._view_combo.currentData()
+
+
+def test_camera_view_choices_are_pretty_labels_over_the_raw_values(qtbot) -> None:
+    from ui.calibration_screen import CalibrationScreen
+
+    screen = CalibrationScreen()
+    qtbot.addWidget(screen)
+
+    combo = screen._view_combo
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        "Not set",
+        "Top-down",
+        "Side view",
+    ]
+    assert [combo.itemData(i) for i in range(combo.count())] == ["unknown", "top", "side"]
+
+
+def test_the_camera_view_starts_not_set(qtbot, tmp_path: Path) -> None:
+    from ui.calibration_screen import CalibrationScreen
+
+    screen = CalibrationScreen(_make_store(tmp_path))
+    qtbot.addWidget(screen)
+
+    assert _view_of(screen) == "unknown"
+
+
+def test_choosing_a_camera_view_commits_it_to_the_manifest(qtbot, tmp_path: Path) -> None:
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._view_combo.setCurrentIndex(screen._view_combo.findData("side"))
+    screen.flush()
+
+    assert store.manifest.scene.camera_view == "side"
+
+
+def test_the_camera_view_commit_does_not_touch_the_calibration(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import CalibrationConfig
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    store.update_calibration(CalibrationConfig(mode="bodylength", bl_min_samples=99))
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._view_combo.setCurrentIndex(screen._view_combo.findData("top"))
+    screen.flush()
+
+    assert store.manifest.scene.camera_view == "top"
+    assert store.manifest.calibration.bl_min_samples == 99
+    assert store.manifest.calibration.mode == "bodylength"
+
+
+def test_changing_the_calibration_does_not_reset_the_camera_view(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import SceneConfig
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    store.update_scene(SceneConfig(camera_view="side"))
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._radio_scalar.setChecked(True)
+    screen._px_spin.setValue(12.0)
+    screen.flush()
+
+    assert store.manifest.calibration.mode == "scalar"
+    assert store.manifest.scene.camera_view == "side"
+
+
+def test_the_combo_follows_a_view_set_elsewhere(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import SceneConfig
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    store.update_scene(SceneConfig(camera_view="side"))
+
+    assert _view_of(screen) == "side"
+
+
+def test_populating_the_combo_does_not_write_back(qtbot, tmp_path: Path) -> None:
+    """Repopulating from the store must not look like a user edit, or every project open would
+    re-commit and re-emit in a loop."""
+    from track2data.core.models import SceneConfig
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    store.update_scene(SceneConfig(camera_view="top"))
+    fired: list[bool] = []
+    store.sceneChanged.connect(lambda: fired.append(True))
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen.flush()
+
+    assert _view_of(screen) == "top"
+    assert fired == []
+
+
+def test_the_side_view_explanation_points_at_the_zones_screen(qtbot, tmp_path: Path) -> None:
+    from ui.calibration_screen import CalibrationScreen
+
+    screen = CalibrationScreen(_make_store(tmp_path))
+    qtbot.addWidget(screen)
+
+    screen._view_combo.setCurrentIndex(screen._view_combo.findData("side"))
+
+    text = screen._view_help.text()
+    assert "Zones" in text
+    assert "waterline" in text
+    screen._view_combo.setCurrentIndex(screen._view_combo.findData("unknown"))
+    assert "Zones" not in screen._view_help.text()

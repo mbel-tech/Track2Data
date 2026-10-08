@@ -11,6 +11,9 @@ Widgets:
   • readiness_list       QListWidget     (Session calibration mode only) --
                           per-session length_unit readiness, from
                           ProjectStore.session_facts()
+  • view_combo           QComboBox       camera view (Not set / Top-down / Side view);
+                          committed to store.update_scene on its own, never through
+                          the calibration commit
   • edits auto-commit (debounced) → store.update_calibration; flush() on leave
 """
 
@@ -35,9 +38,32 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.core.models import SceneConfig
 from ui.widgets.autocommit import AutoCommit
 
 _UNIT_CHOICES = ["cm", "mm", "m"]
+
+#: (raw CameraView value, label, what it means for the project).
+_VIEW_CHOICES = (
+    (
+        "unknown",
+        "Not set",
+        "Tell Track2Data how the camera looked at the animals. Metrics that only make sense "
+        "for one view stay off until you do.",
+    ),
+    (
+        "top",
+        "Top-down",
+        "The camera looks down on the arena. Every metric that does not need a side view applies.",
+    ),
+    (
+        "side",
+        "Side view",
+        "The camera looks at the tank from the side, so image height is depth. Draw the main "
+        "zone from the waterline to the floor on the Zones screen; this switches on Vertical "
+        "Position (IL-15).",
+    ),
+)
 
 
 class _ModeCard(QFrame):
@@ -78,10 +104,14 @@ class CalibrationScreen(QWidget):
         super().__init__(parent)
         self._store = store
         self._auto = AutoCommit(self._apply, self)
+        # The camera view is not a calibration: it has its own commit, so a calibration that is
+        # unchanged (and returns early) or blocked can never swallow it.
+        self._view_auto = AutoCommit(self._apply_scene, self)
         self._build_ui()
         if store is not None:
             store.calibrationChanged.connect(self._on_calibration_changed)
             store.projectChanged.connect(self._on_calibration_changed)
+            store.sceneChanged.connect(self._on_calibration_changed)
             store.sessionsChanged.connect(self._refresh_readiness)
             store.sessionFactsChanged.connect(self._refresh_readiness)
         self._on_calibration_changed()
@@ -189,6 +219,23 @@ class CalibrationScreen(QWidget):
 
         root.addWidget(self._session_widget)
 
+        # ── camera view ───────────────────────────────────────────────────
+        view_label = QLabel("CAMERA VIEW")
+        view_label.setObjectName("SectionLabel")
+        root.addWidget(view_label)
+        view_form = QFormLayout()
+        view_form.setContentsMargins(0, 0, 0, 0)
+        self._view_combo = QComboBox()
+        for value, label, _help in _VIEW_CHOICES:
+            self._view_combo.addItem(label, value)
+        view_form.addRow("Recorded from:", self._view_combo)
+        root.addLayout(view_form)
+        self._view_help = QLabel()
+        self._view_help.setProperty("role", "muted")
+        self._view_help.setWordWrap(True)
+        root.addWidget(self._view_help)
+        self._update_view_help()
+
         root.addStretch()
 
         # wire radio changes
@@ -204,10 +251,13 @@ class CalibrationScreen(QWidget):
         self._px_spin.valueChanged.connect(self._auto.trigger)
         self._unit_combo.currentIndexChanged.connect(self._auto.trigger)
         self._confirm_check.toggled.connect(self._auto.trigger)
+        self._view_combo.currentIndexChanged.connect(self._update_view_help)
+        self._view_combo.currentIndexChanged.connect(self._view_auto.trigger)
 
     def flush(self) -> None:
         """Commit any pending edit now (called when the screen is left)."""
         self._auto.flush()
+        self._view_auto.flush()
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -249,8 +299,27 @@ class CalibrationScreen(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to apply calibration:\n{exc}")
 
+    def _update_view_help(self) -> None:
+        value = self._view_combo.currentData()
+        for choice, _label, text in _VIEW_CHOICES:
+            if choice == value:
+                self._view_help.setText(text)
+                return
+
+    def _apply_scene(self) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        current = self._store.manifest.scene
+        # Validated, so the combo's value can never put a bad view in the manifest; built from
+        # the current scene so a field this screen does not show is preserved.
+        scene = SceneConfig.model_validate(
+            {**current.model_dump(), "camera_view": self._view_combo.currentData()}
+        )
+        if scene != current:
+            self._store.update_scene(scene)
+
     def _on_calibration_changed(self) -> None:
-        with self._auto.suppressed():
+        with self._auto.suppressed(), self._view_auto.suppressed():
             self._populate()
 
     def _populate(self) -> None:
@@ -267,6 +336,9 @@ class CalibrationScreen(QWidget):
                 self._confirm_check.setChecked(cfg.length_unit_confirmed_by_user)
             else:
                 self._radio_bl.setChecked(True)
+            self._view_combo.setCurrentIndex(
+                max(0, self._view_combo.findData(self._store.manifest.scene.camera_view))
+            )
         self._update_mode_visibility()
         self._refresh_readiness()
 
