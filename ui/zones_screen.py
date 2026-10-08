@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.core.errors import ZoneValidationError
 from track2data.core.models import ROI, ZoneSet
 from ui.widgets.labels import label_for
 from ui.widgets.zone_canvas import ZoneCanvas, polygon_area
@@ -346,13 +347,15 @@ class ZonesScreen(QWidget):
     def _on_zone_edited(self, index: int, vertices: list) -> None:
         if self._store is None or self._store.manifest is None:
             return
-        zones = self._store.manifest.zones
-        rois = list(zones.rois)
-        rois[index] = rois[index].model_copy(update={"vertices": vertices})
         try:
-            self._store.update_zones(zones.model_copy(update={"rois": rois}))
-        except Exception as exc:
-            QMessageBox.warning(self, "Zone not changed", f"That shape is not valid:\n{exc}")
+            self._store.update_zone_vertices(index, vertices)
+        except ZoneValidationError as exc:
+            QMessageBox.warning(
+                self, "Zone not changed", f"{exc.args[0]}\n\n{exc.remediation}"
+            )
+            # Put the dragged handle and the outline back on the committed shape.
+            self._canvas.set_selected_zone(index)
+            self._on_zone_row_changed(index)
             return
         self._zone_list.setCurrentRow(index)
 

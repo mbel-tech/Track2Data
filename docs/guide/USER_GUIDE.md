@@ -245,6 +245,10 @@ Custom vertices (orange/green) can be dragged to fine-tune the outline. When the
 (at least 3 points), give it a **name** and a **level** (`main` or `secondary`) and press
 **Save Zone**.
 
+To reshape a saved zone, select it in the list and drag its vertices. A move that would leave the
+zone with no area (all vertices in a line), repeat a point, or make its edges cross is refused: a
+message says why, the handle jumps back and the zone stays as it was.
+
 If a zone's source resolution differs from a session's video, a yellow warning appears.
 
 ## 5. Metadata (optional)

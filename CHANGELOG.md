@@ -958,6 +958,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Dragging a zone vertex can no longer ruin the zone.** The edit was applied without checking the
+  shape, so a normal drag could collapse a polygon to zero area (zone assignment then matched
+  nothing) while the zone stayed in the project. An edit is now refused, with a message and the
+  handle restored, if it would leave fewer than three distinct points, a non-finite coordinate, edges
+  that cross, or no area. Name, level, sign and the other zones are untouched. Polygons imported
+  from a tracker's `roi_list` are not subject to this rule; the engine still repairs them.
+
 - **Distance and freezing no longer report zero for an animal that was never measured.** IL-1
   returned `path_length_px = 0` (and 0 cm / 0 BL) for an animal with no valid pair of consecutive
   positions, and IL-7 returned 0 bouts and 0 s of freezing for an animal with no usable speed.
