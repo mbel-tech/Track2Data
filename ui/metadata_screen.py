@@ -80,15 +80,17 @@ class MetadataScreen(QWidget):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
         root = QVBoxLayout(inner)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Metadata")
         title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Import a trial-metadata CSV and map columns to canonical fields."
+            "Attach a spreadsheet of treatments, dates and tanks. Its columns are joined onto "
+            "every "
+            "export row. Common names are recognised: condition → treatment, date → trial_date."
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
@@ -103,7 +105,7 @@ class MetadataScreen(QWidget):
         skip_btn.setProperty("role", "outline")
         skip_btn.clicked.connect(self._skip_metadata)
         self._file_label = QLabel("(no file loaded)")
-        self._file_label.setStyleSheet(" font-style: italic;")
+        self._file_label.setProperty("role", "faint")
         file_row.addWidget(load_btn)
         file_row.addWidget(skip_btn)
         file_row.addWidget(self._file_label, 1)
@@ -112,11 +114,13 @@ class MetadataScreen(QWidget):
         # ── preview table ─────────────────────────────────────────────────
         self._preview = QTableWidget(0, 0)
         self._preview.setMinimumHeight(130)
+        self._preview.verticalHeader().hide()
+        self._preview.setShowGrid(False)
         root.addWidget(self._preview)
 
         # ── column mapping ────────────────────────────────────────────────
-        map_label = QLabel("Column mapping:")
-        map_label.setStyleSheet("font-weight: bold;")
+        map_label = QLabel("COLUMN MAPPING")
+        map_label.setObjectName("SectionLabel")
         root.addWidget(map_label)
 
         # Stored on self (not just a local) so tests can inspect the
@@ -148,8 +152,8 @@ class MetadataScreen(QWidget):
         self._match_mode.currentIndexChanged.connect(self._auto.trigger)
         self._mapping_form.addRow("Match animals by:", self._match_mode)
 
-        extra_label = QLabel("Also include these columns (e.g. weight, sex):")
-        extra_label.setStyleSheet("font-weight: bold;")
+        extra_label = QLabel("ALSO INCLUDE THESE COLUMNS (E.G. WEIGHT, SEX)")
+        extra_label.setObjectName("SectionLabel")
         root.addWidget(extra_label)
         self._extra_list = QListWidget()
         self._extra_list.setMaximumHeight(110)
@@ -158,12 +162,17 @@ class MetadataScreen(QWidget):
 
         self._match_label = QLabel("")
         self._match_label.setWordWrap(True)
-        self._match_label.setStyleSheet("font-size: 13px;")
+        self._match_label.setProperty("role", "muted")
         root.addWidget(self._match_label)
 
         root.addStretch()
 
     # ── slots ──────────────────────────────────────────────────────────────
+
+    def _set_match_role(self, role: str) -> None:
+        self._match_label.setProperty("role", role)
+        self._match_label.style().unpolish(self._match_label)
+        self._match_label.style().polish(self._match_label)
 
     def _load_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -192,7 +201,7 @@ class MetadataScreen(QWidget):
             self._populate_preview(headers, data_rows)
             self._populate_combos(headers)
             self._file_label.setText(Path(path).name)
-            self._file_label.setStyleSheet("")
+            self._file_label.setProperty("role", "")
             if self._store is not None:
                 csv_path = Path(path)
                 self._store.update_metadata_source(
@@ -258,7 +267,7 @@ class MetadataScreen(QWidget):
         if self._store is not None:
             self._store.update_metadata_source(None)
         self._file_label.setText("(skipped)")
-        self._file_label.setStyleSheet(" font-style: italic;")
+        self._file_label.setProperty("role", "faint")
         self._preview.setRowCount(0)
         self._preview.setColumnCount(0)
 
@@ -335,7 +344,7 @@ class MetadataScreen(QWidget):
         with self._auto.suppressed():
             self._fill_combos(rows[0])
         self._file_label.setText(src.path.name)
-        self._file_label.setStyleSheet("")
+        self._file_label.setProperty("role", "")
 
     def _per_animal_notes(self, manifest, result) -> list[str]:
         """Problems with per-animal rows that the engine will only log: animals
@@ -393,7 +402,7 @@ class MetadataScreen(QWidget):
             result = match([r.session_id for r in m.sessions], mapped, m.mapping)
         except Exception as exc:
             self._match_label.setText(f"Could not match sessions: {exc}")
-            self._match_label.setStyleSheet("font-size: 13px; color: #b8860b;")
+            self._set_match_role("warn")
             return
         total = len(m.sessions)
         text = f"{len(result.matched)} of {total} sessions matched."
@@ -412,6 +421,4 @@ class MetadataScreen(QWidget):
             text += " " + " ".join(notes)
         ok = len(result.matched) == total and not result.conflicts and not notes
         self._match_label.setText(text)
-        self._match_label.setStyleSheet(
-            f"font-size: 13px; color: {'#2c7a4b' if ok else '#b8860b'};"
-        )
+        self._set_match_role("ok" if ok else "warn")

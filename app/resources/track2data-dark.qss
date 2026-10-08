@@ -139,3 +139,4 @@ QListWidget { background: #181d20; border: 1px solid #2a3237; border-radius: 10p
 QListWidget::item { padding: 6px 8px; }
 QListWidget::item:selected { background: #172327; color: #e3e8ea; }
 QListWidget#StageList { background: #0f1315; border: none; border-radius: 0; border-right: 1px solid #22292e; }
+QLabel[role="ok"] { color: #7fd0da; font-size: 13.5px; }
