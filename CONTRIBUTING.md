@@ -166,6 +166,14 @@ A reader for a new tracker is a `SessionReader` subclass; the checklist:
 6. **Document it:** a reader card in `docs/tracker-formats/README.md`, new error codes
    in `docs/USER_WORKFLOW.md` §6, a `CHANGELOG.md` entry.
 
+A reader of **pose** output (several keypoints per animal) should not reinvent the shared parts;
+`track2data/readers/assemble.py` has them. `reduce_keypoints` picks the one keypoint that becomes
+`raw_xy` (the one the user named, else the one seen most often after the likelihood cutoff; never
+a centroid), `build_keypoints` keeps the whole skeleton beside it (`Session.keypoints`, stored
+only), `to_nan` maps infinity and format sentinels to NaN, and `assemble_session` builds the
+`Session` after checking it, because the model itself checks nothing. Never put a keypoint
+likelihood in `id_probabilities`: that means identity confidence and feeds the identity metrics.
+
 ### Metric references
 
 Every specific, findable work a metric cites lives in exactly one place: `track2data/metrics/references.py`,

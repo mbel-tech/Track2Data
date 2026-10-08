@@ -471,3 +471,38 @@ class TestCalibrationInTheSourceSoftwareSection:
         payload = _from(minimal_payload, reader="idtrackerai", length_unit=10.0)
         content = _readme(tmp_path, payload)
         assert "idtracker.ai does not record which physical unit" in content
+
+
+class TestTheAnimalPositionRow:
+    """Which keypoint stood for the animal is part of what a Methods section must say."""
+
+    SELECTION = {
+        "keypoint": "snout",
+        "chosen_by": "coverage",
+        "cutoff": 0.6,
+        "coverage": 0.984,
+        "plane": ["x", "y"],
+        "n_keypoints": 12,
+    }
+
+    def test_it_names_the_keypoint_how_it_was_chosen_and_the_cutoff(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload, keypoint_selection=self.SELECTION))
+        row = next(line for line in content.splitlines() if line.startswith("| Animal position"))
+        assert "`snout`" in row and "best coverage" in row
+        assert "likelihood cutoff 0.6" in row and "98.4 %" in row
+        assert "12 keypoints" in row and "x, y" in row
+
+    def test_a_keypoint_the_user_named_says_so(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        chosen = {**self.SELECTION, "chosen_by": "user", "cutoff": None}
+        content = _readme(tmp_path, _from(minimal_payload, keypoint_selection=chosen))
+        row = next(line for line in content.splitlines() if line.startswith("| Animal position"))
+        assert "chosen by the user" in row and "no likelihood cutoff" in row
+
+    def test_a_tracker_with_one_point_per_animal_has_no_such_row(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        assert "Animal position" not in _readme(tmp_path, _from(minimal_payload))

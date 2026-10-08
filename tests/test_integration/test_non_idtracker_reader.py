@@ -194,3 +194,51 @@ class TestAdvisories:
         text = (tmp_path / "out" / "PROJECT_SUMMARY.md").read_text("utf-8")
         assert "## Read before pooling these sessions" not in text
         assert "## Session consistency" in text
+
+
+class TestASessionThatCarriesASkeleton:
+    """The keypoint that stood for the animal reaches the export, for any pose reader."""
+
+    @pytest.fixture
+    def with_skeleton(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import numpy as np
+
+        from track2data.readers.assemble import build_keypoints, reduce_keypoints
+
+        original = ToyCsvReader.read
+
+        def read(self, folder, *, allow_pickle=False, options=None):
+            session = original(self, folder, allow_pickle=allow_pickle, options=options)
+            xy = np.repeat(session.raw_xy[:, :, None, :], 2, axis=2)
+            red = reduce_keypoints(xy, ["snout", "tail"], keypoint="snout")
+            session.keypoints = build_keypoints(
+                xy, ["snout", "tail"], None, [(0, 1)], red.selection
+            )
+            return session
+
+        monkeypatch.setattr(ToyCsvReader, "read", read)
+
+    def test_the_readme_says_which_keypoint_was_used(
+        self, toy_reader: None, with_skeleton: None, toy_folder: Path, tmp_path: Path
+    ) -> None:
+        text = (_run(_engine(toy_folder), tmp_path / "out") / "README.md").read_text("utf-8")
+        assert "| Animal position |" in text and "`snout`" in text
+
+    def test_the_manifest_carries_it_too(
+        self, toy_reader: None, with_skeleton: None, toy_folder: Path, tmp_path: Path
+    ) -> None:
+        out = _run(_engine(toy_folder), tmp_path / "out")
+        prov = json.loads((out / "manifest.json").read_text("utf-8"))["run_metadata"][
+            "session_provenance"
+        ]
+        assert prov["keypoint_selection"]["keypoint"] == "snout"
+        assert prov["keypoint_selection"]["n_keypoints"] == 2
+
+    def test_a_session_without_one_records_nothing(
+        self, toy_reader: None, toy_folder: Path, tmp_path: Path
+    ) -> None:
+        out = _run(_engine(toy_folder), tmp_path / "out")
+        prov = json.loads((out / "manifest.json").read_text("utf-8"))["run_metadata"][
+            "session_provenance"
+        ]
+        assert prov["keypoint_selection"] is None

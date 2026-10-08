@@ -97,6 +97,9 @@ class SessionProvenance:
     reader_chosen_by: str | None = None
     detection_confidence: str | None = None
     source_files: tuple[str, ...] = ()
+    # Pose trackers: which keypoint stood for the animal (Session.keypoints.selection, plus
+    # n_keypoints). None for a tracker with one point per animal.
+    keypoint_selection: dict[str, Any] | None = None
 
 
 @dataclass

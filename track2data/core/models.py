@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 if TYPE_CHECKING:
     # Type-only: session_consistency imports Session from here, so a runtime
@@ -42,6 +42,60 @@ class VideoInfo(BaseModel):
     n_frames: int
     width_px: int
     height_px: int
+
+
+class KeypointSelection(BaseModel):
+    """Which keypoint stands for the animal in ``Session.raw_xy``, and how it was chosen."""
+
+    keypoint: str
+    #: Likelihood cutoff applied, or None when none was (or there was no likelihood to apply).
+    cutoff: float | None = None
+    #: "user" named it; "coverage" is the keypoint seen most often after the cutoff.
+    chosen_by: Literal["user", "coverage"]
+    #: Share of (frame, animal) cells that have a position for this keypoint after the cutoff.
+    coverage: float
+    #: The two axes that became ``raw_xy`` (the third, for 3-D data, is only in the skeleton).
+    plane: tuple[str, str] = ("x", "y")
+
+
+class KeypointData(BaseModel):
+    """The full skeleton a pose tracker gave, kept beside the one position metrics use.
+
+    Stored only: no metric reads it, so adding it cannot change a number. It is here so the
+    export can say which keypoint was used, and so a later feature does not need the source files.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    #: (n_frames, n_animals, n_keypoints, 2 or 3), float32, NaN = missing.
+    xy: np.ndarray
+    names: list[str]
+    #: (n_frames, n_animals, n_keypoints) float32 likelihood/score, or None.
+    #: Never an identity probability: ``Session.id_probabilities`` is a different thing.
+    confidence: np.ndarray | None = None
+    #: Pairs of keypoint indices joined in the tracker's skeleton.
+    edges: list[tuple[int, int]] = []
+    selection: KeypointSelection
+
+    def provenance(self) -> dict[str, Any]:
+        """What the export records about the choice: the selection and how many keypoints."""
+        return {**self.selection.model_dump(mode="json"), "n_keypoints": len(self.names)}
+
+    @model_validator(mode="after")
+    def _consistent(self) -> KeypointData:
+        if self.xy.ndim != 4 or self.xy.shape[3] not in (2, 3):
+            raise ValueError(
+                f"xy must be (frames, animals, keypoints, 2 or 3), got {self.xy.shape}"
+            )
+        if len(self.names) != self.xy.shape[2]:
+            raise ValueError(f"{len(self.names)} names for {self.xy.shape[2]} keypoints")
+        if self.confidence is not None and self.confidence.shape != self.xy.shape[:3]:
+            raise ValueError("confidence must be (frames, animals, keypoints)")
+        k = self.xy.shape[2]
+        for a, b in self.edges:
+            if not (0 <= a < k and 0 <= b < k):
+                raise ValueError(f"edge ({a}, {b}) names a keypoint that does not exist")
+        return self
 
 
 class Session(BaseModel):
@@ -184,6 +238,11 @@ class Session(BaseModel):
     # (ProjectManifest.blob_diagnostics) AND allowed pickle loading; None
     # means "not read", never "no corrections".
     tracker_corrected_frames: set[int] | None = None
+
+    # ── pose readers ─────────────────────────────────────────────────────────
+    # The whole skeleton, when the tracker gave one (DeepLabCut, SLEAP, ...). raw_xy is the one
+    # keypoint named in keypoints.selection. Stored only; None for trackers with one point.
+    keypoints: KeypointData | None = None
 
     @property
     def n_frames(self) -> int:

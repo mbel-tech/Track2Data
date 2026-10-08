@@ -482,7 +482,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 1
+    _CACHE_SCHEMA = 2
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is
@@ -1138,6 +1138,9 @@ class Engine:
             detection_confidence=ref.reader_confidence if ref is not None else None,
             source_files=(
                 (str(session.trajectory_source),) if session.trajectory_source else ()
+            ),
+            keypoint_selection=(
+                session.keypoints.provenance() if session.keypoints is not None else None
             ),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,

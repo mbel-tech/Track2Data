@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Shared building blocks for pose readers** (`track2data/readers/assemble.py`), the groundwork for
+  DeepLabCut and SLEAP input. `Session.keypoints` (new, default `None`) keeps a pose tracker's
+  whole skeleton (float32, names, edges, likelihood, and which keypoint was used and why) beside
+  the one position per animal that metrics use; no metric reads it, so no number changes. The
+  export's README and `manifest.json` now say which keypoint stood for the animal, how it was
+  chosen, the likelihood cutoff and its coverage. The preprocessed-session cache schema is bumped
+  to 2, so older cache entries are rebuilt once.
 - **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
   `session_*` folders to settle what the synthetic tests cannot: how far the
   blob-derived body length sits from the session-wide value (issue #72), how
