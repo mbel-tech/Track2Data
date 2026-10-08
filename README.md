@@ -203,6 +203,16 @@ A rendered site is published from these files at
 **<https://mbel-tech.github.io/Track2Data/>**, including a browsable
 catalogue of all 50 metrics with their formulas, units and DOIs.
 
+The **[wiki](https://github.com/mbel-tech/Track2Data/wiki)** covers what sits
+around that reference material and is not pinned to a release:
+[analysis recipes](https://github.com/mbel-tech/Track2Data/wiki/Analysis-Recipes)
+from an export to a fitted model,
+[statistics and pseudoreplication](https://github.com/mbel-tech/Track2Data/wiki/Statistics-and-Pseudoreplication),
+a [glossary](https://github.com/mbel-tech/Track2Data/wiki/Glossary) of every
+exported column, and
+[known issues](https://github.com/mbel-tech/Track2Data/wiki/Known-Issues).
+Its source is [`docs/wiki/`](docs/wiki/).
+
 **Using it**
 
 - [`docs/guide/`](docs/guide/USER_GUIDE.md) — the user guide (also as a [PDF](docs/guide/Track2Data_User_Guide.pdf)): every screen, with screenshots, plus the output-file reference and troubleshooting
