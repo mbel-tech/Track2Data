@@ -17,7 +17,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from track2data.core.models import KinematicsArrays, PreprocessedSession
-from track2data.core.timeline import map_array_index_to_true_frame
 
 
 @dataclass(frozen=True)
@@ -37,9 +36,7 @@ def bin_windows(psess: PreprocessedSession, bin_seconds: float) -> list[BinWindo
     if n == 0:
         return []
     fps = psess.fps
-    true_frames, _valid = map_array_index_to_true_frame(
-        psess.session.tracking_intervals, n
-    )
+    true_frames, _valid = psess.timeline()
     time_s = np.asarray(true_frames, dtype=np.float64) / fps
     bin_idx = np.floor(time_s / bin_seconds + 1e-9).astype(np.int64)
     # true_frames never decrease, so bin_idx is sorted: each bin is contiguous
@@ -68,8 +65,12 @@ def slice_psess(psess: PreprocessedSession, start: int, stop: int) -> Preprocess
     calibration fields, so a sliced copy is a drop-in input for ``compute()``.
     """
     kin = psess.kinematics
+    frames, valid = psess.timeline()
     return dataclasses.replace(
         psess,
+        # the window keeps the original video frames of its rows
+        frame_index=frames[start:stop],
+        timeline_valid=valid,
         xy=psess.xy[start:stop],
         kinematics=KinematicsArrays(
             speed_px_s=kin.speed_px_s[start:stop],

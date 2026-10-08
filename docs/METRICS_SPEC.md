@@ -468,7 +468,9 @@ info-button modal (§6).
 | **Priority** | Optional |
 | **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (fixed 1, or fitted when `derive_bout_criterion` is on) |
 | **Formula** | Emit one row per edge transition with `t_s = frame / fps`; a run inside a zone shorter than `min_dwell_frames` produces no enter/exit events at all. `min_dwell_frames` defaults to a fixed **1 frame**; switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`, shared with Z-3/Z-4) to this session's own pooled in-zone run lengths, still falling back to the fixed 1 when that fit does not converge. The switch **overrides** an explicit `min_dwell_frames`, which applies only while the switch is off. |
-| **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame`, `min_dwell_frames_used`, `bout_criterion_effective` |
+| **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame`, `after_gap`, `min_dwell_frames_used`, `bout_criterion_effective` |
+| **Time base** | `frame` is the original **video frame** and `t_s = frame / fps` on the video clock, exactly as in the per-frame table (tracking that starts at frame 1000 reports 1010, not 10). Sessions without usable `tracking_intervals` fall back to the stored row position, with a logged warning. In a time-binned run an event keeps its original frame; bins do not reset the clock |
+| **Gaps** | Each unbroken stretch of video between tracking intervals is read on its own: a stay is never joined across frames that were not tracked, no `exit` is emitted where observation stops, and the first observed frame inside a zone after a gap is an `enter` with `after_gap = True` (the real entry happened in the gap) |
 | **Units** | seconds; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
 | **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_dwell_frames` (int, frames, no declared default — resolved per the switch) |
 | **Warnings** | `min_dwell_frames_used`/`bout_criterion_effective` report the threshold actually applied and how it was derived; Z-6 and Z-9 inherit whichever was used here, since both forward their own cfg into this compute() unchanged. |
@@ -483,11 +485,11 @@ info-button modal (§6).
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
 | **Inputs** | Z-5 event log; forwards `min_dwell_frames`/`derive_bout_criterion` to Z-5 |
-| **Formula** | Per zone, per individual: `t_s` of first "enter" event (after Z-5's debounce) |
-| **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s` |
+| **Formula** | Per zone, per individual: `(frame of first "enter" event − origin_frame) / fps` (after Z-5's debounce). The origin is the first tracked video frame (the first frame of the bin in a time-binned run), so latency counts time since tracking began, and time omitted between tracking intervals counts as elapsed time, not zero. Video time of the entry is `origin_frame / fps + first_entry_t_s` |
+| **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s`, `origin_frame`, `first_entry_after_gap` |
 | **Units** | seconds |
 | **Parameters** | `derive_bout_criterion` (bool, **default `False`**), `min_dwell_frames` (int, frames, no declared default); both forwarded to Z-5 unchanged |
-| **Warnings** | NaN when the individual never enters; encode as `inf` for sortability. The source paradigm (mouse light/dark box) gives no censoring convention of its own for a never-entering animal — the `inf` encoding is this tool's own deliberate choice, not something the citation specifies. Inherits Z-5's `derive_bout_criterion` switch: with it on, a brief flicker no longer counts as the first entry. |
+| **Warnings** | `first_entry_after_gap` is True when the animal was already inside the zone at the first frame observed after an unobserved gap, so the latency is an upper bound. NaN when the individual never enters; encode as `inf` for sortability. The source paradigm (mouse light/dark box) gives no censoring convention of its own for a never-entering animal — the `inf` encoding is this tool's own deliberate choice, not something the citation specifies. Inherits Z-5's `derive_bout_criterion` switch: with it on, a brief flicker no longer counts as the first entry. |
 | **Reference** | Bourin & Hascoet 2003, Eur. J. Pharmacol. 463(1-3):55-65 (the mouse light/dark box test) — DOI [10.1016/S0014-2999(03)01274-3](https://doi.org/10.1016/S0014-2999(03)01274-3) |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
@@ -541,7 +543,7 @@ info-button modal (§6).
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
 | **Inputs** | Z-5 event log; forwards `min_dwell_frames`/`derive_bout_criterion` to Z-5 |
-| **Formula** | Pair each "enter" event with its next "exit" event (same zone, individual) from the Z-5 event log; `dwell_s = exit.t_s − enter.t_s`; mean/median/max computed over all paired visits. A visit still open at the final frame (Z-5's unmatched "enter") is excluded, not counted as an open-ended visit. |
+| **Formula** | Pair each "enter" event with its next "exit" event (same zone, individual) from the Z-5 event log; `dwell_s = exit.t_s − enter.t_s`; mean/median/max computed over all paired visits. A visit still open at the final frame (Z-5's unmatched "enter") is excluded, not counted as an open-ended visit, and so is a visit whose "enter" is flagged `after_gap` (it began in an unobserved stretch, so its duration is unknown). A visit is never joined across frames that were not tracked. |
 | **Output columns** | `zone_name`, `individual_id`, `n_visits`, `mean_dwell_s`, `median_dwell_s`, `max_dwell_s` |
 | **Units** | count; seconds |
 | **Assumptions** | Zone arrays are pre-assigned object arrays of zone-name strings |

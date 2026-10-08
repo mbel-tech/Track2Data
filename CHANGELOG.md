@@ -958,6 +958,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Zone events now use the same clock as the per-frame table.** Z-5 reported the stored row
+  number as `frame` and `row / fps` as `t_s`, so with tracking that started after frame 0 an
+  entry showed at 0.4 s while the same observation was at 40.4 s (frame 1010) in
+  `master_fish_by_frame`, and disjoint intervals added the omitted spans on top. Z-5 now reports the
+  original video frame and `t_s = frame / fps`; time bins no longer add a second offset. Sessions
+  starting at frame 0 are unchanged. Frames that were not tracked are never bridged: a stay is cut
+  at a gap, no exit is invented there, and an `enter` that is only the first observed frame after a
+  gap carries `after_gap = True` (new column). Z-9 drops a visit that began in a gap. Z-6 keeps
+  "time since the start of tracking" but now reports `origin_frame` and `first_entry_after_gap`, and
+  time omitted between intervals counts as elapsed time. Interval metadata that overlaps, is out of
+  order or does not match the data now logs a warning and falls back to the row position. Cache
+  schema 5. If you exported zone events from sessions with a tracking interval, re-export.
+
 - **The Preview quality grid no longer calls poor identification "Good".** A session with identities
   requested but only 10 % of animals identified was shown as Good with Identity "n/a", because D-5
   reports `identity_free` for it as well as for sessions tracked without identities on purpose. D-5

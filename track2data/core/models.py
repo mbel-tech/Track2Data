@@ -684,6 +684,23 @@ class PreprocessedSession:
     # "differs from raw" stops isolating this step the moment it is enabled.
     # None when jump detection did not run.
     jump_replaced: np.ndarray | None = None
+    # (n_frames,) true video frame of each row, for a session cut down to a window of its rows
+    # (see metrics.binning.slice_psess); the full session derives it from
+    # ``session.tracking_intervals`` instead, so this stays None. Use ``timeline()``.
+    frame_index: np.ndarray | None = None
+    timeline_valid: bool = True
+
+    def timeline(self) -> tuple[np.ndarray, bool]:
+        """(true video frame per row, whether that mapping is verified).
+
+        The one place rows become video frames, shared by the per-frame table, binning and the
+        zone events, so they cannot disagree about the clock.
+        """
+        if self.frame_index is not None:
+            return self.frame_index, self.timeline_valid
+        from track2data.core.timeline import map_array_index_to_true_frame
+
+        return map_array_index_to_true_frame(self.session.tracking_intervals, self.n_frames)
 
     # ── convenience pass-throughs ─────────────────────────────────────────────
 

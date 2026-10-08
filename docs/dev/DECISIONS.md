@@ -731,3 +731,53 @@ Metrics use a chosen 2-D plane (default x, y); z is kept.
 physical quantities. Recording them before the readers exist keeps each reader's
 review about the format, not about re-deciding the policy.
 
+---
+
+### D-032 · One row-to-frame timeline; zone events and latency follow it
+
+**Decision:** Which video frame a stored trajectory row is comes from one place,
+`PreprocessedSession.timeline()` (built on `core/timeline.py`): the per-frame table,
+time bins and the zone events all use it, and a window cut from a session carries its
+rows' original frames. Z-5 reports the original `frame` and `t_s = frame / fps`, as the
+per-frame table does. Z-6 keeps its meaning, time since the start of tracked observation,
+but says where that is (`origin_frame`) and counts time omitted between tracking intervals
+as elapsed time. Each unbroken stretch of video is read on its own: no exit is invented
+where observation stops, the first observed frame in a zone after a gap is an enter flagged
+`after_gap`, and Z-9 drops a visit that began in a gap. Malformed or non-reconciling
+intervals fall back to the row position with a logged warning, and an array that already
+spans the whole timeline is not expanded twice.
+
+**Rationale:** Two clocks for one observation made event logs disagree with the trajectory
+by the tracking start (40 s in the reported case) and by every omitted span. Redefining
+latency as absolute video time would have silently changed a published meaning, so the
+origin is explicit instead. Z-4 and Z-7 still count a transition between the last zone of
+one interval and the first of the next; that is a known limit, not yet addressed.
+
+---
+
+### D-033 · The quality grid separates choice from failure and counts crossings by frame
+
+**Decision:** D-5 keeps its `identity_stability_status` values and adds
+`identity_free_reason` (`declared`, `low_identification`, `unknown`, `not_applicable`) and
+`identified_fraction`; the user's Identity-free tick counts as `declared`. The Preview grid
+leaves `declared` and `not_applicable` unjudged and flags the others. D-8 keeps
+`crossing_frame_fraction` (a share of fragment duration, which falls as the group grows)
+and adds `crossing_unique_frame_fraction` (frames with a crossing over tracked frames); the
+grid uses the new one with the limits that were already written for a share of frames.
+
+**Rationale:** `identity_free` meant both "tracked without identities on purpose" and
+"identification failed", so a 10 % identification session read Good. Adding fields rather
+than changing existing values keeps every consumer of the old columns working.
+
+---
+
+### D-034 · No usable data is NaN, not zero (IL-1, IL-7)
+
+**Decision:** IL-1 reports NaN when an animal has no valid pair of consecutive positions,
+and IL-7 reports NaN count and durations when it has no usable speed. Valid data with no
+movement or no qualifying bout stays 0, and the mean duration with zero observed bouts keeps
+its historical 0.
+
+**Rationale:** An empty sum is 0.0, which reads as "did not move" for an animal that was
+never tracked; if tracking failures differ by condition, that biases group comparisons.
+
