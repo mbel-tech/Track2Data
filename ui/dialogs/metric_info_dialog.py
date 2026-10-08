@@ -68,12 +68,14 @@ class MetricInfoDialog(QDialog):
         footer = QHBoxLayout()
         doc = metric_cls.documentation
         self._copy_citation_btn = QPushButton("Copy citation")
+        self._copy_citation_btn.setProperty("role", "outline")
         self._copy_citation_btn.setEnabled(doc.citation is not None)
         self._copy_citation_btn.clicked.connect(self._copy_citation)
         footer.addWidget(self._copy_citation_btn)
         footer.addStretch()
 
         close_btn = QPushButton("Close")
+        close_btn.setProperty("role", "outline")
         close_btn.setFixedWidth(90)
         close_btn.clicked.connect(self.accept)
         footer.addWidget(close_btn)

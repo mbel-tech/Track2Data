@@ -149,8 +149,8 @@ class TestUILayer:
         # their own sidebar row so every page is directly reachable --
         # see app/navigation.py's module comment.
         assert len(STAGES) == 9
-        assert STAGES[0][0].startswith("1")
-        assert STAGES[-1][0].startswith("9")
+        assert STAGES[0][0] == "Project"
+        assert STAGES[-1][0] == "Preview & Export"
 
     def test_page_to_stage_mapping_length(self) -> None:
         from app.navigation import PAGE_TO_STAGE, STAGES
@@ -389,6 +389,7 @@ class TestUILayer:
         from app.main_window import MainWindow
 
         win = MainWindow()
+        win._sidebar.set_locked(8, False)  # Preview unlocks after a run
         landed = []
         for row in range(win._sidebar.count()):
             win._sidebar.setCurrentRow(row)

@@ -117,3 +117,34 @@ def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
     if info.status == "empty" and page in REQUIRED_PAGES:
         return info.message or f"Complete the {PAGE_NAMES[page]} step first."
     return None
+
+
+def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) -> list[str]:
+    """One short live line per sidebar stage (Project … Preview & Export)."""
+    if manifest is None:
+        return ["Unnamed", "No sessions", "", "", "", "", "", "Not run", "Needs a run"]
+    cal = manifest.calibration
+    cal_text = {"scalar": "Scalar", "session": "From tracker"}.get(cal.mode, "Body length")
+    if cal.mode == "scalar" and cal.px_per_cm:
+        cal_text += f" · {cal.px_per_cm:g} px/cm"
+    n_zones = len(manifest.zones.rois)
+    sel = manifest.metrics
+    n_metrics = len(sel.individual) + len(sel.group) + len(sel.zone)
+    n_sessions = len(manifest.sessions)
+    if manifest.metadata_source is None:
+        meta = "Not set"
+    elif manifest.mapping is None or not manifest.mapping.rules:
+        meta = "Map columns"
+    else:
+        meta = f"{len(manifest.mapping.rules)} columns mapped"
+    return [
+        manifest.project_name or "Unnamed",
+        f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions",
+        cal_text,
+        f"{n_zones} zone{'s' if n_zones != 1 else ''}" if n_zones else "No zones",
+        meta,
+        "Identity switch on" if manifest.preprocess.identity_switch.enabled else "Defaults",
+        f"{n_metrics} selected" if n_metrics else "None selected",
+        f"Ran · {n_sessions} sessions" if has_run_results else "Not run",
+        "Results ready" if has_run_results else "Needs a run",
+    ]
