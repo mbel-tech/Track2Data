@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -109,15 +108,19 @@ class MetricsScreen(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Metrics")
         title.setObjectName("PageTitle")
         root.addWidget(title)
 
-        subtitle = QLabel("Choose which behavioural metrics to extract.")
+        subtitle = QLabel(
+            "Choose what to extract. Diagnostics (coverage, identity stability, crossings) "
+            "always run."
+        )
         subtitle.setObjectName("PageLead")
+        subtitle.setWordWrap(True)
         root.addWidget(subtitle)
 
         # ── search + presets ─────────────────────────────────────────────
@@ -125,6 +128,7 @@ class MetricsScreen(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search metrics by name or ID…")
         self._search.setClearButtonEnabled(True)
+        self._search.setObjectName("Search")
         self._search.textChanged.connect(self._apply_search)
         tools.addWidget(self._search, 1)
         self._preset_combo = QComboBox()
@@ -136,7 +140,7 @@ class MetricsScreen(QWidget):
         tools.addWidget(self._preset_combo)
         root.addLayout(tools)
         self._search_hint = QLabel("")
-        self._search_hint.setStyleSheet("font-size: 12px;")
+        self._search_hint.setProperty("role", "faint")
         root.addWidget(self._search_hint)
 
         self._tabs = QTabWidget()
@@ -152,23 +156,25 @@ class MetricsScreen(QWidget):
         root.addWidget(self._tabs, 1)
 
         self._counter = QLabel("")
-        self._counter.setStyleSheet("font-size: 13px; font-weight: bold;")
-        root.addWidget(self._counter)
+        self._counter.setObjectName("Counter")
         self._diag_note = QLabel(
             "Diagnostic metrics (D-1 … D-10: coverage, accuracy, identity stability, …) "
             "are always computed and are not listed here."
         )
         self._diag_note.setWordWrap(True)
-        self._diag_note.setStyleSheet("font-size: 12px;")
+        self._diag_note.setProperty("role", "faint")
         root.addWidget(self._diag_note)
 
-        qform = QFormLayout()
+        qform = QHBoxLayout()
+        qform.setSpacing(10)
         self._quality_spin = QDoubleSpinBox()
         self._quality_spin.setRange(0.0, 1.0)
         self._quality_spin.setSingleStep(0.05)
         self._quality_spin.setDecimals(2)
         self._quality_spin.setValue(0.0)
-        qform.addRow("Quality threshold:", self._quality_spin)
+        qform.addWidget(QLabel("Quality threshold"))
+        qform.addWidget(self._quality_spin)
+        qform.addSpacing(16)
         self._timepoint_spin = QDoubleSpinBox()
         self._timepoint_spin.setRange(0.0, 100000.0)
         self._timepoint_spin.setDecimals(2)
@@ -180,7 +186,10 @@ class MetricsScreen(QWidget):
             "metric per bin (adds bin_index, bin_start_s, bin_end_s columns). "
             "Whole-track metrics such as tortuosity stay one row per animal."
         )
-        qform.addRow("Time bins:", self._timepoint_spin)
+        qform.addWidget(QLabel("Time bins"))
+        qform.addWidget(self._timepoint_spin)
+        qform.addStretch()
+        qform.addWidget(self._counter)
         root.addLayout(qform)
 
         # No Apply button: edits auto-commit after a pause; MainWindow
@@ -271,6 +280,8 @@ class MetricsScreen(QWidget):
             _COL_NAME, QHeaderView.ResizeMode.Stretch
         )
         table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(40)
+        table.setShowGrid(False)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         for row, metric_cls in enumerate(metric_classes):
@@ -305,12 +316,14 @@ class MetricsScreen(QWidget):
             doc = metric_cls.documentation
             if doc.formula_plain is not None or doc.citation is not None:
                 info_btn = QPushButton("ⓘ")
-                info_btn.setFixedWidth(28)
+                info_btn.setFixedSize(28, 28)
+                info_btn.setProperty("role", "icon")
                 info_btn.clicked.connect(partial(self._show_metric_info, metric_cls))
                 table.setCellWidget(row, _COL_INFO, info_btn)
 
             config_btn = QPushButton("⚙")
-            config_btn.setFixedWidth(28)
+            config_btn.setFixedSize(28, 28)
+            config_btn.setProperty("role", "icon")
             # getattr, not metric_cls.parameters, for the same reason as
             # _natural_sort_key's fallback above -- a third-party plugin
             # metric isn't required to define it and shouldn't crash the

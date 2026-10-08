@@ -146,3 +146,5 @@ QCheckBox[switch="true"]::indicator { width: 34px; height: 20px; border: none; b
 QCheckBox[switch="true"]::indicator:checked { image: url(:/icons/switch-on-light.svg); background: transparent; border: none; }
 QGroupBox { background: #ffffff; border: 1px solid #e6dfd0; border-radius: 12px; margin-top: 14px; padding: 18px 16px 12px 16px; font-size: 15px; }
 QLabel[banner="warn"] { background: #fbefd0; color: #6e4f00; border-radius: 10px; padding: 10px 12px; }
+QLabel#Counter { font-weight: 700; font-size: 14px; }
+QPushButton[role="icon"] { padding: 0; border: none; border-radius: 14px; background: transparent; font-size: 15px; font-weight: 400; } QPushButton[role="icon"]:hover { background: rgba(138,151,155,0.2); }
