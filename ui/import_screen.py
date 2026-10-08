@@ -43,7 +43,10 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QFileDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -128,13 +131,23 @@ class ImportScreen(QWidget):
     # ── build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        main = QWidget()
+        root = QVBoxLayout(main)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
+        outer.addWidget(main, 1)
 
+        # ── header: title and lead on the left, the two add actions on the right ──
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head_text = QVBoxLayout()
+        head_text.setSpacing(6)
         title = QLabel("Sessions")
         title.setObjectName("PageTitle")
-        root.addWidget(title)
+        head_text.addWidget(title)
 
         subtitle = QLabel(
             "Add the folder your tracking software wrote its output to, or drag and drop it "
@@ -143,12 +156,34 @@ class ImportScreen(QWidget):
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
-        root.addWidget(subtitle)
+        head_text.addWidget(subtitle)
+        head.addLayout(head_text, 1)
+        self._head_actions = QHBoxLayout()
+        self._head_actions.setSpacing(10)
+        head.addLayout(self._head_actions, 0)
+        root.addLayout(head)
+
+        # ── summary chips ─────────────────────────────────────────────────
+        self._chip_row = QHBoxLayout()
+        self._chip_row.setSpacing(8)
+        self._chip_ready = self._make_chip("ok")
+        self._chip_free = self._make_chip("warn")
+        self._facts_label = QLabel()
+        self._facts_label.setProperty("role", "faint")
+        self._chip_row.addWidget(self._chip_ready)
+        self._chip_row.addWidget(self._chip_free)
+        self._chip_row.addWidget(self._facts_label)
+        self._chip_row.addStretch()
+        root.addLayout(self._chip_row)
 
         # ── table ─────────────────────────────────────────────────────────
         self._table = QTableWidget(0, len(_COLUMN_HEADERS))
         self._table.setHorizontalHeaderLabels(_COLUMN_HEADERS)
         self._table.setMinimumHeight(180)
+        self._table.verticalHeader().hide()
+        self._table.verticalHeader().setDefaultSectionSize(44)
+        self._table.setShowGrid(False)
+        self._table.setAlternatingRowColors(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -158,7 +193,11 @@ class ImportScreen(QWidget):
         # header width, while session ids ("session_trial10_Segment1") were
         # being elided to fit a fixed slice.
         header.setStretchLastSection(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(_COL_SESSION_ID, QHeaderView.ResizeMode.Stretch)
+        for col in range(1, len(_COLUMN_HEADERS)):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._table.itemChanged.connect(self._on_item_changed)
         root.addWidget(self._table)
 
@@ -179,9 +218,9 @@ class ImportScreen(QWidget):
         )
         self._locate_btn.clicked.connect(self._locate_video)
         self._table.itemSelectionChanged.connect(self._update_locate_enabled)
-        btn_row.addWidget(add_btn)
+        self._head_actions.addWidget(self._locate_btn)
+        self._head_actions.addWidget(add_btn)
         btn_row.addWidget(remove_btn)
-        btn_row.addWidget(self._locate_btn)
         btn_row.addStretch()
         root.addLayout(btn_row)
         self._update_locate_enabled()
@@ -204,16 +243,140 @@ class ImportScreen(QWidget):
 
         self._scan_message = QLabel()
         self._scan_message.setWordWrap(True)
-        self._scan_message.setStyleSheet("color: #c0392b;")
+        self._scan_message.setProperty("role", "err")
         self._scan_message.hide()
         root.addWidget(self._scan_message)
 
         # ── status ─────────────────────────────────────────────────────
         self._status_label = QLabel("0 sessions imported")
-        self._status_label.setStyleSheet("font-size: 13px;")
+        self._status_label.setProperty("role", "faint")
         root.addWidget(self._status_label)
 
         root.addStretch()
+
+        # ── detail pane for the selected session ──────────────────────────
+        self._detail = self._build_detail_pane()
+        outer.addWidget(self._detail)
+        self._table.itemSelectionChanged.connect(self._update_detail)
+        self._update_detail()
+
+    @staticmethod
+    def _make_chip(kind: str) -> QLabel:
+        chip = QLabel()
+        chip.setProperty("chip", kind)
+        chip.hide()
+        return chip
+
+    def _build_detail_pane(self) -> QFrame:
+        pane = QFrame()
+        pane.setObjectName("DetailPane")
+        pane.setFixedWidth(292)
+        col = QVBoxLayout(pane)
+        col.setContentsMargins(20, 26, 20, 20)
+        col.setSpacing(10)
+        label = QLabel("SELECTED SESSION")
+        label.setObjectName("SectionLabel")
+        col.addWidget(label)
+        self._detail_id = QLabel("Select a session")
+        self._detail_id.setProperty("role", "mono")
+        self._detail_id.setWordWrap(True)
+        col.addWidget(self._detail_id)
+        self._detail_grid = QGridLayout()
+        self._detail_grid.setHorizontalSpacing(12)
+        self._detail_grid.setVerticalSpacing(6)
+        col.addLayout(self._detail_grid)
+        self._detail_note = QFrame()
+        self._detail_note.setProperty("banner", "warn")
+        note_row = QVBoxLayout(self._detail_note)
+        note_row.setContentsMargins(12, 10, 12, 10)
+        self._detail_note_text = QLabel()
+        self._detail_note_text.setWordWrap(True)
+        note_row.addWidget(self._detail_note_text)
+        self._detail_note.hide()
+        col.addWidget(self._detail_note)
+        self._detail_free = QCheckBox("Treat as identity-free")
+        self._detail_free.toggled.connect(self._on_detail_free_toggled)
+        col.addWidget(self._detail_free)
+        col.addStretch()
+        return pane
+
+    def _update_detail(self) -> None:
+        while self._detail_grid.count():
+            item = self._detail_grid.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        session_id = self._selected_session_id()
+        ref = None
+        if session_id is not None and self._store is not None and self._store.manifest:
+            ref = next(
+                (s for s in self._store.manifest.sessions if s.session_id == session_id), None
+            )
+        if ref is None:
+            self._detail_id.setText("Select a session")
+            self._detail_note.hide()
+            self._detail_free.setEnabled(False)
+            return
+        facts = self._store.session_facts(ref.session_id)
+        self._detail_id.setText(ref.session_id)
+        video_text, _tip = self._video_cell(ref, facts)
+        rows = [("Reader", self._reader_label(ref.reader) if ref.reader else _PLACEHOLDER)]
+        if facts is not None:
+            minutes = facts.n_frames / facts.fps / 60 if facts.fps else 0
+            rows += [
+                ("Frame rate", f"{facts.fps:g} fps"),
+                ("Frames", f"{facts.n_frames:,} ({minutes:.0f} min)".replace(",", " ")),
+                ("Animals", str(facts.n_animals)),
+            ]
+        rows.append(("Video", video_text))
+        for i, (key, value) in enumerate(rows):
+            k = QLabel(key)
+            k.setProperty("role", "faint")
+            v = QLabel(value)
+            v.setProperty("role", "mono")
+            self._detail_grid.addWidget(k, i, 0)
+            self._detail_grid.addWidget(v, i, 1)
+
+        note = ""
+        if ref.is_identity_free():
+            note = (
+                "Tracked without identities. Individual metrics will be skipped for this "
+                "session; group and zone metrics still run."
+            )
+        elif facts is not None and video_text == "Not found":
+            note = (
+                "Video not found. Zones can still be drawn on the trajectory plot; use "
+                "Locate video… to attach it."
+            )
+        self._detail_note_text.setText(note)
+        self._detail_note.setVisible(bool(note))
+        self._detail_free.setEnabled(facts is not None)
+        self._detail_free.blockSignals(True)
+        self._detail_free.setChecked(ref.is_identity_free())
+        self._detail_free.blockSignals(False)
+
+    def _on_detail_free_toggled(self, checked: bool) -> None:
+        session_id = self._selected_session_id()
+        if self._store is not None and session_id is not None:
+            self._store.set_session_identity_free(session_id, checked)
+
+    def _update_chips(self, sessions) -> None:
+        n_free = sum(1 for s in sessions if s.is_identity_free())
+        n_ready = len(sessions) - n_free
+        self._chip_ready.setText(f"{n_ready} ready")
+        self._chip_ready.setVisible(bool(sessions))
+        self._chip_free.setText(f"{n_free} identity-free")
+        self._chip_free.setVisible(n_free > 0)
+        facts = [self._store.session_facts(s.session_id) for s in sessions]
+        facts = [f for f in facts if f is not None]
+        if facts:
+            fps = sorted({f"{f.fps:g}" for f in facts})
+            animals = sorted({f.n_animals for f in facts})
+            minutes = sum(f.n_frames / f.fps for f in facts if f.fps) / 60
+            self._facts_label.setText(
+                f"{'/'.join(fps)} fps · {'/'.join(map(str, animals))} animals · {minutes:.0f} min"
+            )
+        else:
+            self._facts_label.setText("")
 
     # ── multi-folder dialog ───────────────────────────────────────────────
 
@@ -325,7 +488,9 @@ class ImportScreen(QWidget):
 
     def _set_drag_active(self, active: bool) -> None:
         # Blue-border feedback on drag-over, per UI_DESIGN.md §6.2.
-        self._table.setStyleSheet("QTableWidget { border: 2px solid #2980b9; }" if active else "")
+        self._table.setProperty("dropActive", active)
+        self._table.style().unpolish(self._table)
+        self._table.style().polish(self._table)
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -507,3 +672,5 @@ class ImportScreen(QWidget):
             self._table.setItem(row, _COL_VIDEO, video_item)
         n = len(sessions)
         self._status_label.setText(f"{n} session{'s' if n != 1 else ''} imported")
+        self._update_chips(sessions)
+        self._update_detail()

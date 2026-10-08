@@ -118,3 +118,8 @@ QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; }
 QGroupBox { border: 1px solid #8a979b55; border-radius: 10px; margin-top: 12px; padding-top: 10px; font-weight: 700; }
 QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
+
+QLabel[role="err"] { color: #f0b4a8; }
+QTableView[dropActive="true"] { border: 2px solid #3fa7b5; }
+QTableView::item:selected { background: #172327; color: #e3e8ea; }
+QTableView::item { padding: 10px 4px; } QHeaderView::section { padding: 10px 4px; }
