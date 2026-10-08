@@ -16,18 +16,21 @@ Widgets:
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -35,6 +38,37 @@ from PySide6.QtWidgets import (
 from ui.widgets.autocommit import AutoCommit
 
 _UNIT_CHOICES = ["cm", "mm", "m"]
+
+
+class _ModeCard(QFrame):
+    """A selectable card around one calibration radio button."""
+
+    def __init__(self, radio: QRadioButton, description: str) -> None:
+        super().__init__()
+        self.setProperty("card", True)
+        self.setProperty("selected", False)
+        self._radio = radio
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(16, 14, 16, 14)
+        col.setSpacing(6)
+        col.addWidget(radio)
+        desc = QLabel(description)
+        desc.setWordWrap(True)
+        desc.setProperty("role", "muted")
+        col.addWidget(desc)
+        radio.toggled.connect(self._sync)
+        self._sync()
+
+    def _sync(self) -> None:
+        self.setProperty("selected", self._radio.isChecked())
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mousePressEvent(self, event) -> None:
+        self._radio.setChecked(True)
+        super().mousePressEvent(event)
 
 
 class CalibrationScreen(QWidget):
@@ -56,17 +90,17 @@ class CalibrationScreen(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Calibration")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Convert pixel distances to real-world units."
+            "How pixels become real units. Distances, speeds and areas in every export use this."
         )
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
         # ── mode selection ────────────────────────────────────────────────
@@ -81,17 +115,21 @@ class CalibrationScreen(QWidget):
         self._btn_group.addButton(self._radio_scalar)
         self._btn_group.addButton(self._radio_session)
 
-        mode_row.addWidget(self._radio_bl)
-        mode_row.addWidget(self._radio_scalar)
-        mode_row.addWidget(self._radio_session)
-        mode_row.addStretch()
+        mode_row.setSpacing(14)
+        for radio, text in (
+            (self._radio_bl, "Scales each animal by its own median body length. "
+                             "Outputs in BL and cm."),
+            (self._radio_scalar, "One px-per-cm factor for every session. Measure it on a frame."),
+            (self._radio_session, "Use the length unit each session already recorded."),
+        ):
+            mode_row.addWidget(_ModeCard(radio, text), 1)
         root.addLayout(mode_row)
 
         # ── BL info ───────────────────────────────────────────────────────
         self._bl_label = QLabel(
             "Body length will be derived from session bounding boxes."
         )
-        self._bl_label.setStyleSheet("color: #555; font-size: 13px;")
+        self._bl_label.setProperty("role", "muted")
         self._bl_label.setWordWrap(True)
         root.addWidget(self._bl_label)
 
@@ -104,8 +142,10 @@ class CalibrationScreen(QWidget):
         self._px_spin.setValue(1.0)
         self._px_spin.setDecimals(4)
         self._px_spin.setSuffix(" px per unit")
+        self._px_spin.setMinimumWidth(180)
         scalar_form.addRow("Pixels per unit:", self._px_spin)
         self._measure_btn = QPushButton("Measure on frame…")
+        self._measure_btn.setProperty("role", "outline")
         self._measure_btn.setToolTip(
             "Click both ends of an object of known length on a session frame"
         )
@@ -123,7 +163,7 @@ class CalibrationScreen(QWidget):
             "Uses each session's own calibration ratio, recorded by the "
             "idtracker.ai validator's Length Calibration tool."
         )
-        session_info.setStyleSheet("color: #555; font-size: 13px;")
+        session_info.setProperty("role", "muted")
         session_info.setWordWrap(True)
         session_layout.addWidget(session_info)
 
@@ -140,7 +180,8 @@ class CalibrationScreen(QWidget):
         session_layout.addWidget(self._confirm_check)
 
         readiness_label = QLabel("Per-session readiness:")
-        readiness_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        readiness_label.setObjectName("SectionLabel")
+        readiness_label.setText("PER-SESSION READINESS")
         session_layout.addWidget(readiness_label)
         self._readiness_list = QListWidget()
         self._readiness_list.setMinimumHeight(100)

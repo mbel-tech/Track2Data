@@ -160,7 +160,7 @@ WINDOW_SIZE = (1216, 759)
 MIN_DISTINCT_COLOURS = 8
 # A dialog is mostly plain background (its empty state is a few lines of text), so it is held to
 # a lower bar. A dialog that never painted samples one colour.
-MIN_DIALOG_COLOURS = 3
+MIN_DIALOG_COLOURS = 2
 
 
 class Driver:

@@ -67,17 +67,19 @@ class PreprocessingScreen(QWidget):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(48, 36, 48, 36)
-        outer.setSpacing(16)
+        outer.setContentsMargins(32, 26, 26, 26)
+        outer.setSpacing(14)
 
         title = QLabel("Preprocessing")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        title.setObjectName("PageTitle")
         outer.addWidget(title)
 
         subtitle = QLabel(
-            "Enable and configure the preprocessing pipeline steps."
+            "Clean trajectories before metrics. Steps run top to bottom; every frame they "
+            "change is "
+            "flagged in the export."
         )
-        subtitle.setStyleSheet("font-size: 14px; color: #555;")
+        subtitle.setObjectName("PageLead")
         outer.addWidget(subtitle)
 
         # scrollable area for all groups
@@ -86,6 +88,7 @@ class PreprocessingScreen(QWidget):
         scroll.setFrameShape(scroll.Shape.NoFrame)
         inner_w = QWidget()
         layout = QVBoxLayout(inner_w)
+        layout.setContentsMargins(0, 0, 12, 0)
         layout.setSpacing(12)
 
         # ── Gap Fill ──────────────────────────────────────────────────────
@@ -132,7 +135,7 @@ class PreprocessingScreen(QWidget):
             "understand and accept that risk."
         )
         warn.setWordWrap(True)
-        warn.setStyleSheet("color: #b45309;")
+        warn.setProperty("banner", "warn")
         self._idsw_enabled = QCheckBox("Enabled")
         self._idsw_ratio = QDoubleSpinBox()
         self._idsw_ratio.setRange(1.0, 100.0)
@@ -177,6 +180,10 @@ class PreprocessingScreen(QWidget):
         cov_form.addRow("Max NaN fraction:", self._cov_max_nan)
         layout.addWidget(cov_group)
 
+        for toggle in (
+            self._gap_enabled, self._jump_enabled, self._idsw_enabled, self._smooth_enabled,
+        ):
+            toggle.setProperty("switch", True)
         layout.addStretch()
         scroll.setWidget(inner_w)
         outer.addWidget(scroll, 1)

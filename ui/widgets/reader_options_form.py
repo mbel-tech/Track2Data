@@ -67,7 +67,7 @@ class ReaderOptionsForm(QWidget):
         for spec in parameters:
             label = QLabel(f"{spec.label} *" if spec.required else spec.label)
             note = QLabel("")
-            note.setStyleSheet("color: #777; font-size: 11px;")
+            note.setStyleSheet(" font-size: 11px;")
             control = self._build_control(spec)
             if spec.help:
                 control.setToolTip(spec.help)
@@ -174,6 +174,7 @@ class ReaderOptionsForm(QWidget):
             edit = QLineEdit()
             edit.textChanged.connect(lambda text, n=name: self._edited(n, self._read(n)))
             browse = QPushButton("Browse…")
+            browse.setProperty("role", "outline")
             browse.clicked.connect(lambda _checked=False, e=edit: self._browse(e))
             holder_layout.addWidget(edit, 1)
             holder_layout.addWidget(browse)

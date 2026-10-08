@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 
 pytest.importorskip("PySide6")
 
@@ -377,7 +378,7 @@ def test_sidebar_shows_status_badges(qtbot, tmp_path: Path) -> None:
     win._store.new_project("p", tmp_path)
     assert win._sidebar.status(0) == "valid"
     assert win._sidebar.status(1) == "empty"
-    assert win._sidebar.item(0).text().startswith("✓")
+    assert win._sidebar.item(0).data(Qt.ItemDataRole.UserRole) == "valid"
     win._store.update_sessions([SessionRef(session_id="s1", folder=tmp_path, sha256="x")])
     assert win._sidebar.status(1) == "valid"
 
