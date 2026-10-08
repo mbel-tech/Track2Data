@@ -921,7 +921,8 @@ selection, and exported alongside the metrics CSV in a separate
 | **Priority** | Diagnostic |
 | **Inputs** | `Session.has_stable_identities`, `Session.quality["fraction_identified"]` |
 | **Formula** | `identity_free` if `has_stable_identities=False`; else `not_assessed` if `fraction_identified` is missing and the session's reader is registered with `provides_identification_quality = False` (a tracker with no such metric); else `stable` if `fraction_identified >= 0.5` (default 0.0 when missing); else `weak` |
-| **Output columns** | `identity_stability_status` |
+| **Output columns** | `identity_stability_status`, `identity_free_reason`, `identified_fraction` |
+| **Assumptions** | `identity_free` covers two different situations, so `identity_free_reason` says which: `declared` (the tracker was told not to identify, or the user ticked Identity-free for the session), `low_identification` (identities were requested but `fraction_identified < 0.5`), `unknown` (the tracker did not say which), `not_applicable` (a tracker with no identification quality); empty when the status is not `identity_free`. The Preview quality grid leaves `declared` and `not_applicable` unjudged and flags the other two. `identified_fraction` is the tracker's `fraction_identified`, NaN when absent |
 | **Reference** | Track2Data engineering threshold on idtracker.ai's own fraction_identified (PRD §5.2, FR-IMP-3); not an external scientific result |
 | **Supporting references** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) (DOI: 10.1038/s41592-018-0295-5) |
 
@@ -961,8 +962,8 @@ selection, and exported alongside the metrics CSV in a separate
 | **Level** | Session summary |
 | **Priority** | Diagnostic |
 | **Inputs** | `Session.fragments` (both individual and crossing fragments) |
-| **Formula** | `crossing_fragment_fraction = n_crossing_fragments / n_fragments`; `crossing_frame_fraction = sum(len of crossing fragments) / sum(len of all fragments)` |
-| **Output columns** | `crossing_fragment_fraction`, `crossing_frame_fraction` |
+| **Formula** | `crossing_fragment_fraction = n_crossing_fragments / n_fragments`; `crossing_frame_fraction = sum(len of crossing fragments) / sum(len of all fragments)` (a share of **fragment duration**: concurrent individual fragments each add to the denominator, so it shrinks as the group grows); `crossing_unique_frame_fraction = |union of crossing frames| / tracked frames` (overlapping crossings count once; this is the share of the recording with animals in contact, and is what the Preview quality grid reports) |
+| **Output columns** | `crossing_fragment_fraction`, `crossing_frame_fraction`, `crossing_unique_frame_fraction` |
 | **Units** | fraction ∈ [0, 1] |
 | **Warnings** | Directly quantifies a confound for every GL-* metric: animals inside a crossing fragment are by definition touching or overlapping for that whole span, so distance- and orientation-based group metrics are unreliable there. The frame-weighted fraction is the one to read — crossing and individual fragments have very different typical lengths. |
 | **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |

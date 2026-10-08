@@ -330,14 +330,25 @@ class IdentityStability(Metric):
     level = "diagnostic"
     priority = "diagnostic"
     requires_identity = False
-    output_columns: ClassVar[list[str]] = ["session_id", "identity_stability_status"]
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "identity_stability_status",
+        "identity_free_reason",
+        "identified_fraction",
+    ]
     documentation = MetricDocumentation(
         definition=(
             "Categorical classification of identity stability: "
             "'stable' when identities are well-maintained, "
             "'weak' when identities exist but are unreliable, "
             "'identity_free' when the session has no stable identities, "
-            "'not_assessed' when the tracker reports no identification quality to judge by."
+            "'not_assessed' when the tracker reports no identification quality to judge by. "
+            "identity_free_reason says why a session is 'identity_free': 'declared' (tracked "
+            "without identities on purpose, or marked so by the user), 'low_identification' "
+            "(identities were requested but fewer than half of the animals were identified), "
+            "'unknown' (the tracker did not say which) or 'not_applicable' (a tracker with no "
+            "identification quality); it is empty otherwise. identified_fraction is the "
+            "tracker's fraction identified, NaN when absent."
         ),
         formula_plain=(
             "stable        if has_stable_identities=True  and fraction_identified >= 0.5; "
@@ -364,14 +375,16 @@ class IdentityStability(Metric):
     )
 
     def compute(self, session: Session, cfg: dict[str, Any] | None = None) -> pd.DataFrame:
+        fraction_identified: float | None = None
+        if session.quality is not None:
+            raw = session.quality.get("fraction_identified")
+            if raw is not None:
+                fraction_identified = float(raw)
+        reason = ""
         if not session.has_stable_identities:
             status = "identity_free"
+            reason = self._identity_free_reason(session, fraction_identified, cfg)
         else:
-            fraction_identified: float | None = None
-            if session.quality is not None:
-                raw = session.quality.get("fraction_identified")
-                if raw is not None:
-                    fraction_identified = float(raw)
             if fraction_identified is None and _reader_has_no_identification_quality(
                 session.reader
             ):
@@ -384,10 +397,37 @@ class IdentityStability(Metric):
                 {
                     "session_id": session.session_id,
                     "identity_stability_status": status,
+                    "identity_free_reason": reason,
+                    "identified_fraction": (
+                        float("nan") if fraction_identified is None else fraction_identified
+                    ),
                 }
             ],
             columns=self.output_columns,
         )
+
+    @staticmethod
+    def _identity_free_reason(
+        session: Session, fraction_identified: float | None, cfg: dict[str, Any] | None
+    ) -> str:
+        """Why identities are not stable: a choice, a failure, or not knowable.
+
+        has_stable_identities folds three things together (the tracker's declaration, a low
+        fraction identified, a coverage fallback), so the grid cannot tell an experiment run
+        without identities from one whose identification failed. Only the former should be
+        left unjudged.
+        """
+        if (cfg or {}).get("identity_free_declared") is True or session.track_wo_identities:
+            return "declared"
+        if _reader_has_no_identification_quality(session.reader):
+            return "not_applicable"
+        if (
+            session.track_wo_identities is False
+            and fraction_identified is not None
+            and fraction_identified < 0.5
+        ):
+            return "low_identification"
+        return "unknown"
 
 
 # ── D-6: Segmentation Error Frames ──────────────────────────────────────────
@@ -567,9 +607,14 @@ class CrossingRate(Metric):
         "session_id",
         "crossing_fragment_fraction",
         "crossing_frame_fraction",
+        "crossing_unique_frame_fraction",
     ]
     documentation = MetricDocumentation(
         definition=(
+            "crossing_unique_frame_fraction: share of tracked frames covered by at least one "
+            "crossing fragment (overlapping crossings count once; concurrent individual "
+            "fragments do not enter the denominator). This is the share of the recording "
+            "with animals in contact, and what the Preview quality grid reports. "
             "crossing_fragment_fraction: fraction of all fragments (individual "
             "+ crossing) where is_an_individual is False. "
             "crossing_frame_fraction: fraction of total fragment-frames "
@@ -579,6 +624,7 @@ class CrossingRate(Metric):
             "lengths."
         ),
         formula_plain=(
+            "crossing_unique_frame_fraction = |union of crossing frames| / tracked frames; "
             "crossing_fragment_fraction = n_crossing_fragments / n_fragments; "
             "crossing_frame_fraction = sum(length of crossing fragments) / "
             "sum(length of all fragments)"
@@ -599,6 +645,7 @@ class CrossingRate(Metric):
                     "session_id": session.session_id,
                     "crossing_fragment_fraction": float("nan"),
                     "crossing_frame_fraction": float("nan"),
+                    "crossing_unique_frame_fraction": float("nan"),
                 }],
                 columns=self.output_columns,
             )
@@ -619,11 +666,20 @@ class CrossingRate(Metric):
             )
             frame_frac = crossing_len / total_len if total_len > 0 else float("nan")
 
+        n_rows = int(session.raw_xy.shape[0])
+        if n_rows > 0:
+            from track2data.readers.idtrackerai.fragments import crossing_frame_mask
+
+            unique_frac = float(crossing_frame_mask(session.fragments, n_rows).mean())
+        else:
+            unique_frac = float("nan")
+
         return pd.DataFrame(
             [{
                 "session_id": session.session_id,
                 "crossing_fragment_fraction": frag_frac,
                 "crossing_frame_fraction": frame_frac,
+                "crossing_unique_frame_fraction": unique_frac,
             }],
             columns=self.output_columns,
         )
@@ -1379,12 +1435,18 @@ class PreprocessingDistortion(Metric):
 
 
 
-def compute_all_diagnostics(psess: PreprocessedSession) -> dict[str, pd.DataFrame]:
+def compute_all_diagnostics(
+    psess: PreprocessedSession, *, identity_free_declared: bool | None = None
+) -> dict[str, pd.DataFrame]:
     """Run every diagnostic metric and return {metric_id: DataFrame}.
 
     Takes the PreprocessedSession, not the Session: D-1..D-10 all describe
     the tracker's own output and read ``psess.session``, but D-11 describes
     what the metrics consumed and needs the preprocessed arrays.
+
+    *identity_free_declared* is the user's own answer for this session (the Sessions screen's
+    Identity-free tick): True means "tracked without identities on purpose", which D-5 records
+    as the reason, so a low identification rate is not read as a failure.
     """
     session = psess.session
     metrics: list[Metric] = [
@@ -1403,7 +1465,8 @@ def compute_all_diagnostics(psess: PreprocessedSession) -> dict[str, pd.DataFram
         CertainFragmentFrameFraction(),
         TrackerCorrectionCensus(),
     ]
-    results = {m.id: m.compute(session) for m in metrics}
+    cfgs = {"D-5": {"identity_free_declared": identity_free_declared}}
+    results = {m.id: m.compute(session, cfgs.get(m.id)) for m in metrics}
     results[MetricInputProvenance.id] = MetricInputProvenance().compute(psess)
     results[PreprocessingDistortion.id] = PreprocessingDistortion().compute(psess)
     return results

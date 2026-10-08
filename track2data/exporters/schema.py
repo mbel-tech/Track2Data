@@ -106,6 +106,7 @@ _EXPLICIT_UNITS: dict[str, str] = {
     "bout_criterion_effective": "categorical",
     "home_base_stable": "boolean",
     "identity_stability_status": "categorical",
+    "identity_free_reason": "categorical",
 }
 
 #: Suffix -> unit, longest suffix first so "_px_s2" wins over "_px_s" and

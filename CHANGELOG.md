@@ -958,6 +958,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The Preview quality grid no longer calls poor identification "Good".** A session with identities
+  requested but only 10 % of animals identified was shown as Good with Identity "n/a", because D-5
+  reports `identity_free` for it as well as for sessions tracked without identities on purpose. D-5
+  now also records why (`identity_free_reason`: declared, low_identification, unknown,
+  not_applicable) and the identification rate (`identified_fraction`). The grid leaves deliberate
+  identity-free tracking (including your Identity-free tick) unjudged, flags low identification with
+  its rate, and shows "Unknown" when the tracker does not say. `identity_stability_status` values
+  are unchanged.
+- **The crossing percentage in the grid now means what it says.** It was D-8's share of *fragment
+  duration* worded as a share of frames, which falls as the group grows (10 crossed frames of 100
+  with five animals read 2.0 %). D-8 gains `crossing_unique_frame_fraction` (the share of tracked
+  frames with animals in contact, overlaps counted once) and the grid uses it, with the 2 % / 5 %
+  limits that were written for a share of frames. `crossing_frame_fraction` keeps its meaning and is
+  documented as a fragment-duration share.
+
 - **Dragging a zone vertex can no longer ruin the zone.** The edit was applied without checking the
   shape, so a normal drag could collapse a polygon to zero area (zone assignment then matched
   nothing) while the zone stayed in the project. An edit is now refused, with a message and the

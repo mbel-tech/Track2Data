@@ -4,11 +4,14 @@ Pure (no Qt): ``assess_session`` reads one ``SessionRunResult``'s diagnostic
 frames and returns a ``SessionQuality`` -- one ``Cell`` per measure plus a
 verdict (the worst cell) and one plain sentence per non-green measure.
 
-Sources: coverage D-1, identity stability D-5, crossing frames D-8, implausible
+Sources: coverage D-1, identity stability D-5, crossing share D-8, implausible
 jumps D-10, interpolated frames D-11. The cut-offs below are UI-side defaults,
 kept in one table so they can be moved into the engine config later. Crossings
-are shown as a share of frames because D-8 reports a fraction, not a rate per
-minute.
+are the share of tracked frames with animals in contact (D-8's
+``crossing_unique_frame_fraction``), not the older fragment-duration share, which
+depends on the group size. An identity-free session is only left unjudged when it
+was tracked that way on purpose: low identification of a session that asked for
+identities is flagged (D-5's ``identity_free_reason``).
 """
 
 from __future__ import annotations
@@ -103,9 +106,15 @@ def assess_session(result) -> SessionQuality:
         )
 
     stability = None
+    ident_reason = ""
+    ident_fraction: float | None = None
     frame = diag.get("D-5")
     if frame is not None and len(frame):
         stability = str(frame["identity_stability_status"].iloc[0])
+        if "identity_free_reason" in frame:
+            ident_reason = str(frame["identity_free_reason"].iloc[0])
+        if "identified_fraction" in frame:
+            ident_fraction = _num(frame["identified_fraction"].iloc[0])
     ident = {
         "stable": Cell("Stable", "good"),
         "weak": Cell("Weak", "check"),
@@ -114,11 +123,31 @@ def assess_session(result) -> SessionQuality:
     }.get(stability or "", Cell("—", "na"))
     if stability == "weak":
         reasons.append("Identities exist but are unreliable; swaps are likely.")
+    elif stability == "identity_free" and ident_reason == "low_identification":
+        ident = Cell(f"Low ({_pct(ident_fraction)})", "check")
+        reasons.append(
+            f"Only {_pct(ident_fraction)} of animals were identified although identities were "
+            "requested; per-animal results are unreliable."
+        )
+    elif stability == "identity_free" and ident_reason == "unknown":
+        ident = Cell("Unknown", "check")
+        shown = "" if ident_fraction is None else f" ({_pct(ident_fraction)} identified)"
+        reasons.append(
+            "The tracker does not say whether identities were switched off on purpose"
+            f"{shown}; mark the session identity-free if they were, otherwise check them."
+        )
 
-    cross = _column(diag, "D-8", "crossing_frame_fraction", "max")
+    unique = _column(diag, "D-8", "crossing_unique_frame_fraction", "max")
+    if unique is not None:
+        cross = unique
+        cross_text = f"Animals cross paths in {_pct(cross)} of frames."
+    else:
+        # Older diagnostics carry only the fragment-duration share; say what it is.
+        cross = _column(diag, "D-8", "crossing_frame_fraction", "max")
+        cross_text = f"Crossing fragments make up {_pct(cross)} of all fragment time."
     cross_level = _lower_better(cross, *THRESHOLDS["crossings"])
     if cross_level in ("check", "review"):
-        reasons.append(f"Animals cross paths in {_pct(cross)} of frames.")
+        reasons.append(cross_text)
 
     jumps = _column(diag, "D-10", "teleport_jump_count", "sum")
     jump_level = _lower_better(jumps, *THRESHOLDS["jumps"])

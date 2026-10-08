@@ -765,6 +765,13 @@ class Engine:
                 return ref.identity_free_override
         return session.track_wo_identities is True
 
+    def _identity_free_override(self, session_id: str) -> bool | None:
+        """The user's own identity-free answer for *session_id*, None when they gave none."""
+        for ref in self._manifest.sessions:
+            if ref.session_id == session_id:
+                return ref.identity_free_override
+        return None
+
     def identity_skipped_metrics(self, identity_free: bool) -> dict[str, str]:
         """Selected metric ids that an identity-free session must not run,
         mapped to the reason, for the export record.
@@ -889,7 +896,12 @@ class Engine:
         # D-5 IdentityStability is precisely the record of that fact, so
         # suppressing the diagnostics would remove the evidence for the
         # skips below.
-        results.update(compute_all_diagnostics(psess))
+        results.update(
+            compute_all_diagnostics(
+                psess,
+                identity_free_declared=self._identity_free_override(psess.session_id),
+            )
+        )
 
         sel = self._manifest.metrics
 
