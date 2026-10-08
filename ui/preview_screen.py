@@ -119,15 +119,15 @@ class PreviewScreen(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Preview & Diagnostics")
         title.setObjectName("PageTitle")
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Inspect project summary, quality-control diagnostics, and metric previews."
+            "Check tracking quality per session before you export."
         )
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
@@ -163,7 +163,7 @@ class PreviewScreen(QWidget):
             "changed, and where the animals spent their time."
         )
         self._traj_status.setWordWrap(True)
-        self._traj_status.setStyleSheet("font-size: 12px;")
+        self._traj_status.setProperty("role", "faint")
         lay.addWidget(self._traj_status)
 
         self._traj_view = TrajectoryView()
@@ -286,7 +286,7 @@ class PreviewScreen(QWidget):
         summary_layout = QVBoxLayout(summary_w)
         self._summary_label = QLabel("(no project open)")
         self._summary_label.setWordWrap(True)
-        self._summary_label.setStyleSheet("font-size: 13px;")
+        self._summary_label.setProperty("role", "faint")
         summary_layout.addWidget(self._summary_label)
         summary_layout.addStretch()
         return summary_w
@@ -296,7 +296,7 @@ class PreviewScreen(QWidget):
         diag_layout = QVBoxLayout(diag_w)
 
         self._diag_placeholder = QLabel("Run the pipeline to see diagnostics.")
-        self._diag_placeholder.setStyleSheet(" font-style: italic;")
+        self._diag_placeholder.setProperty("role", "faint")
         diag_layout.addWidget(self._diag_placeholder)
 
         selector_form = QFormLayout()
@@ -308,7 +308,7 @@ class PreviewScreen(QWidget):
         diag_layout.addLayout(selector_form)
 
         individual_label = QLabel("Per-individual (D-1 coverage, D-3 ID-probability stats)")
-        individual_label.setStyleSheet("font-weight: bold;")
+        individual_label.setObjectName("SectionLabel")
         diag_layout.addWidget(individual_label)
         self._diag_individual_table = QTableWidget()
         diag_layout.addWidget(self._diag_individual_table)
@@ -316,13 +316,13 @@ class PreviewScreen(QWidget):
         session_label = QLabel(
             "Session-level (D-2 accuracy, D-4 inconsistent frames, D-5 identity stability)"
         )
-        session_label.setStyleSheet("font-weight: bold;")
+        session_label.setObjectName("SectionLabel")
         diag_layout.addWidget(session_label)
         self._diag_session_table = QTableWidget()
         diag_layout.addWidget(self._diag_session_table)
 
         preprocess_label = QLabel("Preprocessing steps")
-        preprocess_label.setStyleSheet("font-weight: bold;")
+        preprocess_label.setObjectName("SectionLabel")
         diag_layout.addWidget(preprocess_label)
         self._diag_preprocess_table = QTableWidget()
         diag_layout.addWidget(self._diag_preprocess_table)
@@ -335,7 +335,7 @@ class PreviewScreen(QWidget):
         metric_layout = QVBoxLayout(metric_w)
 
         self._metrics_placeholder = QLabel("Run the pipeline to see metric previews.")
-        self._metrics_placeholder.setStyleSheet(" font-style: italic;")
+        self._metrics_placeholder.setProperty("role", "faint")
         metric_layout.addWidget(self._metrics_placeholder)
 
         selector_form = QFormLayout()

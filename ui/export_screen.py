@@ -114,8 +114,8 @@ class ExportScreen(QWidget):
         scroll.setFrameShape(scroll.Shape.NoFrame)
         inner = QWidget()
         root = QVBoxLayout(inner)
-        root.setContentsMargins(48, 36, 48, 36)
-        root.setSpacing(16)
+        root.setContentsMargins(32, 26, 26, 26)
+        root.setSpacing(14)
 
         title = QLabel("Export")
         title.setObjectName("PageTitle")
@@ -146,7 +146,7 @@ class ExportScreen(QWidget):
         browse_btn.setProperty("role", "outline")
         browse_btn.clicked.connect(self._browse_dir)
         self._dir_label = QLabel("(defaults to project exports directory)")
-        self._dir_label.setStyleSheet(" font-style: italic;")
+        self._dir_label.setProperty("role", "faint")
         dir_row.addWidget(browse_btn)
         dir_row.addWidget(self._dir_label, 1)
         root.addLayout(dir_row)
@@ -180,7 +180,7 @@ class ExportScreen(QWidget):
         root.addLayout(btn_row)
 
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("font-size: 13px;")
+        self._status_label.setProperty("role", "faint")
         root.addWidget(self._status_label)
 
         # ── receipt table ────────────────────────────────────────────────
@@ -267,7 +267,7 @@ class ExportScreen(QWidget):
     def _set_output_dir(self, directory: str) -> None:
         self._output_dir = directory
         self._dir_label.setText(directory)
-        self._dir_label.setStyleSheet("")
+        self._dir_label.setProperty("role", "")
         self._check_overwrite()
 
     def _default_dir(self) -> Path:
@@ -359,10 +359,10 @@ class ExportScreen(QWidget):
         has_project = self._store is not None and self._store.has_project
         if has_project:
             self._dir_label.setText(str(self._resolved_out_dir()))
-            self._dir_label.setStyleSheet("")
+            self._dir_label.setProperty("role", "")
         else:
             self._dir_label.setText("(defaults to project exports directory)")
-            self._dir_label.setStyleSheet(" font-style: italic;")
+            self._dir_label.setProperty("role", "faint")
         self._check_overwrite()
 
     def _on_task_finished(self, task_id: str, result: object) -> None:
