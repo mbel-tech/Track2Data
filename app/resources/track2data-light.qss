@@ -124,3 +124,11 @@ QLabel[role="err"] { color: #8e2a1e; }
 QTableView[dropActive="true"] { border: 2px solid #1c5866; }
 QTableView::item:selected { background: #eef5f5; color: #1d2b30; }
 QTableView::item { padding: 10px 4px; } QHeaderView::section { padding: 10px 4px; }
+
+QLabel[role="muted"] { color: #55676c; font-size: 13.5px; }
+QFrame[card="true"][selected="true"] { border: 1.5px solid #1c5866; background: #eef5f5; }
+QFrame[card="true"] QLabel, QFrame[card="true"] QRadioButton { background: transparent; border: none; }
+
+QRadioButton { font-weight: 700; spacing: 8px; }
+QRadioButton::indicator { width: 14px; height: 14px; border-radius: 9px; border: 2px solid #cfc6b3; background: transparent; }
+QRadioButton::indicator:checked { width: 8px; height: 8px; border-radius: 9px; border: 5px solid #1c5866; background: #ffffff; }
