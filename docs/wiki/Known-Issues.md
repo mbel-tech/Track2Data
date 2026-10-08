@@ -81,7 +81,7 @@ exist first. Verify your download with `sha256sum -c SHA256SUMS.txt` and see
 
 **There is no release DOI yet.** The Zenodo integration is prepared but not switched on,
 and `CITATION.cff` has no ORCID. Until then, cite the version and commit recorded in your
-export's `manifest.json`. The plan is in
+export's `manifest.json` — see [[Citing Track2Data]]. The plan is in
 [`docs/dev/RELEASING.md`](https://github.com/mbel-tech/Track2Data/blob/main/docs/dev/RELEASING.md).
 
 ## Full audit trail

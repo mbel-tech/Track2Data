@@ -43,6 +43,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   version-scope caveat on every page, and `README.md` links the wiki at last:
   wiki pages are excluded from code search and from search-engine crawling, so
   an unlinked wiki is unreachable.
+- **Wiki: install, recording, compatibility and citation pages.** Four more
+  pages in `docs/wiki/`, covering what a user needs before and around a run.
+  *Install and First Run* walks the unsigned-binary dialogs on each OS, the
+  checksum verification that makes them safe to accept, what the app writes and
+  where (`.t2d_cache` beside the project file, nothing outside the output
+  directory), and how to uninstall. *Before You Record* is the pre-experiment
+  checklist for the decisions that cannot be fixed afterwards: frame rate, a
+  scale object in frame or body lengths accepted as the unit, identities,
+  session-folder naming as `session_id`, and a metadata CSV template in both
+  per-session and per-animal shapes with the Validator-label-versus-position
+  trap spelled out. *Compatibility* is one table for idtracker.ai 6.x, legacy
+  v5 and unsupported v4, the formats a scan names but cannot read, the pickle
+  gate, the three OS install routes and the Python versions under CI.
+  *Citing Track2Data* gives the idtracker.ai and software BibTeX, states that
+  there is no release DOI yet and to cite the `app_version` / `project_hash`
+  from `manifest.json` instead, and points at `METRIC_REFERENCES.csv` and the
+  export's own `codebook.csv` for the per-metric citations a behavioural
+  reviewer expects.
 - **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
   `session_*` folders to settle what the synthetic tests cannot: how far the
   blob-derived body length sits from the session-wide value (issue #72), how

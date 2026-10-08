@@ -9,6 +9,8 @@ export to a statistical result, what the terms mean, and what is currently in fl
 
 **Start here**
 
+- **Installing it?** [[Install and First Run]] — including the unsigned-binary dialogs.
+- **Planning a recording?** [[Before You Record]] — what to decide before the camera starts.
 - **New to the app?** The [[User Guide]] — every screen, with screenshots.
 - **Got an export, now what?** [[Analysis Recipes]] — four worked designs, from CSV to model.
 - **Writing the methods section?** [[Statistics and Pseudoreplication]].
@@ -24,7 +26,9 @@ export to a statistical result, what the terms mean, and what is currently in fl
 
 **Also here**
 
+- [[Compatibility]] — what reads what, on which systems.
 - [[Formats and Interoperability]] — what can be read, and reading the output elsewhere.
+- [[Citing Track2Data]] — the tracker, the tool, and the metric references.
 - [[FAQ and Troubleshooting]].
 - [[Developer Docs]] — contributing, architecture, releasing.
 
