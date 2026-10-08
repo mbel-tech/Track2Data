@@ -23,6 +23,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   export's README and `manifest.json` now say which keypoint stood for the animal, how it was
   chosen, the likelihood cutoff and its coverage. The preprocessed-session cache schema is bumped
   to 2, so older cache entries are rebuilt once.
+- **Formats we can name but not read are now named.** A scan recognises SLEAP `.slp`
+  projects, `trx.mat`, FlyTracker `-track.mat`, DANNCE `save_data_AVG.mat`, Multi-Worm Tracker
+  `.blobs`, AnimalTA detailed files, DeepLabCut 3-D tables and FicTrac logs, and says what to do
+  instead (for `.slp`: export Analysis HDF5), in the confirm dialog, `track2data scan` and
+  `scan --json` (`recognised`), instead of "nothing recognised". Matched only by what the format
+  fixes (a name, suffix, folder or header row); nothing is added.
+- **GUI driver verbs `scan`, `confirm` and `shot-dialog`** drive the scan, the confirm dialog and
+  Add as a user would, and a guard makes every file picker answer "cancelled" instead of blocking.
+- **Wiki: the pages between an export and a result.** Five new pages in
+  `docs/wiki/`, written for the step the repository documentation did not
+  cover — what to do with the numbers once they exist. *Analysis Recipes*
+  works four designs (open-field thigmotaxis, shoaling cohesion, activity and
+  freezing, within-session habituation) from `metrics_long.csv` to a fitted
+  model, naming the metrics to select and the columns they produce.
+  *Statistics and Pseudoreplication* states the unit of replication for each
+  metric family — notably that every GL-\* metric is one value per session, so
+  a tank of eight fish is one observation — plus bounded-ratio models, count
+  offsets, circular headings and a reporting checklist. *Glossary* maps every
+  term to the column that carries it. *Known Issues* is the dated list of what
+  is currently wrong or in flux, which a tagged release cannot hold.
+  *Reanalysing After a Metric Fix* answers the question the pre-1.0 warning
+  raises: whether a dataset exported weeks ago is still current, via
+  `manifest.json`, the changelog and a diff of the long tables.
+
+  The wiki is now published from `docs/wiki/` by `.github/workflows/wiki.yml`
+  rather than copied by hand, which had already drifted in three of six pages
+  within a day. `scripts/check_wiki.py` — in the test gate via
+  `tests/test_docs/test_wiki.py` — resolves every `[[wiki link]]`, checks every
+  repository link points at a file and heading that exist, rejects relative
+  links (they do not resolve from a wiki page) and fails on a page orphaned
+  from `_Sidebar.md`. A `_Footer.md` now carries the licence and the
+  version-scope caveat on every page, and `README.md` links the wiki at last:
+  wiki pages are excluded from code search and from search-engine crawling, so
+  an unlinked wiki is unreachable.
+- **Wiki: install, recording, compatibility and citation pages.** Four more
+  pages in `docs/wiki/`, covering what a user needs before and around a run.
+  *Install and First Run* walks the unsigned-binary dialogs on each OS, the
+  checksum verification that makes them safe to accept, what the app writes and
+  where (`.t2d_cache` beside the project file, nothing outside the output
+  directory), and how to uninstall. *Before You Record* is the pre-experiment
+  checklist for the decisions that cannot be fixed afterwards: frame rate, a
+  scale object in frame or body lengths accepted as the unit, identities,
+  session-folder naming as `session_id`, and a metadata CSV template in both
+  per-session and per-animal shapes with the Validator-label-versus-position
+  trap spelled out. *Compatibility* is one table for idtracker.ai 6.x, legacy
+  v5 and unsupported v4, the formats a scan names but cannot read, the pickle
+  gate, the three OS install routes and the Python versions under CI.
+  *Citing Track2Data* gives the idtracker.ai and software BibTeX, states that
+  there is no release DOI yet and to cite the `app_version` / `project_hash`
+  from `manifest.json` instead, and points at `METRIC_REFERENCES.csv` and the
+  export's own `codebook.csv` for the per-metric citations a behavioural
+  reviewer expects.
 - **`scripts/validate_blob_diagnostics.py`** — run it on a directory of real
   `session_*` folders to settle what the synthetic tests cannot: how far the
   blob-derived body length sits from the session-wide value (issue #72), how

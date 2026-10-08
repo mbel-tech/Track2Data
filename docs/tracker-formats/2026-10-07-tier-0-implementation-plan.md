@@ -1436,6 +1436,8 @@ left out, with reasons:
 
 **Tests.** A recognise-only fixture per table entry gives a MEDIUM detection whose remediation text is shown instead of "nothing found"; a smoke test of each driver verb.
 
+**Built (T0-9).** `readers/recognise.py` holds the table (`FORMATS`) and `find_unreadable`; `ScanResult.recognised` carries the matches (default empty, so existing callers are unchanged). One deliberate change from the interface above: a match is **not** a MEDIUM `Detection`. A `Detection` names a reader that can read the files and offers sessions to add, and these formats have neither; reporting them as information keeps "nothing to add" true, so `ConfirmDraft.is_empty` and the dialog's *Close*-only state still hold and the remediation text appears there and in the CLI. Signatures are file names, suffixes, a folder name or a header row only, read with the header-only `Peeker`; files inside a session a reader already owns are not reported; a cloud-only placeholder is never opened. The `trx.mat` entry goes when the Tier 2 reader lands (G-JAABA), `dlc_3d` with Tier 3, and so on: the table is the list of what is still missing. Driver: `scan`, `confirm`, `shot-dialog`, REPL equivalents, and a `QFileDialog` guard.
+
 ---
 
 ## Self-review against the design

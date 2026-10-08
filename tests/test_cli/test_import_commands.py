@@ -93,6 +93,21 @@ class TestScan:
         assert "No tracking output" in out.output
         assert ".csv" in out.output and ".txt" in out.output
 
+    def test_a_format_we_can_name_but_not_read_says_what_to_do(self, tmp_path: Path) -> None:
+        (tmp_path / "run.slp").write_text("x")
+        out = invoke("scan", str(tmp_path))
+        assert out.exit_code == 0
+        assert "No tracking output" in out.output
+        assert "SLEAP project" in out.output
+        assert "Export Analysis HDF5" in out.output
+
+    def test_json_lists_what_was_recognised_but_cannot_be_read(self, tmp_path: Path) -> None:
+        (tmp_path / "run.slp").write_text("x")
+        data = json.loads(invoke("scan", str(tmp_path), "--json").output)
+        (found,) = data["recognised"]
+        assert found["key"] == "sleap_slp" and found["count"] == 1
+        assert "Export Analysis HDF5" in found["remediation"]
+
     def test_json_carries_the_groups_and_the_evidence(self, idtracker_root: Path) -> None:
         data = json.loads(invoke("scan", str(idtracker_root), "--json").output)
         assert data["truncated"] is False
@@ -183,6 +198,16 @@ class TestAdd:
         assert out.exit_code != 0
         assert "No tracking output" in out.output
         assert project.read_bytes() == before
+
+    def test_adding_a_format_that_cannot_be_read_explains_why(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        folder = tmp_path / "slp"
+        folder.mkdir()
+        (folder / "run.slp").write_text("x")
+        out = invoke("add", str(project), str(folder), "--yes")
+        assert out.exit_code != 0
+        assert "Export Analysis HDF5" in out.output
 
     def test_sessions_can_be_left_out_and_renamed(
         self, project: Path, idtracker_root: Path
