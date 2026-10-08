@@ -149,6 +149,26 @@ class Peeker:
             return None
         return Hdf5Root(nodes, found)
 
+    def mat_variables(self, path: Path) -> dict[str, tuple[tuple[int, ...], str]] | None:
+        """The variables of a classic (v5) MATLAB file as ``{name: (shape, class)}``; else None.
+
+        Reads the variable headers only (scipy's ``whosmat``), never the arrays. A v7.3 file is
+        HDF5 underneath and is not listed here. Nothing is executed or deserialised.
+        """
+        path = Path(path)
+        if not self._allowed(path):
+            return None
+        try:
+            with open(path, "rb") as handle:
+                if not handle.read(128).startswith(b"MATLAB 5.0 MAT-file"):
+                    return None
+            import scipy.io as sio
+
+            listing = sio.whosmat(str(path))
+        except Exception:  # not MATLAB, truncated, permissions: cannot tell
+            return None
+        return {name: (tuple(int(n) for n in shape), str(kind)) for name, shape, kind in listing}
+
     def npy_header(self, path: Path) -> NpyHeader | None:
         """Parse a ``.npy`` header without loading (or unpickling) any data."""
         path = Path(path)
