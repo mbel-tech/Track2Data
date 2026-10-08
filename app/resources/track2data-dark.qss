@@ -162,3 +162,6 @@ QLineEdit#PaletteSearch { font-size: 16px; padding: 10px 14px; }
 QListWidget#PaletteList { border: none; font-family: "IBM Plex Mono", Consolas, Menlo, monospace; font-size: 13px; background: transparent; }
 QListWidget#PaletteList::item { padding: 8px 10px; border-radius: 8px; }
 QListWidget#PaletteList::item:selected { background: #172327; color: #e3e8ea; }
+
+QLabel#ReceiptTick { background: #e8b64c; color: #1b1503; border-radius: 20px; font-size: 20px; font-weight: 700; }
+QLabel#DialogTitle { font-size: 20px; font-weight: 700; }
