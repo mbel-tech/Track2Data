@@ -37,6 +37,7 @@ from track2data.core.models import (
     CalibrationConfig,
     MetricSelection,
     ProjectManifest,
+    SceneConfig,
     SecurityConfig,
     SessionRef,
 )
@@ -307,7 +308,9 @@ def test_compute_metrics_every_registered_metric_runs_without_crashing(
                 group=_ids_for("group"),
                 zone=_ids_for("zone"),
                 diagnostic=[],
-            )
+            ),
+            # IL-15 is offered only for a declared side view.
+            "scene": SceneConfig(camera_view="side"),
         }
     )
     engine = Engine(manifest)

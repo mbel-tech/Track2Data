@@ -864,7 +864,7 @@ def test_social_preset_selects_group_metrics_and_everything_selects_all(qtbot) -
     screen.apply_preset("All metrics")
     screen.flush()
     m = store.manifest.metrics
-    assert len(m.individual) == 12 and len(m.group) == 13 and len(m.zone) == 9
+    assert len(m.individual) == 13 and len(m.group) == 13 and len(m.zone) == 9
 
 
 def test_all_presets_only_name_registered_metrics() -> None:
@@ -882,11 +882,11 @@ def test_counter_shows_selected_of_total_by_level(qtbot) -> None:
 
     screen = MetricsScreen(store=_make_store())
     qtbot.addWidget(screen)
-    assert "0 / 34" in screen._counter.text()
+    assert "0 / 35" in screen._counter.text()
     screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0).setCheckState(
         Qt.CheckState.Checked
     )
-    assert "1 / 34" in screen._counter.text()
+    assert "1 / 35" in screen._counter.text()
     assert "1 individual" in screen._counter.text()
 
 

@@ -11,15 +11,13 @@ a class attribute; the content comes verbatim from
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import pandas as pd
 from pydantic import BaseModel, model_validator
 
+from track2data.core.models import CameraView
 from track2data.metrics.references import Reference
-
-if TYPE_CHECKING:
-    from track2data.core.models import CameraView
 
 
 class MetricDocumentation(BaseModel):
@@ -148,7 +146,7 @@ class Metric(ABC):
     window_safe: ClassVar[bool] = True
     output_columns: ClassVar[list[str]]
     documentation: ClassVar[MetricDocumentation]
-    # Most metrics (30 of 50 today) take no configuration at all --
+    # Most metrics (30 of 51 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.
