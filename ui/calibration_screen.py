@@ -240,7 +240,8 @@ class CalibrationScreen(QWidget):
                 facts = self._store.session_facts(ref.session_id)
                 if facts is not None:
                     background = facts.background_image_path
-                    size = (float(facts.width_px), float(facts.height_px))
+                    if facts.width_px and facts.height_px:  # 0 x 0: no pixel frame
+                        size = (float(facts.width_px), float(facts.height_px))
                     break
         dialog = RulerDialog(background, size, parent=self)
         if dialog.exec() == RulerDialog.DialogCode.Accepted:

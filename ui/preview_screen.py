@@ -68,7 +68,9 @@ class TrajectoryData:
     xy: np.ndarray
     fps: float
     background: Path | None
-    size: tuple[float, float]
+    #: The video frame's size, or None for a session with no pixel frame (the viewer then
+    #: sizes itself from the positions).
+    size: tuple[float, float] | None
 
 
 def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> TrajectoryData:
@@ -84,7 +86,11 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
         xy=psess.xy,
         fps=video.fps,
         background=psess.session.background_image_path,
-        size=(float(video.width_px), float(video.height_px)),
+        size=(
+            (float(video.width_px), float(video.height_px))
+            if psess.session.has_pixel_frame
+            else None
+        ),
     )
 
 #: Diagnostic metric IDs shown in the Diagnostics tab's per-individual table.
