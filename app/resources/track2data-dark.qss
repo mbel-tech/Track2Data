@@ -165,3 +165,6 @@ QListWidget#PaletteList::item:selected { background: #172327; color: #e3e8ea; }
 
 QLabel#ReceiptTick { background: #e8b64c; color: #1b1503; border-radius: 20px; font-size: 20px; font-weight: 700; }
 QLabel#DialogTitle { font-size: 20px; font-weight: 700; }
+
+QPushButton#CheckCell { background: transparent; border: none; border-radius: 8px; text-align: left; padding: 0; }
+QPushButton#CheckCell:hover { background: #1f262a; }

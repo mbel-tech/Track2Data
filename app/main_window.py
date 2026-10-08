@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
         # has exactly one call path into the real run, shared with this
         # screen's own Run button (issue #22).
         self._processing_screen = pages[7]
+        self._processing_screen.navigateRequested.connect(self._go_to_page)
         for page in pages:
             page.setObjectName("Page")
             self._stack.addWidget(page)

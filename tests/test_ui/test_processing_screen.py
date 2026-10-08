@@ -286,3 +286,49 @@ def test_parallel_run_bar_follows_session_events_only(qtbot) -> None:
     assert screen._progress.value() == 0
     screen._on_task_event("t", ProgressEvent(stage="session", current=1, total=4))
     assert screen._progress.value() == 25
+
+
+def test_workers_segments_drive_the_spin_box_and_the_cli_command(qtbot) -> None:
+    from ui.processing_screen import ProcessingScreen
+    from ui.store.project_store import ProjectStore
+
+    screen = ProcessingScreen(ProjectStore())
+    qtbot.addWidget(screen)
+    assert screen._worker_buttons[1].isChecked()
+    top = screen._workers.maximum()
+    assert screen._worker_buttons[1].isEnabled()
+    assert screen._worker_buttons[8].isEnabled() == (top >= 8)
+
+    if top >= 2:
+        screen._worker_buttons[2].click()
+        assert screen._workers.value() == 2
+        assert screen._worker_buttons[2].isChecked()
+        assert screen.cli_command().endswith("--workers 2")
+
+
+def test_clicking_a_setup_check_asks_to_navigate_to_its_page(qtbot) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from ui.processing_screen import ProcessingScreen
+    from ui.store.project_store import ProjectStore
+
+    screen = ProcessingScreen(ProjectStore())
+    qtbot.addWidget(screen)
+    cells = screen.findChildren(QPushButton, "CheckCell")
+    assert len(cells) == 6
+    with qtbot.waitSignal(screen.navigateRequested) as blocker:
+        cells[0].click()
+    assert blocker.args == [1]  # Sessions
+    with qtbot.waitSignal(screen.navigateRequested) as blocker:
+        cells[5].click()
+    assert blocker.args == [6]  # Metrics
+
+
+def test_main_window_follows_a_setup_check_click(qtbot) -> None:
+    from app.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._processing_screen.navigateRequested.emit(3)
+    assert win._stack.currentIndex() == 3
+    win.close()
