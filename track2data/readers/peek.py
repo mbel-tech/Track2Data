@@ -159,9 +159,6 @@ class Peeker:
         if not self._allowed(path):
             return None
         try:
-            with open(path, "rb") as handle:
-                if not handle.read(128).startswith(b"MATLAB 5.0 MAT-file"):
-                    return None
             import scipy.io as sio
 
             listing = sio.whosmat(str(path))
