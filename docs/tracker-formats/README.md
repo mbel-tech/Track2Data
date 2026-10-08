@@ -51,7 +51,7 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 
 | Prio | Importer | Tier | Status | Suite cases |
 |---|---|---|---|---|
-| 1 | DeepLabCut CSV, then H5 (Lightning Pose, EKS, maDLC) | 1 | planned | `dlc_single_animal_h5`, `dlc_two_mice_csv`, `lightning_pose_eks_csv` |
+| 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) | 1 | **built** (CSV); `.h5` planned | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` waits for the G-H5 decision |
 | 2 | SLEAP analysis HDF5 | 1 | planned | `sleap_named_tracks`, `sleap_no_tracks` |
 | 3 | Ctrax raw `.mat`, `trx.mat`, FlyTracker | 2 | planned | `ctrax_raw_mat` |
 | 4 | ToxTrac `Tracking_RealSpace.txt` | 3 | planned | `toxtrac_realspace` |
@@ -63,6 +63,25 @@ Tier 0 (the scan, detect, confirm and persist foundation, including
 idtracker.ai folder-of-folders) comes first. **Built so far:** the reader contract
 (options, verification, `discover`), the read-only scan, the persisted reader with
 provenance and pre-flight notes, `ConfirmDraft` and the `list-readers` / `scan` / `add`
-commands. **Still to build in Tier 0:** the store and task runner, the confirm dialog,
-and the GUI driver verbs. The decisions are D-026 to D-031 in `docs/dev/DECISIONS.md`. Everything else, such as FastTrack,
+commands, the store and task runner, the confirm dialog, the GUI driver verbs, and the
+list of formats that are recognised but not yet readable. Tier 0 is complete. The decisions are
+D-026 to D-031 in `docs/dev/DECISIONS.md`. Everything else, such as FastTrack,
 OCTRON, WCON and the fragment-ID formats, is backlog ordered by ease.
+
+## Reader cards
+
+### DeepLabCut CSV (`deeplabcut`)
+
+Also reads Lightning Pose and EKS tables, which share the layout. Verified against the real
+`DLC_two-mice.predictions.csv` and `EKS_IBL-paw_multicam_left.predictions.csv` samples.
+
+| | |
+|---|---|
+| Session | One per `.csv` file (one per video). A folder of them is scanned and added together. |
+| Detect | First cell `scorer`; second row `individuals` (4 header rows, multi-animal) or `bodyparts` (3 rows, single animal); a `coords` row containing `x`, `y` and `likelihood`. Annotation files (`CollectedData_*`) and 3-D tables have no likelihood and are not claimed. |
+| You supply | Frame rate, frame width and height (the file records none of them), never defaulted. Optionally: which keypoint stands for the animal, the likelihood cutoff (default 0.6; the dialog proposes 0 for a Lightning Pose / EKS table), which animals to read, and whether to keep the full skeleton. |
+| Position | One real keypoint, never a centroid: the one you name, else the keypoint present most often after the cutoff (ties go to the higher mean likelihood). The whole skeleton is stored beside it and no metric reads it. |
+| Identity | Named individuals are stable. `ind1`, `ind2`... are positional placeholders and are flagged and treated as unstable. `single` (DeepLabCut's unique body parts) is not an animal and is left out unless asked for. One animal: stable. |
+| Missing | Empty cells; positions under the cutoff. A text cell is an error, never a gap. |
+| Traps handled | EKS tables carry six more coordinates per keypoint (`x_ens_median`...): only `x`, `y`, `likelihood` are read, by name. EKS writes a likelihood of exactly 0 for every frame, a placeholder: it is ignored and the session says so, otherwise a cutoff would erase the recording. A human-filled gap has likelihood 0.01 and is dropped by the default cutoff. Frames are placed by their number, so a gap in the numbers is a run of missing frames. |
+| Not yet | `.h5` (waits for the decoder decision), the `.csv` / `.h5` pair counted as one session, 3-D tables (recognised, not read). |
