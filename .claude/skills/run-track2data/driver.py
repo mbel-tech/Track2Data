@@ -158,6 +158,9 @@ WINDOW_SIZE = (1216, 759)
 # A window whose render collapses to a couple of flat colours never
 # actually painted. Real Track2Data pages sample ~40+ distinct colours.
 MIN_DISTINCT_COLOURS = 8
+# A dialog is mostly plain background (its empty state is a few lines of text), so it is held to
+# a lower bar. A dialog that never painted samples one colour.
+MIN_DIALOG_COLOURS = 3
 
 
 class Driver:
@@ -246,7 +249,7 @@ class Driver:
 
         return self._save(self.win.grab(), out)
 
-    def _save(self, pixmap, out: Path) -> Path:
+    def _save(self, pixmap, out: Path, min_colours: int = MIN_DISTINCT_COLOURS) -> Path:
         # QPixmap.save() returns False rather than raising -- notably when
         # the parent directory doesn't exist. Silently producing no file
         # is the worst outcome here, so check it.
@@ -258,7 +261,7 @@ class Driver:
         for y in range(0, image.height(), 7):
             for x in range(0, image.width(), 7):
                 colours.add(image.pixel(x, y))
-        if len(colours) < MIN_DISTINCT_COLOURS:
+        if len(colours) < min_colours:
             raise SystemExit(
                 f"{out} looks blank ({len(colours)} distinct colours sampled). "
                 "The window did not paint."
@@ -348,7 +351,7 @@ class Driver:
             raise SystemExit("no confirm dialog is open to photograph")
         out = Path(out_path).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
-        return self._save(dialog.grab(), out)
+        return self._save(dialog.grab(), out, MIN_DIALOG_COLOURS)
 
     def describe_dialog(self) -> str:
         """The dialog's state as text: what a person looking at it would read."""
