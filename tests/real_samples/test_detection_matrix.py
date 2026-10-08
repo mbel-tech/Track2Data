@@ -23,8 +23,8 @@ EXPECTED: dict[str, str | None] = {
     "dlc_single_animal_h5": None,  # .h5: arrives with the G-H5 decision
     "dlc_two_mice_csv": "deeplabcut",
     "lightning_pose_eks_csv": "deeplabcut",
-    "sleap_named_tracks": None,
-    "sleap_no_tracks": None,
+    "sleap_named_tracks": "sleap_analysis",
+    "sleap_no_tracks": "sleap_analysis",
     "trex_new_export": None,
     "trex_old_export": None,
     "animalta_fixed_csv": None,

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **SLEAP analysis HDF5 input** (File > Export Analysis HDF5). One session per file; frame rate
+  and frame size are asked for (the file records neither); one real skeleton node stands for the
+  animal and the whole skeleton, its edges and the point scores are stored beside it. The layout is
+  checked, not guessed: a file whose occupancy, node names or track names disagree with `tracks`
+  is refused with a clear error. Tracks with no names (or SLEAP's synthetic `track_0...`) are
+  positional, so the session is identity-free by construction. Checked against the two real
+  sample files. The scan can now take a read-only look at an HDF5 file's top level.
 - **DeepLabCut CSV input** (also Lightning Pose and EKS tables). The scan recognises prediction
   tables, offers the keypoints and animals found, and asks for the frame rate and frame size the
   file does not record (never defaulted). One real keypoint stands for the animal (the one you

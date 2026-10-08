@@ -889,6 +889,11 @@ and headless CLI report the same identifier. The full list:
 | `DLC_NO_FILE` | 2 | error | "Nothing to read at <path>." Fix: point at a DeepLabCut `.csv` file or a folder that holds one. |
 | `DLC_UNREADABLE` | 2 | error | "<file> is not valid text / could not be parsed." The file may be damaged; re-export it from DeepLabCut. |
 | `DLC_BAD_FRAME_INDEX` | 2 | error | "The first column must hold each frame number once." Raised for a missing, negative, fractional or repeated frame number. |
+| `SLEAP_NOT_AN_ANALYSIS_FILE` | 2 | error | "<file> is not a SLEAP analysis file." Fix: in SLEAP choose File > Export Analysis HDF5 and add that `.h5` file; project files (`.slp`) are not read. |
+| `SLEAP_NO_FILE` | 2 | error | "Nothing to read at <path>." Fix: point at a SLEAP analysis `.h5` file or a folder that holds one. |
+| `SLEAP_UNREADABLE` | 2 | error | "<file> could not be read as HDF5." The file may be damaged or incomplete; export it from SLEAP again. |
+| `SLEAP_LAYOUT_AMBIGUOUS` | 2 | error | "<file> does not match the SLEAP analysis layout: <what disagrees>." The occupancy, node names or track names do not agree with `tracks`; the file is refused rather than guessed at. |
+| `SLEAP_LAYOUT_UNSUPPORTED` | 2 | error | "<file> declares the axis order <...>." Only the standard order (track, xy, node, frame) is read; export the file again from the SLEAP GUI. |
 | `DLC_BAD_VALUE` | 2 | error | "<file> has cells that are not numbers." An empty cell is missing data; a text cell is an error and is never silently turned into a gap. |
 
 The `IDT_*` codes are sourced from [`./IDTRACKERAI_FORMAT_ANALYSIS.md`](./IDTRACKERAI_FORMAT_ANALYSIS.md) §7.1 and become live when the reader rewrite lands.

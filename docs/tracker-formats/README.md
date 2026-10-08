@@ -52,7 +52,7 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 | Prio | Importer | Tier | Status | Suite cases |
 |---|---|---|---|---|
 | 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) | 1 | **built** (CSV); `.h5` planned | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` waits for the G-H5 decision |
-| 2 | SLEAP analysis HDF5 | 1 | planned | `sleap_named_tracks`, `sleap_no_tracks` |
+| 2 | SLEAP analysis HDF5 | 1 | **built** | `sleap_named_tracks`, `sleap_no_tracks` pass |
 | 3 | Ctrax raw `.mat`, `trx.mat`, FlyTracker | 2 | planned | `ctrax_raw_mat` |
 | 4 | ToxTrac `Tracking_RealSpace.txt` | 3 | planned | `toxtrac_realspace` |
 | 5 | Anipose pose-3d CSV (and DLC-3D) | 3 | planned | quirk tests only |
@@ -85,3 +85,21 @@ Also reads Lightning Pose and EKS tables, which share the layout. Verified again
 | Missing | Empty cells; positions under the cutoff. A text cell is an error, never a gap. |
 | Traps handled | EKS tables carry six more coordinates per keypoint (`x_ens_median`...): only `x`, `y`, `likelihood` are read, by name. EKS writes a likelihood of exactly 0 for every frame, a placeholder: it is ignored and the session says so, otherwise a cutoff would erase the recording. A human-filled gap has likelihood 0.01 and is dropped by the default cutoff. Frames are placed by their number, so a gap in the numbers is a run of missing frames. |
 | Not yet | `.h5` (waits for the decoder decision), the `.csv` / `.h5` pair counted as one session, 3-D tables (recognised, not read). |
+
+
+### SLEAP analysis HDF5 (`sleap_analysis`)
+
+Reads the file SLEAP writes from File > Export Analysis HDF5. Verified against the real
+`SLEAP_three-mice_Aeon_mixed-labels.analysis.h5` and `SLEAP_single-mouse_EPM.analysis.h5` samples.
+
+| | |
+|---|---|
+| Session | One per `.h5` file (a `.analysis.h5` suffix is not required). A folder of them is scanned and added together. |
+| Detect | Top-level datasets `tracks` (4-D), `track_names`, `node_names`, `track_occupancy`. `tracks` as a *group* is stitched DeepLabCut tracklets and is not claimed; neither is a DeepLabCut `.h5`. `.slp` project files are recognised and the scan says to export the analysis file instead. |
+| You supply | Frame rate, frame width and height (the file records none of them), never defaulted. Optionally: which skeleton node stands for the animal, a point-score cutoff (default off: SLEAP's scores are not a calibrated probability), and whether to keep every node. |
+| Layout | `tracks` is `(tracks, 2, nodes, frames)`. The GUI export carries no attributes, so the layout is *checked* (the occupancy, the node names and the track names must agree with it) and a file that does not fit is refused with `SLEAP_LAYOUT_AMBIGUOUS`, never guessed. A `dims` attribute, if present, must be the standard order; any other is `SLEAP_LAYOUT_UNSUPPORTED`. |
+| Position | One real node, never a centroid: the one you name, else the node present most often; among equally covered nodes the one nearest the middle of the skeleton (the steadiest stand-in for the animal; a snout or tail tip jitters). The whole skeleton, its edges and the point scores are stored beside it. |
+| Identity | Named tracks: stable, with the names as labels. No names and one slot (a project with no tracking): one animal. No names, or SLEAP's synthetic `track_0`, `track_1`, with several slots: positional, so identity-free by construction (`track_wo_identities`), and the scan flags it. |
+| Missing | NaN. |
+| Traps handled | A project with no tracks writes an empty *float64* `track_names`. A skeleton with no edges writes an empty `(0,)` `edge_inds`. Names are bytes and are decoded. |
+| Not yet | Other axis orders (no real sample), the sleap-io writer's CSV layouts, `.slp` projects. |
