@@ -839,6 +839,7 @@ class Z5EntryExitEvents(Metric):
         "t_s",
         "frame",
         "after_gap",
+        "estimated",
         "min_dwell_frames_used",
         "bout_criterion_effective",
     ]
@@ -849,7 +850,9 @@ class Z5EntryExitEvents(Metric):
             "original video frame and t_s is frame / fps on the video clock, the same "
             "as the per-frame table. after_gap is True for an 'enter' that is only the "
             "first observed frame inside the zone after an unobserved stretch "
-            "(between tracking intervals), so the real entry happened in the gap."
+            "(between tracking intervals), so the real entry happened in the gap. estimated is "
+            "True when the event falls on a frame that was reconstructed across a gap by the "
+            "project's cross-interval interpolation rather than tracked."
         ),
         formula_plain=(
             "enter at frame t when in_zone[t] and (t == 0 or not in_zone[t-1]); "
@@ -961,6 +964,7 @@ class Z5EntryExitEvents(Metric):
         )
 
         true_frames, _valid = session.timeline()  # type: ignore[attr-defined]
+        tracked = getattr(session, "tracked_mask", None)
         n_rows = len(true_frames)
         starts = segment_starts(true_frames)
         segments = list(zip([0, *starts], [*starts, n_rows], strict=True))
@@ -977,6 +981,7 @@ class Z5EntryExitEvents(Metric):
                 "t_s": frame / fps,
                 "frame": frame,
                 "after_gap": after_gap,
+                "estimated": bool(tracked is not None and not tracked[row]),
                 "min_dwell_frames_used": min_dwell_frames,
                 "bout_criterion_effective": criterion_effective,
             }

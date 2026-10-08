@@ -58,6 +58,7 @@ class PreprocessingScreen(QWidget):
         self._auto = AutoCommit(self._apply, self)
         self._build_ui()
         self._wire_autocommit()
+        self._sync_gap_across_enabled()
         if store is not None:
             store.preprocessChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
@@ -101,6 +102,27 @@ class PreprocessingScreen(QWidget):
         self._gap_max.setValue(30)
         gap_form.addRow("", self._gap_enabled)
         gap_form.addRow("Max gap frames:", self._gap_max)
+        # Sessions stored as separate tracking intervals have stretches of video that were never
+        # tracked between their rows; the engine keeps those as breaks unless told to bridge them.
+        self._gap_across = QCheckBox("Interpolate across gaps between tracking intervals")
+        self._gap_across.setToolTip(
+            "Only for sessions tracked in separate intervals. Off: the untracked stretch between "
+            "two intervals is left empty and never joined. On: a stretch no longer than the limit "
+            "below is filled with a straight line between each animal's last and next observed "
+            "position. That is an estimate, not a measurement, and is marked as interpolated in "
+            "the export. Needs stable identities and a position on both sides; never extrapolates."
+        )
+        self._gap_across_limit = QDoubleSpinBox()
+        self._gap_across_limit.setRange(0.1, 86400.0)
+        self._gap_across_limit.setDecimals(1)
+        self._gap_across_limit.setSingleStep(5.0)
+        self._gap_across_limit.setSuffix(" s")
+        self._gap_across_limit.setValue(30.0)
+        self._gap_across_limit.setToolTip(
+            "Longest stretch of missing video to fill, in seconds. A longer one stays a gap."
+        )
+        gap_form.addRow("", self._gap_across)
+        gap_form.addRow("Longest interval gap to fill:", self._gap_across_limit)
         layout.addWidget(self._gap_group)
 
         # ── Jump Detection ────────────────────────────────────────────────
@@ -190,17 +212,26 @@ class PreprocessingScreen(QWidget):
 
     def _wire_autocommit(self) -> None:
         for w in (
-            self._gap_enabled, self._jump_enabled, self._idsw_enabled,
+            self._gap_enabled, self._gap_across, self._jump_enabled, self._idsw_enabled,
             self._idsw_hungarian, self._smooth_enabled,
         ):
             w.toggled.connect(self._auto.trigger)
+        self._gap_enabled.toggled.connect(self._sync_gap_across_enabled)
+        self._gap_across.toggled.connect(self._sync_gap_across_enabled)
         for w in (
-            self._gap_max, self._jump_sd, self._jump_pct, self._idsw_ratio,
+            self._gap_max, self._gap_across_limit, self._jump_sd, self._jump_pct, self._idsw_ratio,
             self._idsw_window, self._smooth_window, self._cov_max_nan,
         ):
             w.valueChanged.connect(self._auto.trigger)
         for w in (self._jump_method, self._smooth_method):
             w.currentIndexChanged.connect(self._auto.trigger)
+
+    def _sync_gap_across_enabled(self) -> None:
+        """The interval limit only means something when gap filling and the option are on."""
+        self._gap_across.setEnabled(self._gap_enabled.isChecked())
+        self._gap_across_limit.setEnabled(
+            self._gap_enabled.isChecked() and self._gap_across.isChecked()
+        )
 
     def flush(self) -> None:
         """Commit any pending edit now (called when the screen is left)."""
@@ -224,6 +255,8 @@ class PreprocessingScreen(QWidget):
                     update={
                         "enabled": self._gap_enabled.isChecked(),
                         "max_gap_frames": self._gap_max.value(),
+                        "across_tracking_intervals": self._gap_across.isChecked(),
+                        "max_cross_interval_gap_s": self._gap_across_limit.value(),
                     }
                 ),
                 "jump": cur.jump.model_copy(
@@ -267,6 +300,9 @@ class PreprocessingScreen(QWidget):
     def _populate(self, cfg) -> None:
         self._gap_enabled.setChecked(cfg.gap_fill.enabled)
         self._gap_max.setValue(cfg.gap_fill.max_gap_frames)
+        self._gap_across.setChecked(cfg.gap_fill.across_tracking_intervals)
+        self._gap_across_limit.setValue(cfg.gap_fill.max_cross_interval_gap_s)
+        self._sync_gap_across_enabled()
         self._jump_enabled.setChecked(cfg.jump.enabled)
         idx = self._jump_method.findData(cfg.jump.method)
         if idx >= 0:

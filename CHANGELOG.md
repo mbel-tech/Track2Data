@@ -958,6 +958,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Sessions tracked in separate intervals are processed on real elapsed time.** The stored rows were
+  treated as consecutive frames, so a move between two stationary stretches 40 seconds apart read as
+  ~1,060 px/s, and smoothing, speed, acceleration and jump detection all worked on that. Each
+  unobserved stretch is now kept as a break (one NaN separator row, never exported), so no value is
+  computed across it. New **Interpolate across gaps between tracking intervals** option on the
+  Preprocessing screen (off by default; limit 30 s, adjustable) rebuilds gaps up to that length frame
+  by frame as a straight line between each animal's last and next observed position. These frames are
+  estimates: `was_interpolated` true, `in_tracking_interval` false, tracker confidence left empty,
+  counted by D-11 and flagged on Z-5 events (`estimated`). Needs stable identities and an observed
+  position on both sides; never extrapolates; identity-free sessions are never bridged. Sessions
+  without such gaps are unchanged. Cache schema 6. If you analysed multi-interval sessions, re-run:
+  speed, acceleration and everything derived from them near the junctions changes.
+
 - **Zone events now use the same clock as the per-frame table.** Z-5 reported the stored row
   number as `frame` and `row / fps` as `t_s`, so with tracking that started after frame 0 an
   entry showed at 0.4 s while the same observation was at 40.4 s (frame 1010) in

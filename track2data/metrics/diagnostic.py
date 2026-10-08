@@ -991,7 +991,8 @@ class MetricInputProvenance(Metric):
     def compute(
         self, session: PreprocessedSession, cfg: dict[str, Any] | None = None
     ) -> pd.DataFrame:
-        n_frames = session.n_frames
+        # Separator rows only keep two tracking intervals apart; they are not frames.
+        n_frames = int(session.counted_rows().sum())
         n_animals = session.n_animals
 
         used = ~np.isnan(session.xy[:, :, 0])       # (n_frames, n_animals)
@@ -1392,7 +1393,7 @@ class PreprocessingDistortion(Metric):
     def compute(
         self, session: PreprocessedSession, cfg: dict[str, Any] | None = None
     ) -> pd.DataFrame:
-        raw = np.asarray(session.session.raw_xy, dtype=np.float64)
+        raw = np.asarray(session.raw_xy_aligned, dtype=np.float64)
         proc = np.asarray(session.xy, dtype=np.float64)
         nan = float("nan")
         rows = []

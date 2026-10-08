@@ -500,7 +500,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 5
+    _CACHE_SCHEMA = 6
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is
@@ -632,7 +632,12 @@ class Engine:
                 session.session_id,
                 problem,
             )
-        psess = pp_run(session, self._manifest.preprocess, check=self._cancel_check)
+        psess = pp_run(
+            session,
+            self._manifest.preprocess,
+            check=self._cancel_check,
+            bridge_allowed=not self.identity_free_for(session),
+        )
         return self.apply_calibration_and_zones(psess)
 
     def apply_calibration_and_zones(
@@ -1030,6 +1035,9 @@ class Engine:
         time_s = frames / fps
         in_interval_fill = True if mapping_valid else np.nan
         in_interval = np.full(n_frames * n_animals, in_interval_fill)
+        if psess.tracked_mask is not None:
+            # rows inserted for unobserved video are estimates, not tracked frames
+            in_interval = np.repeat(psess.tracked_mask, n_animals)
 
         xy_flat = psess.xy.reshape(-1, 2)
         speed_flat = psess.kinematics.speed_px_s.reshape(-1)
@@ -1047,6 +1055,9 @@ class Engine:
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
+        if psess.separator_mask is not None:
+            # a separator row only keeps two tracking intervals apart; it is not a frame
+            df["_separator"] = np.repeat(psess.separator_mask, n_animals)
 
         # Distinct from was_interpolated, which covers only gap-filled frames
         # that started as NaN. A jump-replaced position started as a real
@@ -1089,7 +1100,7 @@ class Engine:
             ]
 
         threshold = self._manifest.metrics.quality_threshold
-        id_prob = psess.session.id_probabilities
+        id_prob = psess.id_probabilities_aligned
         if id_prob is not None:
             df["id_probability"] = id_prob.reshape(-1)
         elif threshold > 0:
@@ -1118,6 +1129,9 @@ class Engine:
         self._attach_metadata(
             df, psess, self.identity_free_for(psess.session, identity_free)
         )
+
+        if "_separator" in df.columns:
+            df = df[~df["_separator"]].drop(columns="_separator")
 
         return df.sort_values(["session_id", "individual_id", "frame"]).reset_index(
             drop=True

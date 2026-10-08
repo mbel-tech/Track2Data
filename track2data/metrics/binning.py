@@ -71,6 +71,13 @@ def slice_psess(psess: PreprocessedSession, start: int, stop: int) -> Preprocess
         # the window keeps the original video frames of its rows
         frame_index=frames[start:stop],
         timeline_valid=valid,
+        jump_replaced=None if psess.jump_replaced is None else psess.jump_replaced[start:stop],
+        tracked_mask=None if psess.tracked_mask is None else psess.tracked_mask[start:stop],
+        separator_mask=None if psess.separator_mask is None else psess.separator_mask[start:stop],
+        raw_xy_rows=None if psess.raw_xy_rows is None else psess.raw_xy_rows[start:stop],
+        id_probabilities_rows=(
+            None if psess.id_probabilities_rows is None else psess.id_probabilities_rows[start:stop]
+        ),
         xy=psess.xy[start:stop],
         kinematics=KinematicsArrays(
             speed_px_s=kin.speed_px_s[start:stop],

@@ -781,3 +781,25 @@ its historical 0.
 **Rationale:** An empty sum is 0.0, which reads as "did not move" for an animal that was
 never tracked; if tracking failures differ by condition, that biases group comparisons.
 
+---
+
+### D-035 · Gaps between tracking intervals: real time, a separator, optional bridging
+
+**Decision:** A session stored as tracking intervals is put on real elapsed time before any
+temporal step. Each unobserved stretch becomes either rows (bridged: one per missing frame,
+a straight line between the animal's last and next observed positions) or a single all-NaN
+separator row, so no step reads two intervals as adjacent frames. Bridging is off by default
+(`GapFillCfg.across_tracking_intervals`), limited to `max_cross_interval_gap_s` (30 s) counted in
+real missing frames, requires stable identities (and no identity-free override) and an observed
+anchor on both sides per animal, never extrapolates, and is refused outright when the rebuilt arrays
+would exceed 50 million cells. The tracker's own `Session` stays compact; the processed session
+carries `frame_index`, `tracked_mask`, `separator_mask` and row-aligned raw positions and
+identification probabilities. Inserted rows are `was_interpolated`, `in_tracking_interval = false`,
+and have NaN confidence; separators are never exported. Distance, speed, activity and zone time
+include estimated frames, which D-11 counts and Z-5 flags (`estimated`).
+
+**Rationale:** The compact array made the move between two stationary stretches look like
+~1,060 px/s, and every derivative (smoothing, speed, acceleration) inherited it. Rebuilding only the
+gaps the user chose keeps memory bounded, keeps an estimate visibly an estimate, and leaves a
+contiguous session byte-for-byte on its old path.
+

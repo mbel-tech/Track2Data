@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
     # Type-only: session_consistency imports Session from here, so a runtime
@@ -260,6 +260,16 @@ class Session(BaseModel):
 class GapFillCfg(BaseModel):
     enabled: bool = True
     max_gap_frames: int = 30
+    # A session stored as concatenated tracking intervals has stretches of video that were never
+    # tracked between its rows. Off (the default, so existing projects do not change): those
+    # stretches stay unfilled and every temporal step treats them as a break. On: a stretch of at
+    # most ``max_cross_interval_gap_s`` seconds of missing video is rebuilt frame by frame as a
+    # straight line between the animal's last and next observed positions. This is an
+    # assumption, not a measurement, and is recorded as interpolated. It needs stable
+    # identities (identity-free rows are detection slots, not animals) and an observed
+    # position for that animal on both sides, and never extrapolates.
+    across_tracking_intervals: bool = False
+    max_cross_interval_gap_s: float = Field(default=30.0, gt=0)
 
 
 class JumpCfg(BaseModel):
@@ -689,6 +699,38 @@ class PreprocessedSession:
     # ``session.tracking_intervals`` instead, so this stays None. Use ``timeline()``.
     frame_index: np.ndarray | None = None
     timeline_valid: bool = True
+    # The arrays above have one row per entry of ``frame_index`` when the session's tracking
+    # intervals left unobserved stretches (see preprocess/timeline_expand.py); otherwise these
+    # all stay None and every array is aligned with ``session`` exactly as before.
+    # (n_rows,) bool: True for rows that came from a tracked interval, False for rows inserted
+    # to represent unobserved video (an estimated frame or a separator).
+    tracked_mask: np.ndarray | None = None
+    # (n_rows,) bool: True for the single NaN row that stands for an unfilled gap. It is never
+    # exported and is not a frame; it only keeps the two sides from being read as adjacent.
+    separator_mask: np.ndarray | None = None
+    # ``session.raw_xy`` / ``session.id_probabilities`` laid out on these rows (NaN where a row
+    # was inserted). Tracker confidence is never invented for an inserted row.
+    raw_xy_rows: np.ndarray | None = None
+    id_probabilities_rows: np.ndarray | None = None
+
+    @property
+    def raw_xy_aligned(self) -> np.ndarray:
+        """The tracker's positions on the same rows as ``xy``."""
+        return self.session.raw_xy if self.raw_xy_rows is None else self.raw_xy_rows
+
+    @property
+    def id_probabilities_aligned(self) -> np.ndarray | None:
+        """Identification probabilities on the same rows as ``xy`` (None when the tracker gave
+        none)."""
+        if self.id_probabilities_rows is not None:
+            return self.id_probabilities_rows
+        return self.session.id_probabilities
+
+    def counted_rows(self) -> np.ndarray:
+        """(n_rows,) bool: rows that stand for a video frame (everything but separators)."""
+        if self.separator_mask is None:
+            return np.ones(self.n_frames, dtype=bool)
+        return ~self.separator_mask
 
     def timeline(self) -> tuple[np.ndarray, bool]:
         """(true video frame per row, whether that mapping is verified).
@@ -749,6 +791,6 @@ class PreprocessedSession:
         in ``PreprocessReport``'s ``jump_detect`` step, which records
         exactly how many frames it touched).
         """
-        raw_nan = np.isnan(self.session.raw_xy[:, :, 0])
+        raw_nan = np.isnan(self.raw_xy_aligned[:, :, 0])
         final_present = ~np.isnan(self.xy[:, :, 0])
         return raw_nan & final_present

@@ -107,6 +107,7 @@ _EXPLICIT_UNITS: dict[str, str] = {
     "bout_criterion_effective": "categorical",
     "home_base_stable": "boolean",
     "after_gap": "boolean",
+    "estimated": "boolean",
     "first_entry_after_gap": "boolean",
     "identity_stability_status": "categorical",
     "identity_free_reason": "categorical",
