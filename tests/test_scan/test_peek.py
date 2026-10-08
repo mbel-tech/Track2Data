@@ -128,3 +128,84 @@ class _Evil:
 
     def __reduce__(self) -> tuple[object, tuple[object, ...]]:
         return (Path(self.marker).write_text, ("executed",))
+
+
+class TestHdf5Root:
+    """What an HDF5 file's top level says about itself: names, kinds, shapes and a few strings.
+
+    Opened with h5py read-only. Only metadata and small string datasets are read; no numeric
+    data, and no object that could execute anything.
+    """
+
+    @pytest.fixture
+    def h5(self, tmp_path: Path) -> Path:
+        import h5py
+
+        path = tmp_path / "a.h5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("tracks", data=np.zeros((2, 2, 3, 10)))
+            f.create_dataset("node_names", data=np.array([b"nose", b"tail", b"ear"]))
+            f.create_dataset("empty_names", data=np.empty((0,), dtype=np.float64))
+            f.create_group("group")
+            f.create_dataset("big_names", data=np.array([b"x"] * 5000))
+        return path
+
+    def test_it_lists_top_level_names_with_kind_and_shape(self, h5: Path) -> None:
+        root = Peeker().hdf5_root(h5)
+        assert root is not None
+        tracks = root.nodes["tracks"]
+        assert tracks.kind == "dataset" and tracks.shape == (2, 2, 3, 10)
+        assert root.nodes["group"].kind == "group" and root.nodes["group"].shape is None
+
+    def test_the_dtype_kind_tells_text_from_numbers(self, h5: Path) -> None:
+        root = Peeker().hdf5_root(h5)
+        assert root.nodes["node_names"].dtype_kind == "S"
+        assert root.nodes["tracks"].dtype_kind == "f"
+
+    def test_small_string_datasets_can_be_read_by_name(self, h5: Path) -> None:
+        root = Peeker().hdf5_root(h5, strings=("node_names", "empty_names", "tracks", "nope"))
+        assert root.strings["node_names"] == ["nose", "tail", "ear"]
+        assert root.strings["empty_names"] == []  # an empty dataset of any type is no names
+        assert "tracks" not in root.strings  # numbers are never read
+        assert "nope" not in root.strings
+
+    def test_a_long_string_dataset_is_not_read(self, h5: Path) -> None:
+        assert "big_names" not in Peeker().hdf5_root(h5, strings=("big_names",)).strings
+
+    def test_attributes_of_a_dataset_are_available(self, tmp_path: Path) -> None:
+        import h5py
+
+        path = tmp_path / "b.h5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("tracks", data=np.zeros((1, 2, 1, 3))).attrs["dims"] = "x"
+        assert Peeker().hdf5_root(path).nodes["tracks"].attrs == {"dims": "x"}
+
+    @pytest.mark.parametrize(
+        "content", [b"", b"not hdf5 at all", b"\x89HDF\r\n\x1a\n" + b"\0" * 20]
+    )
+    def test_anything_that_is_not_a_readable_hdf5_file_is_none(
+        self, tmp_path: Path, content: bytes
+    ) -> None:
+        assert Peeker().hdf5_root(_write(tmp_path / "x.h5", content)) is None
+
+    def test_a_truncated_file_is_none_not_an_error(self, h5: Path) -> None:
+        data = h5.read_bytes()
+        h5.write_bytes(data[: len(data) // 3])
+        assert Peeker().hdf5_root(h5) is None
+
+    def test_a_missing_file_is_none(self, tmp_path: Path) -> None:
+        assert Peeker().hdf5_root(tmp_path / "missing.h5") is None
+
+    def test_a_cloud_only_placeholder_is_never_opened(self, h5: Path) -> None:
+        index = ScanIndex([h5.parent], [IndexEntry(h5, False, 10, cloud_only=True)])
+        assert Peeker(index=index).hdf5_root(h5) is None
+
+    def test_it_counts_against_the_peek_budget(self, h5: Path) -> None:
+        peek = Peeker(ScanBudget(max_peeks=1))
+        assert peek.hdf5_root(h5) is not None
+        assert peek.hdf5_root(h5) is None
+
+    def test_the_file_is_not_modified(self, h5: Path) -> None:
+        before = h5.read_bytes()
+        Peeker().hdf5_root(h5, strings=("node_names",))
+        assert h5.read_bytes() == before

@@ -11,14 +11,14 @@ Detection must be cheap, safe and bounded, so a peek reads a few kilobytes at mo
 * There is a budget of peeks per scan, and every method returns ``None`` on any failure: a
   half-written file, a permission error and a corrupt header all mean "cannot tell", not a crash.
 
-Peeks for other containers (CSV header rows are already ``text_lines``) are added with the first
-reader that needs them.
+HDF5 files get a read-only look at their top level (``hdf5_root``). Peeks for other containers
+are added with the first reader that needs them.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,28 @@ class NpyHeader:
     def is_object(self) -> bool:
         """True for a pickled object (such as idtracker.ai's trajectory dict)."""
         return bool(self.dtype.hasobject)
+
+
+@dataclass(frozen=True)
+class Hdf5Node:
+    """One top-level object of an HDF5 file."""
+
+    kind: str  # "dataset" or "group"
+    shape: tuple[int, ...] | None = None  # datasets only
+    dtype_kind: str | None = None  # numpy kind letter: "f" float, "i" int, "S" bytes, "O" object
+    attrs: dict[str, Any] = field(default_factory=dict)  # a dataset's attributes, as text/numbers
+
+
+@dataclass(frozen=True)
+class Hdf5Root:
+    """The top level of an HDF5 file: what is there, and a few small string datasets."""
+
+    nodes: dict[str, Hdf5Node]
+    strings: dict[str, list[str]] = field(default_factory=dict)
+
+
+#: A string dataset longer than this is not read by a peek.
+_MAX_PEEK_STRINGS = 1000
 
 
 class Peeker:
@@ -89,6 +111,44 @@ class Peeker:
             return None
         return data.decode("utf-8-sig", errors="replace").splitlines()[:n]
 
+    def hdf5_root(self, path: Path, strings: tuple[str, ...] = ()) -> Hdf5Root | None:
+        """The top level of an HDF5 file, read-only; None if it cannot be read.
+
+        Lists each top-level object's kind, shape, dtype kind and (for datasets) attributes, and
+        reads the datasets named in *strings* when they are small text datasets (or empty). Numeric
+        data is never read, and nothing is deserialised beyond text.
+        """
+        path = Path(path)
+        if not self._allowed(path):
+            return None
+        try:
+            import h5py
+
+            with h5py.File(path, "r") as handle:
+                nodes: dict[str, Hdf5Node] = {}
+                for name, obj in handle.items():
+                    if isinstance(obj, h5py.Dataset):
+                        nodes[name] = Hdf5Node(
+                            "dataset",
+                            tuple(int(n) for n in obj.shape),
+                            obj.dtype.kind,
+                            {k: _attr_value(v) for k, v in obj.attrs.items()},
+                        )
+                    else:
+                        nodes[name] = Hdf5Node("group")
+                found: dict[str, list[str]] = {}
+                for name in strings:
+                    node = handle.get(name)
+                    if not isinstance(node, h5py.Dataset) or node.ndim != 1:
+                        continue
+                    if node.shape[0] == 0:
+                        found[name] = []
+                    elif node.dtype.kind in ("S", "O", "U") and node.shape[0] <= _MAX_PEEK_STRINGS:
+                        found[name] = [_text(v) for v in node[:]]
+        except Exception:  # not HDF5, truncated, permissions: cannot tell
+            return None
+        return Hdf5Root(nodes, found)
+
     def npy_header(self, path: Path) -> NpyHeader | None:
         """Parse a ``.npy`` header without loading (or unpickling) any data."""
         path = Path(path)
@@ -106,3 +166,18 @@ class Peeker:
         except Exception:  # corrupt, truncated or not numpy at all: cannot tell
             return None
         return NpyHeader(tuple(shape), dtype, bool(fortran_order))
+
+
+def _text(value: Any) -> str:
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+
+
+def _attr_value(value: Any) -> Any:
+    """An HDF5 attribute as something comparable: text for bytes, plain numbers for numpy."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, np.ndarray):
+        return [_attr_value(v) for v in value.tolist()]
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
