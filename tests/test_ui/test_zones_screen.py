@@ -438,3 +438,78 @@ def test_rectangle_tool_button_drives_the_canvas_and_enables_save(
 
     screen._undo_btn.click()
     assert len(screen._canvas.selected_points()) == 3
+
+
+# ── select, reshape and delete a saved zone ──────────────────────────────────
+
+
+def _two_zone_store(tmp_path: Path):
+    from track2data.core.models import ROI, ZoneSet
+
+    store = _make_store(tmp_path)
+    store.update_zones(
+        ZoneSet(
+            rois=[
+                ROI(name="a", level="main", vertices=[(0, 0), (100, 0), (100, 100), (0, 100)]),
+                ROI(name="b", level="main", vertices=[(200, 200), (300, 200), (250, 300)]),
+            ]
+        )
+    )
+    return store
+
+
+def test_polygon_area_is_the_shoelace_area() -> None:
+    from ui.widgets.zone_canvas import polygon_area
+
+    assert polygon_area([(0, 0), (4, 0), (4, 3), (0, 3)]) == 12.0
+    assert polygon_area([(0, 0), (4, 0), (0, 3)]) == 6.0
+    assert polygon_area([(0, 0), (1, 1)]) == 0.0
+
+
+def test_selecting_a_zone_row_highlights_it_and_reports_its_size(qtbot, tmp_path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    screen = ZonesScreen(_two_zone_store(tmp_path))
+    qtbot.addWidget(screen)
+    screen._zone_list.setCurrentRow(0)
+
+    assert screen._canvas.selected_zone() == 0
+    assert screen._zone_info.text() == "4 vertices · 10000 px²"
+    assert screen._delete_zone_btn.isEnabled() is True
+    assert len(screen._canvas._handle_items) == 4
+
+
+def test_dragging_a_handle_reshapes_the_stored_zone(qtbot, tmp_path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _two_zone_store(tmp_path)
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._zone_list.setCurrentRow(0)
+
+    assert screen._canvas.edit_vertex(2, 150.0, 150.0) is True
+
+    assert tuple(store.manifest.zones.rois[0].vertices[2]) == (150.0, 150.0)
+    assert store.manifest.zones.rois[1].name == "b"  # the other zone is untouched
+    assert screen._zone_list.currentRow() == 0  # still selected after the refresh
+
+
+def test_deleting_the_selected_zone_removes_only_that_zone(qtbot, tmp_path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    store = _two_zone_store(tmp_path)
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._zone_list.setCurrentRow(1)
+    screen._delete_zone_btn.click()
+
+    assert [r.name for r in store.manifest.zones.rois] == ["a"]
+    assert screen._delete_zone_btn.isEnabled() is False
+
+
+def test_edit_vertex_without_a_selected_zone_does_nothing(qtbot, tmp_path) -> None:
+    from ui.zones_screen import ZonesScreen
+
+    screen = ZonesScreen(_two_zone_store(tmp_path))
+    qtbot.addWidget(screen)
+    assert screen._canvas.edit_vertex(0, 1.0, 1.0) is False

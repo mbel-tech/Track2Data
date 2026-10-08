@@ -51,10 +51,11 @@ from PySide6.QtWidgets import (
 
 from track2data.core.models import ROI, ZoneSet
 from ui.widgets.labels import label_for
-from ui.widgets.zone_canvas import ZoneCanvas
+from ui.widgets.zone_canvas import ZoneCanvas, polygon_area
 
 #: Minimum vertices for a valid polygon.
 _MIN_ZONE_VERTICES = 3
+_ZONE_HINT = "Select a zone to see its shape. Drag its white handles to reshape it."
 
 
 class ZonesScreen(QWidget):
@@ -202,6 +203,17 @@ class ZonesScreen(QWidget):
         self._count_label = QLabel("0 zones loaded")
         self._count_label.setProperty("role", "faint")
         side.addWidget(self._count_label)
+        self._zone_info = QLabel(_ZONE_HINT)
+        self._zone_info.setWordWrap(True)
+        self._zone_info.setProperty("role", "faint")
+        side.addWidget(self._zone_info)
+        self._delete_zone_btn = QPushButton("Delete zone")
+        self._delete_zone_btn.setProperty("role", "outline")
+        self._delete_zone_btn.setEnabled(False)
+        self._delete_zone_btn.clicked.connect(self._delete_selected_zone)
+        side.addWidget(self._delete_zone_btn)
+        self._zone_list.currentRowChanged.connect(self._on_zone_row_changed)
+        self._canvas.zoneEdited.connect(self._on_zone_edited)
 
         btn_row = QHBoxLayout()
         load_btn = QPushButton("Load CSV…")
@@ -313,7 +325,50 @@ class ZonesScreen(QWidget):
 
     # ── slots: refresh ────────────────────────────────────────────────────
 
+    # ── slots: select, reshape and delete a saved zone ───────────────────
+
+    def _on_zone_row_changed(self, row: int) -> None:
+        index = row if row >= 0 else None
+        self._canvas.set_selected_zone(index)
+        self._delete_zone_btn.setEnabled(index is not None)
+        if index is None or self._store is None or self._store.manifest is None:
+            self._zone_info.setText(_ZONE_HINT)
+            return
+        roi = self._store.manifest.zones.rois[index]
+        area = polygon_area(roi.vertices)
+        cfg = self._store.manifest.calibration
+        if cfg.mode == "scalar" and cfg.px_per_cm:
+            area_text = f"{area / cfg.px_per_cm**2:.0f} cm²"
+        else:
+            area_text = f"{area:.0f} px²"
+        self._zone_info.setText(f"{len(roi.vertices)} vertices · {area_text}")
+
+    def _on_zone_edited(self, index: int, vertices: list) -> None:
+        if self._store is None or self._store.manifest is None:
+            return
+        zones = self._store.manifest.zones
+        rois = list(zones.rois)
+        rois[index] = rois[index].model_copy(update={"vertices": vertices})
+        try:
+            self._store.update_zones(zones.model_copy(update={"rois": rois}))
+        except Exception as exc:
+            QMessageBox.warning(self, "Zone not changed", f"That shape is not valid:\n{exc}")
+            return
+        self._zone_list.setCurrentRow(index)
+
+    def _delete_selected_zone(self) -> None:
+        row = self._zone_list.currentRow()
+        if self._store is None or self._store.manifest is None or row < 0:
+            return
+        zones = self._store.manifest.zones
+        rois = [r for i, r in enumerate(zones.rois) if i != row]
+        try:
+            self._store.update_zones(zones.model_copy(update={"rois": rois}))
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to delete zone:\n{exc}")
+
     def _refresh_list(self) -> None:
+        keep = self._zone_list.currentRow()
         self._zone_list.clear()
         if self._store is None or self._store.manifest is None:
             self._count_label.setText("0 zones loaded")
@@ -331,6 +386,8 @@ class ZonesScreen(QWidget):
         n = len(rois)
         self._count_label.setText(f"{n} zone{'s' if n != 1 else ''} loaded")
         self._canvas.set_saved_zones(rois)
+        if 0 <= keep < n:
+            self._zone_list.setCurrentRow(keep)
 
     def _refresh_mismatch_warning(self) -> None:
         if self._store is None or self._store.manifest is None:
