@@ -731,3 +731,34 @@ Metrics use a chosen 2-D plane (default x, y); z is kept.
 physical quantities. Recording them before the readers exist keeps each reader's
 review about the format, not about re-deciding the policy.
 
+---
+
+### D-033 · Camera view is a project setting; depth is IL-15, measured against the main zones
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-08-side-view-depth-design.md`
+(sub-project C of `docs/3d-movement/2026-10-08-3d-roadmap.md`). D-032 is held by the unmerged
+`feat/native-units` branch, so this is numbered D-033 to avoid a clash; renumber if that lands
+differently. It does not change D-031: 3-D data still reduces to a chosen plane.
+
+**Decision:** *Setting.* `ProjectManifest.scene.camera_view` is `unknown` (default), `top` or
+`side`, declared once on the Calibration screen. It is top-level, not inside `ZoneSet` (the Zones
+screen replaces that object on Clear/Load/Import) nor `CalibrationConfig` (hashed into the
+preprocessing cache key, which a view never changes). *Gate.* A metric names the views it is
+meaningful for in `Metric.valid_camera_views` (a set; `None` = any). A metric the view rules out
+is greyed, skipped with a reason that reaches the run README, and never silently computed on the
+wrong axis. *Existing metrics are deliberately not gated:* IL-3 and IL-14 assume a top-down view,
+but gating them would change what existing projects get. *IL-15, not Z-10.* Exports bucket
+metrics by ID prefix and the UI by level, so an individual-level metric must be IL-xx; Z-10 is
+re-reserved for auto depth bands. *Depth.* 0 = water surface, 1 = tank floor. The water column is
+the vertical span of every main-level "+" zone pooled (not per animal like IL-3), and when there
+is none the values are empty with a stated reason, never the video frame. Frames outside the
+column are dropped and counted, never clipped. *Zones canvas.* The blank Zones canvas is the size
+of the video frame, and the first zone saved records it (`source_*_px`); a zone set that already
+holds zones is never stamped.
+
+**Rationale:** Without a declared view, "depth" on a top-down recording would be computed from a
+meaningless y axis and look plausible. Clipping would manufacture "at the surface" and "at the
+floor" occupancy out of reflections and tracker noise. The canvas fix is here because depth is
+only right if the zones are in the video's own pixels, which they were not for any tracker but
+idtracker.ai.
+

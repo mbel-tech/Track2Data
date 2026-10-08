@@ -93,7 +93,8 @@ exporters, not metrics.
 **Binning rules.** Each bin is a slice of the session, but anything a metric
 derives *from the data* is resolved once on the whole session so bins stay
 comparable: the IL-4/IL-7 activity threshold (`mean speed x multiplier`), the fitted
-bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the Z-2/Z-8 zone areas.
+bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the IL-15 water column, the
+Z-2/Z-8 zone areas.
 Consequences: IL-1 path length loses the one step across each bin edge, so bins sum
 to slightly less than the whole session; Z-1 `time_s` is exactly additive; Z-6
 `first_entry_t_s` is a latency from the start of the bin. Z-5 event `frame`/`t_s` stay

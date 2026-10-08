@@ -114,7 +114,7 @@ re-reading why each was deferred:
 
 | ID(s) | Proposal | Why deferred |
 |---|---|---|
-| Z-10 | Vertical-position / novel-tank depth metrics | Assumes side-view video; nothing in the data model records camera view, so on top-down data it would compute "depth" from a meaningless y-axis. Needs a project-level `camera_view` declaration first. |
+| Z-10 | Auto depth bands: time in the top / middle / bottom third of the water column, with no zones to draw | The prerequisite shipped: the project-level `camera_view` setting (D-033) and IL-15, the continuous depth statistic. Stacked secondary-level zones already give band occupancy, latency, visits and dwell through Z-1..Z-9, so this is only a convenience. Re-reserved here because the original "vertical-position" proposal became IL-15 (an individual-level metric cannot carry a Z- prefix). |
 | GL-17 | Individual consistency / repeatability of social position | Needs repeated trials. `Metric.compute(session, cfg)` is per-session with no cross-session concept -- an architectural change, not a metric. |
 | D-11 | Effective sample size / autocorrelation-adjusted N | Viable, medium effort, no blocker -- deferred on scope alone this round. |
 | D-12 | Interpolation & gap provenance per metric | `PreprocessedSession.was_interpolated` already exists, but *per-metric* provenance requires every metric to report which frames fed it -- a change to the `Metric` contract, not one new class. |

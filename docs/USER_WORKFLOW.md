@@ -374,8 +374,15 @@ the user wants to reuse one zone set across mirrored videos).
 | BL mode, **all** sessions below threshold | *"No session has enough body-length samples for body-length calibration. Switch to scalar mode or re-run idtracker.ai with longer segmentation."* (modal blocks advance) | error |
 | Orientation tag empty | (allowed; defaults to "default") | — |
 
+**Camera view.** The same screen holds a *Camera view* setting: Not set (default), Top-down or
+Side view. It says how the camera looked at the animals and is saved with the project, not with
+the calibration. Metrics that only make sense for one view (today IL-15, vertical position, for a
+side view) are greyed on the Metrics screen until it is declared, and the run README records any
+that were skipped. A side view also needs a main zone drawn from the waterline to the floor on
+Stage 4; the Zones stage shows a warning until there is one.
+
 **Saved at advance:** `CalibrationConfig` (mode, px_per_cm or
-min_samples), per-session orientation tag.
+min_samples), per-session orientation tag; `SceneConfig` (camera view), committed on its own.
 
 ---
 
