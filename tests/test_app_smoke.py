@@ -155,8 +155,8 @@ class TestUILayer:
     def test_page_to_stage_mapping_length(self) -> None:
         from app.navigation import PAGE_TO_STAGE, STAGES
 
-        # 10 pages, 9 stages — all stage indices in range.
-        assert len(PAGE_TO_STAGE) == 10
+        # 11 pages (10 + the 3-D-only Views page), 9 stages — all stage indices in range.
+        assert len(PAGE_TO_STAGE) == 11
         assert all(0 <= s < len(STAGES) for s in PAGE_TO_STAGE)
 
     def test_page_to_stage_is_one_to_one_except_preview_export(self) -> None:
@@ -167,6 +167,7 @@ class TestUILayer:
 
         assert PAGE_TO_STAGE[:8] == [0, 1, 2, 3, 4, 5, 6, 7]
         assert PAGE_TO_STAGE[8] == PAGE_TO_STAGE[9] == 8
+        assert PAGE_TO_STAGE[10] == 1  # the Views page sits under Sessions
 
     def test_app_state_is_a_genuine_reexport_not_a_duplicate(self) -> None:
         """D-004 / issue #27: app/state.py is a deprecated shim over
@@ -432,8 +433,11 @@ class TestUILayer:
 
         win = MainWindow()
         assert win.windowTitle() == "Track2Data"
-        # Stack has 10 pages.
-        assert win._stack.count() == 10
+        # Stack has 11 pages; the Views page is last.
+        from ui.views_screen import ViewsScreen
+
+        assert win._stack.count() == 11
+        assert isinstance(win._stack.widget(10), ViewsScreen)
         win.close()
 
     def test_main_window_navigation(self, qt_app) -> None:
@@ -460,6 +464,7 @@ class TestUILayer:
         from ui.preview_screen import PreviewScreen
         from ui.processing_screen import ProcessingScreen
         from ui.project_screen import ProjectScreen
+        from ui.views_screen import ViewsScreen
         from ui.zones_screen import ZonesScreen
 
         store = ProjectStore()
@@ -474,7 +479,8 @@ class TestUILayer:
             ProcessingScreen(store),
             PreviewScreen(store),
             ExportScreen(store),
+            ViewsScreen(store),
         ]
-        assert len(screens) == 10
+        assert len(screens) == 11
         for screen in screens:
             assert isinstance(screen, __import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget)

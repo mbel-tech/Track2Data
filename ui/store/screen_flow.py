@@ -14,3 +14,30 @@ from track2data.core.models import ProjectMode
 def screen_flow(mode: ProjectMode) -> Literal["standard"]:
     """The screen flow for *mode*; always ``"standard"`` for now."""
     return "standard"
+
+
+#: The Views page index (mirrors ``app.navigation.VIEWS_PAGE``; ui must not import app).
+_VIEWS_PAGE = 10
+
+
+def page_route(mode: ProjectMode) -> list[int]:
+    """The wizard pages in order for *mode*; 3-D inserts Views after Sessions."""
+    if mode.dimension == "3d":
+        return [0, 1, _VIEWS_PAGE, *range(2, 10)]
+    return list(range(10))
+
+
+def next_page(mode: ProjectMode, page: int) -> int | None:
+    """The page after *page* in the route, or None at the end / off the route."""
+    route = page_route(mode)
+    if page not in route or page == route[-1]:
+        return None
+    return route[route.index(page) + 1]
+
+
+def prev_page(mode: ProjectMode, page: int) -> int | None:
+    """The page before *page* in the route, or None at the start / off the route."""
+    route = page_route(mode)
+    if page not in route or page == route[0]:
+        return None
+    return route[route.index(page) - 1]
