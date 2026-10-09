@@ -25,6 +25,7 @@ from track2data.core.models import (
     VIEWS_3D_ONLY,
     CalibrationConfig,
     ExportTarget,
+    FusionSettings,
     MappingRule,
     MetadataSource,
     MetricSelection,
@@ -699,6 +700,25 @@ class ProjectStore(QObject):
                 changed = True
         if changed:
             self._set_views(list(m.sessions), pairs)
+
+    def update_fusion(
+        self, top_session_id: str, side_session_id: str, settings: FusionSettings | None
+    ) -> None:
+        """Set (or clear, via None) the fusion settings of one pair; its other fields stay."""
+        if not self._require_3d():
+            return
+        assert self._manifest is not None
+        key = (top_session_id, side_session_id)
+        pairs = list(self._manifest.view_pairs)
+        index = next(
+            (i for i, p in enumerate(pairs) if (p.top_session_id, p.side_session_id) == key), None
+        )
+        if index is None:
+            raise ValueError(f"unknown pair: {top_session_id} / {side_session_id}")
+        if pairs[index].fusion == settings:
+            return
+        pairs[index] = pairs[index].model_copy(update={"fusion": settings})
+        self._set_views(list(self._manifest.sessions), pairs)
 
     def remove_view_pair(self, top_session_id: str, side_session_id: str) -> None:
         if not self._require_3d():

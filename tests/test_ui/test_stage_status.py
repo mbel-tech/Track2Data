@@ -11,6 +11,7 @@ from track2data.core.models import (
     MODE_3D_BLOCK_REASON,
     CalibrationConfig,
     ExportTarget,
+    FusionSettings,
     IdSwitchCfg,
     MappingRule,
     MetadataSource,
@@ -247,6 +248,9 @@ def test_3d_stage_summaries_say_not_available() -> None:
 # ── Views page ───────────────────────────────────────────────────────────────
 
 
+_FUSION = FusionSettings(surface_row=10.0, floor_row=110.0, tank_height_cm=20.0)
+
+
 def _views(manifest) -> object:
     return compute_stage_statuses(manifest, has_run_results=False)[VIEWS]
 
@@ -312,9 +316,31 @@ def test_views_identity_free_pair_warns() -> None:
 def test_views_matched_pair_is_valid(kw) -> None:
     m = _manifest_3d(
         sessions=[_vref("t", "top"), _vref("s", "side")],
-        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", **kw)],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", fusion=_FUSION, **kw)],
     )
     assert _views(m).status == "valid"
+
+
+@pytest.mark.parametrize(
+    "kw", [{"same_ids": True, "fish_map": {"0": "0"}}, {"fish_map": {"0": "1"}}]
+)
+def test_views_matched_pair_without_fusion_settings_warns(kw) -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", **kw)],
+    )
+    info = _views(m)
+    assert info.status == "warning"
+    assert "fusion setup needed" in info.message.lower()
+    assert "t / s" in info.message
+
+
+def test_views_unmatched_pair_is_reported_before_fusion_setup() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert _views(m).message == "Match the fish of t / s."
 
 
 def test_views_ticked_pair_with_empty_map_needs_matching() -> None:
@@ -382,6 +408,15 @@ def test_sessions_row_2d_is_the_sessions_status() -> None:
         (
             [_vref("t", "top"), _vref("s", "side")],
             [ViewPair(top_session_id="t", side_session_id="s", fish_map={"0": "0"})],
+            "warning",  # fusion setup needed
+        ),
+        (
+            [_vref("t", "top"), _vref("s", "side")],
+            [
+                ViewPair(
+                    top_session_id="t", side_session_id="s", fish_map={"0": "0"}, fusion=_FUSION
+                )
+            ],
             "valid",
         ),
         (

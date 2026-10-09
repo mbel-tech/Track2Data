@@ -176,6 +176,11 @@ def _views_status(manifest: ProjectManifest) -> StageInfo:
         if not p.fish_map:
             name = f"{p.top_session_id} / {p.side_session_id}"
             return StageInfo("warning", f"Match the fish of {name}.")
+    # Matched pairs still need their depth set up; a hint only, never blocking.
+    for p in manifest.view_pairs:
+        if p.fusion is None:
+            name = f"{p.top_session_id} / {p.side_session_id}"
+            return StageInfo("warning", f"Fusion setup needed for {name}.")
     return StageInfo("valid", f"{len(manifest.view_pairs)} pair(s) matched.")
 
 

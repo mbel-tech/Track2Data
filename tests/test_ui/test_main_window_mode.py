@@ -171,7 +171,7 @@ def _two_view_refs(tmp_path: Path) -> list[SessionRef]:
 
 
 def test_3d_sessions_row_shows_worse_of_sessions_and_views(qtbot, tmp_path) -> None:
-    from track2data.core.models import ViewPair
+    from track2data.core.models import FusionSettings, ViewPair
 
     win = _window(qtbot, tmp_path)
     store = win._store
@@ -188,6 +188,13 @@ def test_3d_sessions_row_shows_worse_of_sessions_and_views(qtbot, tmp_path) -> N
     assert "is not paired" in win._sidebar.item(1).toolTip()
     store.update_view_pair(
         ViewPair(top_session_id="t1_top", side_session_id="t1_side", fish_map={"0": "0"})
+    )
+    assert win._sidebar.status(1) == "warning"
+    assert "Fusion setup needed" in win._sidebar.item(1).toolTip()
+    store.update_fusion(
+        "t1_top",
+        "t1_side",
+        FusionSettings(surface_row=10.0, floor_row=110.0, tank_height_cm=20.0),
     )
     assert win._sidebar.status(1) == "valid"
     assert win._sidebar.item(1).data(SUMMARY_ROLE) == "2 sessions · 1 pair"

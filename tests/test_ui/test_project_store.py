@@ -1280,3 +1280,114 @@ def test_a_probe_finishing_after_its_session_was_split_is_ignored(
     store._on_identity_probe_finished("task-1", _fake_session(Path("s")))
     assert store.session_facts("s") is None
     assert not store._session_facts
+
+
+# ── fusion settings on a pair ────────────────────────────────────────────────
+
+
+def _fusion(**kw):
+    from track2data.core.models import FusionSettings
+
+    return FusionSettings(
+        **{"surface_row": 10.0, "floor_row": 110.0, "tank_height_cm": 20.0, **kw}
+    )
+
+
+@pytest.fixture
+def paired3d(store3d):
+    for sid, role in (("a_top", "top"), ("a_side", "side")):
+        store3d.update_view_role(sid, role)
+    store3d.update_view_pair(_pair("a_top", "a_side", fish_map={"0": "1"}))
+    return store3d
+
+
+def test_update_fusion_sets_and_clears_and_emits_once(qtbot, paired3d) -> None:
+    paired3d.save_project()
+    with qtbot.waitSignal(paired3d.viewsChanged, timeout=1000) as blocker:
+        paired3d.update_fusion("a_top", "a_side", _fusion())
+    assert blocker.args == []
+    assert paired3d.manifest.view_pairs[0].fusion == _fusion()
+    assert paired3d.manifest.view_pairs[0].fish_map == {"0": "1"}
+    assert paired3d.dirty
+    with qtbot.waitSignal(paired3d.viewsChanged, timeout=1000):
+        paired3d.update_fusion("a_top", "a_side", None)
+    assert paired3d.manifest.view_pairs[0].fusion is None
+
+
+def test_update_fusion_emits_exactly_once(paired3d) -> None:
+    seen: list[int] = []
+    paired3d.viewsChanged.connect(lambda: seen.append(1))
+    paired3d.update_fusion("a_top", "a_side", _fusion(frame_offset=3))
+    assert seen == [1]
+
+
+def test_update_fusion_unchanged_is_a_no_op(qtbot, paired3d) -> None:
+    paired3d.update_fusion("a_top", "a_side", _fusion())
+    paired3d.save_project()
+    with qtbot.assertNotEmitted(paired3d.viewsChanged):
+        paired3d.update_fusion("a_top", "a_side", _fusion())
+        paired3d.update_fusion("a_top", "a_side", _fusion())
+    assert not paired3d.dirty
+    paired3d.update_fusion("a_top", "a_side", None)
+    with qtbot.assertNotEmitted(paired3d.viewsChanged):
+        paired3d.update_fusion("a_top", "a_side", None)
+
+
+def test_update_fusion_rejected_in_2d(store, tmp_path: Path) -> None:
+    from track2data.core.models import VIEWS_3D_ONLY
+
+    store.update_sessions([_ref(tmp_path, "a")])
+    with pytest.raises(ValueError, match=VIEWS_3D_ONLY):
+        store.update_fusion("a", "b", _fusion())
+
+
+def test_update_fusion_rejected_for_unknown_pair(paired3d) -> None:
+    with pytest.raises(ValueError, match="unknown pair"):
+        paired3d.update_fusion("a_top", "b_side", _fusion())
+    with pytest.raises(ValueError, match="unknown pair"):
+        paired3d.update_fusion("a_side", "a_top", None)
+    assert paired3d.manifest.view_pairs[0].fusion is None
+
+
+def test_update_fusion_is_a_no_op_without_a_project(qtbot) -> None:
+    from ui.store.project_store import ProjectStore
+
+    empty = ProjectStore()
+    empty.update_fusion("a", "b", _fusion())
+    empty.tasks.shutdown(1000)
+
+
+def test_fusion_survives_an_edited_fish_map(paired3d) -> None:
+    paired3d.update_fusion("a_top", "a_side", _fusion())
+    pair = paired3d.manifest.view_pairs[0]
+    paired3d.update_view_pair(pair.model_copy(update={"fish_map": {"0": "0"}, "auto": False}))
+    assert paired3d.manifest.view_pairs[0].fusion == _fusion()
+    assert paired3d.manifest.view_pairs[0].fish_map == {"0": "0"}
+
+
+def test_fusion_survives_apply_regex_pairing(store3d) -> None:
+    store3d.update_pairing(_name_patterns())
+    store3d.apply_regex_pairing()
+    for pair in store3d.manifest.view_pairs:
+        assert pair.auto
+        store3d.update_fusion(pair.top_session_id, pair.side_session_id, _fusion())
+    store3d.apply_regex_pairing()
+    pairs = store3d.manifest.view_pairs
+    assert len(pairs) == 2 and all(p.fusion == _fusion() for p in pairs)
+
+
+def test_fusion_survives_a_panel_change(qtbot, tmp_path: Path, store) -> None:
+    from track2data.core.models import PanelRect
+
+    store.update_mode(ProjectMode(dimension="3d", layout="single_video_two_panels"))
+    store.update_sessions([_ref(tmp_path, "v")])
+    top_id, side_id = store.split_session_into_panels(
+        "v", PanelRect(x=0, y=0, width=10, height=10), PanelRect(x=10, y=0, width=10, height=10)
+    )
+    pair = store.manifest.view_pairs[0]
+    store.update_view_pair(pair.model_copy(update={"fish_map": {"0": "0"}, "same_ids": True}))
+    store.update_fusion(top_id, side_id, _fusion())
+    store.set_session_panel(side_id, PanelRect(x=10, y=0, width=12, height=10))
+    kept = store.manifest.view_pairs[0]
+    assert kept.fish_map == {} and not kept.same_ids
+    assert kept.fusion == _fusion()
