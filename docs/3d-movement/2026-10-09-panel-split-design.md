@@ -1,6 +1,10 @@
 # Panel split (sub-project F)
 
-**Status:** draft 2026-10-09, awaiting review
+**Status:** implemented 2026-10-09 (decision D-039). Changes made during the build: the Panels section is
+its own widget, `ui/widgets/panels_section.py`, embedded in the Views page and refreshed from it; it loads
+the unpanelled session on the store's worker pool before opening the editor; the editor's flags are
+*low*, *left out* and *no data*; no log warning is written for a fish left out of a panel (the editor
+flag is the notice).
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). Builds on [the mode switch](2026-10-09-mode-switch-design.md) (E) and
 [ID correspondence](2026-10-09-id-correspondence-design.md) (G).
 

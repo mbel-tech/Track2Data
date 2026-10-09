@@ -235,6 +235,36 @@ Calibration. In 2-D projects it does not exist.
 This only records the correspondence. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project
 still cannot be run: Processing, Preview and Export stay blocked.
 
+### Panels (one video, two views)
+
+If you chose the layout **One video, two panels** on the Project screen, the top and side views are
+two parts (panels) of one video. The **Views** page then has a **Panels** section with one row per
+session, showing its panel (*whole video* or the rectangle as x, y, width × height in pixels). Select a
+row to use the buttons.
+
+- **Split into panels…** is for one tracker run on the whole frame. The editor offers the presets
+  **Left | Right** and **Top | Bottom** with a split slider (50% by default), exact x, y, width and
+  height fields for each panel, and a choice of which panel is the top view. A preview shows the
+  tracker's background image, or else the first video frame, or else the tracks, with the two
+  rectangles over it. A table lists each fish with its panel, the share of its positions inside
+  (*Inside*) and a *Flag*: *low* under 90%, *left out* under 50% (such a fish is not in that panel's
+  session), *no data* when it has no position. **OK** is off while a rectangle is invalid or a panel
+  would have no fish. The session is replaced by two, `<id>__top` and `<id>__side` (a number is added
+  if the name is taken), each with its panel, the view set, and a hand-made pair.
+- **Set panel…** is for two tracker runs on the same video, each limited to one panel: it opens the
+  same editor with one rectangle for the selected session.
+- **Clear panel** puts the session back on the whole video.
+
+A session with a panel keeps the fish with at least 50% of their positions inside it, and positions
+outside become empty (NaN) because they belong to the other view. Coordinates are relative to the
+panel (its top-left corner is 0, 0) and the video size becomes the panel size, so the Zones,
+Calibration and Preview screens show only the panel. The same folder with a different panel counts
+as a different session. Changing or clearing a panel resets the fish matching of its pair (the pair
+stays).
+
+Zones are still one set per project, and per-view pixel scale calibration is not part of this
+version. 3-D projects still cannot be run.
+
 ## 3. Calibration
 
 Calibration decides which units distances and speeds are reported in. Figure 4 shows the default,

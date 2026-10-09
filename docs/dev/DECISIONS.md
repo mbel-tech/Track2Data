@@ -902,3 +902,35 @@ describe many pairs, so the pair record and its UI belong with the mapping. Rege
 many trials, and the manual path covers names that follow no rule. Keeping hand-made pairs out of
 re-pairing means a correction is never silently undone. Fusion (D) will be the stage that requires
 complete pairs.
+
+### D-039 · Panel split: a session may carry a panel, applied on read, in panel-relative coordinates
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-panel-split-design.md`
+(sub-project F of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It does not change D-037 or D-038.
+
+**Decision:** *Model.* `SessionRef.panel` is a `PanelRect(x, y, width, height)` (`x, y >= 0`,
+`width, height > 0`) or unset; manifests without it load unchanged. Panels exist only for a 3-D project
+with the layout `single_video_two_panels` (otherwise `ValueError`, "Panels apply to the 'One video, two
+panels' layout only"). *Applied on read.* `apply_panel` (`track2data/views/panels.py`, no Qt) runs as the
+last step of reading a session in the engine and the store's probe, so previews, runs and the CLI see
+the panel version. Coordinates are panel-relative (panel top-left is (0, 0), the video size becomes the
+panel size). Positions outside the panel become NaN; an animal is kept when at least 50% of its valid
+positions are inside (`MIN_COVERAGE`), and the editor flags animals under 90% (`LOW_COVERAGE`). An
+animal with no valid position has coverage 0 and is left out. A session without stable identities has
+no 50% rule: positions outside become NaN and slots with none left are dropped. A panel that is
+larger than or outside the video raises `ValueError` (video size 0 means unknown, no check). *Identity.*
+The same folder with a different panel is a different session, and the panel is part of the
+preprocessing cache key (added only when set, so existing keys stay valid). *Split.*
+`split_session_into_panels` replaces a whole-frame session with `<id>__top` and `<id>__side` (a numeric
+suffix on collision) with `view_role` set, and adds a `ViewPair` with `auto=False`, which a regex
+re-pairing (D-038) never removes. `set_session_panel` sets or clears one panel (two tracker runs on one
+video). Changing or clearing a panel clears `fish_map` and `same_ids` of the pair that holds the
+session; the pair stays. *UI.* The Panels section lives in `ui/widgets/panels_section.py` and is shown
+on the Views page for that layout only; the editor is `ui/dialogs/panel_dialog.py`. *Not in this cycle.*
+Zones remain one set per project; per-view pixel-to-centimetre calibration (needed by fusion and 3-D
+metrics), cropped video export, automatic panel detection, more than two panels and rotated panels.
+
+**Rationale:** One idea, a panel on a session, covers both a single tracker run on the whole frame and
+two runs limited to one panel each. Cutting on read keeps the tracker output untouched and gives the
+later stages (fusion D, 3-D metrics B) two ordinary sessions with their own video size plus
+`view_pairs`. Panel-relative coordinates let zones and depth (IL-15) work inside one panel.
