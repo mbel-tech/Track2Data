@@ -87,7 +87,9 @@ def _info_html(readers: set[str]) -> str:
     if idt or everything:
         parts.append(
             "<p><b>idtracker.ai</b> records the scale itself: the Validator's Length Calibration "
-            "tool saves one or more measurements, and <code>length_unit</code> is their average. "
+            "tool saves one or more measurements, and <code>length_unit</code> is their average, "
+            "a factor from pixels to <i>user-defined units</i>: idtracker.ai never records "
+            "whether you measured in cm or mm, so the unit you pick here is your declaration. "
             "When a session holds several, choose the average or the median below. "
             f'<a href="{_IDT_DOC}">idtrackerai.Session reference</a></p>'
         )

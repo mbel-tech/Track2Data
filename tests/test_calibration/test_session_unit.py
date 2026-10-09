@@ -179,3 +179,16 @@ def test_clicks_do_not_override_a_missing_length_unit() -> None:
         _calibrated(None, _clicks(2.0, 4.0), "median")
 
 
+
+
+def test_a_stored_length_unit_that_differs_from_the_clicks_is_kept_with_a_warning(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        out = _calibrated(5.0, _clicks(2.0, 4.0), "mean")
+    assert out.px_per_cm == pytest.approx(5.0)
+    assert "differs from the mean" in caplog.text
+
+
+def test_a_matching_length_unit_does_not_warn(caplog) -> None:
+    with caplog.at_level("WARNING"):
+        _calibrated(3.0, _clicks(2.0, 4.0), "mean")
+    assert "differs from the mean" not in caplog.text

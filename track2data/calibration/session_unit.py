@@ -98,6 +98,19 @@ def apply_session_calibration(
             n_clicks,
             100 * rel_sd,
         )
+    ratios = calibration_ratios(session.length_calibrations)
+    if ratios and session.length_unit and cfg.session_calibration_stat == "mean":
+        # idtracker.ai defines length_unit as the mean of the calibrations; a stored value that
+        # differs (calibrations edited after export) is kept, but the user should know.
+        recomputed = statistics.fmean(ratios)
+        if abs(recomputed - session.length_unit) > 1e-6 * session.length_unit:
+            logger.warning(
+                "Session '%s': length_unit (%.6g) differs from the mean of its length "
+                "calibrations (%.6g); the stored length_unit was used.",
+                session.session_id,
+                session.length_unit,
+                recomputed,
+            )
     return dataclasses.replace(psess, px_per_cm=scale, px_per_cm_rel_sd=rel_sd)
 
 
