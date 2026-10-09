@@ -111,6 +111,7 @@ def run_sensitivity(
 
     from track2data.exporters.schema import unit_for_column
 
+    engine.require_computable()  # raised, not recorded per grid point
     grid = grid or SensitivityGrid()
     base_config = engine.manifest.preprocess
 

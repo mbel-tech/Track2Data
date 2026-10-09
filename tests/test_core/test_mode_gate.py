@@ -42,7 +42,8 @@ def _engine(dimension: str = "3d") -> Engine:
 
 
 def test_validate_reports_3d_block() -> None:
-    assert MODE_3D_BLOCK_REASON in _engine("3d").validate()
+    issues = _engine("3d").validate()
+    assert issues[0] == MODE_3D_BLOCK_REASON
 
 
 def test_2d_validate_has_no_mode_issue() -> None:
@@ -69,3 +70,15 @@ def test_export_refuses_3d(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="3-D fusion is not available yet"):
         _engine().export(object(), out)
     assert not out.exists()
+
+
+def test_compute_metrics_refuses_3d() -> None:
+    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+        _engine().compute_metrics(object())  # type: ignore[arg-type]
+
+
+def test_run_sensitivity_refuses_3d() -> None:
+    from track2data.sensitivity import run_sensitivity
+
+    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+        run_sensitivity(_engine(), object())  # type: ignore[arg-type]

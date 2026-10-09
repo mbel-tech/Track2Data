@@ -928,6 +928,7 @@ class Engine:
         selected metric, so a cancellation request is noticed between
         metrics; ``OperationCancelled`` propagates out of this method.
         """
+        self.require_computable()
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
 
@@ -1315,7 +1316,7 @@ class Engine:
     ) -> list[Path]:
         """Write *payload* to *out_dir* via the requested (or configured
         default) exporters. Returns the list of written paths."""
-        self._require_computable()
+        self.require_computable()
         from track2data.exporters import get_exporter
 
         out_dir = Path(out_dir)
@@ -1338,7 +1339,7 @@ class Engine:
 
         return written
 
-    def _require_computable(self) -> None:
+    def require_computable(self) -> None:
         """Refuse to compute while the project is 3-D (fusion does not exist yet)."""
         if self._manifest.mode.dimension == "3d":
             raise ValueError(MODE_3D_BLOCK_REASON)
@@ -1358,7 +1359,7 @@ class Engine:
 
         Returns list of written output paths.
         """
-        self._require_computable()
+        self.require_computable()
         psess = self.preprocess(session)
         emit(
             progress,
@@ -1439,7 +1440,7 @@ class Engine:
         (``OperationCancelled``) stops the run: workers see a shared flag at
         their next checkpoint and stop.
         """
-        self._require_computable()
+        self.require_computable()
         previous_check, self._cancel_check = self._cancel_check, cancel_check
         try:
             return self._run(out_dir, exporters, progress, n_workers, cancel_check)
@@ -1916,7 +1917,7 @@ class Engine:
         written paths, not the full ``RunResult`` (diagnostics, metric
         previews, per-session timing/errors).
         """
-        self._require_computable()
+        self.require_computable()
         return self.run(out_dir, exporters, progress=progress).written
 
     # ── preview ────────────────────────────────────────────────────────────
