@@ -111,7 +111,7 @@ def test_unreadable_session_is_a_fusion_error(monkeypatch):
     top, side, pair = make_pair()
     engine = _engine(monkeypatch, [pair], {"t": top, "s": side})
     _unreadable(engine, "s")
-    with pytest.raises(FusionError, match="session s could not be read: .*folder moved"):
+    with pytest.raises(FusionError, match=r"session s could not be read: .*folder moved"):
         engine.fuse_pair(pair)
     assert engine.suggest_offset(pair) is None
 
