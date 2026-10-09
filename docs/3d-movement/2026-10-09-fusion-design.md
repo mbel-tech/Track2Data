@@ -1,6 +1,6 @@
 # Fusion of top and side views (sub-project D)
 
-**Status:** draft 2026-10-09, awaiting review
+**Status:** implemented (2026-10-09). The deviations from the first draft are listed under "Changes made during the build".
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). Builds on the mode switch (E), [ID correspondence](2026-10-09-id-correspondence-design.md) (G), [panel split](2026-10-09-panel-split-design.md) (F) and the depth convention of [side-view depth](2026-10-08-side-view-depth-design.md) (C).
 
 ## Why
@@ -15,7 +15,7 @@ fits together. D does not compute metrics; B does.
 | | Sub-project | Scope |
 |---|---|---|
 | E, G, F | Mode switch, ID correspondence, panel split | Done |
-| **D** | **Fusion** (this spec) | Fusion settings per pair, the fusion logic, `Engine.fuse_pair`, the Fusion panel and dialog on the Views page |
+| **D** | **Fusion** (this spec). Done | Fusion settings per pair, the fusion logic, `Engine.fuse_pair`, the Fusion panel and dialog on the Views page |
 | B | 3-D metrics | Reads the fused sessions; decides which metrics run in 3-D; lifts the 3-D compute block |
 
 ## Decisions
@@ -36,7 +36,8 @@ fits together. D does not compute metrics; B does.
   views have no common origin) and the RMS of the rest is reported in cm.
 - **Only matched fish are fused,** those in the pair's `fish_map`. The rest are listed in the
   report.
-- **Fusion is computed on demand and cached,** never stored in the project file. 3-D compute stays
+- **Fusion is computed on demand,** never stored in the project file and not cached on disk (its
+  inputs, the two preprocessed sessions, are cached). 3-D compute stays
   blocked until B (`Engine.require_computable()` is unchanged).
 
 ## Design
@@ -51,7 +52,7 @@ fits together. D does not compute metrics; B does.
    - `FusionReport` (dataclass): `overlap_frames`, `top_frames`, `side_frames`, `fused_labels`,
      `unmatched_top`, `unmatched_side`, `n_outside_column`, `agreement_rms_cm` (overall and per
      fish; `None` with `agreement_skipped` giving the reason), `agreement_warning: bool`,
-     `suggested_offset: int | None`.
+     `suggested_offset: int | None` (declared but not filled by `fuse`; see below).
    - `FusedSession` (dataclass): `psess: PreprocessedSession` (top view, matched fish, `depth`
      set), `report`, `session_id = "<top>+<side>"`.
 2. **Fusion logic** (`track2data/fusion/`, no Qt).
@@ -71,9 +72,9 @@ fits together. D does not compute metrics; B does.
      beats lag 0 by a clear margin (at least 20% lower RMS), else `None`.
 3. **Engine** (`track2data/api.py`). `fuse_pair(pair) -> FusedSession` preprocesses both sessions
    through `preprocess_ref` (so each view's own pipeline and calibration apply), decides
-   `same_video` from the layout, and caches the result under a key that includes both sessions'
-   cache keys and the pair's `FusionSettings`. `fuse_all()` fuses every pair with settings and
-   returns the results and the errors. `require_computable()` is unchanged.
+   `same_video` from the layout, and does not cache the result (the preprocessed sessions are cached). `fuse_all()` fuses every pair with settings and
+   returns the results and the errors. `suggest_offset(pair)` wraps the scan for a worker thread
+   (`None` for one video). `require_computable()` is unchanged.
 4. **Store** (`ui/store/project_store.py`). `update_fusion(top_id, side_id, settings | None)`
    replaces the pair's settings and emits `viewsChanged`; rejected unless the project is 3-D and
    the pair exists. Changing a pair's `fish_map` or either session's panel keeps the settings (the
@@ -99,7 +100,7 @@ fits together. D does not compute metrics; B does.
   drop counting, agreement RMS near 0 for consistent tracks and large for a mismatched fish,
   unmatched fish listed, the axis and flip options, the uncalibrated case, every `FusionError`.
 - `suggest_offset` recovers a known lag and returns `None` for lag 0 and for noise.
-- Engine: `fuse_pair` result, the cache key changes with the settings and not otherwise,
+- Engine: `fuse_pair` result, a changed setting gives a fresh result,
   `fuse_all` collects errors, compute remains blocked.
 - Store: `update_fusion` signals, rejection outside 3-D or for a missing pair, settings survive
   re-matching.
@@ -113,3 +114,25 @@ fits together. D does not compute metrics; B does.
 3-D metrics and lifting the compute block (B), camera calibration and triangulation, non-right-angle
 cameras, fusion across different frame rates, automatic detection of the water column, a z axis in
 the exports, and several offsets for one pair.
+
+## Changes made during the build
+
+- **No fusion cache.** `Engine.fuse_pair` recomputes on every call; only the two preprocessed
+  sessions are cached. The status refresh key of the Fusion section therefore includes the pair, both
+  session entries and their facts, the layout, and the project's preprocess, calibration and zones
+  settings (plus the pickle and blob-diagnostics flags and the video overrides).
+- **The offset suggestion is on demand.** `fuse()` leaves `FusionReport.suggested_offset` as `None`.
+  The dialog's "Suggest offset" button calls `agreement.suggest_offset` (about 1-2 s on long
+  sessions; the scan is vectorised and scans +-5 s around 0 only). `Engine.suggest_offset(pair)` is a
+  wrapper for worker threads. A lag needs at least 30 jointly valid samples to be scored.
+- **The dialog recomputes on the UI thread.** Its summary and the offset suggestion run in the
+  dialog (the suggestion under a wait cursor). Only the Views-page status and the loading of both
+  sessions before the dialog opens run as background tasks, with stale results ignored.
+- **Agreement.** A fish with fewer than 3 jointly valid samples has no RMS (`None`) and is left out
+  of the overall value, which pools the residuals of the other fish. The warning compares the overall
+  RMS with the pooled range of the top-view axis in cm.
+- **Rows.** Untracked rows and separator rows are excluded from fusion and counted in neither view's
+  frame total. The fused session carries no separator rows and no tracked mask; dropped frames leave
+  gaps in `frame_index`, so B must read `frame_index` rather than assume adjacent rows.
+- **Errors.** `FusionError` also covers a session that is not in the project or cannot be read, and
+  duplicate or inconsistent fish labels.

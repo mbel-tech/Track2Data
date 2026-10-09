@@ -935,3 +935,48 @@ metrics), cropped video export, automatic panel detection, more than two panels 
 two runs limited to one panel each. Cutting on read keeps the tracker output untouched and gives the
 later stages (fusion D, 3-D metrics B) two ordinary sessions with their own video size plus
 `view_pairs`. Panel-relative coordinates let zones and depth (IL-15) work inside one panel.
+
+### D-040 · Fusion of top and side views: two cameras at right angles, computed on demand, depth beside the top-view session
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-fusion-design.md`
+(sub-project D of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-038 (the pair record
+gains the fusion settings) and D-039 (the fused session is built from the two panel sessions) and
+does not change D-037: 3-D projects still cannot compute, `Engine.require_computable()` is unchanged.
+
+**Decision:** *Model.* `ViewPair.fusion` is `FusionSettings(frame_offset=0, horizontal_axis="x"|"y",
+flip=False, surface_row >= 0, floor_row > surface_row, tank_height_cm > 0)` or unset; manifests
+without it load unchanged and it is part of `project_hash`. `PreprocessedSession.depth` is an optional
+`(n_frames, n_animals)` array. *Geometry.* The side view's horizontal axis follows one top-view axis;
+the cameras are assumed to be at right angles, with no calibration or triangulation. Depth is
+`(y_side - surface_row) / (floor_row - surface_row)`, 0 = surface, 1 = floor (the IL-15 convention);
+positions outside [0, 1] become NaN and are counted, never clipped. The side scale is
+`(floor_row - surface_row) / tank_height_cm` pixels per cm. *Alignment.* `fuse` (`track2data/fusion/`,
+no Qt) aligns on video frame numbers (side frame = top frame + `frame_offset`); frame rates that
+differ by more than 0.1% raise `FusionError`; the layout "One video, two panels" forces offset 0.
+Only the fish in the pair's `fish_map` are fused. Untracked and separator rows are left out, and the
+fused session carries no separator rows, so a consumer must read `frame_index`. The result
+(`FusedSession`) is the top-view session over the shared frames with `depth` set. *Agreement.* With a
+calibrated top view, both views are converted to cm and the side horizontal position is compared with
+the chosen top-view axis, median difference removed per fish; the RMS is reported (overall RMS pools
+the fish with at least 3 jointly valid samples) and a warning is set above 10% of the top-view range
+along the axis. An uncalibrated top view skips the check ("top view not calibrated") and still gets a
+depth. `suggest_offset` scans lags within +-5 s around 0 only, skips lags with fewer than 30 jointly
+valid samples and returns a lag only if its RMS is at least 20% below the lag-0 RMS; `fuse` does not
+fill `FusionReport.suggested_offset`, the dialog's "Suggest offset" button calls it on demand.
+*Engine.* `fuse_pair`, `fuse_all` (results and error messages per pair) and `suggest_offset`; fusion
+is not cached on disk, its inputs (the two preprocessed sessions) are. *Store and UI.*
+`ProjectStore.update_fusion` (3-D only, the pair must exist) keeps the settings when the fish map or a
+panel changes. The Views page gains a Fusion section (`ui/widgets/fusion_section.py`) with a status
+line and "Set up fusion…", which opens `ui/dialogs/fusion_dialog.py` (side-view backdrop with two
+draggable lines, `ui/widgets/water_column_view.py`, typed fields, a live summary). The Views stage
+status warns "Fusion setup needed for ..." while a pair has no settings and still never blocks.
+*Not in this cycle.* 3-D metrics and lifting the compute block (B), camera calibration and
+triangulation, cameras not at right angles, fusion across different frame rates, automatic detection
+of the water column, a z axis in the exports, several offsets for one pair.
+
+**Rationale:** Right-angle cameras need no calibration, so the fusion can ship before the 3-D metrics.
+Putting the depth beside an ordinary top-view session means all existing 2-D code works on the fused
+session unchanged and B only has to read one more array. Counting out-of-column positions instead of
+clipping them keeps a wrong water column visible. Computing on demand from cached inputs avoids a
+second cache whose key would have to track every setting of both sessions.
+

@@ -265,6 +265,37 @@ stays).
 Zones are still one set per project, and per-view pixel scale calibration is not part of this
 version. 3-D projects still cannot be run.
 
+### Fusion (top and side views)
+
+Once a pair has its fish matched, the **Fusion** box on the Views page combines the two views into one
+session that knows both where each fish is on the floor and how deep it is. It shows *Fusion setup
+needed.* until you set the pair up, and **Set up fusion…** opens the editor for the selected pair.
+
+- The editor shows the side view with two lines you can drag: the **water surface** and the **tank
+  floor**. The same two rows can be typed. Enter the **tank height** in cm (the water depth between the
+  lines; 20 cm to start with), which gives the side view its scale.
+- **Shared horizontal axis** says which top-view axis (x or y) the side view's left-right direction
+  follows; tick **Flip** if it runs the other way.
+- **Frame offset** shifts the side recording against the top one, in frames (side = top + offset). With
+  the layout "One video, two panels" it is hidden and fixed at 0. **Suggest offset** looks for the shift
+  that makes the two views agree best, within ±5 seconds around 0 only; it can take a second or two on a
+  long session and answers "no better offset found" when nothing clearly beats 0.
+- The summary under the fields updates as you edit: shared frames, fish fused, positions outside the
+  water column, and the agreement. **OK** is off while the settings are invalid or the pair cannot be
+  fused.
+
+Depth is 0 at the surface line and 1 at the floor line; a position outside the lines becomes empty and
+is counted, never clipped. The cameras are assumed to be at right angles, with no camera calibration.
+The agreement check compares the side view's horizontal position with the chosen top-view axis in cm
+(after removing the constant shift between them) and warns when the difference is more than 10% of the
+top-view range; it needs a calibrated top view, and says so when it cannot run.
+
+Fusion needs both views' fish to be matched, and the two recordings' frame rates must match (within
+0.1%). Frames missing from either view are left out, and fish that are not matched are not fused. Until
+a pair is set up, the Views step in the sidebar shows a warning "Fusion setup needed for ..."; it does
+not block Next. 3-D projects still cannot be run: Processing, Preview and Export stay blocked until the
+3-D metrics step exists.
+
 ## 3. Calibration
 
 Calibration decides which units distances and speeds are reported in. Figure 4 shows the default,
