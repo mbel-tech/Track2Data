@@ -636,3 +636,62 @@ def test_an_unknown_camera_view_value_is_rejected() -> None:
 
     with pytest.raises(ValidationError):
         SceneConfig(camera_view="underwater")
+
+
+# ── ProjectMode ────────────────────────────────────────────────────────────────
+
+
+def _mode_manifest(**kw: object) -> ProjectManifest:
+    now = datetime(2026, 1, 1)
+    return ProjectManifest(project_name="p", created_at=now, updated_at=now, **kw)
+
+
+def test_mode_defaults_to_2d() -> None:
+    from track2data.core.models import ProjectMode
+
+    m = _mode_manifest()
+    assert m.mode == ProjectMode()
+    assert m.mode.dimension == "2d"
+    assert m.mode.layout is None
+    assert m.mode.id_map == {}
+
+
+def test_mode_3d_requires_layout() -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import ProjectMode
+
+    with pytest.raises(ValidationError):
+        ProjectMode(dimension="3d")
+
+
+def test_mode_2d_rejects_layout() -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import ProjectMode
+
+    with pytest.raises(ValidationError):
+        ProjectMode(dimension="2d", layout="two_videos")
+
+
+def test_mode_roundtrip_keeps_id_map() -> None:
+    from track2data.core.models import ProjectMode
+
+    m = _mode_manifest(mode=ProjectMode(dimension="3d", layout="two_videos", id_map={"a": "b"}))
+    restored = ProjectManifest.model_validate(m.model_dump())
+    assert restored == m
+    assert restored.mode.id_map == {"a": "b"}
+
+
+def test_old_manifest_without_mode_loads() -> None:
+    from track2data.core.models import ProjectMode
+
+    data = _mode_manifest().model_dump(exclude={"mode"})
+    assert ProjectManifest.model_validate(data).mode == ProjectMode()
+
+
+def test_project_hash_depends_on_mode() -> None:
+    from track2data.core.models import ProjectMode
+
+    mode3d = ProjectMode(dimension="3d", layout="single_video_two_panels")
+    assert _mode_manifest().project_hash() != _mode_manifest(mode=mode3d).project_hash()

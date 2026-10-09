@@ -15,12 +15,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from track2data.core.models import ProjectManifest
+from track2data.core.models import MODE_3D_BLOCK_REASON, ProjectManifest
 from track2data.metrics import get as _get_metric
 from track2data.metrics.availability import view_dependent_metrics
 from track2data.zones.extent import water_column
 
 Status = Literal["empty", "valid", "warning", "blocked"]
+
+SESSIONS_NEEDS_LAYOUT = "Choose a 3-D layout"
 
 def _missing_water_column(manifest: ProjectManifest) -> list[str]:
     """The selected metrics that need a water column the zones do not give.
@@ -69,7 +71,10 @@ def compute_stage_statuses(
     # Sessions
     sessions = manifest.sessions
     free = [s.session_id for s in sessions if s.is_identity_free()]
-    if not sessions:
+    mode = manifest.mode
+    if mode.dimension == "3d" and mode.layout is None:
+        out[_SESSIONS] = StageInfo("blocked", SESSIONS_NEEDS_LAYOUT)
+    elif not sessions:
         out[_SESSIONS] = StageInfo("empty", "Add at least one session folder.")
     elif free:
         out[_SESSIONS] = StageInfo(
@@ -131,6 +136,9 @@ def compute_stage_statuses(
         if manifest.export_targets
         else StageInfo("empty")
     )
+    if mode.dimension == "3d":
+        # Fusion is not available yet, so nothing can be computed or shown.
+        out[_PROC] = out[_PREVIEW] = out[_EXPORT] = StageInfo("blocked", MODE_3D_BLOCK_REASON)
     return out
 
 
@@ -167,6 +175,11 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
         meta = "Map columns"
     else:
         meta = f"{len(manifest.mapping.rules)} columns mapped"
+    if manifest.mode.dimension == "3d":
+        run_text, preview_text = "Not available yet", "Not available yet"
+    else:
+        run_text = f"Ran · {n_sessions} sessions" if has_run_results else "Not run"
+        preview_text = "Results ready" if has_run_results else "Needs a run"
     return [
         manifest.project_name or "Unnamed",
         f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions",
@@ -177,6 +190,6 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
         meta,
         "Identity switch on" if manifest.preprocess.identity_switch.enabled else "Defaults",
         f"{n_metrics} selected" if n_metrics else "None selected",
-        f"Ran · {n_sessions} sessions" if has_run_results else "Not run",
-        "Results ready" if has_run_results else "Needs a run",
+        run_text,
+        preview_text,
     ]

@@ -408,6 +408,29 @@ class SceneConfig(BaseModel):
     camera_view: CameraView = "unknown"
 
 
+MODE_3D_BLOCK_REASON = "3-D fusion is not available yet"
+
+
+class ProjectMode(BaseModel):
+    """Whether the project is 2-D or 3-D, and for 3-D how the two views are supplied.
+
+    ``layout`` is set if and only if ``dimension == "3d"``. ``id_map`` maps one view's
+    identity labels onto the other's.
+    """
+
+    dimension: Literal["2d", "3d"] = "2d"
+    layout: Literal["single_video_two_panels", "two_videos"] | None = None
+    id_map: dict[str, str] = {}
+
+    @model_validator(mode="after")
+    def _layout_iff_3d(self) -> ProjectMode:
+        if self.dimension == "3d" and self.layout is None:
+            raise ValueError("a 3d project mode requires a layout")
+        if self.dimension == "2d" and self.layout is not None:
+            raise ValueError("a 2d project mode must not set a layout")
+        return self
+
+
 class ROI(BaseModel):
     name: str
     level: str = "main"
@@ -575,6 +598,7 @@ class ProjectManifest(BaseModel):
     calibration: CalibrationConfig = CalibrationConfig()
     zones: ZoneSet = ZoneSet()
     scene: SceneConfig = SceneConfig()
+    mode: ProjectMode = ProjectMode()
     metadata_source: MetadataSource | None = None
     mapping: MappingRule | None = None
     preprocess: PreprocessConfig = PreprocessConfig()
