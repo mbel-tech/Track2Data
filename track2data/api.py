@@ -43,6 +43,7 @@ import numpy as np
 from track2data.core.errors import ImportError_
 from track2data.core.ids import default_session_id
 from track2data.core.models import (
+    MODE_3D_BLOCK_REASON,
     PreprocessedSession,
     PreprocessReport,
     ProjectManifest,
@@ -1314,6 +1315,7 @@ class Engine:
     ) -> list[Path]:
         """Write *payload* to *out_dir* via the requested (or configured
         default) exporters. Returns the list of written paths."""
+        self._require_computable()
         from track2data.exporters import get_exporter
 
         out_dir = Path(out_dir)
@@ -1336,6 +1338,11 @@ class Engine:
 
         return written
 
+    def _require_computable(self) -> None:
+        """Refuse to compute while the project is 3-D (fusion does not exist yet)."""
+        if self._manifest.mode.dimension == "3d":
+            raise ValueError(MODE_3D_BLOCK_REASON)
+
     # ── full run ───────────────────────────────────────────────────────────
 
     def run_session(
@@ -1351,6 +1358,7 @@ class Engine:
 
         Returns list of written output paths.
         """
+        self._require_computable()
         psess = self.preprocess(session)
         emit(
             progress,
@@ -1431,6 +1439,7 @@ class Engine:
         (``OperationCancelled``) stops the run: workers see a shared flag at
         their next checkpoint and stop.
         """
+        self._require_computable()
         previous_check, self._cancel_check = self._cancel_check, cancel_check
         try:
             return self._run(out_dir, exporters, progress, n_workers, cancel_check)
@@ -1907,6 +1916,7 @@ class Engine:
         written paths, not the full ``RunResult`` (diagnostics, metric
         previews, per-session timing/errors).
         """
+        self._require_computable()
         return self.run(out_dir, exporters, progress=progress).written
 
     # ── preview ────────────────────────────────────────────────────────────
@@ -1933,6 +1943,8 @@ class Engine:
         alongside this and which ``run()`` records in the export.
         """
         issues: list[str] = []
+        if self._manifest.mode.dimension == "3d":
+            issues.append(MODE_3D_BLOCK_REASON)
         if not self._manifest.sessions:
             issues.append("No sessions imported.")
         cfg = self._manifest.calibration
