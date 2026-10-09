@@ -769,3 +769,69 @@ def test_project_hash_depends_on_pairs() -> None:
     m = _views_manifest()
     other = m.model_copy(update={"view_pairs": []})
     assert m.project_hash() != other.project_hash()
+
+
+# ── Panel rectangle on a session ──────────────────────────────────────────────
+
+
+def test_panel_defaults_to_none() -> None:
+    from track2data.core.models import PANELS_ONLY_FOR_SINGLE_VIDEO, PanelRect, SessionRef
+
+    assert SessionRef(session_id="a", folder=Path("/x"), sha256="0").panel is None
+    rect = PanelRect(width=10, height=5)
+    assert (rect.x, rect.y) == (0.0, 0.0)
+    assert PANELS_ONLY_FOR_SINGLE_VIDEO == "Panels apply to the 'One video, two panels' layout only"
+
+
+@pytest.mark.parametrize("width,height", [(0, 5), (5, 0), (-1, 5), (5, -1)])
+def test_panel_rect_rejects_non_positive_size(width: float, height: float) -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import PanelRect
+
+    with pytest.raises(ValidationError):
+        PanelRect(width=width, height=height)
+
+
+@pytest.mark.parametrize("x,y", [(-1, 0), (0, -1)])
+def test_panel_rect_rejects_negative_origin(x: float, y: float) -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import PanelRect
+
+    with pytest.raises(ValidationError):
+        PanelRect(x=x, y=y, width=10, height=10)
+
+
+def _panel_manifest(panel=None) -> ProjectManifest:
+    from track2data.core.models import ProjectMode, SessionRef
+
+    return _mode_manifest(
+        sessions=[SessionRef(session_id="a", folder=Path("/x"), sha256="0", panel=panel)],
+        mode=ProjectMode(dimension="3d", layout="single_video_two_panels"),
+    )
+
+
+def test_session_ref_with_panel_roundtrips_json() -> None:
+    from track2data.core.models import PanelRect
+
+    m = _panel_manifest(PanelRect(x=10, y=20, width=300, height=200))
+    back = ProjectManifest.model_validate_json(m.model_dump_json())
+    assert back == m
+    assert back.sessions[0].panel == PanelRect(x=10, y=20, width=300, height=200)
+
+
+def test_old_manifest_without_panel_loads() -> None:
+    data = _panel_manifest().model_dump()
+    for s in data["sessions"]:
+        s.pop("panel")
+    assert ProjectManifest.model_validate(data).sessions[0].panel is None
+
+
+def test_project_hash_depends_on_panel() -> None:
+    from track2data.core.models import PanelRect
+
+    assert (
+        _panel_manifest().project_hash()
+        != _panel_manifest(PanelRect(width=10, height=10)).project_hash()
+    )

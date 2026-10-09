@@ -415,9 +415,23 @@ class SceneConfig(BaseModel):
 
 MODE_3D_BLOCK_REASON = "3-D fusion is not available yet"
 VIEWS_3D_ONLY = "Views apply to 3-D projects only"
+PANELS_ONLY_FOR_SINGLE_VIDEO = "Panels apply to the 'One video, two panels' layout only"
 
 #: Which camera a session was recorded from, in a 3-D project.
 ViewRole = Literal["top", "side"]
+
+
+class PanelRect(BaseModel):
+    """The part of a video frame one camera view occupies, in video pixels.
+
+    ``x`` and ``y`` are the top-left corner. Used by a session of a 'One video, two panels'
+    project to cut the shared video into its top and side views.
+    """
+
+    x: float = Field(default=0.0, ge=0)
+    y: float = Field(default=0.0, ge=0)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
 
 
 class PairingPatterns(BaseModel):
@@ -575,6 +589,9 @@ class SessionRef(BaseModel):
     # Which camera recorded this session, in a 3-D project. None until the user (or the name
     # patterns) says so.
     view_role: ViewRole | None = None
+    # The part of the video this session covers, in a 'One video, two panels' project. None
+    # means the whole frame.
+    panel: PanelRect | None = None
 
     @field_validator("session_id")
     @classmethod
