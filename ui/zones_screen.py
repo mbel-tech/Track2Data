@@ -453,7 +453,15 @@ class ZonesScreen(QWidget):
             facts.background_image_path,
             facts.setup_points,
             frame_size=(facts.width_px, facts.height_px),
+            crop=self._session_panel(session_id),
         )
+
+    def _session_panel(self, session_id: str):
+        """The panel of a session of the open project, or None."""
+        manifest = self._store.manifest if self._store is not None else None
+        if manifest is None:
+            return None
+        return next((r.panel for r in manifest.sessions if r.session_id == session_id), None)
 
     def _set_tool(self, tool: object) -> None:
         self._canvas.set_tool(tool)

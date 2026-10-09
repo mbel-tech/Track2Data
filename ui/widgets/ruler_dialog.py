@@ -12,7 +12,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -24,6 +24,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from track2data.core.models import PanelRect
+from ui.widgets.backdrop import load_backdrop_image
 
 _COLOR = QColor("#e74c3c")
 
@@ -55,17 +58,22 @@ class Ruler:
 class RulerCanvas(QGraphicsView):
     changed = Signal()
 
-    def __init__(self, background: Path | None, size: tuple[float, float], parent=None) -> None:
+    def __init__(
+        self,
+        background: Path | None,
+        size: tuple[float, float],
+        parent=None,
+        crop: PanelRect | None = None,
+    ) -> None:
         super().__init__(parent)
         self.ruler = Ruler()
         self._gscene = QGraphicsScene(self)
         self.setScene(self._gscene)
         self.setMinimumSize(480, 320)
         pixmap = None
-        if background is not None and Path(background).exists():
-            image = QImage(str(background))
-            if not image.isNull():
-                pixmap = QPixmap.fromImage(image)
+        image = load_backdrop_image(background, crop)
+        if image is not None:
+            pixmap = QPixmap.fromImage(image)
         if pixmap is not None:
             self._gscene.addPixmap(pixmap)
             self._gscene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
@@ -114,6 +122,7 @@ class RulerDialog(QDialog):
         size: tuple[float, float],
         unit_label: str = "cm",
         parent: QWidget | None = None,
+        crop: PanelRect | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Measure on frame")
@@ -124,7 +133,7 @@ class RulerDialog(QDialog):
                 "arena diameter, a calibration bar). A third click starts over."
             )
         )
-        self.canvas = RulerCanvas(background, size)
+        self.canvas = RulerCanvas(background, size, crop=crop)
         lay.addWidget(self.canvas, 1)
 
         form = QFormLayout()

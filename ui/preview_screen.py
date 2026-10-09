@@ -60,6 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.core.models import PanelRect
 from ui.store.quality_grid import SessionQuality, assess_session, count_verdicts
 from ui.widgets.dataframe_table import clear_table, populate_table
 from ui.widgets.dots import level_icon
@@ -75,6 +76,7 @@ class TrajectoryData:
     fps: float
     background: Path | None
     size: tuple[float, float]
+    crop: PanelRect | None = None
 
 
 def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> TrajectoryData:
@@ -91,6 +93,7 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
         fps=video.fps,
         background=psess.session.background_image_path,
         size=(float(video.width_px), float(video.height_px)),
+        crop=ref.panel,
     )
 
 #: Diagnostic metric IDs shown in the Diagnostics tab's per-individual table.
@@ -262,7 +265,7 @@ class PreviewScreen(QWidget):
         rois = self._store.manifest.zones.rois if self._store.manifest else []
         self._traj_view.set_data(
             result.raw_xy, result.xy, result.fps, rois=rois,
-            background_path=result.background, size=result.size,
+            background_path=result.background, size=result.size, crop=result.crop,
         )
         self._traj_slider.setRange(0, max(0, self._traj_view.n_frames - 1))
         self._traj_slider.setValue(0)

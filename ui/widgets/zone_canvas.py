@@ -28,8 +28,11 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QKeySequence, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
+
+from track2data.core.models import PanelRect
+from ui.widgets.backdrop import load_backdrop_image
 
 #: Click-to-point tolerance, in image pixels (scene units == image
 #: pixels here, since the background pixmap is added at its native
@@ -258,6 +261,7 @@ class ZoneCanvas(QGraphicsView):
         background_image_path: Path | None,
         setup_points,
         frame_size: tuple[int, int] | None = None,
+        crop: PanelRect | None = None,
     ) -> None:
         """Load a new session's backdrop + setup_points, discarding any
         prior selection -- called when the Zones screen's session
@@ -266,7 +270,10 @@ class ZoneCanvas(QGraphicsView):
         *frame_size* is the session's video frame in pixels. Zones are stored in image
         pixels, so a canvas with no backdrop must still be the size of the frame: a blank
         scene of any other size would make every vertex a coordinate in a picture that is
-        not the video."""
+        not the video.
+
+        *crop* is the session's panel: the backdrop is cut to it, since the zones of a panel
+        session are relative to the panel."""
         self._gscene.clear()
         self._marker_items = {}
         self._label_items = {}
@@ -278,10 +285,9 @@ class ZoneCanvas(QGraphicsView):
         self._selector.load_setup_points(setup_points)
 
         pixmap: QPixmap | None = None
-        if background_image_path is not None and Path(background_image_path).exists():
-            image = QImage(str(background_image_path))
-            if not image.isNull():
-                pixmap = QPixmap.fromImage(image)
+        image = load_backdrop_image(background_image_path, crop)
+        if image is not None:
+            pixmap = QPixmap.fromImage(image)
 
         if pixmap is not None:
             self._gscene.addPixmap(pixmap)

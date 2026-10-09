@@ -20,6 +20,9 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainterPath, QPen, QPixmap, Q
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 from scipy.ndimage import gaussian_filter
 
+from track2data.core.models import PanelRect
+from ui.widgets.backdrop import load_backdrop_image
+
 #: Distinguishable per-animal colours (cycled).
 ANIMAL_COLORS = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -121,6 +124,7 @@ class TrajectoryView(QGraphicsView):
         rois=(),
         background_path: Path | None = None,
         size: tuple[float, float] | None = None,
+        crop: PanelRect | None = None,
     ) -> None:
         """Load a session: *raw_xy* and *xy* are (n_frames, n_animals, 2) pixels."""
         self._raw, self._xy, self._rois = raw_xy, xy, list(rois)
@@ -129,10 +133,9 @@ class TrajectoryView(QGraphicsView):
         self._dynamic, self._zone_items, self._heat_item = [], [], None
 
         pixmap = None
-        if background_path is not None and Path(background_path).exists():
-            image = QImage(str(background_path))
-            if not image.isNull():
-                pixmap = QPixmap.fromImage(image)
+        image = load_backdrop_image(background_path, crop)
+        if image is not None:
+            pixmap = QPixmap.fromImage(image)
         if pixmap is not None:
             self._gscene.addPixmap(pixmap).setZValue(0)
             self._size = (float(pixmap.width()), float(pixmap.height()))

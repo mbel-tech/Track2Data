@@ -420,3 +420,39 @@ def test_the_side_view_explanation_points_at_the_zones_screen(qtbot, tmp_path: P
     assert "waterline" in text
     screen._view_combo.setCurrentIndex(screen._view_combo.findData("unknown"))
     assert "Zones" not in screen._view_help.text()
+
+
+def test_measure_on_frame_passes_the_sessions_panel_to_the_ruler(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    from track2data.core.models import PanelRect, SessionRef
+    from ui.calibration_screen import CalibrationScreen
+    from ui.store.session_facts import SessionFacts
+    from ui.widgets import ruler_dialog
+
+    store = _make_store(tmp_path)
+    folder = tmp_path / "s"
+    folder.mkdir()
+    panel = PanelRect(x=10, y=20, width=100, height=50)
+    store.update_sessions([SessionRef(session_id="s", folder=folder, sha256="", panel=panel)])
+    store._session_facts["s"] = SessionFacts(
+        session_id="s", reader="idtrackerai", fps=30.0, n_frames=10, n_animals=1,
+        width_px=100, height_px=50, has_stable_identities=True,
+        track_wo_identities=False, idtrackerai_version=None, length_unit=None,
+        setup_points=None, roi_list=None, has_body_length=False, background_image_path=None,
+    )
+    seen = {}
+    original = ruler_dialog.RulerDialog.__init__
+
+    def spy(self, *args, **kwargs):
+        seen["crop"] = kwargs.get("crop")
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ruler_dialog.RulerDialog, "__init__", spy)
+    monkeypatch.setattr(
+        ruler_dialog.RulerDialog, "exec", lambda self: ruler_dialog.RulerDialog.DialogCode.Rejected
+    )
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+    screen._measure_btn.click()
+    assert seen["crop"] == panel

@@ -467,15 +467,16 @@ class CalibrationScreen(QWidget):
         accepted, put its pixels-per-unit into the spin box."""
         from ui.widgets.ruler_dialog import RulerDialog
 
-        background, size = None, (640.0, 480.0)
+        background, size, crop = None, (640.0, 480.0), None
         if self._store is not None and self._store.manifest is not None:
             for ref in self._store.manifest.sessions:
                 facts = self._store.session_facts(ref.session_id)
                 if facts is not None:
                     background = facts.background_image_path
                     size = (float(facts.width_px), float(facts.height_px))
+                    crop = ref.panel
                     break
-        dialog = RulerDialog(background, size, parent=self)
+        dialog = RulerDialog(background, size, parent=self, crop=crop)
         if dialog.exec() == RulerDialog.DialogCode.Accepted:
             scale = dialog.px_per_unit()
             if scale is not None:
