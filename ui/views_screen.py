@@ -37,7 +37,8 @@ EMPTY_TEXT = "Open a 3-D project and add sessions to set up the views."
 class ViewsScreen(QWidget):
     """Roles per session and the name patterns that pair top with side sessions."""
 
-    pairSelected = Signal(object)  # (top_id, side_id) or None; user selection changes only
+    # (top_id, side_id) or None: a user change, or None when the selected pair vanishes
+    pairSelected = Signal(object)
 
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -249,7 +250,7 @@ class ViewsScreen(QWidget):
         )
 
     def _pair_state(self, pair: ViewPair, free: set[str]):
-        """(status text, tooltip, top labels, side labels) for one pair."""
+        """(status text, tooltip) for one pair."""
         top_l, side_l = self._labels(pair.top_session_id), self._labels(pair.side_session_id)
         msgs = validate_fish_map(
             pair.fish_map,
@@ -259,9 +260,9 @@ class ViewsScreen(QWidget):
             side_identity_free=pair.side_session_id in free,
         )
         if msgs:
-            return msgs[0], "\n".join(msgs), top_l, side_l
+            return msgs[0], "\n".join(msgs)
         if not pair.fish_map:
-            return NEEDS_MATCHING, "", top_l, side_l
+            return NEEDS_MATCHING, ""
         left_top = [x for x in top_l if x not in pair.fish_map]
         left_side = [x for x in side_l if x not in set(pair.fish_map.values())]
         tip = ""
@@ -270,7 +271,7 @@ class ViewsScreen(QWidget):
                 "Not matched: top " + (", ".join(left_top) or "none")
                 + "; side " + (", ".join(left_side) or "none")
             )
-        return "Matched", tip, top_l, side_l
+        return "Matched", tip
 
     def _fill_pairs(self, sessions) -> None:
         table = self._pairs_table
@@ -288,7 +289,7 @@ class ViewsScreen(QWidget):
                     item = QTableWidgetItem(text)
                     item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                     table.setItem(row, col, item)
-                status, tip, _, _ = self._pair_state(pair, free)
+                status, tip = self._pair_state(pair, free)
                 st = QTableWidgetItem(status)
                 st.setToolTip(tip)
                 st.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -366,6 +367,7 @@ class ViewsScreen(QWidget):
         try:
             self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
+            self._refresh()
             self._error_label.setText(str(exc))
 
     def _remove_pair(self, top_id: str, side_id: str) -> None:

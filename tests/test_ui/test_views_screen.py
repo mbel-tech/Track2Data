@@ -235,7 +235,7 @@ def test_partial_overlap_maps_shared_and_lists_unmatched(qtbot, tmp_path) -> Non
     assert store.manifest.view_pairs[0].fish_map == {"b": "b"}
     assert _status(screen).text() == "Matched"
     tip = _status(screen).toolTip()
-    assert "a" in tip and "c" in tip
+    assert tip == "Not matched: top a; side c"
 
 
 def test_identity_free_session_cannot_match(qtbot, tmp_path) -> None:
@@ -299,7 +299,12 @@ def test_selection_emits_and_survives_rebuild(qtbot, tmp_path) -> None:
 
 
 def test_pair_rebuild_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import ViewPair
+
     store, _screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+    store.update_view_pair(
+        ViewPair(top_session_id="t1_top", side_session_id="t1_side", same_ids=True)
+    )
     calls = []
     monkeypatch.setattr(store, "update_view_pair", lambda *a: calls.append(a))
     monkeypatch.setattr(store, "remove_view_pair", lambda *a: calls.append(a))
@@ -307,3 +312,15 @@ def test_pair_rebuild_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
     store.viewsChanged.emit()
     store.sessionFactsChanged.emit()
     assert calls == []
+
+
+def test_rejected_tick_resyncs_checkbox(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+
+    def boom(_pair):
+        raise ValueError("nope")
+
+    monkeypatch.setattr(store, "update_view_pair", boom)
+    _tick(screen).setChecked(True)
+    assert not _tick(screen).isChecked()
+    assert screen._error_label.text() == "nope"
