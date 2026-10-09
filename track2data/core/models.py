@@ -446,11 +446,37 @@ class PairingPatterns(BaseModel):
     side_regex: str = ""
 
 
+class FusionSettings(BaseModel):
+    """How the side view of a pair is lined up with its top view to give a depth.
+
+    ``frame_offset`` shifts the side clock against the top clock, in frames. The side view's
+    horizontal axis follows ``horizontal_axis`` of the top view (optionally ``flip``ped).
+    ``surface_row`` and ``floor_row`` are the water surface and tank floor, in side-view image
+    rows; ``tank_height_cm`` is the water depth between them, which sets the side view's scale.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    frame_offset: int = 0
+    horizontal_axis: Literal["x", "y"] = "x"
+    flip: bool = False
+    surface_row: float = Field(ge=0)
+    floor_row: float
+    tank_height_cm: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _surface_above_floor(self) -> FusionSettings:
+        if self.surface_row >= self.floor_row:
+            raise ValueError("surface_row must be above floor_row")
+        return self
+
+
 class ViewPair(BaseModel):
     """One top session matched with one side session.
 
     ``fish_map`` maps a top fish label to the side fish label. ``same_ids`` says both views use
     the same labels, so the map is implied. ``auto`` marks a pair found by the name patterns.
+    ``fusion`` holds the alignment settings once the pair has been set up for fusion.
     """
 
     top_session_id: str
@@ -458,6 +484,7 @@ class ViewPair(BaseModel):
     same_ids: bool = False
     fish_map: dict[str, str] = {}
     auto: bool = False
+    fusion: FusionSettings | None = None
 
     @model_validator(mode="after")
     def _two_different_sessions(self) -> ViewPair:
@@ -820,6 +847,9 @@ class PreprocessedSession:
     # was inserted). Tracker confidence is never invented for an inserted row.
     raw_xy_rows: np.ndarray | None = None
     id_probabilities_rows: np.ndarray | None = None
+    # (n_frames, n_animals) depth in cm below the water surface, from fusing the side view into a
+    # 3-D track; None for a 2-D session or one that has not been fused.
+    depth: np.ndarray | None = None
 
     @property
     def raw_xy_aligned(self) -> np.ndarray:
