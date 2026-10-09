@@ -64,6 +64,12 @@ does now *name* formats it recognises but cannot read — SLEAP `.slp`, `trx.mat
 says what to export instead, rather than reporting nothing recognised. See
 [[Formats and Interoperability]].
 
+**The Zones canvas has no picture for trackers other than idtracker.ai.** idtracker.ai
+sessions show their background image to draw over. A session from any other tracker gets a
+blank canvas the size of the video frame, so zones are drawn by coordinates or loaded from a
+CSV. Zones drawn on that canvas in earlier versions were on a blank 640×480 scene, not in
+video pixels, and should be redrawn.
+
 **A required option is never defaulted.** If the files do not record something a reader
 needs — frame rate is the common case — you get `READER_OPTION_MISSING` and must supply it.
 A guessed frame rate would corrupt every speed and path-length value instead.

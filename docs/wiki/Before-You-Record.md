@@ -21,6 +21,12 @@ that cannot be fixed afterwards.
   and area are defined by idtracker.ai's segmentation parameters, and identity matching
   across sessions needs `resolution_reduction` and `id_image_size` to match; Track2Data
   warns when sessions differ, but the data is already collected by then.
+- **Decide the camera view, and keep it fixed.** A side view gives depth in the water
+  column (IL-15); a top-down view gives position in the arena. Declare which you used on the
+  Calibration screen. For depth, film so the whole water column is in frame, upright, with the
+  waterline and the tank floor visible: Track2Data measures depth between the top and bottom
+  edges of the main zone you draw, and it cannot correct for refraction or for fish at
+  different distances from the front glass.
 - **Keep the video with the session folder.** If the path idtracker.ai recorded no longer
   exists on the analysis machine, the Video column reads *Not found* and you point at the
   file with **Locate Video…** — metrics do not need it, but the Preview and the calibration

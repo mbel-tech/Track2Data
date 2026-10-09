@@ -187,6 +187,7 @@ class MainWindow(QMainWindow):
             self._store.sessionsChanged,
             self._store.calibrationChanged,
             self._store.zonesChanged,
+            self._store.sceneChanged,
             self._store.metadataChanged,
             self._store.preprocessChanged,
             self._store.metricsChanged,

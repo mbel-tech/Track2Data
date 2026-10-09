@@ -41,6 +41,8 @@ def derive_metric_params(
         # both need the same roi_areas/total_arena_area, just fed into
         # a different formula downstream.
         return _derive_z2(zone_set)
+    if metric_id == "IL-15":
+        return _derive_il15(psess, zone_set)
     return {}
 
 
@@ -240,3 +242,38 @@ def _derive_z2(zone_set: ZoneSet) -> dict[str, Any]:
     total_arena_area = sum(roi_areas[name] for name in names_for_total)
 
     return {"roi_areas": roi_areas, "total_arena_area": total_arena_area}
+
+
+def _derive_il15(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]:
+    """IL-15 (vertical position)'s water column: the surface and floor rows, and where they
+    came from.
+
+    Zones drawn at a different frame size than this session are refused rather than rescaled:
+    the rows would not be this video's rows. Only a *recorded* size counts as a disagreement,
+    since zones drawn by hand before the canvas stamped a size carry none and must keep working.
+    No extent is never replaced by the frame height (see ``zones.extent``).
+    """
+    from track2data.zones.extent import water_column
+
+    column = water_column(zone_set)
+    video = psess.session.video
+    recorded = (zone_set.source_width_px, zone_set.source_height_px)
+    if (
+        column.top_px is not None
+        and None not in recorded
+        and recorded != (video.width_px, video.height_px)
+    ):
+        return {
+            "water_column": {
+                "top_px": None,
+                "bottom_px": None,
+                "source": "none:frame_size_mismatch",
+            }
+        }
+    return {
+        "water_column": {
+            "top_px": column.top_px,
+            "bottom_px": column.bottom_px,
+            "source": column.source,
+        }
+    }

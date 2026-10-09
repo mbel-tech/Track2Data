@@ -40,9 +40,9 @@ from track2data.metrics import base
 
 # Every metric that must not run on an identity-free session.
 IDENTITY_REQUIRING = {
-    # All twelve individual metrics: each is a per-animal time series.
+    # All thirteen individual metrics: each is a per-animal time series.
     "IL-1", "IL-2", "IL-3", "IL-4", "IL-5", "IL-6",
-    "IL-7", "IL-8", "IL-9", "IL-10", "IL-11", "IL-14",
+    "IL-7", "IL-8", "IL-9", "IL-10", "IL-11", "IL-14", "IL-15",
     # Group metrics built on per-individual headings.
     "GL-3",   # polarisation: mean unit heading vector
     "GL-8",   # rotational order: heading relative to the group centroid

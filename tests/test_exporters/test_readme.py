@@ -506,3 +506,54 @@ class TestTheAnimalPositionRow:
         self, tmp_path: Path, minimal_payload: ExportPayload
     ) -> None:
         assert "Animal position" not in _readme(tmp_path, _from(minimal_payload))
+
+
+# ── Camera view: written only when it says something ──────────────────────────
+
+
+class TestCameraViewProvenance:
+    def test_a_default_run_has_no_camera_view_section(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        """Existing READMEs must not change just because the setting now exists."""
+        assert "Camera view" not in _readme(tmp_path, _from(minimal_payload))
+
+    def test_a_declared_view_is_recorded(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload, camera_view="side"))
+        assert "## Camera view" in content
+        assert "| Camera view | Side view |" in content
+
+    def test_a_top_down_view_is_recorded_in_words(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        content = _readme(tmp_path, _from(minimal_payload, camera_view="top"))
+        assert "| Camera view | Top-down |" in content
+
+    def test_the_water_column_rows_and_source_are_recorded(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        column = {"top_px": 100.0, "bottom_px": 700.0, "source": "zone:tank"}
+        content = _readme(
+            tmp_path, _from(minimal_payload, camera_view="side", water_column=column)
+        )
+        assert "| Water column | rows 100 to 700 px (zone:tank) |" in content
+
+    def test_a_missing_water_column_says_why(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        column = {"top_px": None, "bottom_px": None, "source": "none:no_main_zone"}
+        content = _readme(
+            tmp_path, _from(minimal_payload, camera_view="side", water_column=column)
+        )
+        assert "| Water column | none (none:no_main_zone) |" in content
+
+    def test_the_manifest_json_carries_the_view(
+        self, tmp_path: Path, minimal_payload: ExportPayload
+    ) -> None:
+        import json
+
+        ReadmeExporter().write(_from(minimal_payload, camera_view="side"), tmp_path)
+        data = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+        assert data["run_metadata"]["session_provenance"]["camera_view"] == "side"
