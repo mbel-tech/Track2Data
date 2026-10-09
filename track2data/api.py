@@ -444,7 +444,7 @@ class Engine:
             # may have derived another.
             session = self.import_session(ref.folder)
             session = session.model_copy(update={"session_id": ref.session_id})
-            return self._apply_video_override(session)
+            return self._apply_panel(self._apply_video_override(session), ref)
         try:
             session = read_session(
                 Path(ref.folder),
@@ -464,7 +464,19 @@ class Engine:
                 "session and add it again so a reader is detected afresh.",
             ) from exc
         session = session.model_copy(update={"session_id": ref.session_id})
-        return self._apply_import_settings(session)
+        return self._apply_panel(self._apply_import_settings(session), ref)
+
+    @staticmethod
+    def _apply_panel(session: Session, ref: SessionRef) -> Session:
+        """Cut *session* to the entry's panel, the last step of reading it (no panel: as is).
+
+        Raises ValueError when the panel does not fit inside the video.
+        """
+        if ref.panel is None:
+            return session
+        from track2data.views.panels import apply_panel
+
+        return apply_panel(session, ref.panel)
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -528,17 +540,19 @@ class Engine:
                 return None
             reader_name = detected.name
         m = self._manifest
-        config_hash = dict_sha256(
-            {
-                "schema": self._CACHE_SCHEMA,
-                "app": __version__,
-                "reader_options": ref.reader_options,
-                "import_settings": self._import_settings_fingerprint(ref),
-                "preprocess": m.preprocess.model_dump(mode="json"),
-                "calibration": m.calibration.model_dump(mode="json"),
-                "zones": m.zones.model_dump(mode="json"),
-            }
-        )
+        payload: dict[str, Any] = {
+            "schema": self._CACHE_SCHEMA,
+            "app": __version__,
+            "reader_options": ref.reader_options,
+            "import_settings": self._import_settings_fingerprint(ref),
+            "preprocess": m.preprocess.model_dump(mode="json"),
+            "calibration": m.calibration.model_dump(mode="json"),
+            "zones": m.zones.model_dump(mode="json"),
+        }
+        if ref.panel is not None:
+            # Only when set, so the keys of sessions without a panel stay valid.
+            payload["panel"] = ref.panel.model_dump(mode="json")
+        config_hash = dict_sha256(payload)
         store = CacheStore(self._cache_dir)
         return store, store.key(reader_name, folder_fingerprint(ref.folder), config_hash)
 
