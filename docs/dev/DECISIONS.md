@@ -841,3 +841,29 @@ set now records comes from the session. IL-3, IL-14, IL-15 and every zone metric
 the two agreeing. The only idtracker.ai sessions in the repository are synthetic (`tests/conftest.py`
 writes a placeholder PNG), so this could not be checked; check it on a real session before relying
 on it, and if they differ, the recorded size would hide the discrepancy.
+
+---
+
+### D-037 · Project mode (2D or 3D) is a project setting, locked once sessions exist, and 3-D does not compute yet
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-mode-switch-design.md`
+(sub-project E of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It does not change D-031 or D-036.
+
+**Decision:** *Setting.* `ProjectManifest.mode` holds `dimension` (`2d` default, or `3d`), `layout`
+(`single_video_two_panels` or `two_videos`; set if and only if the dimension is 3-D) and `id_map`.
+It is separate from `scene`: `scene.camera_view` stays what one camera sees, and D gives each view
+its own through `Engine.camera_view_for(session)`. Manifests without a `mode` key load as 2-D. *Lock.*
+The mode cannot change while the project has any session ("Remove all sessions to change the
+mode"); removing them unlocks it, because panel splits and ID maps built on a mode would otherwise
+go stale. *No 3-D compute.* Until fusion (D) and 3-D metrics (B) exist, a 3-D project can be set up,
+have sessions added and be saved, but nothing computes: Processing, Preview and Export are blocked
+with "3-D fusion is not available yet". The gate is `Engine.require_computable()` and it covers
+every compute entry point, including `compute_metrics` and the `sensitivity` command, not only
+the screens, so the CLI and API cannot produce 2-D numbers for a 3-D project. *id_map.* Reserved
+for sub-project G (ID correspondence between views); E never reads or writes it. *Order.* E, then F
+(panel split) and G in either order, then D, then B.
+
+**Rationale:** Fusion, ID correspondence and 3-D metrics all need to know the dimension and the
+recording layout first, and need it fixed before sessions exist. Running the 2-D pipeline on a
+3-D project would give plausible but wrong results, so refusing at the engine is safer than
+hiding buttons.

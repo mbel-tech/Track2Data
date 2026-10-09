@@ -1,6 +1,6 @@
 # 2D / 3D project mode (sub-project E)
 
-**Status:** draft 2026-10-09, awaiting review
+**Status:** implemented 2026-10-09
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). E is the entry point for the 3-D
 sub-projects F, G, D and B below.
 
