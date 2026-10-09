@@ -157,3 +157,15 @@ QLabel[check="err"] { background: #d1453b; color: #fff; border-radius: 9px; font
 QFrame[card="true"] QLabel[check="ok"] { background: #3a9a72; color: #fff; border-radius: 9px; font-size: 11px; font-weight: 700; }
 QFrame[card="true"] QLabel[check="warn"] { background: #e0a92a; color: #fff; border-radius: 9px; font-size: 11px; font-weight: 700; }
 QFrame[card="true"] QLabel[check="err"] { background: #d1453b; color: #fff; border-radius: 9px; font-size: 11px; font-weight: 700; }
+
+QDialog#CommandPalette { background: #ffffff; border: 1px solid #e6dfd0; border-radius: 16px; }
+QLineEdit#PaletteSearch { font-size: 16px; padding: 10px 14px; }
+QListWidget#PaletteList { border: none; font-family: "IBM Plex Mono", Consolas, Menlo, monospace; font-size: 13px; background: transparent; }
+QListWidget#PaletteList::item { padding: 8px 10px; border-radius: 8px; }
+QListWidget#PaletteList::item:selected { background: #eef5f5; color: #1d2b30; }
+
+QLabel#ReceiptTick { background: #e8b64c; color: #2a2205; border-radius: 20px; font-size: 20px; font-weight: 700; }
+QLabel#DialogTitle { font-size: 20px; font-weight: 700; }
+
+QPushButton#CheckCell { background: transparent; border: none; border-radius: 8px; text-align: left; padding: 0; }
+QPushButton#CheckCell:hover { background: #f5f1e8; }

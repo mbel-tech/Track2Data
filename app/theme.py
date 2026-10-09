@@ -14,6 +14,8 @@ from PySide6.QtCore import QObject, QSettings, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
+from app.fonts import load_bundled_fonts
+
 RESOURCES = Path(__file__).parent / "resources"
 THEMES = ("light", "dark")
 
@@ -38,6 +40,7 @@ class ThemeManager(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._name = "light"
+        self._fonts_loaded = False
 
     @property
     def name(self) -> str:
@@ -64,6 +67,9 @@ class ThemeManager(QObject):
         app = QApplication.instance()
         if app is None:
             return
+        if not self._fonts_loaded:
+            load_bundled_fonts()
+            self._fonts_loaded = True
         qss = (RESOURCES / f"track2data-{name}.qss").read_text(encoding="utf-8")
         qss = qss.replace(":/icons/", (RESOURCES / "icons").as_posix() + "/")
         app.setStyleSheet(qss)
