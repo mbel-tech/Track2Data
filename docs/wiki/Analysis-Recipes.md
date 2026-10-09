@@ -25,6 +25,7 @@ library(dplyr); library(tidyr); library(readr)
 
 run <- "out"
 long     <- list.files(run, "^metrics_long\\.csv$", recursive = TRUE, full.names = TRUE) |>
+            Filter(f = \(f) basename(dirname(f)) != "all_sessions") |>  # see the note below
             lapply(read_csv, show_col_types = FALSE) |> bind_rows()
 sessions <- read_csv(file.path(run, "sessions.csv"), show_col_types = FALSE)
 codebook <- read_csv(file.path(run, "codebook.csv"), show_col_types = FALSE)
@@ -40,6 +41,12 @@ quality <- long |> filter(metric_id == "D-11") |>
   select(session_id, individual_id, column, value) |>
   pivot_wider(names_from = column, values_from = value)
 ```
+
+**Read the session folders or `all_sessions/`, never both.** A run with two or more sessions also writes
+`all_sessions/metrics_long.csv`, which is the same rows stacked. A recursive search for `metrics_long.csv` finds it
+as well, so the code above skips it; without that filter every value is counted twice. If you would rather read
+one file, `read_csv(file.path(run, "all_sessions", "metrics_long.csv"))` gives the same table, but only exists
+for runs with two or more sessions.
 
 Join your treatment labels from the metadata you supplied on the **Metadata** screen (they
 travel through to every table), or from `sessions.csv` if the treatment is per session.

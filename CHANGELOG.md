@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`trx.mat` reader (Ctrax / FlyTracker / JAABA).** Built from the documented layout, unverified against a real sample. `pxpermm` becomes the session scale.
 - **Average or median of several idtracker.ai length calibrations.** The average (idtracker.ai's own `length_unit`) stays the default.
 - **Wiki and guide:** the user guide, Before You Record, Glossary, Compatibility, Known Issues and Formats pages describe the per-tracker scale and the readers that exist today.
+- **`all_sessions/` output folder.** A run with two or more successful sessions now also writes `all_sessions/` at the
+  run root: `metrics_long.csv`, `trial_activity_summary.csv`, `group_dynamics_summary.csv` and
+  `master_fish_by_frame.csv` with every session's rows stacked (`session_id` identifies the source), plus a pooled
+  `manifest.json` and `README.md`. A single-session run is unchanged. The example analysis scripts and wiki recipes skip this folder when they search a
+  run for `metrics_long.csv`, so they do not count rows twice.
 - **A project can now be marked 2D or 3D.** The Project screen has an "Analysis type" choice. 3D asks how the
   recording was made: one video with the top and side views in two panels, or two separate videos. The choice is saved
   in the project file (`mode`; older projects load as 2D) and is locked once the project has a session: remove all

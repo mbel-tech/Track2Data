@@ -1493,7 +1493,7 @@ class Engine:
                 )
 
         self._write_project_summary(Path(out_dir), results)
-        self._write_all_sessions(Path(out_dir), results)
+        pooled = self._write_all_sessions(Path(out_dir), results)
 
         emit(
             progress,
@@ -1501,7 +1501,7 @@ class Engine:
                 stage="run", current=n_configured, total=n_configured, message="Run complete"
             ),
         )
-        return RunResult(sessions=results)
+        return RunResult(sessions=results, pooled=pooled)
 
     def _hash_and_check_input(self, session: Session, ref: SessionRef) -> str:
         """SHA-256 of the trajectory file that produced this session's numbers.

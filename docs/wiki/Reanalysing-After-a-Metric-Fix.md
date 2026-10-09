@@ -62,7 +62,9 @@ from pathlib import Path
 KEYS = ["session_id", "individual_id", "zone_name", "metric_id", "column"]
 
 def load(run_dir):
-    frames = [pd.read_csv(f) for f in sorted(Path(run_dir).rglob("metrics_long.csv"))]
+    files = [f for f in sorted(Path(run_dir).rglob("metrics_long.csv"))
+             if f.parent.name != "all_sessions"]  # the stacked copy would double-count
+    frames = [pd.read_csv(f) for f in files]
     df = pd.concat(frames, ignore_index=True)
     # Empty individual_id / zone_name are meaningful keys (pooled or group rows),
     # and NaN never matches NaN in a merge.
