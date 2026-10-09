@@ -167,7 +167,11 @@ class CalibrationScreen(QWidget):
             (self._radio_bl, "Scales each animal by its own median body length. "
                              "Outputs in BL and cm."),
             (self._radio_scalar, "One px-per-cm factor for every session. Measure it on a frame."),
-            (self._radio_session, "Use the scale each session already carries: idtracker.ai's length unit, or the scale set at import."),
+            (
+                self._radio_session,
+                "Use the scale each session already carries: idtracker.ai's length unit, "
+                "or the scale set at import.",
+            ),
         ):
             mode_row.addWidget(_ModeCard(radio, text), 1)
         root.addLayout(mode_row)
