@@ -847,8 +847,9 @@ class PreprocessedSession:
     # was inserted). Tracker confidence is never invented for an inserted row.
     raw_xy_rows: np.ndarray | None = None
     id_probabilities_rows: np.ndarray | None = None
-    # (n_frames, n_animals) depth in cm below the water surface, from fusing the side view into a
-    # 3-D track; None for a 2-D session or one that has not been fused.
+    # (n_frames, n_animals) depth as a fraction of the water column, 0 = surface, 1 = floor; NaN
+    # where missing or outside the column. From fusing the side view into a 3-D track; None for a
+    # 2-D session or one that has not been fused.
     depth: np.ndarray | None = None
 
     @property

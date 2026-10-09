@@ -4,7 +4,7 @@ import pytest
 from track2data.core.models import ViewPair
 from track2data.fusion.fuse import FusionError, fuse
 
-from .builders import SIDE_Y, make_pair, make_psess, settings, side_xy, top_xy
+from .builders import make_pair, make_psess, settings, side_xy, top_xy
 
 
 def test_depth_exact_and_top_order_with_reversed_side():
@@ -154,5 +154,86 @@ def test_ids_and_shapes():
     assert fused.psess.depth.shape == fused.psess.xy.shape[:2]
     assert fused.report.agreement_rms_cm is None and fused.report.agreement_skipped is None
     # the inputs are untouched
+    top2, side2, _ = make_pair()
     assert top.session.session_id == "t" and top.depth is None
-    assert SIDE_Y[0] == side.xy[0, 0, 1]
+    np.testing.assert_array_equal(top.xy, top2.xy)
+    np.testing.assert_array_equal(side.xy, side2.xy)
+    np.testing.assert_array_equal(top.session.raw_xy, top2.session.raw_xy)
+
+
+def test_timeline_validity_carried():
+    top, side, pair = make_pair()
+    top.session.tracking_intervals = [(0, 10), (20, 30)]  # does not reconcile with 100 rows
+    fused = fuse(top, side, pair, same_video=False)
+    assert fused.psess.timeline()[1] is False
+    top, side, pair = make_pair()
+    top.session.tracking_intervals = [(0, 100)]
+    side.session.tracking_intervals = [(0, 100)]
+    assert fuse(top, side, pair, same_video=False).psess.timeline()[1] is True
+
+
+def test_outside_counted_on_side_y_alone():
+    top, side, pair = make_pair()
+    top.xy[0, 0] = np.nan
+    side.xy[1, 1, 0] = np.nan
+    side.xy[0, 0, 1] = 50.0
+    side.xy[1, 1, 1] = 350.0
+    fused = fuse(top, side, pair, same_video=False)
+    assert fused.report.n_outside_column == 2
+    assert np.isnan(fused.psess.depth[0, 0]) and np.isnan(fused.psess.depth[1, 1])
+
+
+def test_label_guards():
+    top, side, pair = make_pair()
+    top.session.identities_labels = ["a", "a", "c"]
+    with pytest.raises(FusionError, match="duplicate fish labels in the top view"):
+        fuse(top, side, pair, same_video=False)
+    top, side, pair = make_pair()
+    side.session.identities_labels = ["a", "b", "b"]
+    with pytest.raises(FusionError, match="duplicate fish labels in the side view"):
+        fuse(top, side, pair, same_video=False)
+    top, side, pair = make_pair()
+    top.session.identities_labels = ["a", "b"]
+    msg = "fish labels do not match the number of animals in the top view"
+    with pytest.raises(FusionError, match=msg):
+        fuse(top, side, pair, same_video=False)
+    top, side, pair = make_pair()
+    side.session.identities_labels = ["a", "b", "c", "d"]
+    msg = "fish labels do not match the number of animals in the side view"
+    with pytest.raises(FusionError, match=msg):
+        fuse(top, side, pair, same_video=False)
+
+
+def test_unknown_top_label():
+    top, side, pair = make_pair()
+    pair = pair.model_copy(update={"fish_map": {"z": "a", "b": "b", "c": "c"}})
+    with pytest.raises(FusionError, match="unknown top fish: z"):
+        fuse(top, side, pair, same_video=False)
+
+
+def test_fps_tolerance_boundary():
+    top, side, pair = make_pair(fps_side=25.02)
+    fuse(top, side, pair, same_video=False)
+    top, side, pair = make_pair(fps_side=25.1)
+    with pytest.raises(FusionError, match=r"frame rates differ: 25 vs 25\.1 fps"):
+        fuse(top, side, pair, same_video=False)
+
+
+def test_per_row_arrays_trimmed_together():
+    top, side, pair = make_pair(fusion=settings(frame_offset=5))
+    r = np.arange(100)
+    top.main_zone = np.array([[f"m{i}"] * 3 for i in r], dtype=object)
+    top.sec_zone = np.array([[f"s{i}"] * 3 for i in r], dtype=object)
+    jump = np.zeros((100, 3), dtype=bool)
+    jump[7, 1] = True
+    top.jump_replaced = jump
+    top.raw_xy_rows = top.xy + 0.5
+    top.id_probabilities_rows = np.tile(r[:, None] / 100.0, (1, 3))
+    f = fuse(top, side, pair, same_video=False).psess
+    assert f.main_zone.shape == (95, 3) and f.main_zone[7, 2] == "m7"
+    assert f.sec_zone.shape == (95, 3) and f.sec_zone[9, 0] == "s9"
+    assert f.jump_replaced.shape == (95, 3) and f.jump_replaced[7, 1] and f.jump_replaced.sum() == 1
+    assert f.raw_xy_rows.shape == (95, 3, 2)
+    np.testing.assert_allclose(f.raw_xy_rows[4], top.xy[4] + 0.5)
+    assert f.id_probabilities_rows.shape == (95, 3)
+    assert f.id_probabilities_rows[12, 1] == pytest.approx(0.12)

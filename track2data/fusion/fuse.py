@@ -30,6 +30,9 @@ class FusionError(ValueError):
 
 @dataclass
 class FusionReport:
+    """``top_frames`` / ``side_frames`` count the eligible rows of each view (tracked, not
+    separators); ``overlap_frames`` the rows both share after the offset."""
+
     overlap_frames: int
     top_frames: int
     side_frames: int
@@ -51,15 +54,15 @@ class FusedSession:
     session_id: str
 
 
-def _fusable_rows(psess: PreprocessedSession) -> tuple[np.ndarray, np.ndarray]:
-    """(row numbers, their true video frames) of the rows that stand for observed video."""
-    frames, _ = psess.timeline()
+def _fusable_rows(psess: PreprocessedSession) -> tuple[np.ndarray, np.ndarray, bool]:
+    """(row numbers, their true video frames, timeline verified) of the observed-video rows."""
+    frames, valid = psess.timeline()
     frames = np.asarray(frames)
     ok = psess.counted_rows()
     if psess.tracked_mask is not None:
         ok = ok & np.asarray(psess.tracked_mask, dtype=bool)
     rows = np.flatnonzero(ok)
-    return rows, frames[rows]
+    return rows, frames[rows], bool(valid)
 
 
 def _match_rows(
@@ -93,6 +96,11 @@ def fuse(
 ) -> FusedSession:
     """Fuse ``side`` into ``top`` as described in the module docstring.
 
+    ``top_frames`` / ``side_frames`` in the report count the eligible rows (tracked, not
+    separators). Dropped rows leave gaps in ``frame_index`` and no separator rows are inserted, so
+    a consumer that relies on adjacency must read ``frame_index``. ``psess.session`` keeps its
+    full-length per-frame data, filtered by animal only.
+
     Raises ``FusionError`` for missing settings, differing frame rates, an invalid fish map, no
     matched fish, or no frames the two views share. ``same_video`` forces the offset to 0.
     """
@@ -104,6 +112,12 @@ def fuse(
 
     top_labels = fish_labels(top.session.identities_labels, top.n_animals)
     side_labels = fish_labels(side.session.identities_labels, side.n_animals)
+    for name, psess, labels in (("top", top, top_labels), ("side", side, side_labels)):
+        given = psess.session.identities_labels
+        if given and len(given) != psess.n_animals:
+            raise FusionError(f"fish labels do not match the number of animals in the {name} view")
+        if len(set(labels)) != len(labels):
+            raise FusionError(f"duplicate fish labels in the {name} view")
     msgs = validate_fish_map(
         pair.fish_map,
         top_labels,
@@ -122,8 +136,8 @@ def fuse(
     matched_side = {pair.fish_map[lab] for lab in fused_labels}
 
     offset = 0 if same_video else fs.frame_offset
-    top_rows, top_frames = _fusable_rows(top)
-    side_rows, side_frames = _fusable_rows(side)
+    top_rows, top_frames, top_valid = _fusable_rows(top)
+    side_rows, side_frames, side_valid = _fusable_rows(side)
     rows, srows = _match_rows(top_rows, top_frames, side_rows, side_frames, offset)
     if rows.size == 0:
         raise FusionError("no shared frames between the two views")
@@ -135,7 +149,8 @@ def fuse(
     valid = np.isfinite(y) & np.isfinite(x) & top_ok
     depth = (y - fs.surface_row) / (fs.floor_row - fs.surface_row)
     with np.errstate(invalid="ignore"):
-        outside = valid & ~((depth >= 0) & (depth <= 1))
+        # counted on the side y alone; depth is NaN wherever either view lacks a position
+        outside = np.isfinite(y) & ~((depth >= 0) & (depth <= 1))
     depth = np.where(valid & ~outside, depth, np.nan)
 
     kin = top.kinematics
@@ -160,6 +175,7 @@ def fuse(
         main_zone=_take(top.main_zone, rows, keep),
         sec_zone=_take(top.sec_zone, rows, keep),
         jump_replaced=_take(top.jump_replaced, rows, keep),
+        timeline_valid=top_valid and side_valid,
         frame_index=top_frames[np.searchsorted(top_rows, rows)],
         tracked_mask=None,
         separator_mask=None,
