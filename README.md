@@ -113,6 +113,8 @@ exports/2026-08-30T1408/
 ├── PROJECT_SUMMARY.md          what ran, what failed, what not to pool
 ├── sessions.csv                per-session fps, group size, duration, calibration
 ├── codebook.csv                every column: unit, level, metric, DOI
+├── all_sessions/               2+ sessions only: same files as a session folder,
+│   └── ...                     with every session's rows stacked (session_id tells them apart)
 └── session_trial01/
     ├── metrics_long.csv              one row per value — feed this to lme4/statsmodels
     ├── trial_activity_summary.csv    one row per individual, a column per metric

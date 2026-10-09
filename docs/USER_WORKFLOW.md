@@ -930,6 +930,7 @@ After Stage 9 the user has, on disk:
         ├── PROJECT_SUMMARY.md    # what ran, what failed, what not to pool
         ├── sessions.csv          # per-session fps, group size, calibration
         ├── codebook.csv          # every column: unit, level, metric, DOI
+        ├── all_sessions/         # 2+ sessions only: the tables below, stacked
         ├── session_trial01/      # one directory per session
         │   ├── manifest.json     # hash + parameters + SHA-256s
         │   ├── README.md         # one-page summary for this session
@@ -955,6 +956,14 @@ format's documentation and never checked against real tracker output, and
 body-length calibration chosen for a tracker that reports no body length
 (those sessions are exported in pixels only). Neither stops the run, and the
 same notes are shown before it starts.
+
+`all_sessions/` (written only when two or more sessions ran) holds
+`metrics_long.csv`, `trial_activity_summary.csv`,
+`group_dynamics_summary.csv` and `master_fish_by_frame.csv` with every
+session's rows stacked in one file, plus a pooled `manifest.json` and
+`README.md`. `session_id` identifies the source; a column a session lacks
+is blank for its rows. It is a convenience, not a statement that the
+sessions may be pooled: `PROJECT_SUMMARY.md` still says when they may not.
 
 Each session's `README.md` and `manifest.json` say which software produced
 its trajectories. For idtracker.ai that is the "idtracker.ai provenance"

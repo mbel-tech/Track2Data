@@ -725,13 +725,16 @@ class RunResult:
     """Outcome of running every session in a manifest through ``Engine.run()``."""
 
     sessions: list[SessionRunResult] = field(default_factory=list)
+    #: Files of the run-root ``all_sessions/`` folder (empty for fewer than two sessions).
+    pooled: list[Path] = field(default_factory=list)
 
     @property
     def written(self) -> list[Path]:
-        """All written paths across every session, flattened."""
+        """All written paths: every session's, flattened, then the ``all_sessions/`` ones."""
         paths: list[Path] = []
         for s in self.sessions:
             paths.extend(s.written)
+        paths.extend(self.pooled)
         return paths
 
 

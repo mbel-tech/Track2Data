@@ -23,8 +23,10 @@ run_dir <- if (length(args) > 0) args[1] else "out"
 # ── load ──────────────────────────────────────────────────────────────────────
 
 # One row per measured value, across every metric level.
+# all_sessions/ holds the same rows stacked; reading it too would count every row twice.
 long <- list.files(run_dir, pattern = "^metrics_long\\.csv$",
                    recursive = TRUE, full.names = TRUE) |>
+  Filter(f = \(f) basename(dirname(f)) != "all_sessions") |>
   lapply(read_csv, show_col_types = FALSE) |>
   bind_rows()
 

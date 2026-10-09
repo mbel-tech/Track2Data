@@ -16,6 +16,7 @@ definitions, formulas and citations are in
 | **Run** | One execution of a project, writing one output directory. Recorded in `manifest.json` (`run_metadata`: `app_version`, `project_hash`, `generated_at`, `metrics_computed`). |
 | **Individual** | One tracked animal within a session, `individual_id`. Not comparable across sessions: identity 0 in two tanks is two different animals. |
 | **Long table** | `metrics_long.csv` — one row per measured value: `session_id`, `individual_id`, `zone_name`, `metric_id`, `column`, `value`, `unit`. Start here for analysis. |
+| **`all_sessions/`** | Written only when a run has two or more sessions: the long, summary and per-frame tables of every session stacked in one folder, plus a pooled `manifest.json` and `README.md`. Convenient, not a licence to pool: read `PROJECT_SUMMARY.md` first. Do not read it together with the session folders, or every row is counted twice. |
 | **Wide tables** | `trial_activity_summary.csv` (session × animal), `group_dynamics_summary.csv` (session), `trial_summary_wide.csv` (everything side by side), `master_fish_by_frame.csv` (session × animal × frame). |
 | **Codebook** | `codebook.csv` — one row per exported column with its unit, level, originating metric and DOI. |
 | **Time bins** | Optional windows set on the Metrics screen. Summary tables gain `bin_index`, `bin_start_s`, `bin_end_s`; metrics that are not meaningful per window keep one row with empty bin columns. |

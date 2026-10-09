@@ -1493,6 +1493,7 @@ class Engine:
                 )
 
         self._write_project_summary(Path(out_dir), results)
+        pooled = self._write_all_sessions(Path(out_dir), results)
 
         emit(
             progress,
@@ -1500,7 +1501,7 @@ class Engine:
                 stage="run", current=n_configured, total=n_configured, message="Run complete"
             ),
         )
-        return RunResult(sessions=results)
+        return RunResult(sessions=results, pooled=pooled)
 
     def _hash_and_check_input(self, session: Session, ref: SessionRef) -> str:
         """SHA-256 of the trajectory file that produced this session's numbers.
@@ -1618,6 +1619,20 @@ class Engine:
             logger.exception("Could not write the run summary to %s", out_dir)
         return written
 
+    @staticmethod
+    def _write_all_sessions(out_dir: Path, results: list[SessionRunResult]) -> list[Path]:
+        """Write ``all_sessions/``: the session tables stacked, for 2+ sessions.
+
+        Never fatal, for the same reason as the project summary.
+        """
+        from track2data.exporters.pooled import write_all_sessions
+
+        try:
+            return write_all_sessions(out_dir, [r.session_id for r in results if not r.error])
+        except Exception:
+            logger.exception("Could not write the pooled all_sessions folder to %s", out_dir)
+            return []
+
     def _camera_view_summary(self) -> list[str]:
         """One summary bullet naming the declared camera view; nothing when none was declared,
         so a project that never set one keeps its summary exactly as it was."""
@@ -1654,8 +1669,9 @@ class Engine:
             *self._camera_view_summary(),
             "",
             "Per-session outputs are in the subdirectory named after each "
-            "session. `sessions.csv` lists every session's frame rate, group "
-            "size, duration and calibration state.",
+            "session; with two or more sessions, `all_sessions/` stacks their "
+            "tables into one file per table. `sessions.csv` lists every "
+            "session's frame rate, group size, duration and calibration state.",
             "",
         ]
 

@@ -23,7 +23,10 @@ MIN_COVERAGE = 0.80  # state whatever you choose in your methods section
 
 def load(run_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Return ``(long, codebook, sessions)`` for a run directory."""
-    long_files = sorted(run_dir.rglob("metrics_long.csv"))
+    # all_sessions/ holds the same rows stacked; reading it too would count every row twice.
+    long_files = sorted(
+        f for f in run_dir.rglob("metrics_long.csv") if f.parent.name != "all_sessions"
+    )
     if not long_files:
         sys.exit(f"no metrics_long.csv under {run_dir} -- did the run write there?")
 
