@@ -97,7 +97,9 @@ def suggest_offset(
             hit, pos = match_sorted(top_frames, sorted_frames, lag)
             return top_cm[hit], side_cm[pos]
         shift = int(top_frames[0]) + lag - int(sorted_frames[0])  # side index of top row 0
-        lo, hi = max(0, -shift), min(top_cm.shape[0], side_cm.shape[0] - shift)
+        lo = max(0, -shift)
+        hi = max(lo, min(top_cm.shape[0], side_cm.shape[0] - shift))  # empty if no overlap
+        lo = min(lo, hi)
         return top_cm[lo:hi], side_cm[lo + shift : hi + shift]
 
     def rms_at(lag: int) -> float | None:

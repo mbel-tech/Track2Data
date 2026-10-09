@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from track2data.fusion.agreement import agreement, suggest_offset
+from track2data.fusion.align import fusable_rows, horizontal_cm, match_fish, match_rows
 from track2data.fusion.fuse import fuse
 
 from .builders import FLOOR_ROW, LABELS, SURFACE_ROW, TANK_CM, make_pair, make_psess, settings
@@ -168,11 +169,63 @@ def test_timing_smoke_100k_frames():
     assert scan < 3.0 and time.perf_counter() - t0 < 1.0
 
 
-def test_suggest_offset_with_frame_gaps_matches_consecutive_path():
+def test_suggest_offset_frame_gaps_in_both_views():
     h = walk(400, 3)
     top, side, pair = build(h, lag=7)
-    top.frame_index = np.arange(400) * 1  # same frames, but forces nothing special
     gap = np.arange(400) + (np.arange(400) >= 200)  # one skipped frame in both views
     top.frame_index = gap
     side.frame_index = gap
     assert suggest_offset(top, side, pair) == 7
+
+
+def test_suggest_offset_short_session_never_raises():
+    h = walk(40, 3, seed=4)
+    for lag in (3, -3, 0):
+        top, side, pair = build(h, lag=lag)
+        assert suggest_offset(top, side, pair) in (lag if lag else None, None)
+    # offset frame ranges that do not overlap at the far lags
+    top, side, pair = build(h, lag=3)
+    top.frame_index = np.arange(40) + 14
+    assert suggest_offset(top, side, pair) == _reference(top, side, pair)
+
+
+def _reference(top, side, pair):
+    """Per-lag scan with the generic matching, for comparison with the fast scan."""
+    keep, cols, *_ = match_fish(top, side, pair)
+    tr, tf, _ = fusable_rows(top)
+    sr, sf, _ = fusable_rows(side)
+
+    def rms(lag):
+        rows, srows = match_rows(tr, tf, sr, sf, lag)
+        if rows.size == 0:
+            return None
+        t, s = horizontal_cm(top, side, pair, rows, srows, keep, cols)
+        if int(np.isfinite(t + s).sum()) < 30:
+            return None
+        return agreement(t, s)[0]
+
+    base = rms(0)
+    if base is None:
+        return None
+    best_lag, best = 0, base
+    for lag in range(-round(5 * top.fps), round(5 * top.fps) + 1):
+        r = rms(lag)
+        if r is not None and r < best:
+            best_lag, best = lag, r
+    return best_lag if best_lag != 0 and best <= 0.8 * base else None
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_suggest_offset_matches_reference(seed):
+    rng = np.random.default_rng(seed)
+    n = int(rng.choice([40, 90, 400]))
+    h = walk(n, 3, seed=seed)
+    lag = int(rng.integers(-12, 13))
+    top, side, pair = build(h, lag=lag)
+    if rng.random() < 0.5:  # NaN-masked fish and samples in the side view
+        side.xy[rng.random(n) < 0.3, int(rng.integers(0, 3)), :] = np.nan
+    if rng.random() < 0.5:  # gaps in one view only
+        side.frame_index = np.arange(n) + (np.arange(n) >= n // 2) * int(rng.integers(1, 4))
+    if rng.random() < 0.3:  # shifted frame range
+        top.frame_index = np.arange(n) + int(rng.integers(0, 20))
+    assert suggest_offset(top, side, pair) == _reference(top, side, pair)
