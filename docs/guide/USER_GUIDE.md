@@ -568,7 +568,8 @@ saying which session each row came from. Nothing is recomputed. A column that on
 because its metric selection differed) is left blank for that session's rows. It also gets a `manifest.json`
 and `README.md` listing the sessions and their input checksums. Stacking is not the same as pooling: check
 `PROJECT_SUMMARY.md` and `sessions.csv` for differences in frame rate, group size or calibration first, and
-treat `session_id` as a grouping factor in your model. A single-session export has no `all_sessions/` folder.
+treat `session_id` as a grouping factor in your model. A single-session export has no `all_sessions/` folder. Use either the session folders or `all_sessions/`,
+not both: loading both counts every row twice.
 
 | Table | One row per | Contents |
 |---|---|---|
