@@ -1864,6 +1864,74 @@ def test_px_per_cm_resolution_follows_the_calibration_mode(
     assert any("calibrated" in w and "b" in w for w in warnings)
 
 
+def _run_sessions(tmp_path: Path, sizes: list[int], exporters: list[str]) -> None:
+    from track2data.api import Engine
+
+    sessions = [
+        _make_session(session_id=f"s{i}", n_frames=n, n_animals=1) for i, n in enumerate(sizes)
+    ]
+    manifest = _make_manifest(
+        sessions=[
+            SessionRef(session_id=s.session_id, folder=s.folder, sha256="x") for s in sessions
+        ],
+        metrics=MetricSelection(individual=["IL-1"]),
+    )
+    engine = Engine(manifest)
+    by_folder = {s.folder: s for s in sessions}
+    engine.import_session = lambda folder: by_folder[Path(folder)]  # type: ignore[method-assign]
+    engine.run(tmp_path, exporters=exporters)
+
+
+def test_run_stacks_two_sessions_into_all_sessions(tmp_path: Path) -> None:
+    import json
+
+    import pandas as pd
+
+    _run_sessions(tmp_path, [10, 15], ["csv_long", "readme"])
+
+    pooled = tmp_path / "all_sessions"
+    for table in ("master_fish_by_frame", "trial_activity_summary", "metrics_long"):
+        parts = [pd.read_csv(tmp_path / s / f"{table}.csv") for s in ("s0", "s1")]
+        both = pd.read_csv(pooled / f"{table}.csv")
+        assert len(both) == sum(len(p) for p in parts), table
+        assert set(both["session_id"]) == {"s0", "s1"}
+    assert (pooled / "group_dynamics_summary.csv").exists()
+    assert (pooled / "README.md").exists()
+    meta = json.loads((pooled / "manifest.json").read_text())["run_metadata"]
+    assert meta["pooled"] is True
+    assert meta["sessions"] == ["s0", "s1"]
+
+
+def test_all_sessions_unions_columns_across_sessions(tmp_path: Path) -> None:
+    import pandas as pd
+
+    from track2data.exporters.pooled import write_all_sessions
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    frames = {"a": {"session_id": ["a"], "x": [1.5]}, "b": {"session_id": ["b"], "y": ["q"]}}
+    for sid, data in frames.items():
+        pd.DataFrame(data).to_csv(tmp_path / sid / "metrics_long.csv", index=False)
+
+    write_all_sessions(tmp_path, ["a", "b"])
+
+    df = pd.read_csv(
+        tmp_path / "all_sessions" / "metrics_long.csv", dtype=str, keep_default_na=False
+    )
+    assert list(df.columns) == ["session_id", "x", "y"]
+    assert df.to_dict("records") == [
+        {"session_id": "a", "x": "1.5", "y": ""},
+        {"session_id": "b", "x": "", "y": "q"},
+    ]
+
+
+def test_single_session_run_writes_no_all_sessions(tmp_path: Path) -> None:
+    _run_sessions(tmp_path, [10], ["csv_long"])
+
+    assert (tmp_path / "s0" / "metrics_long.csv").exists()
+    assert not (tmp_path / "all_sessions").exists()
+
+
 def test_run_with_no_sessions_writes_no_project_summary(tmp_path: Path) -> None:
     """An empty project has nothing to summarise, and must not leave a
     misleading zero-session report behind."""
