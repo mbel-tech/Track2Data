@@ -23,6 +23,7 @@ from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
 from track2data.readers.params import resolve_options
 from track2data.readers.sleap_analysis import SleapAnalysisReader
+from track2data.readers.trx_mat import TrxMatReader
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ register(IDTrackerAiV5Reader)
 register(DeepLabCutReader)
 register(SleapAnalysisReader)
 register(CtraxMatReader)
+register(TrxMatReader)
 _load_entry_points()
 
 

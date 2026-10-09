@@ -112,16 +112,16 @@ FORMATS: tuple[RecognisedFormat, ...] = (
     RecognisedFormat(
         "trx_mat",
         "Ctrax / JAABA trx.mat",
-        "This is a trx.mat file (the Ctrax / FlyTracker / JAABA interchange format), which "
-        "Track2Data cannot read yet. If you still have the raw Ctrax .mat, add that instead.",
+        "This looks like a trx.mat file (the Ctrax / FlyTracker / JAABA interchange format) that "
+        "Track2Data cannot read: only classic MATLAB files holding a 'trx' struct are. Save it "
+        "again with -v7 (not -v7.3), or add the raw Ctrax .mat instead.",
         _named("trx.mat"),
     ),
     RecognisedFormat(
         "flytracker",
         "FlyTracker output (-track.mat)",
         "This is FlyTracker's own -track.mat, which Track2Data cannot read. Export the "
-        "JAABA files from FlyTracker (a trx.mat in a -JAABA folder) and note that trx.mat "
-        "is not readable yet either.",
+        "JAABA files from FlyTracker (a trx.mat in a -JAABA folder) and add that.",
         _ends_with("-track.mat"),
     ),
     RecognisedFormat(
