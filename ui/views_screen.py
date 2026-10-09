@@ -29,6 +29,7 @@ from track2data.views.pairing import (
 )
 from ui.preview_screen import TrajectoryData, load_trajectory_data
 from ui.widgets.autocommit import AutoCommit
+from ui.widgets.fusion_section import FusionSection
 from ui.widgets.panels_section import PanelsSection
 from ui.widgets.regex_help import RegexHelpPopover
 from ui.widgets.trajectory_view import TrajectoryView
@@ -120,6 +121,11 @@ class ViewsScreen(QWidget):
         manual.addWidget(self._manual_add_btn)
         pairs_lay.addLayout(manual)
         root.addWidget(self._pairs_box)
+
+        self._fusion_box = FusionSection(store)
+        self._fusion_status = self._fusion_box._status
+        self._fusion_btn = self._fusion_box._btn
+        root.addWidget(self._fusion_box)
 
         self._match_box = QWidget()
         mbox = QVBoxLayout(self._match_box)
@@ -297,6 +303,7 @@ class ViewsScreen(QWidget):
                     edit.blockSignals(True)
                     edit.setText(text)
                     edit.blockSignals(False)
+        self._fusion_box.rebuild()
         self._fill_match()
         self._update_matches()
 
@@ -514,6 +521,7 @@ class ViewsScreen(QWidget):
         self._top_plot.clear()
         self._side_plot.clear()
         self._loaded_facts = self._facts_of(pair)
+        self._fusion_box.set_pair(pair)
         self._match_status.setText("")
         if not pair or self._store is None or self._store.manifest is None:
             self._match_box.setVisible(False)
