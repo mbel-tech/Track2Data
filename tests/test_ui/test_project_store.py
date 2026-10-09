@@ -1069,3 +1069,181 @@ def test_rederive_skips_unticked_pairs_and_missing_labels(store3d) -> None:
     by_top = {p.top_session_id: p for p in store3d.manifest.view_pairs}
     assert by_top["a_top"].fish_map == {"a": "b"}
     assert by_top["b_top"].fish_map == {"x": "x"}
+
+
+# ── panels: split a session, set a session's panel ──────────────────────────
+
+
+@pytest.fixture
+def store_panels(store, tmp_path: Path, monkeypatch):
+    """A 'one video, two panels' project with one session; probes are recorded, not run."""
+    probes: list[str] = []
+    monkeypatch.setattr(
+        type(store), "_submit_probe", lambda self, sid, folder: probes.append(sid)
+    )
+    store.update_mode(ProjectMode(dimension="3d", layout="single_video_two_panels"))
+    store.update_sessions([_ref(tmp_path, "s", reader="toy", reader_options={"fps": 25.0})])
+    store.probes = probes
+    return store
+
+
+def _rect(x: float = 0, y: float = 0, w: float = 50, h: float = 100):
+    from track2data.core.models import PanelRect
+
+    return PanelRect(x=x, y=y, width=w, height=h)
+
+
+def test_split_session_into_panels_replaces_in_place_and_pairs(qtbot, store_panels) -> None:
+    store = store_panels
+    store.update_sessions(
+        [
+            _ref(store.manifest.sessions[0].folder.parent, "first"),
+            *store.manifest.sessions,
+            _ref(store.manifest.sessions[0].folder.parent, "last"),
+        ]
+    )
+    old = next(s for s in store.manifest.sessions if s.session_id == "s")
+    store.update_sessions(
+        [s.model_copy(update={"sha256": "abc", "has_stable_identities": True})
+         if s.session_id == "s" else s for s in store.manifest.sessions]
+    )
+    store.probes.clear()
+    top, side = _rect(0, 0, 50, 100), _rect(50, 0, 50, 100)
+    counts = {"sessions": 0, "views": 0}
+    store.sessionsChanged.connect(lambda: counts.__setitem__("sessions", counts["sessions"] + 1))
+    store.viewsChanged.connect(lambda: counts.__setitem__("views", counts["views"] + 1))
+    ids = store.split_session_into_panels("s", top, side)
+    assert ids == ("s__top", "s__side")
+    assert counts == {"sessions": 1, "views": 1}
+    assert [s.session_id for s in store.manifest.sessions] == [
+        "first", "s__top", "s__side", "last",
+    ]
+    t, sd = store.manifest.sessions[1:3]
+    assert (t.panel, sd.panel) == (top, side)
+    assert (t.view_role, sd.view_role) == ("top", "side")
+    for ref in (t, sd):
+        assert ref.folder == old.folder
+        assert (ref.reader, ref.reader_options) == ("toy", {"fps": 25.0})
+        assert ref.sha256 == "abc" and ref.has_stable_identities is True
+    (pair,) = store.manifest.view_pairs
+    assert (pair.top_session_id, pair.side_session_id, pair.auto) == ("s__top", "s__side", False)
+    assert store.probes == ["s__top", "s__side"]
+
+
+def test_split_uniquifies_taken_ids(store_panels, tmp_path: Path) -> None:
+    store = store_panels
+    store.update_sessions([*store.manifest.sessions, _ref(tmp_path, "s__top")])
+    top_id, side_id = store.split_session_into_panels("s", _rect(), _rect(50))
+    assert top_id != "s__top" and top_id.startswith("s__top")
+    assert side_id == "s__side"
+
+
+def test_split_refuses_unknown_second_and_already_panelled(store_panels) -> None:
+    store = store_panels
+    store.split_session_into_panels("s", _rect(), _rect(50))
+    with pytest.raises(ValueError):
+        store.split_session_into_panels("s", _rect(), _rect(50))  # replaced already
+    with pytest.raises(ValueError):
+        store.split_session_into_panels("s__top", _rect(), _rect(50))  # has a panel
+
+
+def test_split_wrong_layout_or_2d_raises_exact_message(store, tmp_path: Path) -> None:
+    from track2data.core.models import PANELS_ONLY_FOR_SINGLE_VIDEO
+
+    store.update_sessions([_ref(tmp_path, "s")])
+    with pytest.raises(ValueError, match="Panels apply to the 'One video, two panels' layout only"):
+        store.split_session_into_panels("s", _rect(), _rect(50))
+    with pytest.raises(ValueError, match=PANELS_ONLY_FOR_SINGLE_VIDEO):
+        store.set_session_panel("s", _rect())
+    store.update_sessions([])
+    store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    store.update_sessions([_ref(tmp_path, "s")])
+    with pytest.raises(ValueError, match=PANELS_ONLY_FOR_SINGLE_VIDEO):
+        store.split_session_into_panels("s", _rect(), _rect(50))
+    assert [s.session_id for s in store.manifest.sessions] == ["s"]
+
+
+def test_panel_mutators_are_no_ops_without_a_project(qtbot) -> None:
+    from ui.store.project_store import ProjectStore
+
+    empty = ProjectStore()
+    empty.set_session_panel("s", _rect())
+    empty.tasks.shutdown(1000)
+
+
+def test_set_session_panel_sets_clears_and_reprobes(qtbot, store_panels) -> None:
+    store = store_panels
+    store._session_facts["s"] = SessionFacts.from_session(
+        _fake_session(store.manifest.sessions[0].folder)
+    )
+    with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
+        store.set_session_panel("s", _rect())
+    assert store.manifest.sessions[0].panel == _rect()
+    assert store.probes == ["s"]
+    assert store.session_facts("s") is None
+    store.set_session_panel("s", None)
+    assert store.manifest.sessions[0].panel is None
+    assert store.probes == ["s", "s"]
+    with pytest.raises(ValueError):
+        store.set_session_panel("nope", _rect())
+
+
+def test_set_session_panel_same_panel_is_a_no_op(qtbot, store_panels) -> None:
+    store = store_panels
+    store.set_session_panel("s", _rect())
+    store.probes.clear()
+    with qtbot.assertNotEmitted(store.sessionsChanged):
+        store.set_session_panel("s", _rect())
+    assert store.probes == []
+
+
+def test_set_session_panel_clears_the_pairs_map_but_keeps_the_pair(qtbot, store_panels) -> None:
+    store = store_panels
+    top_id, side_id = store.split_session_into_panels("s", _rect(), _rect(50))
+    store.update_view_pair(_pair(top_id, side_id, same_ids=True, fish_map={"1": "2"}))
+    with qtbot.waitSignals([store.sessionsChanged, store.viewsChanged], timeout=1000):
+        store.set_session_panel(side_id, _rect(60, 0, 40, 100))
+    (pair,) = store.manifest.view_pairs
+    assert (pair.top_session_id, pair.side_session_id) == (top_id, side_id)
+    assert pair.fish_map == {} and pair.same_ids is False
+
+
+def test_is_duplicate_compares_the_panel(tmp_path: Path) -> None:
+    from ui.store.project_store import _is_duplicate
+
+    a = _ref(tmp_path, "a", panel=_rect())
+    assert _is_duplicate(a, [_ref(tmp_path, "a", panel=_rect())])
+    assert not _is_duplicate(a, [_ref(tmp_path, "a", panel=_rect(50))])
+    assert not _is_duplicate(a, [_ref(tmp_path, "a")])
+
+
+def test_probe_result_is_cut_to_the_panel(qtbot, monkeypatch, store_panels) -> None:
+    store = store_panels
+    monkeypatch.undo()  # use the real _submit_probe
+    folder = store.manifest.sessions[0].folder
+    xy = np.full((10, 2, 2), 25.0)
+    xy[:, 1, 0] = 75.0
+    big = _fake_session(folder).model_copy(update={"n_animals": 2, "raw_xy": xy})
+    monkeypatch.setattr("track2data.readers.probe_session", lambda *a, **k: big)
+    store.set_session_panel("s", _rect(0, 0, 50, 100))
+    qtbot.waitUntil(lambda: store.session_facts("s") is not None, timeout=3000)
+    facts = store.session_facts("s")
+    assert (facts.width_px, facts.height_px) == (50, 100)
+    assert facts.n_animals == 1
+
+
+def test_probe_with_a_panel_that_does_not_fit_logs_and_keeps_the_facts(
+    qtbot, monkeypatch, store_panels
+) -> None:
+    store = store_panels
+    monkeypatch.undo()
+    folder = store.manifest.sessions[0].folder
+    monkeypatch.setattr(
+        "track2data.readers.probe_session", lambda *a, **k: _fake_session(folder)
+    )
+    logged: list[str] = []
+    store.runLogAppended.connect(logged.append)
+    store.set_session_panel("s", _rect(0, 0, 500, 100))  # video is 100 wide
+    qtbot.waitUntil(lambda: store.session_facts("s") is not None, timeout=3000)
+    assert any("does not fit" in line for line in logged)
+    assert store.session_facts("s").n_animals == 1
