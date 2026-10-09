@@ -181,6 +181,15 @@ class TrajectoryView(QGraphicsView):
         self._highlight = None if animal is None else int(animal)
         self._redraw()
 
+    def clear(self) -> None:
+        """Drop the loaded session (the highlight setting is kept)."""
+        self._raw = self._xy = None
+        self._rois = []
+        self._gscene.clear()
+        self._dynamic, self._zone_items, self._heat_item = [], [], None
+        self._trail_items = self._trail_points = self._markers = 0
+        self._frame = 0
+
     @property
     def highlighted_animal(self) -> int | None:
         return self._highlight
@@ -281,13 +290,15 @@ class TrajectoryView(QGraphicsView):
                         path.lineTo(float(x), float(y))
                     n_pts += len(seg)
                 width, radius = 1.5, 5.0
+                pen_colour = QColor("#888888") if is_raw else colour
                 if self._highlight is not None:
                     if k == self._highlight:
                         width, radius = 4.0, 8.0
                     else:
                         width, radius = 1.0, 4.0
                         colour.setAlphaF(0.35)
-                pen = QPen(QColor("#888888") if is_raw else colour, width)
+                        pen_colour.setAlphaF(0.35)
+                pen = QPen(pen_colour, width)
                 if is_raw:
                     pen.setStyle(Qt.PenStyle.DashLine)
                 item = self._gscene.addPath(path, pen)

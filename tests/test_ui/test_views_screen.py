@@ -339,7 +339,7 @@ def _fake_loader(monkeypatch, fail=()):
         if session_id in fail:
             raise RuntimeError("boom")
         xy = np.zeros((5, 3, 2))
-        xy[:, :, 0] = np.arange(3)
+        xy[:, :, 0] = np.arange(3) + np.arange(5)[:, None]
         return TrajectoryData(raw_xy=xy, xy=xy, fps=30.0, background=None, size=(50.0, 50.0))
 
     monkeypatch.setattr(views_screen, "load_trajectory_data", fake)
@@ -387,6 +387,24 @@ def test_combo_choice_writes_and_clears_map(qtbot, tmp_path, monkeypatch) -> Non
     assert store.manifest.view_pairs[0].fish_map == {}
 
 
+def test_choosing_used_item_writes_bare_label_and_keeps_selection(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    store, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "x"})
+    screen._match_table.selectRow(2)
+    combo = _match_combo(screen, 2)
+    assert combo.itemText(1) == "x (used)"
+    calls = []
+    real = store.update_view_pair
+    monkeypatch.setattr(store, "update_view_pair", lambda p: (calls.append(p), real(p))[1])
+    combo.setCurrentIndex(1)
+    assert len(calls) == 1 and calls[0].fish_map == {"a": "x", "c": "x"}
+    assert store.manifest.view_pairs[0].fish_map["c"] == "x"
+    assert screen._match_table.selectionModel().selectedRows()[0].row() == 2
+    assert screen._top_plot.highlighted_animal == 2
+    assert screen._side_plot.highlighted_animal == 0
+
+
 def test_duplicate_side_fish_reported_and_marked(qtbot, tmp_path, monkeypatch) -> None:
     _, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "x", "b": "x"})
     assert "duplicate side fish: x" in screen._match_issues.text()
@@ -416,8 +434,11 @@ def test_identity_free_pair_disables_table(qtbot, tmp_path, monkeypatch) -> None
     store.update_sessions(refs)
     screen._pairs_table.selectRow(0)
     msg = "cannot match fish: this session has no stable identities"
-    assert msg in screen._match_issues.text()
+    assert screen._match_issues.text() == msg
     assert not screen._match_table.isEnabled()
+    screen._match_table.selectRow(0)
+    store.sessionFactsChanged.emit()
+    assert screen._match_table.selectionModel().selectedRows() == []
 
 
 def test_pair_without_facts_has_empty_table(qtbot, tmp_path, monkeypatch) -> None:
@@ -427,15 +448,112 @@ def test_pair_without_facts_has_empty_table(qtbot, tmp_path, monkeypatch) -> Non
     assert screen._match_table.rowCount() == 0
 
 
-def test_failed_load_shows_error_and_stale_ignored(qtbot, tmp_path, monkeypatch) -> None:
+def test_failed_load_shows_error(qtbot, tmp_path, monkeypatch) -> None:
     _fake_loader(monkeypatch, fail=("t1_side",))
     _, screen = _paired(qtbot, tmp_path, ["a"], ["a"])
     screen._pairs_table.selectRow(0)
     qtbot.waitUntil(lambda: "boom" in screen._match_status.text())
     screen._pairs_table.clearSelection()
     assert screen._match_table.rowCount() == 0
-    screen._on_traj_task_finished("not-a-task", RuntimeError("late"))
-    assert "late" not in screen._match_status.text()
+
+
+class _ManualTasks:
+    """Records submitted loads; the test delivers results itself."""
+
+    def __init__(self, store, monkeypatch):
+        self.submitted: list[str] = []
+        self.store = store
+        monkeypatch.setattr(store.tasks, "submit", self._submit)
+
+    def _submit(self, fn):
+        tid = f"task{len(self.submitted)}"
+        self.submitted.append(tid)
+        return tid
+
+    def finish(self, tid):
+        import numpy as np
+
+        from ui.preview_screen import TrajectoryData
+
+        xy = np.zeros((5, 3, 2))
+        xy[:, :, 0] = np.arange(3) + np.arange(5)[:, None]
+        data = TrajectoryData(raw_xy=xy, xy=xy, fps=30.0, background=None, size=(50.0, 50.0))
+        self.store.taskFinished.emit(tid, data)
+
+
+def _two_pairs(qtbot, tmp_path, monkeypatch):
+    from track2data.core.models import ViewPair
+
+    store, screen = _paired(
+        qtbot, tmp_path, ["a"], ["a"], names=("t1_top", "t1_side", "t2_top", "t2_side")
+    )
+    store.update_view_role("t2_top", "top")
+    store.update_view_role("t2_side", "side")
+    store.update_view_pair(ViewPair(top_session_id="t2_top", side_session_id="t2_side"))
+    store._session_facts["t2_top"] = _facts("t2_top", ["a"], 1)
+    store._session_facts["t2_side"] = _facts("t2_side", ["a"], 1)
+    return store, screen, _ManualTasks(store, monkeypatch)
+
+
+def test_stale_result_for_previous_pair_is_ignored(qtbot, tmp_path, monkeypatch) -> None:
+    _store, screen, tasks = _two_pairs(qtbot, tmp_path, monkeypatch)
+    screen._pairs_table.selectRow(0)
+    old = list(tasks.submitted)
+    assert len(old) == 2
+    screen._pairs_table.selectRow(1)
+    tasks.finish(old[0])
+    tasks.finish(old[1])
+    assert screen._top_plot.n_frames == 0 and screen._side_plot.n_frames == 0
+    tasks.finish(tasks.submitted[2])
+    assert screen._top_plot.n_frames == 5 and screen._side_plot.n_frames == 0
+    assert screen._match_table.item(0, 0).text() == "a"
+
+
+def test_plots_cleared_when_selecting_or_clearing_pair(qtbot, tmp_path, monkeypatch) -> None:
+    _store, screen, tasks = _two_pairs(qtbot, tmp_path, monkeypatch)
+    screen._pairs_table.selectRow(0)
+    for tid in tasks.submitted:
+        tasks.finish(tid)
+    assert screen._top_plot.n_frames == 5
+    screen._pairs_table.selectRow(1)
+    assert screen._top_plot.n_frames == 0 and screen._side_plot.n_frames == 0
+    for tid in tasks.submitted[2:]:
+        tasks.finish(tid)
+    screen._pairs_table.clearSelection()
+    assert screen._top_plot.n_frames == 0 and screen._side_plot.n_frames == 0
+
+
+def test_whole_track_is_drawn_after_load(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen = _matched(qtbot, tmp_path, monkeypatch)
+    for plot in (screen._top_plot, screen._side_plot):
+        assert plot.current_frame == 4
+        assert plot.trail_point_count() > 3
+
+
+def test_project_change_with_same_ids_drops_old_loads_and_reloads(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    store, screen, tasks = _two_pairs(qtbot, tmp_path, monkeypatch)
+    screen._pairs_table.selectRow(0)
+    old = list(tasks.submitted)
+    store.projectChanged.emit()
+    assert screen._current_pair == ("t1_top", "t1_side")
+    assert len(tasks.submitted) == 4
+    tasks.finish(old[0])
+    assert screen._top_plot.n_frames == 0
+    tasks.finish(tasks.submitted[2])
+    assert screen._top_plot.n_frames == 5
+
+
+def test_facts_change_reloads_selected_pair(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, tasks = _two_pairs(qtbot, tmp_path, monkeypatch)
+    screen._pairs_table.selectRow(0)
+    store.sessionFactsChanged.emit()
+    assert len(tasks.submitted) == 2  # unchanged facts: no reload
+    store._session_facts["t1_top"] = _facts("t1_top", ["a", "b"], 2)
+    store.sessionFactsChanged.emit()
+    assert len(tasks.submitted) == 4
+    assert screen._match_table.rowCount() == 2
 
 
 def test_cleared_selection_never_writes(qtbot, tmp_path, monkeypatch) -> None:

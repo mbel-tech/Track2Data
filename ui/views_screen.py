@@ -125,30 +125,36 @@ class ViewsScreen(QWidget):
         self._match_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._match_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._match_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._match_table.setMaximumHeight(200)
-        mbox.addWidget(self._match_table)
+        body = QHBoxLayout()
+        left = QVBoxLayout()
+        left.addWidget(self._match_table)
         self._match_issues = QLabel("")
         self._match_issues.setObjectName("ErrorLabel")
         self._match_issues.setWordWrap(True)
-        mbox.addWidget(self._match_issues)
+        left.addWidget(self._match_issues)
         self._match_status = QLabel("")
         self._match_status.setObjectName("PageLead")
         self._match_status.setWordWrap(True)
-        mbox.addWidget(self._match_status)
+        left.addWidget(self._match_status)
         plots = QHBoxLayout()
         self._top_plot = TrajectoryView()
         self._side_plot = TrajectoryView()
         for plot in (self._top_plot, self._side_plot):
             plot.setMinimumHeight(200)
             plots.addWidget(plot, 1)
-        mbox.addLayout(plots)
+        body.addLayout(left, 1)
+        body.addLayout(plots, 2)
+        mbox.addLayout(body)
         self._match_box.setVisible(False)
         root.addWidget(self._match_box)
         self._load_tasks: dict[str, str] = {}
-        self._match_table.itemSelectionChanged.connect(self._apply_highlight)
+        self._match_table.itemSelectionChanged.connect(weak_slot(self._apply_highlight))
         self.pairSelected.connect(self._on_pair_selected)
         self._rebuilding = False
         self._last_pair: tuple[str, str] | None = None
+        self._force_emit = False
+        self._match_key: tuple[str, str] | None = None
+        self._loaded_facts: object = None
         self._pairs_table.itemSelectionChanged.connect(self._on_pair_selection)
         self._manual_add_btn.clicked.connect(self._add_manual_pair)
 
@@ -195,11 +201,11 @@ class ViewsScreen(QWidget):
             edit.textChanged.connect(self._update_matches)
 
         if store is not None:
-            store.projectChanged.connect(self._refresh)
+            store.projectChanged.connect(self._on_project_changed)
             store.sessionsChanged.connect(self._refresh)
             store.modeChanged.connect(self._refresh)
             store.viewsChanged.connect(self._refresh)
-            store.sessionFactsChanged.connect(self._refresh)
+            store.sessionFactsChanged.connect(self._on_facts_changed)
             store.taskFinished.connect(self._on_traj_task_finished)
         self._refresh()
 
@@ -363,7 +369,8 @@ class ViewsScreen(QWidget):
             self._rebuilding = False
         self._fill_manual(sessions, pairs)
         now = self._current_pair
-        if now != self._last_pair:
+        force, self._force_emit = self._force_emit, False
+        if now != self._last_pair or force:
             self._last_pair = now
             self.pairSelected.emit(now)
 
@@ -430,9 +437,34 @@ class ViewsScreen(QWidget):
 
     # ── manual matching ────────────────────────────────────────────────────
 
+    def _facts_of(self, pair: object) -> object:
+        if not pair or self._store is None:
+            return None
+        return tuple(self._store.session_facts(sid) for sid in pair)
+
+    def _on_project_changed(self) -> None:
+        # A new project: drop in-flight loads and stale tracks, and make a
+        # still-valid selection (same ids) re-emit so it reloads.
+        self._load_tasks = {}
+        self._top_plot.clear()
+        self._side_plot.clear()
+        self._force_emit = True
+        self._refresh()
+
+    def _on_facts_changed(self) -> None:
+        pair = self._current_pair
+        if pair is not None and self._facts_of(pair) != self._loaded_facts:
+            self._force_emit = True
+        self._refresh()
+        self._force_emit = False
+
     def _on_pair_selected(self, pair: object) -> None:
         """Idempotent; None clears the panel. Never writes to the store."""
         self._load_tasks = {}
+        self._match_key = None
+        self._top_plot.clear()
+        self._side_plot.clear()
+        self._loaded_facts = self._facts_of(pair)
         self._match_status.setText("")
         if not pair or self._store is None or self._store.manifest is None:
             self._match_box.setVisible(False)
@@ -460,6 +492,8 @@ class ViewsScreen(QWidget):
             result.raw_xy, result.xy, result.fps,
             background_path=result.background, size=result.size,
         )
+        plot.set_trail_length(plot.n_frames)
+        plot.set_frame(plot.n_frames - 1)
         if not self._load_tasks and not self._match_status.text().startswith("Could not"):
             self._match_status.setText("Select a fish to highlight it in both views.")
 
@@ -469,6 +503,10 @@ class ViewsScreen(QWidget):
         pair = self._find_pair(*self._current_pair) if self._current_pair else None
         keep = table.selectionModel().selectedRows()
         keep_row = keep[0].row() if keep else None
+        key = (pair.top_session_id, pair.side_session_id) if pair else None
+        if key != self._match_key:
+            keep_row = None
+        self._match_key = key
         table.blockSignals(True)
         try:
             table.clearSelection()
@@ -503,7 +541,7 @@ class ViewsScreen(QWidget):
                 combo.blockSignals(False)
                 combo.currentIndexChanged.connect(weak_slot(self._on_match_changed, label, combo))
                 table.setCellWidget(row, 1, combo)
-            if keep_row is not None and keep_row < len(top_l):
+            if keep_row is not None and keep_row < len(top_l) and table.isEnabled():
                 table.selectRow(keep_row)
         finally:
             table.blockSignals(False)
