@@ -42,7 +42,7 @@
 - Create `track2data/views/panels.py`: `apply_panel`, `panel_coverage`, `AnimalCoverage`, `preset_rects`, thresholds.
 - Modify `track2data/api.py`: `Engine.import_ref` applies the panel; `_cache_key` includes it.
 - Modify `ui/store/project_store.py`: duplicate check, probe, `split_session_into_panels`, `set_session_panel`.
-- Modify `ui/widgets/zone_canvas.py`, `ui/zones_screen.py`: cropped backdrop.
+- Create `ui/widgets/backdrop.py`; modify `ui/widgets/zone_canvas.py`, `ui/zones_screen.py`, `ui/widgets/trajectory_view.py`, `ui/preview_screen.py`, `ui/calibration_screen.py`: cropped backdrop everywhere it is drawn.
 - Create `ui/widgets/panel_preview.py`: preview widget with the backdrop fallback.
 - Create `ui/dialogs/panel_dialog.py`: the editor.
 - Modify `ui/views_screen.py`: the Panels section.
@@ -114,21 +114,24 @@
 - [ ] **Step 4: Run** `pytest tests/test_ui/test_project_store.py tests/test_app_smoke.py -q`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(store): split a session into panels and set a session's panel`.
 
-### Task 5: Cropped zones backdrop
+### Task 5: Cropped backdrop for every consumer
+
+`apply_panel` keeps `Session.background_image_path` (a whole-frame image). Three places draw it next to panel-relative coordinates and must crop it: the zones canvas, the preview's trajectory view and the calibration ruler.
 
 **Files:**
-- Modify: `ui/widgets/zone_canvas.py` (`load_session` ~256), `ui/zones_screen.py` (`_refresh_canvas` ~445)
-- Test: `tests/test_ui/test_zone_canvas.py`
+- Create: `ui/widgets/backdrop.py`
+- Modify: `ui/widgets/zone_canvas.py` (`load_session` ~256), `ui/zones_screen.py` (`_refresh_canvas` ~445), `ui/widgets/trajectory_view.py` (`set_data`), `ui/preview_screen.py` (`TrajectoryData` and `load_trajectory_data` ~80-95), `ui/calibration_screen.py` (ruler call ~475)
+- Test: `tests/test_ui/test_zone_canvas.py`, `tests/test_ui/test_trajectory_view.py`, `tests/test_ui/test_preview_screen.py`, `tests/test_ui/test_calibration_screen.py`, `tests/test_ui/test_backdrop.py` (new)
 
 **Interfaces:**
-- Consumes: `PanelRect`, `SessionRef.panel` from the manifest.
-- Produces: `ZoneCanvas.load_session(background_image_path, setup_points, frame_size=None, crop: PanelRect | None = None)`: with `crop` the backdrop is `QImage.copy(x, y, w, h)` and the scene is the crop size; `ZonesScreen._refresh_canvas` passes the selected session's `panel`.
+- Consumes: `PanelRect`, `SessionRef.panel`.
+- Produces: `load_backdrop_image(path: Path | None, crop: PanelRect | None = None) -> QImage | None` in `ui/widgets/backdrop.py` (None for a missing or unreadable file; with `crop` the image is `QImage.copy` of the rectangle clamped to the image); `ZoneCanvas.load_session(background_image_path, setup_points, frame_size=None, crop: PanelRect | None = None)`; `TrajectoryData.crop: PanelRect | None = None` (filled from the ref's panel by `load_trajectory_data`) and `TrajectoryView.set_data(..., crop: PanelRect | None = None)` using `load_backdrop_image`; the calibration screen passes the selected session's panel to the ruler/backdrop it builds. The screens pass `ref.panel` of the selected session.
 
-- [ ] **Step 1: Write failing tests**: a 400x200 test image with `crop=PanelRect(x=100,y=50,width=200,height=100)` gives a scene rect of 200x100 (assert `canvas.sceneRect()`); no crop leaves the existing behaviour; a crop beyond the image is clamped by Qt and does not raise; the zones screen passes the session's panel (monkeypatch the canvas and assert the call).
-- [ ] **Step 2: Run** `pytest tests/test_ui/test_zone_canvas.py tests/test_ui/test_zones_screen.py -k "crop or panel" -v`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
+- [ ] **Step 1: Write failing tests**: `load_backdrop_image` with a 400x200 test image and `PanelRect(x=100,y=50,width=200,height=100)` returns a 200x100 image whose pixel (0,0) equals the original (100,50); without crop returns the original size; missing file returns None; a crop beyond the image is clamped and does not raise. Zones: the scene rect is 200x100 with the crop; no crop leaves today's behaviour; `ZonesScreen` passes the session's panel (monkeypatch the canvas). Trajectory view: `set_data(..., background_path=img, crop=rect)` gives a scene of the crop size. `load_trajectory_data` fills `crop` for a ref with a panel and `None` otherwise. Calibration: the screen passes the panel to the backdrop (assert on the call or the resulting image size).
+- [ ] **Step 2: Run** `pytest tests/test_ui/test_backdrop.py tests/test_ui/test_zone_canvas.py tests/test_ui/test_trajectory_view.py tests/test_ui/test_preview_screen.py tests/test_ui/test_calibration_screen.py -k "crop or panel or backdrop" -v`. Expected: FAIL.
+- [ ] **Step 3: Implement** the helper and thread `crop` through the three consumers; sessions without a panel behave exactly as before.
 - [ ] **Step 4: Run** `pytest tests/test_ui -q`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(ui): crop the zones backdrop to a session's panel`.
+- [ ] **Step 5: Commit** `feat(ui): crop the session backdrop to its panel everywhere it is drawn`.
 
 ### Task 6: Panel preview widget
 
