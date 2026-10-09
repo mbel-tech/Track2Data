@@ -41,6 +41,19 @@ from track2data.metrics.references import (
 _EMPTY_ZONE_VALUE = ""
 
 
+def _frame_count(session: object) -> int:
+    """Rows of *session* that stand for a video frame.
+
+    A session tracked in separate intervals carries one NaN separator row at each unfilled gap
+    (see ``preprocess/timeline_expand.py``); it is not a frame, so it must not enter the
+    denominator of a share of the session.
+    """
+    counted = getattr(session, "counted_rows", None)
+    if callable(counted):
+        return int(counted().sum())
+    return int(session.n_frames)  # type: ignore[attr-defined]
+
+
 class _PooledView:
     """Read-only stand-in for a PreprocessedSession with all slots stacked.
 
@@ -54,7 +67,7 @@ class _PooledView:
         self.fps: float = psess.fps  # type: ignore[attr-defined]
         n_animals: int = psess.n_animals  # type: ignore[attr-defined]
         self.n_animals = 1
-        self.n_frames: int = psess.n_frames * n_animals  # type: ignore[attr-defined]
+        self.n_frames: int = _frame_count(psess) * n_animals
         for attr in ("main_zone", "sec_zone"):
             arr = getattr(psess, attr, None)
             setattr(self, attr, None if arr is None else arr.T.reshape(-1, 1))
@@ -287,7 +300,7 @@ class TimeInZone(Metric):
             return pd.DataFrame(columns=empty_cols)
 
         session_id: str = session.session_id  # type: ignore[attr-defined]
-        n_frames: int = session.n_frames  # type: ignore[attr-defined]
+        n_frames: int = _frame_count(session)
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
         fps: float = session.fps  # type: ignore[attr-defined]
         total_duration_s = n_frames / fps
@@ -601,7 +614,7 @@ class AreaCorrectedOccupancy(Metric):
             return empty_df
 
         session_id: str = session.session_id  # type: ignore[attr-defined]
-        n_frames: int = session.n_frames  # type: ignore[attr-defined]
+        n_frames: int = _frame_count(session)
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
         fps: float = session.fps  # type: ignore[attr-defined]
         total_duration_s = n_frames / fps
@@ -1407,7 +1420,7 @@ class ZonePreferenceIndex(Metric):
             return pd.DataFrame(columns=empty_cols)
 
         session_id: str = session.session_id  # type: ignore[attr-defined]
-        n_frames: int = session.n_frames  # type: ignore[attr-defined]
+        n_frames: int = _frame_count(session)
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
         total_duration_frames = n_frames
 

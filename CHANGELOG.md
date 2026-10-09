@@ -982,6 +982,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Zone occupancy no longer counts the gap marker between tracking intervals as a frame.** Time in
+  zone (Z-1), area-corrected occupancy (Z-2) and the zone preference index (Z-8) divided by every
+  processed row, including the single NaN separator row kept at each unfilled gap, so a session with
+  short intervals read slightly low (20 tracked frames all in a zone gave 95 %, not 100 %). They now
+  divide by real frames. Added an end-to-end test that runs every metric and exporter on a
+  multi-interval session, with gaps kept as breaks or bridged, whole-session and time-binned.
+
+- **Project saving and result freshness (GUI).** Changes are saved automatically after a short pause
+  (footer: *Unsaved changes* / *Saved* / *Not saved*); Save, Close, New and Open first commit pending
+  edits, including a number typed but not yet confirmed, and are blocked when saving fails, so a
+  failure never loses work. The manifest is written atomically, a reopened project saves back to its
+  own file, and New will not overwrite an existing project. Preview and the sidebar now say when the
+  results come from older settings (export-format changes do not count, reverting does clear it), a
+  run is judged against the settings it started with, a run that finishes for a replaced project is
+  ignored, and a run with no successful session is no longer labelled *Results ready*. Export says
+  it recomputes under the current settings.
+
 - **Zones drawn for any tracker other than idtracker.ai were not in video pixels.** Only
   idtracker.ai sessions supplied a backdrop; every other reader got a blank 640x480 Zones canvas
   and saved zones recorded no frame size, so hand-drawn zones (and the Z-1 to Z-9, IL-3 and IL-14

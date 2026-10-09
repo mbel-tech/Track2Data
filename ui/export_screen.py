@@ -91,6 +91,8 @@ class ExportScreen(QWidget):
         self._output_dir: str = ""
         self._default_dir_cache: Path | None = None
         self._current_task_id: str | None = None
+        self._run_analysis_hash: str | None = None
+        self._run_project_revision: int | None = None
         self._last_out_dir: Path | None = None
         self._last_selected_exporters: list[str] = []
         self._checks: dict[str, QCheckBox] = {}
@@ -121,7 +123,11 @@ class ExportScreen(QWidget):
         title.setObjectName("PageTitle")
         root.addWidget(title)
 
-        subtitle = QLabel("Choose export formats and target directory.")
+        subtitle = QLabel(
+            "Choose export formats and target directory. "
+            "Export recomputes metrics using the current settings."
+        )
+        subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
 
@@ -336,6 +342,8 @@ class ExportScreen(QWidget):
         )
 
         engine = Engine(self._store.manifest, cache_dir=self._store.cache_dir)
+        self._run_analysis_hash = self._store.analysis_hash()
+        self._run_project_revision = self._store.project_revision
         run_fn = functools.partial(engine.run, out_dir, exporters=selected)
 
         self._last_out_dir = out_dir
@@ -372,7 +380,13 @@ class ExportScreen(QWidget):
         self._update_export_enabled()
 
         if isinstance(result, RunResult):
-            self._store.set_run_results(result)
+            accepted = self._store.set_run_results(
+                result, analysis_hash=self._run_analysis_hash,
+                project_revision=self._run_project_revision,
+            )
+            if not accepted:
+                self._status_label.setText("Finished for a previous project.")
+                return
             self._populate_receipt_table(result)
             n_failed = sum(1 for s in result.sessions if s.error)
             if n_failed:
