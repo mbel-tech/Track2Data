@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -198,6 +198,13 @@ class ViewsScreen(QWidget):
         self._side_help_btn.clicked.connect(weak_slot(self._show_help, self._side_help_btn))
 
         self._commit = AutoCommit(self._commit_patterns, self)
+        # Store signals only mark the page dirty; one rebuild runs per event-loop
+        # turn, and none while the page is hidden (showEvent catches up).
+        self._dirty = False
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(0)
+        self._refresh_timer.timeout.connect(self._on_refresh_timer)
         for edit in (self._top_regex_edit, self._side_regex_edit):
             edit.textChanged.connect(self._commit.trigger)
             edit.textChanged.connect(self._update_matches)
@@ -209,7 +216,7 @@ class ViewsScreen(QWidget):
             store.viewsChanged.connect(self._refresh)
             store.sessionFactsChanged.connect(self._on_facts_changed)
             store.taskFinished.connect(self._on_traj_task_finished)
-        self._refresh()
+        self.refresh_now()
 
     def _pattern_row(self, layout: QVBoxLayout, caption: str, placeholder: str):
         row = QHBoxLayout()
@@ -237,7 +244,31 @@ class ViewsScreen(QWidget):
 
     # ── refresh from the store (never writes back) ─────────────────────────
 
-    def _refresh(self) -> None:
+    def _refresh(self, *_args: object) -> None:
+        """Schedule a rebuild: at most one per event-loop turn, none while hidden."""
+        self._dirty = True
+        if self.isVisible() and not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+
+    def _on_refresh_timer(self) -> None:
+        if self._dirty and self.isVisible():
+            self.refresh_now()
+
+    def showEvent(self, event) -> None:  # Qt override
+        super().showEvent(event)
+        if self._dirty:
+            self.refresh_now()
+
+    def flush(self) -> None:
+        """Commit typed patterns now and bring the page up to date (leaving the page)."""
+        self._commit.flush()
+        if self._dirty:
+            self.refresh_now()
+
+    def refresh_now(self) -> None:
+        """Rebuild the page from the store at once."""
+        self._refresh_timer.stop()
+        self._dirty = False
         m = self._manifest()
         sessions = list(m.sessions) if m is not None and self._is_3d() else []
         self._empty_label.setVisible(not sessions)
@@ -429,7 +460,7 @@ class ViewsScreen(QWidget):
         try:
             self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
-            self._refresh()
+            self.refresh_now()
             self._error_label.setText(str(exc))
 
     def _remove_pair(self, top_id: str, side_id: str) -> None:
@@ -463,9 +494,8 @@ class ViewsScreen(QWidget):
     def _on_facts_changed(self) -> None:
         pair = self._current_pair
         if pair is not None and self._facts_of(pair) != self._loaded_facts:
-            self._force_emit = True
+            self._force_emit = True  # consumed by the next rebuild
         self._refresh()
-        self._force_emit = False
 
     def _on_pair_selected(self, pair: object) -> None:
         """Idempotent; None clears the panel. Never writes to the store."""
@@ -572,7 +602,7 @@ class ViewsScreen(QWidget):
         try:
             self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
-            self._refresh()
+            self.refresh_now()
             self._match_issues.setText(str(exc))
 
     def _apply_highlight(self) -> None:
