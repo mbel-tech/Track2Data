@@ -35,7 +35,7 @@ def test_ambiguous_key():
 
 
 def test_both_roles():
-    r = pair_by_regex(["k_both", "k_side"], r"(?P<key>k)_both|(?P<key2>zz)", r"(?P<key>k)_")
+    r = pair_by_regex(["k_both", "k_side"], r"(?P<key>k)_both", r"(?P<key>k)_")
     assert r.both_roles == ["k_both"]
     assert r.pairs == []
     assert "k_both" not in r.top_ids + r.side_ids
@@ -43,9 +43,39 @@ def test_both_roles():
 
 def test_errors():
     r = pair_by_regex(["a_top", "a_side"], "(", SIDE)
-    assert len(r.errors) == 1 and r.pairs == [] and r.top_ids == []
+    assert len(r.errors) == 1 and r.errors[0].startswith("top regex")
+    assert r.pairs == [] and r.top_ids == []
+    assert r.side_ids == ["a_side"] and r.unpaired_side == ["a_side"]
     r = pair_by_regex(["a_top", "a_side"], r"_top$", SIDE)
-    assert len(r.errors) == 1 and r.pairs == []
+    assert len(r.errors) == 1 and r.errors[0].startswith("top regex")
+    assert r.pairs == [] and r.side_ids == ["a_side"]
+
+
+def test_empty_or_missing_key_is_not_a_candidate():
+    ids = ["_top", "_side", "_x_top", "t1_top", "t1_side"]
+    for top in (r"(?P<key>.*)_top$", r"(?P<key>\d+)?_top$"):
+        r = pair_by_regex(["_top", "_side", "t1_side"], top, r"(?P<key>.*)_side$")
+        assert r.top_ids == [] and r.pairs == []
+        assert r.ambiguous_keys == [] and r.errors == []
+        assert r.side_ids == ["t1_side"]
+    r = pair_by_regex(ids, r"(?P<key>.*)_top$", r"(?P<key>.*)_side$")
+    assert r.pairs == [("t1_top", "t1_side")]
+    assert r.ambiguous_keys == [] and r.errors == []
+    assert "_top" not in r.top_ids and "_side" not in r.side_ids
+
+
+def test_empty_labels_and_no_overlap():
+    assert identity_map([], []) == ({}, [])
+    assert identity_map(["a"], ["b"]) == ({}, ["a", "b"])
+    assert _v({}, [], []) == []
+
+
+def test_unknown_labels_deduped():
+    msgs = _v({"a": "z", "b": "z", "q": "x", "r": "x"}, ["a", "b"], ["x"])
+    assert msgs.count("unknown side fish: z") == 1
+    assert msgs.count("unknown top fish: q") == 1
+    assert msgs.count("unknown top fish: r") == 1
+    assert _v({"q": "x", "q2": "x"}, ["a"], ["x"]).count("unknown top fish: q") == 1
 
 
 def test_empty_regex_not_set():

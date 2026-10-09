@@ -50,12 +50,17 @@ def pair_by_regex(session_ids: Sequence[str], top_regex: str, side_regex: str) -
     for sid in session_ids:
         tm = top_rx.search(sid) if top_rx else None
         sm = side_rx.search(sid) if side_rx else None
+        # A missing or empty key group means the session does not match the role.
+        if tm and not tm.group("key"):
+            tm = None
+        if sm and not sm.group("key"):
+            sm = None
         if tm and sm:
             both.append(sid)
         elif tm:
-            top.append((sid, tm.group("key") or ""))
+            top.append((sid, tm.group("key")))
         elif sm:
-            side.append((sid, sm.group("key") or ""))
+            side.append((sid, sm.group("key")))
 
     def _by_key(items: list[tuple[str, str]]) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
@@ -65,17 +70,19 @@ def pair_by_regex(session_ids: Sequence[str], top_regex: str, side_regex: str) -
 
     top_by, side_by = _by_key(top), _by_key(side)
     ambiguous: list[str] = []
+    ambiguous_set: set[str] = set()
     for key in [k for _, k in top] + [k for _, k in side]:
-        if key in ambiguous:
+        if key in ambiguous_set:
             continue
         if len(top_by.get(key, [])) > 1 or len(side_by.get(key, [])) > 1:
             ambiguous.append(key)
+            ambiguous_set.add(key)
 
     pairs: list[tuple[str, str]] = []
     paired_top: set[str] = set()
     paired_side: set[str] = set()
     for sid, key in top:
-        if key in ambiguous or key not in side_by:
+        if key in ambiguous_set or key not in side_by:
             continue
         partner = side_by[key][0]
         pairs.append((sid, partner))
@@ -121,9 +128,11 @@ def validate_fish_map(
     for t in fish_map:
         if t not in top_set:
             msgs.append(f"unknown top fish: {t}")
+    unknown_side: list[str] = []
     for s in fish_map.values():
-        if s not in side_set:
-            msgs.append(f"unknown side fish: {s}")
+        if s not in side_set and s not in unknown_side:
+            unknown_side.append(s)
+    msgs.extend(f"unknown side fish: {s}" for s in unknown_side)
     seen: set[str] = set()
     dup: list[str] = []
     for s in fish_map.values():
