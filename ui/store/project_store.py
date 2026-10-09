@@ -40,7 +40,7 @@ from track2data.core.models import (
 )
 from track2data.core.progress import CancellationToken, OperationCancelled
 from track2data.readers import find_reader
-from track2data.views.pairing import PairingResult, pair_by_regex
+from track2data.views.pairing import PairingResult, fish_labels, identity_map, pair_by_regex
 from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
@@ -202,6 +202,8 @@ class ProjectStore(QObject):
             self.viewsChanged,
         ):
             signal.connect(self._on_manifest_changed)
+        # Connected first, so pages see the re-derived maps when they hear the facts.
+        self.sessionFactsChanged.connect(self._rederive_same_ids)
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -498,6 +500,8 @@ class ProjectStore(QObject):
         if not self._require_3d():
             return
         assert self._manifest is not None
+        if self._manifest.mode.pairing == patterns:
+            return
         mode = self._manifest.mode.model_copy(update={"pairing": patterns})
         self._manifest = self._manifest.model_copy(update={"mode": mode})
         self.modeChanged.emit()
@@ -568,8 +572,40 @@ class ProjectStore(QObject):
                 other, pair.side_session_id
             ):
                 raise ValueError("a session can be in one pair only")
-        pairs = [p for p in pairs if (p.top_session_id, p.side_session_id) != key] + [pair]
+        index = next(
+            (i for i, p in enumerate(pairs) if (p.top_session_id, p.side_session_id) == key), None
+        )
+        if index is None:
+            pairs.append(pair)
+        else:
+            pairs[index] = pair
         self._set_views(list(self._manifest.sessions), pairs)
+
+    def _rederive_same_ids(self) -> None:
+        """Re-fill the map of every "Same IDs" pair from the labels now known.
+
+        A ticked pair has no hand edits (a manual change clears the tick), so its
+        map is always the identity map of the two label lists. Pairs whose labels
+        are not known for both sessions are left as they are.
+        """
+        m = self._manifest
+        if m is None or m.mode.dimension != "3d" or not any(p.same_ids for p in m.view_pairs):
+            return
+        pairs = list(m.view_pairs)
+        changed = False
+        for i, p in enumerate(pairs):
+            if not p.same_ids:
+                continue
+            facts = [self._session_facts.get(s) for s in (p.top_session_id, p.side_session_id)]
+            if None in facts:
+                continue
+            top_l, side_l = (fish_labels(f.identities_labels, f.n_animals) for f in facts)
+            fish_map, _ = identity_map(top_l, side_l)
+            if fish_map != p.fish_map:
+                pairs[i] = p.model_copy(update={"fish_map": fish_map})
+                changed = True
+        if changed:
+            self._set_views(list(m.sessions), pairs)
 
     def remove_view_pair(self, top_session_id: str, side_session_id: str) -> None:
         if not self._require_3d():

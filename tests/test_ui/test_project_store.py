@@ -1010,3 +1010,62 @@ def test_apply_regex_pairing_emits_views_changed_once(qtbot, store3d) -> None:
     store3d.update_pairing(_name_patterns())
     with qtbot.waitSignal(store3d.viewsChanged, timeout=1000):
         store3d.apply_regex_pairing()
+
+
+def test_update_view_pair_replaces_in_place(store3d, tmp_path: Path) -> None:
+    store3d.update_sessions(
+        list(store3d.manifest.sessions) + [_ref(tmp_path, n) for n in ("c_top", "c_side")]
+    )
+    store3d.update_pairing(_name_patterns())
+    store3d.apply_regex_pairing()
+    before = [(p.top_session_id, p.side_session_id) for p in store3d.manifest.view_pairs]
+    assert len(before) == 3
+    store3d.update_view_pair(_pair(*before[0], fish_map={"0": "0"}))
+    after = [(p.top_session_id, p.side_session_id) for p in store3d.manifest.view_pairs]
+    assert after == before
+    assert store3d.manifest.view_pairs[0].fish_map == {"0": "0"}
+
+
+def test_update_pairing_unchanged_is_a_no_op(qtbot, store3d) -> None:
+    store3d.update_pairing(_name_patterns())
+    store3d.save_project()
+    assert not store3d.dirty
+    with qtbot.assertNotEmitted(store3d.modeChanged):
+        store3d.update_pairing(_name_patterns())
+    assert not store3d.dirty
+
+
+def _labelled(store, sid, labels):
+    from ui.store.session_facts import SessionFacts
+
+    store._session_facts[sid] = SessionFacts(
+        session_id=sid, reader="idtrackerai", fps=30.0, n_frames=10, n_animals=len(labels),
+        width_px=10, height_px=10, has_stable_identities=True, track_wo_identities=None,
+        idtrackerai_version=None, length_unit=None, setup_points=None, roi_list=None,
+        has_body_length=False, identities_labels=labels, background_image_path=None,
+    )
+
+
+def test_same_ids_pair_rederives_map_when_labels_arrive(store3d) -> None:
+    store3d.update_view_role("a_top", "top")
+    store3d.update_view_role("a_side", "side")
+    store3d.update_view_pair(_pair("a_top", "a_side", same_ids=True, fish_map={"a": "a"}))
+    _labelled(store3d, "a_top", ["a", "b"])
+    _labelled(store3d, "a_side", ["a", "b"])
+    store3d.sessionFactsChanged.emit()
+    pair = store3d.manifest.view_pairs[0]
+    assert pair.same_ids and pair.fish_map == {"a": "a", "b": "b"}
+
+
+def test_rederive_skips_unticked_pairs_and_missing_labels(store3d) -> None:
+    for sid, role in (("a_top", "top"), ("a_side", "side"), ("b_top", "top"), ("b_side", "side")):
+        store3d.update_view_role(sid, role)
+    store3d.update_view_pair(_pair("a_top", "a_side", fish_map={"a": "b"}))
+    store3d.update_view_pair(_pair("b_top", "b_side", same_ids=True, fish_map={"x": "x"}))
+    _labelled(store3d, "a_top", ["a", "b"])
+    _labelled(store3d, "a_side", ["a", "b"])
+    _labelled(store3d, "b_top", ["x", "y"])  # b_side has no facts yet
+    store3d.sessionFactsChanged.emit()
+    by_top = {p.top_session_id: p for p in store3d.manifest.view_pairs}
+    assert by_top["a_top"].fish_map == {"a": "b"}
+    assert by_top["b_top"].fish_map == {"x": "x"}
