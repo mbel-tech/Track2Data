@@ -41,6 +41,7 @@ from track2data.metrics.availability import view_unavailable_reason
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 from ui.widgets.autocommit import AutoCommit
+from ui.widgets.mode_banner import ModeBanner
 from ui.widgets.weak_slot import weak_slot
 
 _COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
@@ -126,6 +127,9 @@ class MetricsScreen(QWidget):
         subtitle.setObjectName("PageLead")
         subtitle.setWordWrap(True)
         root.addWidget(subtitle)
+
+        if self._store is not None:
+            root.addWidget(ModeBanner(self._store))
 
         # ── search + presets ─────────────────────────────────────────────
         tools = QHBoxLayout()

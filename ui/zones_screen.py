@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 from track2data.core.errors import ZoneValidationError
 from track2data.core.models import ROI, ZoneSet
 from ui.widgets.labels import label_for
+from ui.widgets.mode_banner import ModeBanner
 from ui.widgets.weak_slot import weak_slot
 from ui.widgets.zone_canvas import ZoneCanvas, polygon_area
 
@@ -104,6 +105,9 @@ class ZonesScreen(QWidget):
         subtitle.setWordWrap(True)
         subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
+
+        if self._store is not None:
+            root.addWidget(ModeBanner(self._store))
 
         picker_row = QHBoxLayout()
         picker_row.setSpacing(10)

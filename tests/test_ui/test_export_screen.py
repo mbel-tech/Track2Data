@@ -444,3 +444,28 @@ def test_snippets_appear_after_a_successful_export(qtbot, tmp_path: Path) -> Non
 
     screen._snippet_combo.setCurrentIndex(1)
     assert "import pandas" in screen._snippet_text.toPlainText()
+
+
+# ── 3-D mode ─────────────────────────────────────────────────────────────────
+
+
+def test_export_button_disabled_in_3d(qtbot, tmp_path: Path, tiny_real_session: Path) -> None:
+    from track2data.core.models import MODE_3D_BLOCK_REASON, ProjectMode
+    from ui.export_screen import ExportScreen
+
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    screen = ExportScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._export_btn.isEnabled() is True
+
+    store._manifest = store._manifest.model_copy(
+        update={"mode": ProjectMode(dimension="3d", layout="two_videos")}
+    )
+    store.modeChanged.emit()
+    assert screen._export_btn.isEnabled() is False
+    assert screen._status_label.text() == MODE_3D_BLOCK_REASON
+
+    store._manifest = store._manifest.model_copy(update={"mode": ProjectMode()})
+    store.modeChanged.emit()
+    assert screen._export_btn.isEnabled() is True
+    assert screen._status_label.text() == ""
