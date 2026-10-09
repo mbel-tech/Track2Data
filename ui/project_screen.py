@@ -227,11 +227,14 @@ class ProjectScreen(QWidget):
             return "two_videos"
         return None
 
-    def _selected_mode(self) -> ProjectMode | None:
-        """The mode the radios describe, or None for 3D with no layout yet."""
-        # The radios say nothing about the pairing patterns; keep the open project's.
+    def _selected_mode(self, keep_pairing: bool = False) -> ProjectMode | None:
+        """The mode the radios describe, or None for 3D with no layout yet.
+
+        ``keep_pairing`` carries the open project's name patterns over (used when
+        editing it); a new project always starts with the defaults.
+        """
         pairing = {}
-        if self._store is not None and self._store.manifest is not None:
+        if keep_pairing and self._store is not None and self._store.manifest is not None:
             pairing = {"pairing": self._store.manifest.mode.pairing}
         if self._dim_3d.isChecked():
             layout = self._selected_layout()
@@ -268,7 +271,7 @@ class ProjectScreen(QWidget):
         """Push the radios into the open project; ignore incomplete 3D choices."""
         if self._store is None or self._store.manifest is None:
             return
-        mode = self._selected_mode()
+        mode = self._selected_mode(keep_pairing=True)
         if mode is None or mode == self._store.manifest.mode:
             return
         try:

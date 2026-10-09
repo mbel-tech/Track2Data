@@ -99,17 +99,58 @@ def test_help_buttons_show_popover(qtbot, tmp_path) -> None:
 
 def test_refresh_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
     store, screen = _make(qtbot, tmp_path)
+    store.update_view_role("t1_top", "top")
     store.update_pairing(PairingPatterns(top_regex=TOP, side_regex=SIDE))
+    assert screen._top_regex_edit.text() == TOP
+    assert _combo(screen, 0).currentText() == "Top"
+    # Change the store behind the page's back, then let the page rebuild.
+    with qtbot.assertNotEmitted(store.viewsChanged):
+        store.blockSignals(True)
+        store.update_view_role("t1_top", None)
+        store.update_pairing(PairingPatterns(top_regex="(?P<key>a)", side_regex="(?P<key>b)"))
+        store.blockSignals(False)
     calls = []
     monkeypatch.setattr(store, "update_view_role", lambda *a: calls.append(a))
     monkeypatch.setattr(store, "update_pairing", lambda *a: calls.append(a))
-    store.viewsChanged.emit()
     store.sessionsChanged.emit()
-    store.modeChanged.emit()
     store.projectChanged.emit()
+    assert screen._top_regex_edit.text() == "(?P<key>a)"
+    assert screen._side_regex_edit.text() == "(?P<key>b)"
+    assert _combo(screen, 0).currentText() == "(not set)"
     screen._commit.flush()
     assert calls == []
-    assert screen._top_regex_edit.text() == TOP
+    assert not screen._commit.pending
+
+
+def test_apply_right_after_typing_uses_typed_patterns(qtbot, tmp_path) -> None:
+    store, screen = _make(qtbot, tmp_path)
+    screen._top_regex_edit.setText(TOP)
+    screen._side_regex_edit.setText(SIDE)
+    assert screen._commit.pending
+    screen._apply_btn.click()
+    assert store.manifest.mode.pairing == PairingPatterns(top_regex=TOP, side_regex=SIDE)
+    assert len(store.manifest.view_pairs) == 2
+
+
+def test_side_help_button_shows_popover(qtbot, tmp_path) -> None:
+    _, screen = _make(qtbot, tmp_path)
+    screen._side_help_btn.click()
+    assert screen._popover.isVisible()
+
+
+def test_ambiguous_key_listed(qtbot, tmp_path) -> None:
+    _, screen = _make(qtbot, tmp_path, names=("a_top", "a2_top", "a_side"))
+    screen._top_regex_edit.setText(r"(?P<key>a)\d*_top$")
+    screen._side_regex_edit.setText(SIDE)
+    assert "Ambiguous" in screen._unpaired_label.text()
+    assert "a" in screen._unpaired_label.text()
+
+
+def test_session_matching_both_patterns_listed(qtbot, tmp_path) -> None:
+    _, screen = _make(qtbot, tmp_path, names=("x_top_side", "t1_top"))
+    screen._top_regex_edit.setText(r"(?P<key>.+)_top")
+    screen._side_regex_edit.setText(r"(?P<key>.+)_side$")
+    assert "Match both patterns: x_top_side" in screen._unpaired_label.text()
 
 
 def test_empty_states(qtbot, tmp_path) -> None:

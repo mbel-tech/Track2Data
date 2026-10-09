@@ -219,7 +219,6 @@ class ViewsScreen(QWidget):
         if not self._is_3d():
             return
         self._commit.flush()
-        self._commit_patterns()
         result = self._store.apply_regex_pairing()
         self._error_label.setText("; ".join(result.errors))
 
