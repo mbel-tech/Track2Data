@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.parallel import worker_count
+from ui.widgets.weak_slot import weak_slot
 
 #: ProgressEvent.stage -> friendly per-session status label. Stages not
 #: listed here (e.g. "import", "run") aren't session-scoped in the same
@@ -169,6 +170,12 @@ class ProcessingScreen(QWidget):
     #: Worker counts offered by the segmented control (those above the CPU count are disabled).
     _WORKER_CHOICES = (1, 2, 4, 8)
 
+    def _set_workers(self, n: int) -> None:
+        self._workers.setValue(n)
+
+    def _request_page(self, page: int) -> None:
+        self.navigateRequested.emit(page)
+
     def _build_workers_segments(self) -> QWidget:
         box = QWidget()
         row = QHBoxLayout(box)
@@ -184,7 +191,7 @@ class ProcessingScreen(QWidget):
             btn.setCheckable(True)
             btn.setEnabled(n <= top)
             btn.setToolTip(self._workers.toolTip())
-            btn.clicked.connect(lambda _c=False, n=n: self._workers.setValue(n))
+            btn.clicked.connect(weak_slot(self._set_workers, n))
             group.addButton(btn)
             row.addWidget(btn)
             self._worker_buttons[n] = btn
@@ -224,7 +231,7 @@ class ProcessingScreen(QWidget):
             button.setMinimumHeight(52)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(f"Go to {name}")
-            button.clicked.connect(lambda _c=False, page=_page: self.navigateRequested.emit(page))
+            button.clicked.connect(weak_slot(self._request_page, _page))
             cell = QHBoxLayout(button)
             cell.setContentsMargins(6, 4, 6, 4)
             cell.setSpacing(10)

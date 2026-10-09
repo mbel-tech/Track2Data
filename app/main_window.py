@@ -12,6 +12,7 @@ Implements the QMainWindow shell described in UI_DESIGN.md §3:
 
 from __future__ import annotations
 
+import weakref
 from datetime import datetime
 from functools import partial
 
@@ -56,6 +57,7 @@ from ui.processing_screen import ProcessingScreen
 
 # Placeholder screen imports — all 10 wizard pages.
 from ui.project_screen import ProjectScreen
+from ui.widgets.weak_slot import weak_slot
 from ui.zones_screen import ZonesScreen
 
 APP_NAME = "Track2Data"
@@ -127,7 +129,10 @@ class MainWindow(QMainWindow):
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(500)
         self._autosave_timer.timeout.connect(self._autosave)
-        self._store.prepare_project_change = self._save_before_project_change
+        # Held weakly: the store outlives no window, and a strong bound method here makes
+        # window and store keep each other alive (see ui/widgets/weak_slot.py).
+        _save_ref = weakref.WeakMethod(self._save_before_project_change)
+        self._store.prepare_project_change = lambda: (m := _save_ref()) is None or m()
         # One prompt per launch, not one per refused session: importing a
         # folder of 70 sessions must not produce 70 identical dialogs.
         self._pickle_consent_asked = False
@@ -185,7 +190,7 @@ class MainWindow(QMainWindow):
 
         # ── wire signals ──────────────────────────────────────────────────
         self._sidebar.stage_page_selected.connect(self._go_to_page)
-        self._sidebar.locked_clicked.connect(lambda _i: self.show_toast("Run the pipeline first"))
+        self._sidebar.locked_clicked.connect(weak_slot(self.show_toast, "Run the pipeline first"))
         theme.changed.connect(self._on_theme_changed)
         self._store.projectChanged.connect(self._update_statusbar)
         self._store.sessionsChanged.connect(self._update_statusbar)
@@ -204,7 +209,7 @@ class MainWindow(QMainWindow):
         ):
             sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
-        self._store.runLogAppended.connect(lambda _t: self._update_log_toggle())
+        self._store.runLogAppended.connect(weak_slot(self._update_log_toggle))
         self._store.pickleConsentRequired.connect(self._ask_pickle_consent)
         # taskStarted/taskCancelled are deliberately NOT forwarded onto
         # ProjectStore's own signals (see ProjectStore's docstring) --
@@ -261,7 +266,7 @@ class MainWindow(QMainWindow):
         self._btn_log = QPushButton("Run log · 0 lines ▴")
         self._btn_log.setProperty("role", "link")
         self._btn_log.setFlat(True)
-        self._btn_log.clicked.connect(lambda: self._toggle_log())
+        self._btn_log.clicked.connect(weak_slot(self._toggle_log))
         self._btn_run = QPushButton("⟶ Run pipeline")
         self._btn_run.setProperty("role", "outline-primary")
         self._btn_next = QPushButton("Next →")
@@ -291,7 +296,7 @@ class MainWindow(QMainWindow):
             Command("Run", "Run pipeline", self._action_run, "Ctrl+R", has_project),
             Command("Run", "Validate", self._action_validate, "Ctrl+Shift+V", has_project),
             Command("Run", "Export…", self._action_export, "Ctrl+E", has_run),
-            Command("View", "Show or hide the run log", lambda: self._toggle_log(), "Ctrl+L"),
+            Command("View", "Show or hide the run log", weak_slot(self._toggle_log), "Ctrl+L"),
             Command("View", "Switch theme", theme.toggle),
             Command("File", "Save project", self._action_save_project, "Ctrl+S", has_project),
             Command("File", "New project…", self._action_new_project, "Ctrl+N"),
@@ -376,7 +381,7 @@ class MainWindow(QMainWindow):
         )
         self._menu_cancel = QAction(
             "&Cancel run", self, shortcut="Ctrl+.", enabled=False,
-            triggered=lambda: self._action_cancel(),
+            triggered=weak_slot(self._action_cancel),
         )
         run_menu.addAction(self._menu_cancel)
         run_menu.addSeparator()
@@ -387,7 +392,7 @@ class MainWindow(QMainWindow):
         # View
         view_menu = mb.addMenu("&View")
         self._log_action = QAction("Run &log", self, shortcut="Ctrl+L", checkable=True)
-        self._log_action.toggled.connect(lambda on: self._toggle_log(bool(on)))
+        self._log_action.toggled.connect(self._on_log_action_toggled)
         view_menu.addAction(self._log_action)
         view_menu.addAction(
             QAction("&Command palette…", self, shortcut="Ctrl+K", triggered=self.open_palette)
@@ -441,9 +446,13 @@ class MainWindow(QMainWindow):
                 lambda b=btn, a=act: (b.setEnabled(a.isEnabled()), b.setToolTip(a.toolTip()))
             )
             btn.setEnabled(act.isEnabled())
-        self._cancel_action.changed.connect(
-            lambda: self._menu_cancel.setEnabled(self._cancel_action.isEnabled())
-        )
+        self._cancel_action.changed.connect(self._sync_menu_cancel)
+
+    def _on_log_action_toggled(self, on: bool) -> None:
+        self._toggle_log(bool(on))
+
+    def _sync_menu_cancel(self) -> None:
+        self._menu_cancel.setEnabled(self._cancel_action.isEnabled())
 
     # ── status bar ──────────────────────────────────────────────────────────
 

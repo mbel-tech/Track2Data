@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 import traceback
 import uuid
+import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -235,10 +236,20 @@ class TaskRunner(QObject):
         return task_id
 
     def _forget(self, task_id: str) -> Callable[..., None]:
+        # Weak: the signals object holds this callable strongly (PySide keeps a
+        # lambda/closure slot in the C++ connection table, where the collector
+        # cannot see it) and ``self._active`` holds the signals, so a strong
+        # ``self`` here makes every runner with an unfinished task immortal.
+        runner = weakref.ref(self)
+
         def _cleanup(*_args: object) -> None:
-            self._tokens.pop(task_id, None)
-            self._active.pop(task_id, None)
-            self._lane_of.pop(task_id, None)
+            target = runner()
+            if target is None:
+                return
+            target._tokens.pop(task_id, None)
+            target._active.pop(task_id, None)
+            target._lane_of.pop(task_id, None)
+
         return _cleanup
 
     def cancel(self, task_id: str) -> None:
