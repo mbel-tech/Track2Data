@@ -57,7 +57,7 @@ The left sidebar lists the stages. A badge shows where each one stands:
 | ○ | nothing entered yet (optional stages stay ○) |
 
 **Settings save themselves.** There are no Apply buttons: a change is stored a moment after you
-make it, and again when you leave the screen. **Next ▶** stays disabled, with a tooltip saying why,
+make it, and again when you leave the screen. **Next** (bottom right) stays disabled, with a tooltip saying why,
 until Project, Sessions and Metrics are filled in and the calibration is valid.
 
 | # | Screen | What you do |
@@ -168,7 +168,7 @@ sidebar shows ⚠ while any session is identity-free.
 
 - Folders are only read, never modified.
 - Adding the same folder twice is ignored.
-- The status bar (bottom left) shows the session count.
+- The sidebar shows the session count under **Sessions**, and the chips above the table split them into ready and identity-free.
 - Supported: idtracker.ai 6.x output (the legacy v5 layout is also read). v4 is not supported yet (Track2Data tells you so if it recognises a v4 folder; see
   [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)).
 
@@ -208,6 +208,24 @@ you. A third click starts the measurement over.
 
 If a mode is incomplete (no scale, or an unconfirmed unit) the stage shows ✗ and **Next** is
 disabled until you fix it.
+
+### Camera view
+
+Further down the same screen, **Camera view** says how the camera looked at the animals: **Not
+set** (the default), **Top-down**, or **Side view**. It is saved with the project, separately from
+the calibration, and a project that never sets it behaves exactly as before.
+
+Some metrics only make sense for one view. Today that is **Vertical Position (Depth)**, IL-15,
+which needs a side view: on a top-down recording the image's vertical axis is not depth. Until you
+declare a side view, that row is greyed on the Metrics screen and its tooltip says how to switch
+it on; if it is selected anyway, the run skips it and the run's README says so. Declaring a view
+does not switch off any existing metric. Thigmotaxis (IL-14) and distance from the centre (IL-3)
+still assume you are looking down on the arena, so read them accordingly on a side view.
+
+For depth, draw a **main** zone from the waterline to the floor on the Zones screen. The top edge
+is the surface and the bottom edge the floor; Track2Data never substitutes the video frame, so with
+no main zone the depth columns are empty and say why. For time in the upper or lower part of the
+tank, draw stacked secondary zones and use the zone metrics (Z-1 to Z-9).
 
 ## 4. Zones (optional)
 
@@ -380,7 +398,7 @@ Every metric is documented in [`docs/METRICS_SPEC.md`](../METRICS_SPEC.md).
 ## 8. Processing
 
 **Validate pipeline** checks the project and lists anything that would stop a run. **Run pipeline**
-(or the toolbar button, or Ctrl+R) processes every session: import, preprocessing, calibration,
+(or the button in the footer bar, or Ctrl+R) processes every session: import, preprocessing, calibration,
 zone assignment, metrics, export.
 
 <figure>
@@ -528,7 +546,7 @@ Definitions, formulas and references for every metric: [`docs/METRICS_SPEC.md`](
 
 | You see | Why | What to do |
 |---|---|---|
-| **Next ▶** is disabled | A required stage is empty or invalid | Hover over Next: the tooltip names the problem. Check the ✗ / ○ badges in the sidebar |
+| **Next** is disabled | A required stage is empty or invalid | Hover over Next: the tooltip names the problem. Check the ✗ / ○ badges in the sidebar |
 | *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet (a v4-looking folder gets a specific message; see [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)) |
 | Video column says *Not found* | The video path idtracker.ai recorded does not exist on this computer | Select the session and press **Locate Video…** (Sessions). Metrics do not need the video |
 | *READER_NOT_AVAILABLE* | A project session was added with software this version of Track2Data does not have | Install a version that has that reader. Track2Data will not read it with a different one, since that could change the numbers |

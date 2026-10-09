@@ -16,8 +16,28 @@ from dataclasses import dataclass
 from typing import Literal
 
 from track2data.core.models import ProjectManifest
+from track2data.metrics import get as _get_metric
+from track2data.metrics.availability import view_dependent_metrics
+from track2data.zones.extent import water_column
 
 Status = Literal["empty", "valid", "warning", "blocked"]
+
+def _missing_water_column(manifest: ProjectManifest) -> list[str]:
+    """The selected metrics that need a water column the zones do not give.
+
+    Empty unless the project declared a side view, something selected is only meaningful for
+    one, and no main-level zone outlines the water.
+    """
+    if manifest.scene.camera_view != "side":
+        return []
+    sel = manifest.metrics
+    needing = view_dependent_metrics(
+        [*sel.individual, *sel.group, *sel.zone], "side", _get_metric
+    )
+    if needing and water_column(manifest.zones).top_px is None:
+        return needing
+    return []
+
 
 PAGE_NAMES = [
     "Project", "Sessions", "Calibration", "Zones", "Metadata",
@@ -72,6 +92,13 @@ def compute_stage_statuses(
     out[_ZONES] = (
         StageInfo("valid", f"{n_rois} zone(s).") if n_rois else StageInfo("empty", "Optional.")
     )
+    missing = _missing_water_column(manifest)
+    if missing:
+        out[_ZONES] = StageInfo(
+            "warning",
+            "Side view: draw the main zone from the waterline to the floor, "
+            f"so {', '.join(missing)} can measure depth.",
+        )
 
     # Metadata (optional, but a chosen file needs a mapping)
     if manifest.metadata_source is None:
@@ -127,6 +154,9 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
     cal_text = {"scalar": "Scalar", "session": "From tracker"}.get(cal.mode, "Body length")
     if cal.mode == "scalar" and cal.px_per_cm:
         cal_text += f" · {cal.px_per_cm:g} px/cm"
+    view_text = {"top": "Top-down", "side": "Side view"}.get(manifest.scene.camera_view)
+    if view_text:
+        cal_text += f" · {view_text}"
     n_zones = len(manifest.zones.rois)
     sel = manifest.metrics
     n_metrics = len(sel.individual) + len(sel.group) + len(sel.zone)
@@ -141,7 +171,9 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
         manifest.project_name or "Unnamed",
         f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions",
         cal_text,
-        f"{n_zones} zone{'s' if n_zones != 1 else ''}" if n_zones else "No zones",
+        "Draw the water column"
+        if _missing_water_column(manifest)
+        else (f"{n_zones} zone{'s' if n_zones != 1 else ''}" if n_zones else "No zones"),
         meta,
         "Identity switch on" if manifest.preprocess.identity_switch.enabled else "Defaults",
         f"{n_metrics} selected" if n_metrics else "None selected",

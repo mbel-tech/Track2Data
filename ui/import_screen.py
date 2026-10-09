@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
 from track2data.readers import find_reader
 from track2data.readers.confirm import ConfirmDraft
 from ui.dialogs.confirm_format_dialog import ConfirmFormatDialog
+from ui.widgets.dots import level_icon
 
 _COLUMN_HEADERS = [
     "Session ID",
@@ -73,6 +74,7 @@ _COLUMN_HEADERS = [
     "Animals",
     "Identity",
     "Identity-free",
+    "Tracked",
     "Video",
 ]
 (
@@ -83,8 +85,9 @@ _COLUMN_HEADERS = [
     _COL_ANIMALS,
     _COL_IDENTITY,
     _COL_IDENTITY_FREE,
+    _COL_COVERAGE,
     _COL_VIDEO,
-) = range(8)
+) = range(9)
 _VIDEO_FILTER = "Video files (*.mp4 *.avi *.mov *.mkv *.m4v *.mpg *.mpeg *.wmv);;All files (*)"
 _ROLE_SESSION_ID = Qt.ItemDataRole.UserRole
 _PLACEHOLDER = "—"
@@ -198,6 +201,10 @@ class ImportScreen(QWidget):
         for col in range(1, len(_COLUMN_HEADERS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Frame rate and animal count live in the facts chip and the detail pane; hiding the
+        # columns (the cells still exist) leaves room for long session ids beside that pane.
+        self._table.setColumnHidden(_COL_FPS, True)
+        self._table.setColumnHidden(_COL_ANIMALS, True)
         self._table.itemChanged.connect(self._on_item_changed)
         root.addWidget(self._table)
 
@@ -538,6 +545,20 @@ class ImportScreen(QWidget):
         except (OSError, KeyError) as exc:
             QMessageBox.warning(self, "Locate video", str(exc))
 
+    @staticmethod
+    def _coverage_level(coverage: float) -> str:
+        """good from 95 %, check from 85 %, review below (the diagnostics grid's lines)."""
+        return "good" if coverage >= 0.95 else "check" if coverage >= 0.85 else "review"
+
+    def _coverage_item(self, facts) -> QTableWidgetItem:
+        coverage = None if facts is None else facts.tracked_coverage
+        if coverage is None:
+            return QTableWidgetItem(_PLACEHOLDER)
+        item = QTableWidgetItem(f"{coverage * 100:.1f} %")
+        item.setIcon(level_icon(self._coverage_level(coverage)))
+        item.setToolTip("Share of positions the tracker found, across all animals and frames.")
+        return item
+
     def _video_cell(self, ref, facts) -> tuple[str, str]:
         """(text, tooltip) for the Video column."""
         override = (
@@ -666,6 +687,7 @@ class ImportScreen(QWidget):
             free_item.setFlags(flags)
             free_item.setToolTip(self._identity_free_tooltip(ref, facts))
             self._table.setItem(row, _COL_IDENTITY_FREE, free_item)
+            self._table.setItem(row, _COL_COVERAGE, self._coverage_item(facts))
             text, tip = self._video_cell(ref, facts)
             video_item = QTableWidgetItem(text)
             video_item.setToolTip(tip)

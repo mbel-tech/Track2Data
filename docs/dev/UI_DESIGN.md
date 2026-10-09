@@ -56,17 +56,24 @@ QMainWindow
 │   ├── File: New… / Open… / Save / Duplicate as template / Recent ▸ / Quit
 │   ├── Edit: Undo / Redo / Preferences
 │   ├── Run: Validate / Run pipeline / Export…
-│   ├── View: Toggle Run Log / Toggle Diagnostics / Theme ▸
+│   ├── View: Run log / Command palette / Theme ▸ (Light, Dark)
 │   └── Help: About / Open docs / Report issue
-├── QToolBar (back / forward / run / export / cancel)
-├── Central: QStackedWidget (one page per wizard stage)
-├── LeftDock: WizardSidebar (stage list, completion ticks)
-├── BottomDock: RunLogDock
-└── StatusBar (current project, worker count, cache hit rate)
+│   (a theme pill sits at the right end of the menu bar)
+├── Central: page QStackedWidget (one page per wizard stage)
+│   ├── RunLogDock: collapsible 150 px drawer, `HH:MM:SS  message` lines
+│   └── FooterBar: Back · Run log · Run pipeline · Next (Export dataset on Preview)
+├── LeftDock: WizardSidebar (painted rows: numbered dot, stage name, live summary)
+└── Toasts: a dark pill near the bottom for info messages (status bar hidden)
 ```
 
-**Command palette** (Ctrl/Cmd-K, PRD §14): a `QDialog` over the main
-window with fuzzy-matched actions wired through `QAction`.
+The toolbar is gone; Back / Next / Run / Cancel remain `QAction`s that the menu and the footer
+buttons share. Preview & Export stays locked in the sidebar until a run has produced results.
+Colours and type come from `app/resources/track2data-{light,dark}.qss` (tokens in the Teal Field
+design handoff); `app/theme.py` loads them and remembers the choice in `QSettings`.
+
+**Command palette** (Ctrl/Cmd-K, PRD §14): `ui/dialogs/command_palette.py`, a `QDialog` over the
+main window listing stage jumps, run, validate, export, run log, theme and file actions. Each entry
+runs what the menus run; entries that do not apply (no project, no run yet) are hidden.
 
 ---
 
@@ -412,6 +419,12 @@ This section provides implementation-ready detail for all 14 screens: widget typ
 > unit picker, a required confirmation checkbox, and a per-session
 > readiness list. The widget names/behaviour below (measure-on-frame
 > tool, BL sample-count table, orientation pairing) remain unbuilt.
+>
+> The same screen now also holds the project's **Camera view** (Not set /
+> Top-down / Side view, a combo with a one-line explanation). It has its own
+> auto-commit and writes `store.update_scene`, never the calibration, so an
+> unchanged or blocked calibration cannot swallow it and a calibration edit
+> cannot reset it (D-036).
 
 **Stage:** Stage 3 (Calibration)  
 **Purpose:** Select between scalar px-per-cm vs. body-length calibration modes.
@@ -862,8 +875,11 @@ stages green.
 
 ## 9. Theming & accessibility (NFR-7)
 
-- Two themes (light + dark) via Qt stylesheets; system-preference
-  detection on startup.
+- Two themes (light + dark) via Qt stylesheets (`app/resources/*.qss`); system-preference
+  detection on startup, remembered in `QSettings`, switchable from View ▸ Theme or the menu-bar pill.
+  Screens set `objectName` / dynamic properties (`role`, `chip`, `banner`, `card`) and never hard-code colours.
+- Fonts: Atkinson Hyperlegible and IBM Plex Mono are loaded from `app/resources/fonts/` when present;
+  the stylesheets fall back to system fonts otherwise.
 - All controls keyboard-navigable (`Tab` order curated per page).
 - Screen-reader labels via `setAccessibleName` / `setAccessibleDescription`.
 - Contrast palette validated against WCAG AA at design time.

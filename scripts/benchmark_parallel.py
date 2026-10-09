@@ -133,6 +133,7 @@ def build_manifest(folders: list[Path], *, identity_switch: bool, zones: bool) -
         MetricSelection,
         PreprocessConfig,
         ProjectManifest,
+        SceneConfig,
         SecurityConfig,
         SessionRef,
         ZoneSet,
@@ -164,6 +165,8 @@ def build_manifest(folders: list[Path], *, identity_switch: bool, zones: bool) -
         # script wrote.
         security=SecurityConfig(allow_pickle_trajectories=True),
         zones=zone_set,
+        # IL-15 only runs for a declared side view; the benchmark selects every metric.
+        scene=SceneConfig(camera_view="side"),
         preprocess=PreprocessConfig(identity_switch=IdSwitchCfg(enabled=identity_switch)),
         metrics=MetricSelection(individual=individual, group=group, zone=zone_ids),
     )

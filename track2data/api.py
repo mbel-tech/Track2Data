@@ -64,6 +64,7 @@ from track2data.readers import find_reader, read_session
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from track2data.core.models import CameraView
     from track2data.core.session_consistency import SessionSummary
     from track2data.metrics.base import Metric
     from track2data.readers.index import ScanBudget
@@ -814,6 +815,38 @@ class Engine:
                 skipped[mid] = reason
         return skipped
 
+    def camera_view_for(self, session: Session | None = None) -> CameraView:
+        """The camera view *session* was recorded from.
+
+        Project-level today. Every caller asks here rather than reading the manifest, so a
+        per-session view (a project mixing top and side recordings) is a change to this one
+        method.
+        """
+        return self._manifest.scene.camera_view
+
+    def view_skipped_metrics(self, session: Session | None = None) -> dict[str, str]:
+        """Selected metric ids the camera view rules out, mapped to the reason."""
+        from track2data.metrics import get
+        from track2data.metrics.availability import view_skipped_metrics
+
+        selected = [
+            *self._manifest.metrics.individual,
+            *self._manifest.metrics.group,
+            *self._manifest.metrics.zone,
+        ]
+        return view_skipped_metrics(selected, self.camera_view_for(session), get)
+
+    def skipped_metrics(
+        self, identity_free: bool, session: Session | None = None
+    ) -> dict[str, str]:
+        """Every selected metric id this session must not run, mapped to the reason, for the
+        export record: the identity gate and the camera-view gate together. A metric that both
+        gates rule out carries both reasons."""
+        skipped = self.identity_skipped_metrics(identity_free)
+        for mid, reason in self.view_skipped_metrics(session).items():
+            skipped[mid] = f"{skipped[mid]}; also {reason}" if mid in skipped else reason
+        return skipped
+
     def _bin_seconds(self) -> float | None:
         minutes = self._manifest.metrics.timepoint_minutes
         return float(minutes) * 60.0 if minutes and minutes > 0 else None
@@ -913,14 +946,24 @@ class Engine:
         sel = self._manifest.metrics
 
         is_identity_free = self.identity_free_for(psess.session, identity_free)
-        skipped = self.identity_skipped_metrics(is_identity_free)
-        if skipped:
+        identity_skipped = self.identity_skipped_metrics(is_identity_free)
+        view_skipped = self.view_skipped_metrics(psess.session)
+        skipped = self.skipped_metrics(is_identity_free, psess.session)
+        if identity_skipped:
             logger.warning(
                 "Skipping identity-dependent metrics (%s) for session %s: "
                 "the session is identity-free, so per-individual results "
                 "would not correspond to individual animals.",
-                ", ".join(sorted(skipped)),
+                ", ".join(sorted(identity_skipped)),
                 psess.session_id,
+            )
+        if view_skipped:
+            logger.warning(
+                "Skipping metrics (%s) for session %s: the project's camera view is %s, "
+                "which they are not meaningful for.",
+                ", ".join(sorted(view_skipped)),
+                psess.session_id,
+                self.camera_view_for(psess.session),
             )
 
         bin_seconds = self._bin_seconds()
@@ -1194,7 +1237,20 @@ class Engine:
         # display name and whether it was ever tested on real output; the manifest entry knows
         # who chose it and with which options. A reader that is no longer registered has neither.
         reader_cls = find_reader(session.reader)
+        camera_view = self.camera_view_for(session)
+        water_column = None
+        from track2data.metrics import get as _get_metric
+        from track2data.metrics.availability import view_dependent_metrics
+
+        if view_dependent_metrics(metric_results, "side", _get_metric):
+            from track2data.metrics.derived import derive_metric_params
+
+            water_column = derive_metric_params("IL-15", psess, self._manifest.zones)[
+                "water_column"
+            ]
         provenance = SessionProvenance(
+            camera_view=camera_view,
+            water_column=water_column,
             reader=session.reader,
             source_software=(reader_cls.display_name or reader_cls.name) if reader_cls else None,
             reader_verification=reader_cls.verification if reader_cls else None,
@@ -1247,7 +1303,7 @@ class Engine:
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
-            skipped_metrics=self.identity_skipped_metrics(is_identity_free),
+            skipped_metrics=self.skipped_metrics(is_identity_free, psess.session),
         )
 
     def export(
@@ -1548,6 +1604,14 @@ class Engine:
             logger.exception("Could not write the run summary to %s", out_dir)
         return written
 
+    def _camera_view_summary(self) -> list[str]:
+        """One summary bullet naming the declared camera view; nothing when none was declared,
+        so a project that never set one keeps its summary exactly as it was."""
+        from track2data.metrics.availability import view_label
+
+        view = self._manifest.scene.camera_view
+        return [] if view == "unknown" else [f"- Camera view: {view_label(view)}"]
+
     def _project_readme_text(
         self,
         results: list[SessionRunResult],
@@ -1573,6 +1637,7 @@ class Engine:
             "",
             f"- Project hash: `{self._manifest.project_hash()}`",
             f"- Sessions processed: {len(ok)} of {len(results)}",
+            *self._camera_view_summary(),
             "",
             "Per-session outputs are in the subdirectory named after each "
             "session. `sessions.csv` lists every session's frame rate, group "
@@ -1878,7 +1943,7 @@ class Engine:
         sel = self._manifest.metrics
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
-        issues.extend(self._identity_selection_issues())
+        issues.extend(self._gate_selection_issues())
         return issues
 
     def consistency_warnings(self) -> list[str]:
@@ -1911,6 +1976,7 @@ class Engine:
             *heterogeneity_warnings(summaries),
             *calibration_spread_warnings(summaries),
             *reader_advisories(summaries),
+            *self._view_selection_notes(),
         ]
 
     def _session_summaries(self) -> list[SessionSummary]:
@@ -1957,8 +2023,11 @@ class Engine:
         # thing that decides whether *_cm columns are real.
         return session.length_unit
 
-    def _identity_selection_issues(self) -> list[str]:
-        """Warn when the identity gate would empty the whole run.
+    def _gate_selection_issues(self) -> list[str]:
+        """Warn when the identity gate and the camera-view gate would, together, empty the
+        whole run.
+
+        The identity half, in full:
 
         Selecting only identity-dependent metrics on a project where every
         session is identity-free is not an error -- compute_metrics skips
@@ -1975,24 +2044,63 @@ class Engine:
         safeguard, and it isn't worth reading 70 session folders for.
         """
         sessions = self._manifest.sessions
-        if not sessions or not all(ref.is_identity_free() for ref in sessions):
-            return []
-        selected = [
+        selected = {
             *self._manifest.metrics.individual,
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
-        ]
-        if not selected:
+        }
+        if not sessions or not selected:
             return []
-        skipped = self.identity_skipped_metrics(True)
-        if len(skipped) < len(set(selected)):
+        identity = (
+            self.identity_skipped_metrics(True)
+            if all(ref.is_identity_free() for ref in sessions)
+            else {}
+        )
+        view = self.view_skipped_metrics()
+        if len(set(identity) | set(view)) < len(selected):
+            return []
+        if not view:
+            return [
+                "Every session is identity-free and every selected metric "
+                f"({', '.join(sorted(identity))}) requires identity, so the run "
+                "would produce diagnostics only. Select identity-independent "
+                "metrics, or untick 'Identity-free' for the sessions that do "
+                "preserve identities."
+            ]
+        if not identity:
+            fix = (
+                "Set the camera view on the Calibration screen, or select metrics "
+                "that apply to this recording."
+            )
+            return [
+                f"Every selected metric ({', '.join(sorted(view))}) needs a different "
+                "camera view than the project's, so the run would produce diagnostics "
+                f"only. {fix}"
+            ]
+        return [
+            f"Every selected metric ({', '.join(sorted(selected))}) is ruled out, by the "
+            "identity-free sessions or by the project's camera view, so the run would "
+            "produce diagnostics only. Untick 'Identity-free' where identities were "
+            "preserved, set the camera view on the Calibration screen, or select other "
+            "metrics."
+        ]
+
+    def _view_selection_notes(self) -> list[str]:
+        """Say which selected metrics the camera view will skip, when others still run.
+
+        When *every* selected metric is ruled out, validate() already blocks the run with its
+        own message, so this stays silent rather than repeat it.
+        """
+        selected = {
+            *self._manifest.metrics.individual,
+            *self._manifest.metrics.group,
+            *self._manifest.metrics.zone,
+        }
+        view = self.view_skipped_metrics()
+        if not view or len(view) >= len(selected):
             return []
         return [
-            "Every session is identity-free and every selected metric "
-            f"({', '.join(sorted(skipped))}) requires identity, so the run "
-            "would produce diagnostics only. Select identity-independent "
-            "metrics, or untick 'Identity-free' for the sessions that do "
-            "preserve identities."
+            f"{mid} will be skipped: {reason}." for mid, reason in sorted(view.items())
         ]
 
     def _session_calibration_issues(self) -> list[str]:

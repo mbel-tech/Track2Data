@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
+from track2data.metrics.availability import view_unavailable_reason
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 from ui.widgets.autocommit import AutoCommit
@@ -55,6 +56,9 @@ PRESETS: dict[str, list[str] | None] = {
 }
 _ROLE_METRIC_ID = Qt.ItemDataRole.UserRole
 _ROLE_REQUIRES_IDENTITY = Qt.ItemDataRole.UserRole + 1
+#: A name cell's own tooltip (e.g. 'superseded by ...'), which the availability pass keeps and
+#: adds to rather than replaces.
+_ROLE_BASE_TOOLTIP = Qt.ItemDataRole.UserRole + 2
 
 
 def _summarise_ids(session_ids: list[str], limit: int = 3) -> str:
@@ -98,10 +102,11 @@ class MetricsScreen(QWidget):
         if store is not None:
             store.metricsChanged.connect(self._load_from_store)
             store.projectChanged.connect(self._load_from_store)
-            store.sessionsChanged.connect(self._update_identity_graying)
+            store.sessionsChanged.connect(self._update_availability)
+            store.sceneChanged.connect(self._update_availability)
             store.zonesChanged.connect(self._update_zone_tab_enabled)
             self._load_from_store()
-            self._update_identity_graying()
+            self._update_availability()
             self._update_zone_tab_enabled()
 
     # ── build ──────────────────────────────────────────────────────────────
@@ -132,7 +137,7 @@ class MetricsScreen(QWidget):
         self._search.textChanged.connect(self._apply_search)
         tools.addWidget(self._search, 1)
         self._preset_combo = QComboBox()
-        self._preset_combo.addItem("Presets…")
+        self._preset_combo.addItem("Preset: None")
         for name in PRESETS:
             self._preset_combo.addItem(name)
         self._preset_combo.setToolTip("Replace the current selection with a preset")
@@ -264,6 +269,28 @@ class MetricsScreen(QWidget):
             f"Selected: {n_ind + n_grp + n_zone} / {total} metrics "
             f"({n_ind} individual · {n_grp} group · {n_zone} zone)"
         )
+        for index, (name, table) in enumerate(self._tables()):
+            checked = len(self._checked_ids(table))
+            self._tabs.setTabText(index, f"{name} {checked}/{table.rowCount()}")
+        self._preset_combo.setItemText(0, f"Preset: {self.current_preset_name()}")
+
+    def current_preset_name(self) -> str:
+        """The preset the ticked metrics exactly match, "None" when nothing is
+        ticked, otherwise "Custom"."""
+        selected = {
+            mid for _n, table in self._tables() for mid in self._checked_ids(table)
+        }
+        if not selected:
+            return "None"
+        everything = {
+            table.item(row, _COL_INCLUDE).data(_ROLE_METRIC_ID)
+            for _n, table in self._tables()
+            for row in range(table.rowCount())
+        }
+        for name, ids in PRESETS.items():
+            if selected == (everything if ids is None else set(ids)):
+                return name
+        return "Custom"
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
         self._update_counter()
@@ -306,11 +333,13 @@ class MetricsScreen(QWidget):
                 name += f" (superseded by {superseded_by})"
             name_item = QTableWidgetItem(name)
             if superseded_by:
-                name_item.setToolTip(
+                superseded_note = (
                     f"{metric_cls.label} is kept for output compatibility with "
                     f"existing projects. {superseded_by} computes the same idea "
                     "with a better statistic -- see its ⓘ for details."
                 )
+                name_item.setData(_ROLE_BASE_TOOLTIP, superseded_note)
+                name_item.setToolTip(superseded_note)
             table.setItem(row, _COL_NAME, name_item)
 
             doc = metric_cls.documentation
@@ -421,29 +450,30 @@ class MetricsScreen(QWidget):
             self._set_checked(self._zone_table, sel.zone)
             self._quality_spin.setValue(sel.quality_threshold)
             self._timepoint_spin.setValue(sel.timepoint_minutes or 0.0)
-        self._update_identity_graying()
+        self._update_availability()
         self._update_zone_tab_enabled()
         self._update_counter()
 
-    def _update_identity_graying(self) -> None:
-        """Reflect each session's identity-free status onto the rows.
+    def _update_availability(self) -> None:
+        """Grey the rows the project cannot run, and say why, in one pass.
 
-        Keyed on SessionRef.is_identity_free() rather than
-        has_stable_identities, which also folds in coverage heuristics and
-        so used to grey rows the engine would happily have computed (and
-        vice versa). That predicate reads the manifest's cached
-        track_wo_identities plus the user's override; the engine re-reads
-        the flag from the session file itself, but the background probe
-        fills that cache from the same value, so the two agree for every
-        session this screen can see. Three cases:
+        Two things rule a row out, and a row can be ruled out by both:
 
-        * every session identity-free -> disable the row; nothing it could
-          produce would be meaningful.
-        * some sessions identity-free -> leave it selectable but say, by
-          name, which sessions it will be skipped for. Metric selection is
-          one global list, so refusing the tick outright would make those
-          metrics unavailable for the sessions that *can* support them.
-        * none -> clear.
+        * **identity** -- reflects each session's identity-free status. Keyed on
+          SessionRef.is_identity_free() rather than has_stable_identities, which also folds in
+          coverage heuristics and so used to grey rows the engine would happily have computed
+          (and vice versa). That predicate reads the manifest's cached track_wo_identities plus
+          the user's override; the engine re-reads the flag from the session file itself, but
+          the background probe fills that cache from the same value, so the two agree for every
+          session this screen can see. Every session identity-free -> disable the row; some ->
+          leave it selectable but say, by name, which sessions it will be skipped for (metric
+          selection is one global list, so refusing the tick would make the metric unavailable
+          for the sessions that *can* support it); none -> nothing to say.
+        * **camera view** -- a metric that is only meaningful for some views
+          (metrics/availability.py) is disabled until the project declares one of them.
+
+        Tooltips are rebuilt from their parts every time, so a note a row owns (a superseded
+        metric's explanation) is kept, and a note that no longer applies disappears.
         """
         if self._store is None or self._store.manifest is None:
             return
@@ -451,14 +481,15 @@ class MetricsScreen(QWidget):
         free_ids = [s.session_id for s in sessions if s.is_identity_free()]
         all_identity_free = bool(sessions) and len(free_ids) == len(sessions)
         some_identity_free = bool(free_ids) and not all_identity_free
+        camera_view = self._store.manifest.scene.camera_view
 
         if all_identity_free:
-            blocked_tooltip = (
+            identity_note = (
                 "Every session in this project is identity-free, so this "
                 "metric will be skipped for all of them."
             )
         else:
-            blocked_tooltip = (
+            identity_note = (
                 f"Will be skipped for {len(free_ids)} of {len(sessions)} "
                 f"identity-free session{'s' if len(free_ids) != 1 else ''}: "
                 f"{_summarise_ids(free_ids)}."
@@ -471,19 +502,25 @@ class MetricsScreen(QWidget):
                 if include_item is None or name_item is None:
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
+                view_reason = view_unavailable_reason(
+                    metrics.get(include_item.data(_ROLE_METRIC_ID)), camera_view
+                )
+
+                notes: list[str] = []
+                if requires_identity and (all_identity_free or some_identity_free):
+                    notes.append(identity_note)
+                if view_reason is not None:
+                    notes.append(view_reason[0].upper() + view_reason[1:] + ".")
+                blocked = (requires_identity and all_identity_free) or view_reason is not None
+
                 flags = include_item.flags()
-                if requires_identity and all_identity_free:
+                if blocked:
                     include_item.setFlags(flags & ~Qt.ItemFlag.ItemIsEnabled)
-                    include_item.setToolTip(blocked_tooltip)
-                    name_item.setToolTip(blocked_tooltip)
-                elif requires_identity and some_identity_free:
-                    include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
-                    include_item.setToolTip(blocked_tooltip)
-                    name_item.setToolTip(blocked_tooltip)
                 else:
                     include_item.setFlags(flags | Qt.ItemFlag.ItemIsEnabled)
-                    include_item.setToolTip("")
-                    name_item.setToolTip("")
+                include_item.setToolTip("\n".join(notes))
+                base = name_item.data(_ROLE_BASE_TOOLTIP)
+                name_item.setToolTip("\n\n".join(part for part in (base, *notes) if part))
 
     def _update_zone_tab_enabled(self) -> None:
         if self._store is None or self._store.manifest is None:

@@ -386,6 +386,7 @@ class ExportScreen(QWidget):
             self._open_folder_btn.setEnabled(True)
             self._copy_cli_btn.setEnabled(True)
             self._update_snippets(result)
+            self._show_receipt(result)
         elif isinstance(result, Exception):
             self._status_label.setText("Failed — see log for details.")
             self._store.append_log(f"### Export failed\n```\n{result}\n```\n")
@@ -399,7 +400,23 @@ class ExportScreen(QWidget):
         if self._store is not None:
             self._store.append_log("### Export cancelled\n")
 
-    # ── receipt table ────────────────────────────────────────────────────────
+    # ── receipt ──────────────────────────────────────────────────────────────
+
+    def _show_receipt(self, result: RunResult) -> None:
+        """Open the "Dataset exported" receipt (non-blocking) when files were written."""
+        if not result.written:
+            return
+        from ui.dialogs.export_receipt_dialog import ExportReceiptDialog, receipt_rows
+
+        out_dir = self._last_out_dir or self._resolved_out_dir()
+        n_ok = sum(1 for s in result.sessions if not s.error)
+        dialog = ExportReceiptDialog(
+            out_dir, n_ok, receipt_rows(result.written, out_dir), self._cli_equivalent(), self
+        )
+        dialog.finished.connect(dialog.deleteLater)
+        self._receipt_dialog = dialog
+        dialog.open()
+
 
     def _populate_receipt_table(self, result: RunResult) -> None:
         written = result.written

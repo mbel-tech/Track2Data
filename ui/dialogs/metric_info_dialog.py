@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.metrics.availability import required_views_text
 from track2data.metrics.base import Metric
 
 
@@ -59,6 +60,16 @@ class MetricInfoDialog(QDialog):
             notice.setStyleSheet("color: #b06a00; font-size: 12px;")
             notice.setWordWrap(True)
             layout.addWidget(notice)
+
+        needed_view = required_views_text(metric_cls)
+        if needed_view:
+            view_notice = QLabel(
+                f"Needs a {needed_view} recording. Set the camera view on the Calibration "
+                "screen; until then this metric is skipped."
+            )
+            view_notice.setStyleSheet("color: #b06a00; font-size: 12px;")
+            view_notice.setWordWrap(True)
+            layout.addWidget(view_notice)
 
         body = QTextEdit()
         body.setReadOnly(True)

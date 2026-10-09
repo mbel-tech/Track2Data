@@ -428,3 +428,45 @@ def test_zoom_is_clamped(qtbot) -> None:
     for _ in range(200):
         c.zoom_by(0.5)
     assert c.transform().m11() >= 0.02
+
+
+# ── a blank canvas is the size of the video frame ────────────────────────────
+
+
+def test_canvas_without_a_background_is_sized_from_the_frame(qtbot) -> None:
+    """Zones are stored in image pixels: a blank scene of any other size would make every
+    vertex a coordinate in a picture that is not the video."""
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(None, None, frame_size=(1920, 1080))
+
+    rect = canvas.scene().sceneRect()
+    assert (rect.width(), rect.height()) == (1920, 1080)
+
+
+@pytest.mark.parametrize("frame_size", [None, (0, 0), (1920, 0), (0, 1080)])
+def test_canvas_keeps_the_default_scene_when_the_frame_is_unknown(qtbot, frame_size) -> None:
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(None, None, frame_size=frame_size)
+
+    rect = canvas.scene().sceneRect()
+    assert (rect.width(), rect.height()) == (640, 480)
+
+
+def test_canvas_background_image_wins_over_the_frame_size(qtbot, tmp_path: Path) -> None:
+    from PySide6.QtGui import QImage
+
+    png_path = tmp_path / "background.png"
+    image = QImage(20, 10, QImage.Format.Format_RGB32)
+    image.fill(0)
+    image.save(str(png_path))
+
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+    canvas.load_session(png_path, None, frame_size=(1920, 1080))
+
+    rect = canvas.scene().sceneRect()
+    assert (rect.width(), rect.height()) == (20, 10)

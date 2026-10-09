@@ -28,6 +28,19 @@ if TYPE_CHECKING:
     from track2data.core.models import Session
 
 
+def _tracked_coverage(raw_xy) -> float | None:
+    """Fraction of (frame, animal) positions with both coordinates present."""
+    try:
+        import numpy as np
+
+        xy = np.asarray(raw_xy, dtype=float)
+        if xy.size == 0 or xy.ndim != 3:
+            return None
+        return float(np.isfinite(xy).all(axis=-1).mean())
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class SessionFacts:
     """Read-only facts about one session, probed off its trajectory files.
@@ -75,6 +88,8 @@ class SessionFacts:
     # None for an unreachable path). A "Locate video..." choice is stored on
     # the manifest, not here: see ProjectStore.set_video_path.
     video_path: Path | None = None
+    # Share of (frame, animal) positions the tracker found; None when not measured.
+    tracked_coverage: float | None = None
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -107,4 +122,5 @@ class SessionFacts:
             ),
             background_image_path=session.background_image_path,
             video_path=session.video.path,
+            tracked_coverage=_tracked_coverage(session.raw_xy),
         )

@@ -803,3 +803,41 @@ include estimated frames, which D-11 counts and Z-5 flags (`estimated`).
 gaps the user chose keeps memory bounded, keeps an estimate visibly an estimate, and leaves a
 contiguous session byte-for-byte on its old path.
 
+---
+
+### D-036 · Camera view is a project setting; depth is IL-15, measured against the main zones
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-08-side-view-depth-design.md`
+(sub-project C of `docs/3d-movement/2026-10-08-3d-roadmap.md`). The unmerged
+`feat/native-units` branch also numbered a decision D-032, which `main` has since used for
+something else, so that branch needs renumbering when it lands. It does not change D-031: 3-D
+data still reduces to a chosen plane.
+
+**Decision:** *Setting.* `ProjectManifest.scene.camera_view` is `unknown` (default), `top` or
+`side`, declared once on the Calibration screen. It is top-level, not inside `ZoneSet` (the Zones
+screen replaces that object on Clear/Load/Import) nor `CalibrationConfig` (hashed into the
+preprocessing cache key, which a view never changes). *Gate.* A metric names the views it is
+meaningful for in `Metric.valid_camera_views` (a set; `None` = any). A metric the view rules out
+is greyed, skipped with a reason that reaches the run README, and never silently computed on the
+wrong axis. *Existing metrics are deliberately not gated:* IL-3 and IL-14 assume a top-down view,
+but gating them would change what existing projects get. *IL-15, not Z-10.* Exports bucket
+metrics by ID prefix and the UI by level, so an individual-level metric must be IL-xx; Z-10 is
+re-reserved for auto depth bands. *Depth.* 0 = water surface, 1 = tank floor. The water column is
+the vertical span of every main-level "+" zone pooled (not per animal like IL-3), and when there
+is none the values are empty with a stated reason, never the video frame. Frames outside the
+column are dropped and counted, never clipped. *Zones canvas.* The blank Zones canvas is the size
+of the video frame, and the first zone saved records it (`source_*_px`); a zone set that already
+holds zones is never stamped.
+
+**Rationale:** Without a declared view, "depth" on a top-down recording would be computed from a
+meaningless y axis and look plausible. Clipping would manufacture "at the surface" and "at the
+floor" occupancy out of reflections and tracker noise. The canvas fix is here because depth is
+only right if the zones are in the video's own pixels, which they were not for any tracker but
+idtracker.ai.
+
+**Unverified:** that an idtracker.ai session's `background.png` has the video's pixel size. The
+Zones canvas for an idtracker.ai session is sized from that image, while the frame size the zone
+set now records comes from the session. IL-3, IL-14, IL-15 and every zone metric already rested on
+the two agreeing. The only idtracker.ai sessions in the repository are synthetic (`tests/conftest.py`
+writes a placeholder PNG), so this could not be checked; check it on a real session before relying
+on it, and if they differ, the recorded size would hide the discrepancy.
