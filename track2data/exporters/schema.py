@@ -105,6 +105,7 @@ _EXPLICIT_UNITS: dict[str, str] = {
 
     # Categorical.
     "bout_criterion_effective": "categorical",
+    "depth_extent_source": "categorical",
     "home_base_stable": "boolean",
     "after_gap": "boolean",
     "estimated": "boolean",

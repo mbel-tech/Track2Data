@@ -319,3 +319,59 @@ def test_z2_total_area_is_never_negative_for_an_over_subtracted_zone() -> None:
     result = derive_metric_params("Z-2", psess, zone_set)
 
     assert result["total_arena_area"] <= 0.0  # the malformed input is preserved as-is
+
+
+# ── IL-15 (vertical position): the water column ──────────────────────────────
+
+
+def _tank() -> ROI:
+    return ROI(name="tank", level="main", vertices=[(0, 100), (500, 100), (500, 700), (0, 700)])
+
+
+def test_il15_derives_the_water_column_from_the_main_zones() -> None:
+    zones = ZoneSet(
+        rois=[_tank()]
+    )
+    derived = derive_metric_params("IL-15", _make_psess(), zones)
+    assert derived["water_column"] == {"top_px": 100.0, "bottom_px": 700.0, "source": "zone:tank"}
+
+
+def test_il15_without_zones_has_no_extent_and_does_not_fall_back_to_the_frame() -> None:
+    derived = derive_metric_params("IL-15", _make_psess(width_px=1000, height_px=800), ZoneSet())
+    assert derived["water_column"] == {
+        "top_px": None,
+        "bottom_px": None,
+        "source": "none:no_main_zone",
+    }
+
+
+def test_il15_refuses_zones_drawn_at_another_frame_size() -> None:
+    zones = ZoneSet(
+        rois=[_tank()],
+        source_width_px=640,
+        source_height_px=480,
+    )
+    derived = derive_metric_params("IL-15", _make_psess(width_px=1000, height_px=800), zones)
+    assert derived["water_column"]["top_px"] is None
+    assert derived["water_column"]["source"] == "none:frame_size_mismatch"
+
+
+def test_il15_accepts_zones_drawn_at_the_same_frame_size() -> None:
+    zones = ZoneSet(
+        rois=[_tank()],
+        source_width_px=1000,
+        source_height_px=800,
+    )
+    derived = derive_metric_params("IL-15", _make_psess(width_px=1000, height_px=800), zones)
+    assert derived["water_column"]["source"] == "zone:tank"
+
+
+def test_il15_zones_with_no_recorded_frame_size_are_trusted() -> None:
+    """Zones drawn by hand before the canvas stamped a frame size carry none; refusing them
+    would break every existing project, so only a *recorded* disagreement is refused."""
+    zones = ZoneSet(
+        rois=[_tank()]
+    )
+    assert zones.source_width_px is None
+    derived = derive_metric_params("IL-15", _make_psess(), zones)
+    assert derived["water_column"]["source"] == "zone:tank"

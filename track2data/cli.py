@@ -191,6 +191,7 @@ def list_metrics(level: str | None) -> None:
     Triggers lazy loading of all built-in metric modules before listing.
     """
     from track2data.metrics import _load_builtins, _registry
+    from track2data.metrics.availability import required_views_text
 
     _load_builtins()  # ensure builtins are registered
 
@@ -209,16 +210,20 @@ def list_metrics(level: str | None) -> None:
     # by hand in the manifest), so this column is the only place a CLI
     # user can see which metrics an identity-free session will refuse.
     idy_w = len("IDENTITY")
+    # Likewise for the camera view: the CLI user declares it by editing the manifest, so this is
+    # where they find out which metrics a declared view switches on.
+    view_w = max(len("VIEW"), *(len(required_views_text(m) or "any") for m in metrics))
 
     click.echo(
-        f"{'ID':<{id_w}}  {'LEVEL':<{lvl_w}}  {'IDENTITY':<{idy_w}}  NAME"
+        f"{'ID':<{id_w}}  {'LEVEL':<{lvl_w}}  {'IDENTITY':<{idy_w}}  {'VIEW':<{view_w}}  NAME"
     )
-    click.echo("-" * (id_w + lvl_w + idy_w + 32))
+    click.echo("-" * (id_w + lvl_w + idy_w + view_w + 34))
     for m in metrics:
         label = getattr(m, "label", getattr(m, "name", ""))
         needs = "required" if m.requires_identity else "free"
+        view = required_views_text(m) or "any"
         click.echo(
-            f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {label}"
+            f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {view:<{view_w}}  {label}"
         )
 
 

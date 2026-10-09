@@ -93,7 +93,8 @@ exporters, not metrics.
 **Binning rules.** Each bin is a slice of the session, but anything a metric
 derives *from the data* is resolved once on the whole session so bins stay
 comparable: the IL-4/IL-7 activity threshold (`mean speed x multiplier`), the fitted
-bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the Z-2/Z-8 zone areas.
+bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the IL-15 water column, the
+Z-2/Z-8 zone areas.
 Consequences: IL-1 path length loses the one step across each bin edge, so bins sum
 to slightly less than the whole session; Z-1 `time_s` is exactly additive; Z-6
 `first_entry_t_s` is a latency from the start of the bin. Z-5 event `frame`/`t_s` stay
@@ -127,6 +128,7 @@ Level             Category                 IDs
 Individual        Locomotion               IL-1, IL-2, IL-6
                   Activity / freezing      IL-4, IL-7
                   Space use                IL-3, IL-9, IL-10, IL-14
+                  Vertical position        IL-15
                   Path geometry            IL-5, IL-8, IL-11
 Group             Social spacing           GL-1, GL-2, GL-13
                   Cohesion                 GL-4, GL-6, GL-10, GL-15
@@ -388,6 +390,24 @@ info-button modal (§6).
 | **Parameters** | `arena_polygon_vertices` / `arena_polygon_vertices_per_animal` are `derived=True` and cannot be overridden. `wall_contact_threshold_px` (float, px, default 20.0). |
 | **Reference** | Simon et al. 1994, Behav. Brain Res. 61(1):59-64 (thigmotaxis as an index of anxiety in mice) — DOI [10.1016/0166-4328(94)90008-6](https://doi.org/10.1016/0166-4328(94)90008-6) |
 | **Supporting references** | Schnorr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish) (DOI: 10.1016/j.bbr.2011.12.016); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031) |
+
+#### IL-15 — Vertical position (depth)
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Vertical position (depth in the water column) |
+| **Level** | Individual; trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.xy` (the y column); the water column, derived per session from the main zones (never user-supplied); `px_per_cm` when calibrated |
+| **Required preprocessing** | Zone assignment is not needed; main-level zones must exist. The project's **camera view must be set to side view** (Calibration screen) or the metric is skipped and the run records why |
+| **Formula** | `T`, `B` = top and bottom image rows of the main zones (`T < B`); `d[t,k] = (y[t,k] − T) / (B − T)` for frames with `T ≤ y[t,k] ≤ B`; `mean_depth_fraction`, `median_depth_fraction` and `sd_depth_fraction` (n − 1) over those frames; `mean_depth_cm = mean(y − T) / px_per_cm`; `frac_outside_extent` = share of non-NaN frames with `y < T` or `y > B` |
+| **Output columns** | `individual_id`, `mean_depth_fraction`, `median_depth_fraction`, `sd_depth_fraction`, `mean_depth_cm`, `frac_outside_extent`, `depth_extent_source` |
+| **Units** | fraction (0 = water surface, 1 = tank floor); cm; fraction; categorical |
+| **Assumptions** | The project declares a side camera view, and the top edge of the main zones is the water surface and the bottom edge the tank floor. The camera is upright: image rows grow downward, so a larger y is deeper. Every main-level additive ("+") zone is pooled into one column, so tanks side by side share it; tanks stacked on top of each other would pool into one tall column. Subtractive ("−") zones and secondary-level zones do not move the extent. Frames outside the column are dropped and counted, never clipped to the surface or floor. Interpolated frames are included. |
+| **Warnings** | No refraction or parallax correction: a fish near the front glass looks larger and sits at a different apparent depth than one at the back, and depth in cm uses a single scale for the whole picture. A column taken from zones that do not match the video, or a tracker following reflections, shows up as a high `frac_outside_extent` (a warning is logged above 5 %). Without a main zone there is no depth: the values are NaN and `depth_extent_source` says why (`none:no_main_zone`, `none:degenerate_zone`, `none:frame_size_mismatch` for zones drawn at another recorded frame size, `none:not_derived`); the video frame is never used instead. Depth is measured from the surface; height above the floor is `1 − depth`. For band occupancy, latency, visits and dwell on a side view, draw stacked secondary-level zones and use Z-1 to Z-9. |
+| **Parameters** | `water_column` is `derived=True` and cannot be overridden. |
+| **Reference** | Standard descriptive statistic of vertical position in the water column; no single originating work defines this mean-depth fraction. The construct, vertical position as a behavioural measure in novel-tank assays, is in the supporting references. |
+| **Supporting references** | Cachat et al. 2010, Nat. Protoc. 5(11):1786-1799 (measuring behavioral and endocrine responses to novelty stress in adult zebrafish) (DOI: 10.1038/nprot.2010.140); Egan et al. 2009, Behav. Brain Res. 205(1):38-44 (understanding behavioral and physiological phenotypes of stress and anxiety in zebrafish) (DOI: 10.1016/j.bbr.2009.06.022); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031); Stewart et al. 2012, Neuropharmacology 62(1):135-143 (modeling anxiety using adult zebrafish: a conceptual review -- no operational threshold given) (DOI: 10.1016/j.neuropharm.2011.07.037); Kalueff et al. 2013, Zebrafish 10(1):70-86 (towards a comprehensive catalog of zebrafish behavior 1.0 and beyond) (DOI: 10.1089/zeb.2012.0861) |
 
 ### 4.2 Zone metrics
 
@@ -804,6 +824,7 @@ three together.
 | IL-10 Roaming Entropy | ❌ | Per-animal time series |
 | IL-11 Circular Statistics of Heading | ❌ | Per-animal time series |
 | IL-14 Wall-Distance Thigmotaxis | ❌ | Per-animal time series |
+| IL-15 Vertical Position (Depth) | ❌ | Per-animal time series |
 | GL-1 Nearest-Neighbour Distance | ✅ | Unordered point set per frame |
 | GL-2 Inter-Individual Distance | ✅ | Unordered point set per frame |
 | GL-3 Polarisation | ❌ | Heading requires per-individual tracklets |
@@ -1130,6 +1151,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | IL-9, IL-10 | `metrics/individual.py` | `HomeBaseOccupancy`, `RoamingEntropy` | Share `_occupancy_grid_counts` |
 | IL-11 | `metrics/individual.py` | `CircularHeadingStats` | np-only; Zar's Rayleigh-test approximation |
 | IL-14 | `metrics/individual.py` | `WallDistanceThigmotaxis` | `shapely` -- the only IL-* metric with that dependency |
+| IL-15 | `metrics/individual.py` | `VerticalPosition` | np-only; the water column comes from `zones/extent.py`, derived in `metrics/derived.py`; gated by `Metric.valid_camera_views` (`metrics/availability.py`) |
 
 ### 5.1 Shared computations (no duplicated work)
 
@@ -1360,7 +1382,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 15 of the 34
+   it is disabled with an explanatory tooltip for the 15 of the 35
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by

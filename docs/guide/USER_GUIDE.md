@@ -216,6 +216,24 @@ you. A third click starts the measurement over.
 If a mode is incomplete (no scale, or an unconfirmed unit) the stage shows ✗ and **Next** is
 disabled until you fix it.
 
+### Camera view
+
+Further down the same screen, **Camera view** says how the camera looked at the animals: **Not
+set** (the default), **Top-down**, or **Side view**. It is saved with the project, separately from
+the calibration, and a project that never sets it behaves exactly as before.
+
+Some metrics only make sense for one view. Today that is **Vertical Position (Depth)**, IL-15,
+which needs a side view: on a top-down recording the image's vertical axis is not depth. Until you
+declare a side view, that row is greyed on the Metrics screen and its tooltip says how to switch
+it on; if it is selected anyway, the run skips it and the run's README says so. Declaring a view
+does not switch off any existing metric. Thigmotaxis (IL-14) and distance from the centre (IL-3)
+still assume you are looking down on the arena, so read them accordingly on a side view.
+
+For depth, draw a **main** zone from the waterline to the floor on the Zones screen. The top edge
+is the surface and the bottom edge the floor; Track2Data never substitutes the video frame, so with
+no main zone the depth columns are empty and say why. For time in the upper or lower part of the
+tank, draw stacked secondary zones and use the zone metrics (Z-1 to Z-9).
+
 ## 4. Zones (optional)
 
 Zones are regions of interest (the whole arena, a centre area, a feeder). Zone metrics need at least

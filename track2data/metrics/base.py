@@ -16,6 +16,7 @@ from typing import Any, ClassVar, Literal
 import pandas as pd
 from pydantic import BaseModel, model_validator
 
+from track2data.core.models import CameraView
 from track2data.metrics.references import Reference
 
 
@@ -131,6 +132,11 @@ class Metric(ABC):
     level: ClassVar[Literal["individual", "group", "zone", "diagnostic"]]
     priority: ClassVar[Literal["primary", "optional", "advanced", "diagnostic"]]
     requires_identity: ClassVar[bool]
+    # The camera views this metric is meaningful for; None = any view, which is the safe default
+    # (a legacy project declares none). A set rather than one required value so a later
+    # "top-down or not set" gate cannot lock out legacy projects. Read it through
+    # metrics/availability.py, never directly: test doubles predate the attribute.
+    valid_camera_views: ClassVar[frozenset[CameraView] | None] = None
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False
@@ -140,7 +146,7 @@ class Metric(ABC):
     window_safe: ClassVar[bool] = True
     output_columns: ClassVar[list[str]]
     documentation: ClassVar[MetricDocumentation]
-    # Most metrics (30 of 50 today) take no configuration at all --
+    # Most metrics (30 of 51 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.

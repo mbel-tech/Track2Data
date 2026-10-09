@@ -280,16 +280,45 @@ class TestUILayer:
         assert store.manifest.export_targets == targets
         assert fired == [True]
 
+    def test_project_store_update_scene(self, qt_app, tmp_path: Path) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import SceneConfig
+
+        store = ProjectStore()
+        store.new_project("scene-test", tmp_path)
+        assert store.manifest.scene.camera_view == "unknown"
+        fired: list[bool] = []
+        store.sceneChanged.connect(lambda: fired.append(True))
+
+        store.update_scene(SceneConfig(camera_view="side"))
+
+        assert store.manifest.scene.camera_view == "side"
+        assert fired == [True]
+
+    def test_project_store_scene_survives_save_and_reopen(self, qt_app, tmp_path: Path) -> None:
+        from app.state import ProjectStore
+        from track2data.core.models import SceneConfig
+
+        store = ProjectStore()
+        store.new_project("scene-save", tmp_path)
+        store.update_scene(SceneConfig(camera_view="top"))
+        saved = store.save_project()
+
+        store2 = ProjectStore()
+        store2.open_project(saved)
+        assert store2.manifest.scene.camera_view == "top"
+
     def test_project_store_setters_are_noop_without_a_project(self, qt_app) -> None:
         """Matches the existing guard on every other setter (update_calibration,
         update_zones, etc.): silently do nothing when no project is open,
         rather than crash on self._manifest.model_copy(...)."""
         from app.state import ProjectStore
-        from track2data.core.models import ExportTarget, MappingRule, MetadataSource
+        from track2data.core.models import ExportTarget, MappingRule, MetadataSource, SceneConfig
 
         store = ProjectStore()
         assert store.manifest is None
 
+        store.update_scene(SceneConfig(camera_view="side"))
         store.update_metadata_source(MetadataSource(path=Path("x.csv"), sha256="x"))
         store.update_mapping(MappingRule())
         store.update_export_targets([ExportTarget(exporter_name="csv_long")])

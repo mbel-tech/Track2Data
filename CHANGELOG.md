@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Side-view depth: a camera-view setting and IL-15 vertical position.** The Calibration
+  screen has a new *Camera view* setting (Not set / Top-down / Side view), saved with the
+  project. It defaults to Not set, so existing projects behave exactly as before. Declaring a
+  side view switches on IL-15, which reports each animal's depth as a fraction of the water
+  column (0 = surface, 1 = floor), the mean distance below the surface in cm when calibrated,
+  the spread, and the share of frames that fell outside the column. The column is the vertical
+  span of the main zones, so draw a main zone from the waterline to the floor on the Zones
+  screen. With no main zone the values are empty and `depth_extent_source` says why; the video
+  frame is never used instead. Frames outside the column are dropped and counted, not clipped.
+  A metric the camera view rules out is greyed on the Metrics screen with the fix in its tooltip,
+  skipped with a stated reason in the run's README, and a side view with no water column gets a
+  warning on the Zones stage. The per-session README and `manifest.json` record the view and the
+  water column used, and `list-metrics` has a VIEW column. Adding the setting changes
+  `project_hash` once for every project, as any new manifest field does.
 - **Ctrax raw `.mat` input** ("Save Tracks as Matlab File"). One session per file; the frame
   rate comes from the file's timestamps (an average over the whole span) and the frame size is
   asked for, because Ctrax measures y from the bottom and the height is needed to put it back in
@@ -975,6 +989,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ignored, and a run with no successful session is no longer labelled *Results ready*. Export says
   it recomputes under the current settings.
 
+- **Zones drawn for any tracker other than idtracker.ai were not in video pixels.** Only
+  idtracker.ai sessions supplied a backdrop; every other reader got a blank 640x480 Zones canvas
+  and saved zones recorded no frame size, so hand-drawn zones (and the Z-1 to Z-9, IL-3 and IL-14
+  results that use them) were only right if the video happened to be 640x480. The canvas is now
+  the size of the video frame and the first zone saved records it. The canvas is still blank for
+  those trackers: there is no picture to draw on yet. **Zones you drew on the old blank canvas
+  are not relabelled; redraw them.**
+- **The "superseded by Z-8" note on Z-2 disappeared as soon as a project was open.** The
+  identity pass on the Metrics screen reset every tooltip it did not own.
+
 - **The test process no longer aborts at exit.** After every GUI test passed, pytest could crash in Qt
   teardown (`QObject: shared QObject was deleted directly`, exit 134), failing the CI test jobs.
   Standalone screens, tables and dialogs created in tests are now registered with pytest-qt so they
@@ -1052,7 +1076,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the manifest's session id, which can differ from the id the reader derives. Blob enrichment is
   limited to idtracker.ai readers. Cached sessions made by the faulty path are not reused (cache
   schema 3), so a rerun may recompute once.
-
 - **A session in the legacy idtracker.ai layout could not be opened by auto-detection.**
   A raw `trajectories.npy` array beside a `video_object.npy` was claimed first by the
   unified reader, which then failed with `IDT_FORMAT_AMBIGUOUS` ("expected a dict, got
