@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -25,12 +27,16 @@ from track2data.views.pairing import (
     pair_by_regex,
     validate_fish_map,
 )
+from ui.preview_screen import TrajectoryData, load_trajectory_data
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.regex_help import RegexHelpPopover
+from ui.widgets.trajectory_view import TrajectoryView
 from ui.widgets.weak_slot import weak_slot
 
 ROLE_ITEMS = (("(not set)", None), ("Top", "top"), ("Side", "side"))
 NEEDS_MATCHING = "Needs matching"
+NO_MATCH = "(no match)"
+USED_MARK = " (used)"
 EMPTY_TEXT = "Open a 3-D project and add sessions to set up the views."
 
 
@@ -103,6 +109,44 @@ class ViewsScreen(QWidget):
         manual.addWidget(self._manual_add_btn)
         pairs_lay.addLayout(manual)
         root.addWidget(self._pairs_box)
+
+        self._match_box = QWidget()
+        mbox = QVBoxLayout(self._match_box)
+        mbox.setContentsMargins(0, 0, 0, 0)
+        mbox.setSpacing(8)
+        match_heading = QLabel("Match fish")
+        match_heading.setObjectName("SectionTitle")
+        mbox.addWidget(match_heading)
+        self._match_table = QTableWidget(0, 2)
+        self._match_table.setObjectName("ViewsMatchTable")
+        self._match_table.setHorizontalHeaderLabels(["Top fish", "Side fish"])
+        self._match_table.horizontalHeader().setStretchLastSection(True)
+        self._match_table.verticalHeader().setVisible(False)
+        self._match_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._match_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._match_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._match_table.setMaximumHeight(200)
+        mbox.addWidget(self._match_table)
+        self._match_issues = QLabel("")
+        self._match_issues.setObjectName("ErrorLabel")
+        self._match_issues.setWordWrap(True)
+        mbox.addWidget(self._match_issues)
+        self._match_status = QLabel("")
+        self._match_status.setObjectName("PageLead")
+        self._match_status.setWordWrap(True)
+        mbox.addWidget(self._match_status)
+        plots = QHBoxLayout()
+        self._top_plot = TrajectoryView()
+        self._side_plot = TrajectoryView()
+        for plot in (self._top_plot, self._side_plot):
+            plot.setMinimumHeight(200)
+            plots.addWidget(plot, 1)
+        mbox.addLayout(plots)
+        self._match_box.setVisible(False)
+        root.addWidget(self._match_box)
+        self._load_tasks: dict[str, str] = {}
+        self._match_table.itemSelectionChanged.connect(self._apply_highlight)
+        self.pairSelected.connect(self._on_pair_selected)
         self._rebuilding = False
         self._last_pair: tuple[str, str] | None = None
         self._pairs_table.itemSelectionChanged.connect(self._on_pair_selection)
@@ -156,6 +200,7 @@ class ViewsScreen(QWidget):
             store.modeChanged.connect(self._refresh)
             store.viewsChanged.connect(self._refresh)
             store.sessionFactsChanged.connect(self._refresh)
+            store.taskFinished.connect(self._on_traj_task_finished)
         self._refresh()
 
     def _pattern_row(self, layout: QVBoxLayout, caption: str, placeholder: str):
@@ -203,6 +248,7 @@ class ViewsScreen(QWidget):
                     edit.blockSignals(True)
                     edit.setText(text)
                     edit.blockSignals(False)
+        self._fill_match()
         self._update_matches()
 
     def _fill_roles(self, sessions) -> None:
@@ -381,6 +427,119 @@ class ViewsScreen(QWidget):
             self._store.update_view_pair(ViewPair(top_session_id=top, side_session_id=side))
         except ValueError as exc:
             self._error_label.setText(str(exc))
+
+    # ── manual matching ────────────────────────────────────────────────────
+
+    def _on_pair_selected(self, pair: object) -> None:
+        """Idempotent; None clears the panel. Never writes to the store."""
+        self._load_tasks = {}
+        self._match_status.setText("")
+        if not pair or self._store is None or self._store.manifest is None:
+            self._match_box.setVisible(False)
+            self._fill_match()
+            return
+        self._match_box.setVisible(True)
+        self._fill_match()
+        top_id, side_id = pair
+        self._match_status.setText("Loading tracks…")
+        for role, sid in (("top", top_id), ("side", side_id)):
+            fn = functools.partial(
+                load_trajectory_data, self._store.manifest, sid, self._store.cache_dir
+            )
+            self._load_tasks[self._store.tasks.submit(fn)] = role
+
+    def _on_traj_task_finished(self, task_id: str, result: object) -> None:
+        role = self._load_tasks.pop(task_id, None)
+        if role is None:
+            return
+        if isinstance(result, Exception) or not isinstance(result, TrajectoryData):
+            self._match_status.setText(f"Could not load {role} tracks: {result}")
+            return
+        plot = self._top_plot if role == "top" else self._side_plot
+        plot.set_data(
+            result.raw_xy, result.xy, result.fps,
+            background_path=result.background, size=result.size,
+        )
+        if not self._load_tasks and not self._match_status.text().startswith("Could not"):
+            self._match_status.setText("Select a fish to highlight it in both views.")
+
+    def _fill_match(self) -> None:
+        """Rebuild the matching table from the store (no store writes)."""
+        table = self._match_table
+        pair = self._find_pair(*self._current_pair) if self._current_pair else None
+        keep = table.selectionModel().selectedRows()
+        keep_row = keep[0].row() if keep else None
+        table.blockSignals(True)
+        try:
+            table.clearSelection()
+            if pair is None:
+                table.setRowCount(0)
+                table.setEnabled(True)
+                self._match_issues.setText("")
+                return
+            top_l = self._labels(pair.top_session_id)
+            side_l = self._labels(pair.side_session_id)
+            free = {s.session_id for s in self._manifest().sessions if s.is_identity_free()}
+            msgs = validate_fish_map(
+                pair.fish_map, top_l, side_l,
+                top_identity_free=pair.top_session_id in free,
+                side_identity_free=pair.side_session_id in free,
+            )
+            self._match_issues.setText("\n".join(msgs))
+            table.setEnabled(not (pair.top_session_id in free or pair.side_session_id in free))
+            table.setRowCount(len(top_l))
+            for row, label in enumerate(top_l):
+                item = QTableWidgetItem(label)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                table.setItem(row, 0, item)
+                chosen = pair.fish_map.get(label)
+                used = {v for k, v in pair.fish_map.items() if k != label}
+                combo = QComboBox()
+                combo.blockSignals(True)
+                combo.addItem(NO_MATCH, None)
+                for side in side_l:
+                    combo.addItem(side + (USED_MARK if side in used else ""), side)
+                combo.setCurrentIndex(side_l.index(chosen) + 1 if chosen in side_l else 0)
+                combo.blockSignals(False)
+                combo.currentIndexChanged.connect(weak_slot(self._on_match_changed, label, combo))
+                table.setCellWidget(row, 1, combo)
+            if keep_row is not None and keep_row < len(top_l):
+                table.selectRow(keep_row)
+        finally:
+            table.blockSignals(False)
+        self._apply_highlight()
+
+    def _on_match_changed(self, top_label: str, combo: QComboBox) -> None:
+        cur = self._current_pair
+        pair = self._find_pair(*cur) if cur else None
+        if pair is None:
+            return
+        fish_map = dict(pair.fish_map)
+        side = combo.currentData()
+        if side is None:
+            fish_map.pop(top_label, None)
+        else:
+            fish_map[top_label] = side
+        try:
+            self._store.update_view_pair(pair.model_copy(update={"fish_map": fish_map}))
+        except ValueError as exc:
+            self._refresh()
+            self._match_issues.setText(str(exc))
+
+    def _apply_highlight(self) -> None:
+        rows = self._match_table.selectionModel().selectedRows()
+        cur = self._current_pair
+        pair = self._find_pair(*cur) if cur else None
+        if not rows or pair is None:
+            self._top_plot.set_highlight(None)
+            self._side_plot.set_highlight(None)
+            return
+        row = rows[0].row()
+        top_l = self._labels(pair.top_session_id)
+        side_l = self._labels(pair.side_session_id)
+        mapped = pair.fish_map.get(top_l[row]) if row < len(top_l) else None
+        self._top_plot.set_highlight(row)
+        self._side_plot.set_highlight(side_l.index(mapped) if mapped in side_l else None)
 
     # ── patterns ───────────────────────────────────────────────────────────
 

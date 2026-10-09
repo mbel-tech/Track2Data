@@ -324,3 +324,125 @@ def test_rejected_tick_resyncs_checkbox(qtbot, tmp_path, monkeypatch) -> None:
     _tick(screen).setChecked(True)
     assert not _tick(screen).isChecked()
     assert screen._error_label.text() == "nope"
+
+
+# ── manual matching ────────────────────────────────────────────────────────
+
+
+def _fake_loader(monkeypatch, fail=()):
+    import numpy as np
+
+    from ui import views_screen
+    from ui.preview_screen import TrajectoryData
+
+    def fake(_manifest, session_id, _cache):
+        if session_id in fail:
+            raise RuntimeError("boom")
+        xy = np.zeros((5, 3, 2))
+        xy[:, :, 0] = np.arange(3)
+        return TrajectoryData(raw_xy=xy, xy=xy, fps=30.0, background=None, size=(50.0, 50.0))
+
+    monkeypatch.setattr(views_screen, "load_trajectory_data", fake)
+
+
+def _select(qtbot, screen):
+    screen._pairs_table.selectRow(0)
+    qtbot.waitUntil(lambda: screen._top_plot.n_frames == 5 and screen._side_plot.n_frames == 5)
+
+
+def _match_combo(screen, row):
+    return screen._match_table.cellWidget(row, 1)
+
+
+def _matched(qtbot, tmp_path, monkeypatch, fish_map=None, **kw):
+    from track2data.core.models import ViewPair
+
+    _fake_loader(monkeypatch, **kw)
+    store, screen = _paired(qtbot, tmp_path, ["a", "b", "c"], ["x", "y", "z"])
+    if fish_map is not None:
+        store.update_view_pair(
+            ViewPair(top_session_id="t1_top", side_session_id="t1_side", fish_map=fish_map)
+        )
+    _select(qtbot, screen)
+    return store, screen
+
+
+def test_selecting_pair_fills_match_table(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "y", "c": "x"})
+    t = screen._match_table
+    assert [t.item(r, 0).text() for r in range(3)] == ["a", "b", "c"]
+    assert [_match_combo(screen, r).itemData(0) for r in range(3)] == [None] * 3
+    assert _match_combo(screen, 0).itemText(0) == "(no match)"
+    assert [_match_combo(screen, 0).itemData(i) for i in range(1, 4)] == ["x", "y", "z"]
+    assert [_match_combo(screen, r).currentData() for r in range(3)] == ["y", None, "x"]
+    assert screen._match_issues.text() == ""
+
+
+def test_combo_choice_writes_and_clears_map(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _matched(qtbot, tmp_path, monkeypatch)
+    _match_combo(screen, 1).setCurrentIndex(3)
+    assert store.manifest.view_pairs[0].fish_map == {"b": "z"}
+    assert _match_combo(screen, 1).currentData() == "z"
+    _match_combo(screen, 1).setCurrentIndex(0)
+    assert store.manifest.view_pairs[0].fish_map == {}
+
+
+def test_duplicate_side_fish_reported_and_marked(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "x", "b": "x"})
+    assert "duplicate side fish: x" in screen._match_issues.text()
+    combo = _match_combo(screen, 2)
+    assert combo.itemData(1) == "x" and combo.itemText(1) != "x"
+    assert _match_combo(screen, 0).itemText(1) == "x (used)"
+
+
+def test_row_selection_highlights_both_plots(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "y"})
+    assert screen._top_plot.highlighted_animal is None
+    screen._match_table.selectRow(0)
+    assert screen._top_plot.highlighted_animal == 0
+    assert screen._side_plot.highlighted_animal == 1
+    screen._match_table.selectRow(1)
+    assert screen._top_plot.highlighted_animal == 1
+    assert screen._side_plot.highlighted_animal is None
+
+
+def test_identity_free_pair_disables_table(qtbot, tmp_path, monkeypatch) -> None:
+    _fake_loader(monkeypatch)
+    store, screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+    refs = [
+        s.model_copy(update={"identity_free_override": True}) if s.session_id == "t1_side" else s
+        for s in store.manifest.sessions
+    ]
+    store.update_sessions(refs)
+    screen._pairs_table.selectRow(0)
+    msg = "cannot match fish: this session has no stable identities"
+    assert msg in screen._match_issues.text()
+    assert not screen._match_table.isEnabled()
+
+
+def test_pair_without_facts_has_empty_table(qtbot, tmp_path, monkeypatch) -> None:
+    _fake_loader(monkeypatch)
+    _, screen = _paired(qtbot, tmp_path)
+    screen._pairs_table.selectRow(0)
+    assert screen._match_table.rowCount() == 0
+
+
+def test_failed_load_shows_error_and_stale_ignored(qtbot, tmp_path, monkeypatch) -> None:
+    _fake_loader(monkeypatch, fail=("t1_side",))
+    _, screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+    screen._pairs_table.selectRow(0)
+    qtbot.waitUntil(lambda: "boom" in screen._match_status.text())
+    screen._pairs_table.clearSelection()
+    assert screen._match_table.rowCount() == 0
+    screen._on_traj_task_finished("not-a-task", RuntimeError("late"))
+    assert "late" not in screen._match_status.text()
+
+
+def test_cleared_selection_never_writes(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "x"})
+    calls = []
+    monkeypatch.setattr(store, "update_view_pair", lambda *a: calls.append(a))
+    screen._pairs_table.clearSelection()
+    screen._on_pair_selected(None)
+    store.sessionFactsChanged.emit()
+    assert calls == [] and screen._match_table.rowCount() == 0

@@ -143,3 +143,28 @@ def test_empty_view_is_safe(qtbot) -> None:
     qtbot.addWidget(v)
     v.set_frame(3)
     assert v.n_frames == 0 and v.trail_item_count() == 0
+
+
+def test_set_highlight_thickens_one_animal(qtbot) -> None:
+    view = TrajectoryView()
+    qtbot.addWidget(view)
+    view.set_data(_line_xy(), _line_xy(), 30.0)
+    view.set_frame(50)
+    assert view.highlighted_animal is None
+
+    def widths():
+        return [
+            item.pen().widthF()
+            for item in view.scene().items()
+            if hasattr(item, "path") and item.zValue() == 2
+        ]
+
+    base = sorted(widths())
+    view.set_highlight(1)
+    assert view.highlighted_animal == 1
+    assert view.marker_count() == 2
+    w = sorted(widths())
+    assert len(w) == 2 and w[1] >= 2 * w[0] and w[1] > base[1] - 1e-9
+    view.set_highlight(None)
+    assert view.highlighted_animal is None
+    assert sorted(widths()) == base
