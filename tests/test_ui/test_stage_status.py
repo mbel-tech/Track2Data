@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from track2data.core.models import (
+    MODE_3D_BLOCK_REASON,
     CalibrationConfig,
     ExportTarget,
     IdSwitchCfg,
@@ -15,9 +16,10 @@ from track2data.core.models import (
     MetadataSource,
     MetricSelection,
     ProjectManifest,
+    ProjectMode,
     SessionRef,
 )
-from ui.store.stage_status import compute_stage_statuses, next_blocker
+from ui.store.stage_status import SESSIONS_NEEDS_LAYOUT, compute_stage_statuses, next_blocker
 
 PROJECT, SESSIONS, CALIB, ZONES, META, PREP, METRICS, PROC, PREVIEW, EXPORT = range(10)
 
@@ -199,3 +201,39 @@ def test_the_sidebar_says_when_the_water_column_is_missing() -> None:
 
     m = _side(metrics=MetricSelection(individual=["IL-15"]))
     assert stage_summaries(m, has_run_results=False)[3] == "Draw the water column"
+
+
+def _manifest_3d(layout="two_videos", **kw) -> ProjectManifest:
+    return _manifest(mode=ProjectMode(dimension="3d", layout=layout), **kw)
+
+
+def test_3d_processing_preview_export_blocked() -> None:
+    infos = compute_stage_statuses(_manifest_3d(), has_run_results=True)
+    for page in (PROC, PREVIEW, EXPORT):
+        assert infos[page].status == "blocked"
+        assert infos[page].message == MODE_3D_BLOCK_REASON == "3-D fusion is not available yet"
+
+
+def test_2d_stage_statuses_unchanged() -> None:
+    st = _status(_manifest())
+    assert st[PROC] == st[PREVIEW] == st[EXPORT] == "empty"
+    assert _status(_manifest(), has_run=True)[PROC] == "valid"
+
+
+def test_3d_sessions_status_with_layout_is_normal() -> None:
+    assert _status(_manifest_3d())[SESSIONS] == "empty"
+
+
+def test_blocked_sessions_message_constant() -> None:
+    assert SESSIONS_NEEDS_LAYOUT == "Choose a 3-D layout"
+    mode = ProjectMode.model_construct(dimension="3d", layout=None)
+    m = _manifest().model_copy(update={"mode": mode})
+    info = compute_stage_statuses(m, has_run_results=False)[SESSIONS]
+    assert (info.status, info.message) == ("blocked", SESSIONS_NEEDS_LAYOUT)
+
+
+def test_3d_stage_summaries_say_not_available() -> None:
+    from ui.store.stage_status import stage_summaries
+
+    out = stage_summaries(_manifest_3d(), has_run_results=False)
+    assert out[-2:] == ["Not available yet", "Not available yet"]

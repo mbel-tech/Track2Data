@@ -201,6 +201,7 @@ class MainWindow(QMainWindow):
             self._store.metricsChanged,
             self._store.exportChanged,
             self._store.runResultsChanged,
+            self._store.modeChanged,
         ):
             sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
