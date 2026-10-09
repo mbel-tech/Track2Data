@@ -109,6 +109,7 @@ class TrajectoryView(QGraphicsView):
         self._trail_items = 0
         self._trail_points = 0
         self._markers = 0
+        self._highlight: int | None = None
 
     # ── data ──────────────────────────────────────────────────────────────
 
@@ -174,6 +175,24 @@ class TrajectoryView(QGraphicsView):
             raise ValueError(f"source must be one of {_SOURCES}")
         self._source = source
         self._redraw()
+
+    def set_highlight(self, animal: int | None) -> None:
+        """Emphasise one animal's trail and marker; ``None`` restores the normal look."""
+        self._highlight = None if animal is None else int(animal)
+        self._redraw()
+
+    def clear(self) -> None:
+        """Drop the loaded session (the highlight setting is kept)."""
+        self._raw = self._xy = None
+        self._rois = []
+        self._gscene.clear()
+        self._dynamic, self._zone_items, self._heat_item = [], [], None
+        self._trail_items = self._trail_points = self._markers = 0
+        self._frame = 0
+
+    @property
+    def highlighted_animal(self) -> int | None:
+        return self._highlight
 
     def set_show_zones(self, show: bool) -> None:
         self._show_zones = show
@@ -270,7 +289,16 @@ class TrajectoryView(QGraphicsView):
                     for x, y in seg[1:]:
                         path.lineTo(float(x), float(y))
                     n_pts += len(seg)
-                pen = QPen(QColor("#888888") if is_raw else colour, 1.5)
+                width, radius = 1.5, 5.0
+                pen_colour = QColor("#888888") if is_raw else colour
+                if self._highlight is not None:
+                    if k == self._highlight:
+                        width, radius = 4.0, 8.0
+                    else:
+                        width, radius = 1.0, 4.0
+                        colour.setAlphaF(0.35)
+                        pen_colour.setAlphaF(0.35)
+                pen = QPen(pen_colour, width)
                 if is_raw:
                     pen.setStyle(Qt.PenStyle.DashLine)
                 item = self._gscene.addPath(path, pen)
@@ -282,7 +310,7 @@ class TrajectoryView(QGraphicsView):
                     x, y = data[self._frame, k]
                     if np.isfinite(x) and np.isfinite(y):
                         dot = self._gscene.addEllipse(
-                            float(x) - 5, float(y) - 5, 10, 10,
+                            float(x) - radius, float(y) - radius, 2 * radius, 2 * radius,
                             QPen(Qt.GlobalColor.black), QBrush(colour),
                         )
                         dot.setZValue(3)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
 
 pytest.importorskip("PySide6")
 
@@ -143,3 +144,63 @@ def test_empty_view_is_safe(qtbot) -> None:
     qtbot.addWidget(v)
     v.set_frame(3)
     assert v.n_frames == 0 and v.trail_item_count() == 0
+
+
+def test_set_highlight_thickens_one_animal(qtbot) -> None:
+    xy = np.zeros((100, 4, 2))
+    for a in range(4):
+        xy[:, a, 0] = np.linspace(10, 190, 100)
+        xy[:, a, 1] = 20 + 40 * a
+    view = TrajectoryView()
+    qtbot.addWidget(view)
+    view.set_data(xy, xy, 30.0)
+    view.set_frame(50)
+    assert view.highlighted_animal is None
+
+    def trails():
+        """Pen (width, alpha) of each trail, in animal order, plus marker radii."""
+        paths = [i for i in view.scene().items(order=Qt.SortOrder.AscendingOrder)
+                 if hasattr(i, "path") and i.zValue() == 2]
+        dots = [i for i in view.scene().items(order=Qt.SortOrder.AscendingOrder)
+                if i.zValue() == 3]
+        return (
+            [(i.pen().widthF(), i.pen().color().alphaF()) for i in paths],
+            [d.rect().width() for d in dots],
+        )
+
+    base_pens, base_dots = trails()
+    assert len(set(base_pens)) == 1 and len(set(base_dots)) == 1
+    view.set_highlight(2)
+    assert view.highlighted_animal == 2
+    pens, dots = trails()
+    # Items are ordered by y here: animal index == position in the list.
+    ys = sorted(range(4), key=lambda a: a)
+    assert pens[2][0] >= 2 * max(pens[a][0] for a in ys if a != 2)
+    assert dots[2] > max(dots[a] for a in ys if a != 2)
+    assert all(pens[a][1] < pens[2][1] for a in ys if a != 2)
+    view.set_highlight(99)  # out of range: nothing highlighted, no crash
+    view.set_highlight(None)
+    assert view.highlighted_animal is None
+    assert trails() == (base_pens, base_dots)
+
+
+def test_raw_trails_dimmed_when_highlighting(qtbot) -> None:
+    view = TrajectoryView()
+    qtbot.addWidget(view)
+    view.set_data(_line_xy(animals=2), _line_xy(animals=2), 30.0)
+    view.set_source("raw")
+    view.set_frame(50)
+    view.set_highlight(0)
+    alphas = sorted(
+        i.pen().color().alphaF() for i in view.scene().items()
+        if hasattr(i, "path") and i.zValue() == 2
+    )
+    assert alphas[0] < alphas[1]
+
+
+def test_clear_drops_loaded_data(qtbot) -> None:
+    view = TrajectoryView()
+    qtbot.addWidget(view)
+    view.set_data(_line_xy(), _line_xy(), 30.0)
+    view.clear()
+    assert view.n_frames == 0 and view.trail_item_count() == 0
