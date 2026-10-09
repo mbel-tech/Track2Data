@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-09
+
+v0.2.0 was tagged, but its packaged Linux and macOS apps could not start, so no binaries were ever
+published for it. Everything in 0.2.0 is in this release; use 0.2.1 for the installers.
+
 ### Fixed
 
 - **The packaged Linux and macOS apps crashed on start.** The PyInstaller spec bundled
