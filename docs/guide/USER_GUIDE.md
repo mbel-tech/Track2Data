@@ -561,6 +561,15 @@ See [Understanding the output files](#understanding-the-output-files) for what t
 Each session is written to `<out_dir>/<session_id>/`. Files differ by exporter; the tables are the
 same.
 
+When the export holds two or more sessions, an extra folder `<out_dir>/all_sessions/` stacks the sessions
+together: its `master_fish_by_frame.csv`, `trial_activity_summary.csv`, `group_dynamics_summary.csv` and
+`metrics_long.csv` are the per-session files of the same name joined one after another, with `session_id`
+saying which session each row came from. Nothing is recomputed. A column that one session lacks (for example
+because its metric selection differed) is left blank for that session's rows. It also gets a `manifest.json`
+and `README.md` listing the sessions and their input checksums. Stacking is not the same as pooling: check
+`PROJECT_SUMMARY.md` and `sessions.csv` for differences in frame rate, group size or calibration first, and
+treat `session_id` as a grouping factor in your model. A single-session export has no `all_sessions/` folder.
+
 | Table | One row per | Contents |
 |---|---|---|
 | `master_fish_by_frame` | session × animal × frame | `time_s`, `x_px`, `y_px`, `was_interpolated` (true where preprocessing filled a gap), `speed_px_s`, `heading_rad`, `main_zone`, `sec_zone`, plus calibrated and metadata columns |
