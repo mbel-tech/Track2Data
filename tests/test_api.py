@@ -1864,7 +1864,7 @@ def test_px_per_cm_resolution_follows_the_calibration_mode(
     assert any("calibrated" in w and "b" in w for w in warnings)
 
 
-def _run_sessions(tmp_path: Path, sizes: list[int], exporters: list[str]) -> None:
+def _run_sessions(tmp_path: Path, sizes: list[int], exporters: list[str]):
     from track2data.api import Engine
 
     sessions = [
@@ -1879,7 +1879,7 @@ def _run_sessions(tmp_path: Path, sizes: list[int], exporters: list[str]) -> Non
     engine = Engine(manifest)
     by_folder = {s.folder: s for s in sessions}
     engine.import_session = lambda folder: by_folder[Path(folder)]  # type: ignore[method-assign]
-    engine.run(tmp_path, exporters=exporters)
+    return engine.run(tmp_path, exporters=exporters)
 
 
 def test_run_stacks_two_sessions_into_all_sessions(tmp_path: Path) -> None:
@@ -1887,7 +1887,7 @@ def test_run_stacks_two_sessions_into_all_sessions(tmp_path: Path) -> None:
 
     import pandas as pd
 
-    _run_sessions(tmp_path, [10, 15], ["csv_long", "readme"])
+    result = _run_sessions(tmp_path, [10, 15], ["csv_long", "readme"])
 
     pooled = tmp_path / "all_sessions"
     for table in ("master_fish_by_frame", "trial_activity_summary", "metrics_long"):
@@ -1897,6 +1897,9 @@ def test_run_stacks_two_sessions_into_all_sessions(tmp_path: Path) -> None:
         assert set(both["session_id"]) == {"s0", "s1"}
     assert (pooled / "group_dynamics_summary.csv").exists()
     assert (pooled / "README.md").exists()
+    # The receipt and the CLI list RunResult.written, so the pooled files must be in it.
+    listed = {p for p in result.written if p.parent == pooled}
+    assert listed == {p for p in pooled.iterdir()}
     meta = json.loads((pooled / "manifest.json").read_text())["run_metadata"]
     assert meta["pooled"] is True
     assert meta["sessions"] == ["s0", "s1"]
