@@ -841,16 +841,20 @@ class Engine:
         return self._manifest.scene.camera_view
 
     def _pair_inputs(self, pair: ViewPair) -> tuple[PreprocessedSession, PreprocessedSession]:
+        from track2data.core.errors import Track2DataError
         from track2data.fusion.fuse import FusionError
 
         by_id = {ref.session_id: ref for ref in self._manifest.sessions}
         for sid in (pair.top_session_id, pair.side_session_id):
             if sid not in by_id:
                 raise FusionError(f"session not in the project: {sid}")
-        return (
-            self.preprocess_ref(by_id[pair.top_session_id]),
-            self.preprocess_ref(by_id[pair.side_session_id]),
-        )
+        loaded = []
+        for sid in (pair.top_session_id, pair.side_session_id):
+            try:
+                loaded.append(self.preprocess_ref(by_id[sid]))
+            except Track2DataError as exc:
+                raise FusionError(f"session {sid} could not be read: {exc}") from exc
+        return loaded[0], loaded[1]
 
     def fuse_pair(self, pair: ViewPair) -> FusedSession:
         """Fuse a matched top/side pair into one session with a depth (see ``track2data.fusion``).
@@ -890,6 +894,8 @@ class Engine:
         from track2data.fusion.agreement import suggest_offset
         from track2data.fusion.fuse import FusionError
 
+        if self._manifest.mode.layout == "single_video_two_panels":
+            return None  # fusion forces the offset to 0 for one video
         try:
             top, side = self._pair_inputs(pair)
         except FusionError:
