@@ -75,7 +75,8 @@ def apply_session_calibration(
         raise CalibrationError(
             f"Session '{session.session_id}' has no length_unit -- it was never "
             "calibrated in the idtracker.ai validator (or its length_unit was "
-            "invalid; check the reader log for IDT_LENGTH_UNIT_INVALID).",
+            "invalid; check the reader log for IDT_LENGTH_UNIT_INVALID), or, for another "
+            "tracker, no scale was given at import.",
             code="CAL-SESSION-MISSING",
             subject=session.session_id,
             remediation=(

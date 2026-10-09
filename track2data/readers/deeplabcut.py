@@ -36,6 +36,7 @@ from track2data.core.errors import DataValidationError, ImportError_
 from track2data.core.ids import default_session_id
 from track2data.core.models import Session
 from track2data.readers.assemble import (
+    PX_PER_UNIT_PARAMETER,
     assemble_session,
     build_keypoints,
     reduce_keypoints,
@@ -194,6 +195,7 @@ class DeepLabCutReader(SessionReader):
             kind="multichoice",
             help="Which animals to read. Left unset, all but DeepLabCut's catch-all 'single'.",
         ),
+        PX_PER_UNIT_PARAMETER,
         ReaderParameter(
             name="keep_skeleton",
             label="Keep all keypoints",
@@ -447,6 +449,7 @@ def _build_session(
         keypoints=keypoints,
         trajectory_source=path,
         trajectory_format="deeplabcut_csv",
+        length_unit=opts.get("px_per_unit"),
     )
     if opts.get("keep_skeleton") and keypoints is None:
         notes["skeleton_not_kept"] = (

@@ -26,6 +26,7 @@ import numpy as np
 
 from track2data.core.errors import DataValidationError
 from track2data.core.models import KeypointData, KeypointSelection, Session, VideoInfo
+from track2data.readers.params import ReaderParameter
 
 #: A skeleton larger than this is not kept unless the reader is told to (it is stored only).
 SKELETON_MAX_BYTES = 256 * 1024 * 1024
@@ -188,6 +189,18 @@ def build_keypoints(
     )
 
 
+#: The scale a tracker file cannot record. Shared by the readers whose format has no calibration
+#: field, so "Session calibration" can still use a scale the user set once at import.
+PX_PER_UNIT_PARAMETER = ReaderParameter(
+    name="px_per_unit",
+    label="Scale (pixels per cm)",
+    kind="float",
+    minimum=1e-6,
+    help="Optional. This tracker's files do not record a calibration; give the pixels per cm "
+    "here to use it in Session calibration. Left empty, use Custom or Body length.",
+)
+
+
 def _invalid(subject: str, message: str, remediation: str) -> DataValidationError:
     return DataValidationError(
         message, code="READER_OUTPUT_INVALID", subject=subject, remediation=remediation
@@ -211,6 +224,7 @@ def assemble_session(
     keypoints: KeypointData | None = None,
     trajectory_source: Path | None = None,
     trajectory_format: str | None = None,
+    length_unit: float | None = None,
 ) -> Session:
     """A ``Session`` from a reader's arrays, after checking that they can be true.
 
@@ -263,6 +277,12 @@ def assemble_session(
                 f"Tracking intervals cover {covered} frames but there are {n_frames}.",
                 "Intervals are [start, end) and must add up to the number of frames.",
             )
+    if length_unit is not None and not (math.isfinite(length_unit) and length_unit > 0):
+        raise _invalid(
+            "px_per_unit",
+            f"Scale {length_unit!r} is not a positive number of pixels per unit.",
+            "Give the pixels per cm (or leave it empty).",
+        )
     return Session(
         session_id=session_id,
         folder=Path(folder),
@@ -280,4 +300,5 @@ def assemble_session(
         keypoints=keypoints,
         trajectory_source=trajectory_source,
         trajectory_format=trajectory_format,
+        length_unit=None if length_unit is None else float(length_unit),
     )

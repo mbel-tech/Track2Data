@@ -43,6 +43,23 @@ from ui.widgets.autocommit import AutoCommit
 
 _UNIT_CHOICES = ["cm", "mm", "m"]
 
+_IDT_INFO = (
+    "Uses each session's own calibration ratio, recorded by the "
+    "idtracker.ai validator's Length Calibration tool."
+)
+_OTHER_INFO = (
+    "Only idtracker.ai records a calibration. For this tracker's files, Session calibration "
+    "uses the scale you gave when importing them (\"Scale (pixels per cm)\")."
+)
+_NO_SCALE_TIP = (
+    "None of these sessions carries a calibration. idtracker.ai sessions record one in the "
+    "validator; for other trackers give \"Scale (pixels per cm)\" when importing."
+)
+
+
+def _is_idtrackerai(reader: str) -> bool:
+    return reader.startswith("idtrackerai")
+
 #: (raw CameraView value, label, what it means for the project).
 _VIEW_CHOICES = (
     (
@@ -150,7 +167,7 @@ class CalibrationScreen(QWidget):
             (self._radio_bl, "Scales each animal by its own median body length. "
                              "Outputs in BL and cm."),
             (self._radio_scalar, "One px-per-cm factor for every session. Measure it on a frame."),
-            (self._radio_session, "Use the length unit each session already recorded."),
+            (self._radio_session, "Use the scale each session already carries: idtracker.ai's length unit, or the scale set at import."),
         ):
             mode_row.addWidget(_ModeCard(radio, text), 1)
         root.addLayout(mode_row)
@@ -189,10 +206,8 @@ class CalibrationScreen(QWidget):
         session_layout.setContentsMargins(0, 0, 0, 0)
         session_layout.setSpacing(8)
 
-        session_info = QLabel(
-            "Uses each session's own calibration ratio, recorded by the "
-            "idtracker.ai validator's Length Calibration tool."
-        )
+        session_info = QLabel(_IDT_INFO)
+        self._session_info = session_info
         session_info.setProperty("role", "muted")
         session_info.setWordWrap(True)
         session_layout.addWidget(session_info)
@@ -386,13 +401,42 @@ class CalibrationScreen(QWidget):
         self._bl_label.setText(self.body_length_summary())
         self._readiness_list.clear()
         if self._store is None or self._store.manifest is None:
+            self._set_session_available(True)
             return
+        all_facts = []
         for ref in self._store.manifest.sessions:
             facts = self._store.session_facts(ref.session_id)
+            all_facts.append(facts)
             if facts is None:
                 text = f"{ref.session_id} — checking…"
             elif facts.length_unit is not None:
                 text = f"{ref.session_id} — calibrated ({facts.length_unit:.4g} px per unit)"
-            else:
+            elif _is_idtrackerai(facts.reader):
                 text = f"{ref.session_id} — not calibrated"
+            else:
+                text = f"{ref.session_id} — no scale set at import"
             self._readiness_list.addItem(text)
+
+        known = [f for f in all_facts if f is not None]
+        has_idt = any(_is_idtrackerai(f.reader) for f in known)
+        has_other = any(not _is_idtrackerai(f.reader) for f in known)
+        if has_other and not has_idt:
+            self._session_info.setText(_OTHER_INFO)
+        elif has_other:
+            self._session_info.setText(_IDT_INFO + " " + _OTHER_INFO)
+        else:
+            self._session_info.setText(_IDT_INFO)
+        # Offered unless every session is known and none can supply a scale. Never withdrawn
+        # while the mode is selected, so a saved choice stays visible.
+        available = (
+            len(known) < len(all_facts)
+            or not known
+            or has_idt
+            or any(f.length_unit is not None for f in known)
+        )
+        self._set_session_available(available)
+
+    def _set_session_available(self, available: bool) -> None:
+        enabled = available or self._radio_session.isChecked()
+        self._radio_session.setEnabled(enabled)
+        self._radio_session.setToolTip("" if available else _NO_SCALE_TIP)

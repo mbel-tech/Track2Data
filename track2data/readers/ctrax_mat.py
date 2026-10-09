@@ -33,7 +33,7 @@ import numpy as np
 from track2data.core.errors import DataValidationError, ImportError_
 from track2data.core.ids import default_session_id
 from track2data.core.models import Session
-from track2data.readers.assemble import assemble_session
+from track2data.readers.assemble import PX_PER_UNIT_PARAMETER, assemble_session
 from track2data.readers.base import SessionReader
 from track2data.readers.detection import Confidence, Detection, SessionCandidate
 from track2data.readers.index import ScanIndex
@@ -102,6 +102,7 @@ class CtraxMatReader(SessionReader):
             "ids than animals. Left empty, every id becomes a slot; give a number to keep only "
             "that many of the longest tracks (the animals you care about, usually).",
         ),
+        PX_PER_UNIT_PARAMETER,
     )
 
     # ── detection ──────────────────────────────────────────────────────────
@@ -303,6 +304,7 @@ def _build_session(given: Path, path: Path, opts: dict[str, Any]) -> Session:
         tracking_intervals=[(start, start + n_frames)] if start > 0 else None,
         trajectory_source=path,
         trajectory_format="ctrax_raw_mat",
+        length_unit=opts.get("px_per_unit"),
     )
     note = _irregular(ts, fps)
     if note:

@@ -84,3 +84,10 @@ def test_an_edited_file_is_not_served_from_the_cache(ctrax_file: Path, tmp_path:
     write_ctrax_mat(ctrax_file, walkers(120, (0, 1, 2, 3), seed=9))
     edited = _engine(ctrax_file, cache).preprocess_ref(ref).session
     assert not np.allclose(first.raw_xy, edited.raw_xy, equal_nan=True)
+
+
+def test_a_scale_given_at_import_becomes_the_session_length_unit(ctrax_file: Path) -> None:
+    plain = _engine(ctrax_file)
+    assert plain.import_ref(plain.manifest.sessions[0]).length_unit is None
+    scaled = _engine(ctrax_file, px_per_unit=12.5)
+    assert scaled.import_ref(scaled.manifest.sessions[0]).length_unit == 12.5

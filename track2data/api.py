@@ -2129,7 +2129,8 @@ class Engine:
             issues.append(
                 "Session calibration selected but these sessions have no length_unit: "
                 + ", ".join(missing)
-                + ". Calibrate them in the idtracker.ai validator, or switch calibration mode."
+                + ". Calibrate them in the idtracker.ai validator, give a scale (pixels per cm) "
+                "when importing other trackers' files, or switch calibration mode."
             )
         if unreadable:
             issues.append(
