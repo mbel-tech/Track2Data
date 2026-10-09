@@ -185,6 +185,43 @@ sidebar shows ⚠ while any session is identity-free.
 - Supported: idtracker.ai 6.x output (the legacy v5 layout is also read). v4 is not supported yet (Track2Data tells you so if it recognises a v4 folder; see
   [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)).
 
+### Views (3-D projects)
+
+In a 3-D project (set on the Project screen) every fish is tracked in two views, so Track2Data has
+to know which session is the top view, which is the side view, and which top session goes with
+which side session. This is the **Views** page. It appears only in 3-D projects, under the
+**Sessions** row of the sidebar, and **Next** and **Back** pass through it between Sessions and
+Calibration. In 2-D projects it does not exist.
+
+- **Roles.** Each session has a **View** selector: *(not set)*, *Top* or *Side*.
+- **Pair by session name.** Two pattern fields, **Top sessions** and **Side sessions**, find the
+  pairs from the session names. A pattern is a regular expression, searched anywhere in the session
+  id, with a group called `key` that marks the part shared by both views. Sessions whose `key` is
+  equal become a pair. Example: `(?P<key>.+)_top$` matches `trial01_top` with key `trial01`, and
+  `(?P<key>.+)_side$` matches `trial01_side` with the same key, so the two are paired. The **ⓘ**
+  button next to each field explains this in the app. A line under the fields says how many
+  sessions each pattern catches and lists unpaired or ambiguous ones (several sessions with the
+  same key are not paired). An empty `key` means no match. Press **Pair by pattern** to set the
+  roles and create the pairs; pressing it again replaces the pairs it made earlier, and never
+  touches pairs you made by hand.
+- **Pairs.** One row per pair, with a **Same IDs** tick, a **Status** and **Remove**. To pair by
+  hand, choose a top and a side session below the list (only sessions with that role and not yet in
+  a pair are offered) and press **Add pair**. A session belongs to at most one pair.
+- **Same IDs.** Tick it when fish with the same label are the same fish in both views; the fish map
+  is then filled in from the labels. Leave it unticked to match by hand.
+- **Match fish.** Select a pair to get a table with one row per top-view fish and a dropdown for the
+  side-view fish (or *(no match)*; a side fish already used is marked). Selecting a row highlights
+  that fish and its match in the two track plots beside the table.
+- **Status.** *Needs matching*: no fish matched yet. *Matched*: a fish map exists (a tooltip lists
+  fish still unmatched). Otherwise the status is the problem, for example "cannot match fish: this
+  session has no stable identities" (identity-free sessions cannot be matched), "duplicate side
+  fish: ...", "unknown top fish: ..." or "3 top fish vs 2 side fish". The sidebar badge is ○ until
+  every session has a role, ⚠ while a session is unpaired or a pair needs matching or has no
+  stable identities, and ✓ when every pair is matched. It never stops you from continuing.
+
+This only records the correspondence. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project
+still cannot be run: Processing, Preview and Export stay blocked.
+
 ## 3. Calibration
 
 Calibration decides which units distances and speeds are reported in. Figure 4 shows the default,

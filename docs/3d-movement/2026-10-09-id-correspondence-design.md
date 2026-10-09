@@ -1,6 +1,6 @@
 # ID correspondence between views (sub-project G)
 
-**Status:** draft 2026-10-09, awaiting review
+**Status:** implemented
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). Builds on [the mode switch](2026-10-09-mode-switch-design.md) (sub-project E).
 
 ## Why
@@ -48,10 +48,11 @@ G is built and tested against any two sessions, so it does not wait for F.
 1. **Data model** (`track2data/core/models.py`).
    - `SessionRef.view_role: Literal["top", "side"] | None = None`.
    - `ViewPair(top_session_id: str, side_session_id: str, same_ids: bool = False,
-     fish_map: dict[str, str] = {})`. `fish_map` maps a top-view label to a side-view label; a fish
-     not in it is unmatched.
+     fish_map: dict[str, str] = {}, auto: bool = False)`. `fish_map` maps a top-view label to a
+     side-view label; a fish not in it is unmatched. `auto` marks pairs made by the pattern. A
+     session belongs to at most one pair.
    - `PairingPatterns(top_regex: str = "", side_regex: str = "")`, stored as
-     `ProjectMode.pairing`.
+     `ProjectMode.pairing` and edited through `modeChanged`.
    - `ProjectManifest.view_pairs: list[ViewPair] = []`.
    - Labels are `Session.identities_labels`, falling back to the 0-based index as text (the same
      fallback as `MappingRule.individual_match`).
@@ -70,7 +71,7 @@ G is built and tested against any two sessions, so it does not wait for F.
    hand-made ones), `update_view_pair(pair)`, `remove_view_pair(top_id, side_id)`, and a
    `viewsChanged` signal wired into `_on_manifest_changed`. Removing a session removes its pairs
    and clears nothing else. All of this is for 3-D projects only; the calls are rejected in 2-D.
-4. **The Views step** (`ui/views_screen.py`, 3-D only, between Sessions and Calibration).
+4. **The Views step** (`ui/views_screen.py`, 3-D only: page 10, belongs to the Sessions sidebar row, reached by Next/Back between Sessions and Calibration in 3-D projects).
    - *Roles and patterns.* A role selector per session and the two regex fields. Each field has an
      ⓘ popover in plain language (what `key` is, three worked examples such as `trial01_top`, and
      a live "this catches N sessions" line), plus a preview that lists unpaired sessions.
@@ -78,8 +79,8 @@ G is built and tested against any two sessions, so it does not wait for F.
      identity-free) and a manual re-pair option.
    - *Matching.* A table with one row per top-view fish and a dropdown for the side-view fish or
      "no match"; beside it two `TrajectoryView` plots with the selected fish highlighted.
-5. **Navigation.** The sidebar and page lists are static today. Views is a new page, shown only in
-   3-D projects; in 2-D it is hidden and skipped by Next and Back. `screen_flow(mode)` returns
+5. **Navigation.** The sidebar and page lists are static today. Views is a new page (page 10, belongs to the
+   Sessions sidebar row), shown only in 3-D projects; in 2-D it is hidden and skipped by Next and Back. `screen_flow(mode)` returns
    which variant of the Sessions-to-Calibration route to show. `stage_status` marks Views `empty`
    until every session has a role, `warning` while any pair needs matching or is identity-free,
    and `valid` when every pair has a complete map. It never returns `blocked`.

@@ -29,14 +29,14 @@ F and G are independent of each other. Order: E, F and G, D, B.
 - The mode is locked once the project has a session. Removing every session unlocks it.
 - A 3-D project cannot run the pipeline or export until D and B exist. Sessions can still be added
   and the project saved.
-- ID correspondence is not built here. E reserves its place in the file (`mode.id_map`) only.
+- ID correspondence is not built here. E reserves its place in the file (`mode.id_map`) only. (G later replaced `id_map` by `view_pairs` and `mode.pairing`.)
 
 ## Design
 
 1. **Model.** `ProjectMode` in `core/models.py`:
    - `dimension: "2d" | "3d"` (default `"2d"`)
    - `layout: None | "single_video_two_panels" | "two_videos"` (default `None`)
-   - `id_map: dict[str, str]` (default `{}`, reserved for G, never read or written in E)
+   - `id_map: dict[str, str]` (default `{}`, reserved for G, never read or written in E; replaced by `view_pairs` and `mode.pairing` in G)
 
    A validator requires `layout` to be set if and only if `dimension == "3d"`. Existing manifests
    have no `mode` key and load as 2-D unchanged. `ProjectManifest.mode: ProjectMode` is hashed into
