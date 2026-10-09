@@ -10,7 +10,12 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsRectItem
+from PySide6.QtWidgets import (
+    QGraphicsPathItem,
+    QGraphicsPixmapItem,
+    QGraphicsRectItem,
+    QGraphicsSimpleTextItem,
+)
 
 from track2data.core.models import PanelRect
 from ui.widgets import panel_preview as pp
@@ -98,12 +103,42 @@ def test_missing_video_is_not_read(view, tmp_path, monkeypatch) -> None:
     assert view.backdrop_kind == "tracks"
 
 
-def test_tracks_one_item_per_animal_and_capped(view) -> None:
+def test_tracks_one_item_per_animal(view) -> None:
     view.set_source(SIZE, None, None, _tracks(n_frames=10, n_animals=3))
     assert view.backdrop_kind == "tracks"
     assert len(view.scene().items()) == 3
-    view.set_source(SIZE, None, None, np.zeros((50000, 2, 2)))
+
+
+def test_tracks_point_count_is_capped(view) -> None:
+    tr = np.random.default_rng(0).uniform(0, 20, (50000, 2, 2))
+    view.set_source(SIZE, None, None, tr)
+    items = [i for i in view.scene().items() if isinstance(i, QGraphicsPathItem)]
+    assert len(items) == 2
+    # a rectangle point is 5 path elements
+    points = sum(i.path().elementCount() for i in items) // 5
+    assert 0 < points <= 3000 + 10
+
+
+def test_no_files_with_tracks_is_tracks(view, tmp_path) -> None:
+    view.set_source(SIZE, tmp_path / "no.png", tmp_path / "no.mp4", _tracks())
     assert view.backdrop_kind == "tracks"
+
+
+@pytest.mark.parametrize("size", [(float("nan"), 20.0), (float("inf"), 20.0), (0.0, 0.0)])
+def test_bad_frame_size_does_not_raise(view, size) -> None:
+    view.set_source(size, None, None, None)
+    assert view.backdrop_kind == "none"
+    assert view.scene().sceneRect().width() > 0
+
+
+@pytest.mark.parametrize(
+    "tracks",
+    [np.zeros((5, 2, 1)), np.array([[["a", "b"]]]), np.zeros((5, 0, 2)), np.zeros((5, 2)), "x"],
+)
+def test_malformed_tracks_do_not_raise(view, tracks) -> None:
+    view.set_source(SIZE, None, None, tracks)
+    assert view.backdrop_kind == "none"
+    assert not view.scene().items()
 
 
 def test_nan_only_tracks_still_tracks_kind(view) -> None:
@@ -131,6 +166,20 @@ def test_set_rects_draws_and_clears(view) -> None:
     assert view.rect_item_count == 1
     view.set_rects(None, None)
     assert view.rect_item_count == 0
+    assert not [
+        i
+        for i in view.scene().items()
+        if isinstance(i, QGraphicsRectItem | QGraphicsSimpleTextItem)
+    ]
+
+
+def test_set_rects_labels_present(view) -> None:
+    view.set_source(SIZE, None, None, None)
+    view.set_rects(
+        PanelRect(x=0, y=0, width=20, height=10), PanelRect(x=0, y=10, width=20, height=10)
+    )
+    texts = {i.text() for i in view.scene().items() if isinstance(i, QGraphicsSimpleTextItem)}
+    assert texts == {"Top view", "Side view"}
 
 
 def test_rects_survive_a_new_source(view) -> None:

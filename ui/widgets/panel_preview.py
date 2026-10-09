@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsPathItem,
@@ -31,6 +31,7 @@ BackdropKind = Literal["image", "video", "tracks", "none"]
 #: At most this many points are drawn over all animals; longer tracks are strided.
 _MAX_POINTS = 3000
 _POINT_RADIUS = 1.5
+_DEFAULT_SIZE = 100.0
 _RECT_Z = 10
 _TOP_COLOUR = "#e6194b"
 _SIDE_COLOUR = "#3cb44b"
@@ -63,11 +64,20 @@ class PanelPreview(QGraphicsView):
         video_path: Path | None,
         tracks: np.ndarray | None,
     ) -> None:
+        """Choose the backdrop and redraw. Never raises: bad input falls through to "none".
+
+        The rectangles given to ``set_rects`` are kept and redrawn over the new backdrop.
+        """
         scene = self.scene()
         scene.clear()
         self._backdrop_items = []
         self._rect_items = []
-        width, height = float(frame_size[0]), float(frame_size[1])
+        try:
+            width, height = float(frame_size[0]), float(frame_size[1])
+        except (TypeError, ValueError, IndexError):
+            width = height = float("nan")
+        if not (np.isfinite(width) and np.isfinite(height) and width > 0 and height > 0):
+            width = height = _DEFAULT_SIZE  # unknown size
         scene.setSceneRect(QRectF(0, 0, width, height))
 
         image = load_backdrop_image(background_path)
@@ -75,21 +85,27 @@ class PanelPreview(QGraphicsView):
         if image is None:
             image = self._video_frame(video_path, round(width), round(height))
             kind = "video"
+        self._kind = "none"
         if image is not None:
             item = QGraphicsPixmapItem(QPixmap.fromImage(image))
             item.setZValue(0)
             scene.addItem(item)
             self._backdrop_items.append(item)
             self._kind = kind
-        elif tracks is not None and np.ndim(tracks) == 3 and np.shape(tracks)[0] > 0:
-            self._draw_tracks(np.asarray(tracks, dtype=float))
-            self._kind = "tracks"
-        else:
-            self._kind = "none"
+        elif tracks is not None:
+            try:
+                if self._draw_tracks(tracks):
+                    self._kind = "tracks"
+            except Exception:
+                for item in self._backdrop_items:
+                    scene.removeItem(item)
+                self._backdrop_items = []
         self._draw_rects()
         self._fit()
 
     def set_rects(self, top: PanelRect | None, side: PanelRect | None) -> None:
+        """Draw the labelled top and side rectangles (None removes one). They stay across
+        later ``set_source`` calls."""
         self._rects = (top, side)
         self._draw_rects()
 
@@ -106,21 +122,34 @@ class PanelPreview(QGraphicsView):
         # copy() so the image owns its pixels and not the bytes object
         return QImage(data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
 
-    def _draw_tracks(self, tracks: np.ndarray) -> None:
-        n_frames, n_animals = tracks.shape[0], tracks.shape[1]
+    def _draw_tracks(self, tracks: np.ndarray) -> bool:
+        """Draw *tracks* as points; False when they are not (n_frames, n_animals>0, >=2)."""
+        if np.ndim(tracks) != 3:
+            return False
+        n_frames, n_animals, n_cols = np.shape(tracks)
+        if n_frames == 0 or n_animals == 0 or n_cols < 2:
+            return False
         stride = max(1, -(-n_frames * n_animals // _MAX_POINTS))
+        sampled = np.asarray(tracks[::stride, :, :2], dtype=float)
         for k in range(n_animals):
             path = QPainterPath()
-            for x, y in tracks[::stride, k, :2]:
+            for x, y in sampled[:, k, :]:
                 if np.isfinite(x) and np.isfinite(y):
-                    path.addEllipse(QPointF(float(x), float(y)), _POINT_RADIUS, _POINT_RADIUS)
-            colour = QColor(ANIMAL_COLORS[k % len(ANIMAL_COLORS)])
+                    path.addRect(
+                        QRectF(
+                            float(x) - _POINT_RADIUS,
+                            float(y) - _POINT_RADIUS,
+                            2 * _POINT_RADIUS,
+                            2 * _POINT_RADIUS,
+                        )
+                    )
             item = QGraphicsPathItem(path)
             item.setPen(QPen(Qt.PenStyle.NoPen))
-            item.setBrush(QBrush(colour))
+            item.setBrush(QBrush(QColor(ANIMAL_COLORS[k % len(ANIMAL_COLORS)])))
             item.setZValue(1)
             self.scene().addItem(item)
             self._backdrop_items.append(item)
+        return True
 
     def _draw_rects(self) -> None:
         scene = self.scene()
