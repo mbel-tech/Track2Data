@@ -272,3 +272,73 @@ def test_mismatched_per_animal_data_is_dropped():
     assert out.n_animals == 2
     assert out.identities_labels is None and out.identities_colors is None
     assert out.body_length_px is None and out.id_probabilities is None
+
+
+def test_is_kept_shared_rule():
+    from track2data.views.panels import AnimalCoverage, is_kept
+
+    cov = AnimalCoverage(index=0, label="0", share_inside=0.4, n_valid=10, n_inside=4)
+    assert is_kept(cov, stable_identities=False)
+    assert not is_kept(cov, stable_identities=True)
+    none = AnimalCoverage(index=0, label="0", share_inside=0.0, n_valid=10, n_inside=0)
+    assert not is_kept(none, stable_identities=False)
+
+
+def test_unlabeled_stable_fish_keep_original_numbers():
+    inside, outside = [150, 80], [10, 10]
+    raw = [[outside, outside, inside, inside]] * 3
+    out = apply_panel(_session(raw), PANEL)
+    assert out.identities_labels == ["2", "3"]
+
+
+def test_identity_free_labels_stay_none():
+    inside, outside = [150, 80], [10, 10]
+    out = apply_panel(_session([[outside, inside]], stable=False), PANEL)
+    assert out.identities_labels is None
+
+
+def test_odd_frame_gives_whole_pixels():
+    a, b = preset_rects("left_right", 1279, 721)
+    assert (a.x, a.width, b.x, b.width) == (0, 640, 640, 639)
+    c, d = preset_rects("top_bottom", 1279, 721)
+    assert (c.y, c.height, d.y, d.height) == (0, 361, 361, 360)
+    for split in (0.3, 0.37, 0.95):
+        a, b = preset_rects("left_right", 1001, 333, split)
+        assert a.width == int(a.width) and b.x == int(b.x) and a.width + b.width == 1001
+
+
+def test_panel_rect_rejects_inf():
+    with pytest.raises(ValueError):
+        PanelRect(x=0, y=0, width=float("inf"), height=10)
+    with pytest.raises(ValueError):
+        PanelRect(x=float("inf"), y=0, width=10, height=10)
+
+
+def test_keypoints_with_wrong_animal_count_are_dropped():
+    from track2data.core.models import KeypointData, KeypointSelection
+
+    s = _session([[[150, 80], [10, 10]]] * 2)
+    kp = KeypointData(
+        xy=np.full((2, 3, 1, 2), 150.0),
+        names=["nose"],
+        confidence=None,
+        selection=KeypointSelection(keypoint="nose", chosen_by="user", coverage=1.0),
+    )
+    out = apply_panel(s.model_copy(update={"keypoints": kp}), PANEL)
+    assert out.keypoints is None
+
+
+def test_left_out_animals_are_logged(caplog):
+    import logging
+
+    inside, outside = [150, 80], [10, 10]
+    raw = [[inside, outside, inside]] * 3
+    s = _session(raw, identities_labels=["a", "b", "c"])
+    with caplog.at_level(logging.WARNING, logger="track2data.views.panels"):
+        apply_panel(s, PANEL)
+    assert any("b" in r.getMessage() and r.levelno == logging.WARNING for r in caplog.records)
+    assert not any("'a'" in r.getMessage() or "'c'" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="track2data.views.panels"):
+        apply_panel(_session(raw, stable=False), PANEL)
+    assert caplog.records == []

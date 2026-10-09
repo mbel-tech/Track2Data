@@ -539,7 +539,7 @@ class ViewsScreen(QWidget):
         plot = self._top_plot if role == "top" else self._side_plot
         plot.set_data(
             result.raw_xy, result.xy, result.fps,
-            background_path=result.background, size=result.size,
+            background_path=result.background, size=result.size, crop=result.crop,
         )
         plot.set_trail_length(plot.n_frames)
         plot.set_frame(plot.n_frames - 1)

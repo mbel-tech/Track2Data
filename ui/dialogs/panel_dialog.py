@@ -31,10 +31,12 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import PanelRect, Session
+from track2data.views.pairing import fish_labels
 from track2data.views.panels import (
     LOW_COVERAGE,
     MIN_COVERAGE,
     AnimalCoverage,
+    is_kept,
     panel_coverage,
     preset_rects,
 )
@@ -70,7 +72,7 @@ def _frame_size(session: Session) -> tuple[float, float]:
 
 def _spin(minimum: float) -> QDoubleSpinBox:
     box = QDoubleSpinBox()
-    box.setDecimals(2)
+    box.setDecimals(0)
     box.setRange(minimum, _MAX_PX)
     return box
 
@@ -82,12 +84,17 @@ class PanelDialog(QDialog):
         mode: Literal["split", "single"],
         background_path: Path | None = None,
         parent: QWidget | None = None,
+        initial_rect: PanelRect | None = None,
     ) -> None:
         super().__init__(parent)
         self._session = session
         self._split = mode == "split"
         self._frame_w, self._frame_h = _frame_size(session)
         self._last_preset = "left_right"
+        n_fish = session.raw_xy.shape[1] if np.ndim(session.raw_xy) == 3 else 0
+        self._labels = fish_labels(session.identities_labels, n_fish)
+        if len(self._labels) < n_fish:
+            self._labels += [str(i) for i in range(len(self._labels), n_fish)]
         self.setWindowTitle("Panels" if self._split else "Set panel")
         self.setModal(True)
         self.resize(760, 640)
@@ -152,7 +159,7 @@ class PanelDialog(QDialog):
         else:
             self._fill(
                 [self._top_x, self._top_y, self._top_w, self._top_h],
-                PanelRect(x=0, y=0, width=self._frame_w, height=self._frame_h),
+                initial_rect or PanelRect(x=0, y=0, width=self._frame_w, height=self._frame_h),
             )
         self._connect()
         self._rebuild()
@@ -174,7 +181,7 @@ class PanelDialog(QDialog):
             spins += [self._side_x, self._side_y, self._side_w, self._side_h]
             self._preset_combo.currentIndexChanged.connect(weak_slot(self._on_preset))
             self._split_slider.valueChanged.connect(weak_slot(self._on_split_input))
-            self._first_view_combo.currentIndexChanged.connect(weak_slot(self._on_split_input))
+            self._first_view_combo.currentIndexChanged.connect(weak_slot(self._on_first_view))
         for box in spins:
             box.valueChanged.connect(weak_slot(self._on_spin))
 
@@ -220,6 +227,22 @@ class PanelDialog(QDialog):
         self._apply_preset()
         self._rebuild()
 
+    def _on_first_view(self) -> None:
+        if self._preset_combo.currentText() != _CUSTOM:
+            self._on_split_input()
+            return
+        # Custom rectangles are the user's: swapping the views swaps their values.
+        top = [self._top_x, self._top_y, self._top_w, self._top_h]
+        side = [self._side_x, self._side_y, self._side_w, self._side_h]
+        values = [(a.value(), b.value()) for a, b in zip(top, side, strict=True)]
+        self._fill(
+            top, PanelRect(x=values[0][1], y=values[1][1], width=values[2][1], height=values[3][1])
+        )
+        self._fill(
+            side, PanelRect(x=values[0][0], y=values[1][0], width=values[2][0], height=values[3][0])
+        )
+        self._rebuild()
+
     def _on_spin(self) -> None:
         if self._split:
             self._set_preset_text(_CUSTOM)
@@ -261,9 +284,9 @@ class PanelDialog(QDialog):
         except ValueError:
             return None
 
-    @staticmethod
-    def _keeps_animal(cov: list[AnimalCoverage] | None) -> bool:
-        return cov is not None and any(c.share_inside >= MIN_COVERAGE for c in cov)
+    def _keeps_animal(self, cov: list[AnimalCoverage] | None) -> bool:
+        stable = self._session.has_stable_identities
+        return cov is not None and any(is_kept(c, stable) for c in cov)
 
     def _rebuild(self) -> None:
         top = self._rect("_top")
@@ -282,6 +305,7 @@ class PanelDialog(QDialog):
     ) -> None:
         n = self._session.raw_xy.shape[1] if np.ndim(self._session.raw_xy) == 3 else 0
         table = self._coverage_table
+        stable = self._session.has_stable_identities
         table.setRowCount(n)
         for i in range(n):
             options = [
@@ -289,19 +313,22 @@ class PanelDialog(QDialog):
                 for name, cov in ((_TOP_VIEW, top_cov), (_SIDE_VIEW, side_cov))
                 if cov is not None and i < len(cov)
             ]
-            label = options[0][1].label if options else str(i)
+            label = options[0][1].label if options else self._labels[i]
             if not options:
                 cells = [label, _DASH, _DASH, ""]
             elif all(c.n_valid == 0 for _, c in options):
                 cells = [label, _DASH, _DASH, "no data"]
             else:
                 name, best = max(options, key=lambda o: o[1].share_inside)
-                if best.share_inside < MIN_COVERAGE:
+                if not stable:
+                    flag = ""  # no identity to judge: any position inside keeps the slot
+                elif best.share_inside < MIN_COVERAGE:
                     flag = "left out"
                 elif best.share_inside < LOW_COVERAGE:
                     flag = "low"
                 else:
                     flag = ""
-                cells = [label, name, f"{round(best.share_inside * 100)}%", flag]
+                pct = math.floor(best.share_inside * 100 + 1e-9)  # floor: never contradicts a flag
+                cells = [label, name, f"{pct}%", flag]
             for col, text in enumerate(cells):
                 table.setItem(i, col, QTableWidgetItem(text))

@@ -207,6 +207,69 @@ def test_identity_free_session(qtbot):
     xy[3:, 0] = [300, 50]
     d = _dlg(qtbot, _session(xy, stable=False))
     assert d._coverage_table.rowCount() == 1
+    t = d._coverage_table
+    assert t.item(0, 0).text() == "0"
+    assert t.item(0, 3).text() == ""
+    assert d._ok_button.isEnabled()
+
+
+def test_identity_free_split_across_halves_is_ok(qtbot):
+    xy = np.full((10, 1, 2), np.nan)
+    xy[:4, 0] = [50, 50]  # 40% left, 60% right
+    xy[4:, 0] = [300, 50]
+    d = _dlg(qtbot, _session(xy, stable=False))
+    t = d._coverage_table
+    assert [t.item(0, c).text() for c in range(4)] == ["0", "Side view", "60%", ""]
+    assert d._ok_button.isEnabled()
+
+
+def test_percentage_uses_floor(qtbot):
+    xy = np.full((1000, 1, 2), np.nan)
+    xy[:996, 0] = [50, 50]
+    xy[996:, 0] = [500, 50]  # outside the frame
+    d = _dlg(qtbot, _session(xy))
+    assert d._coverage_table.item(0, 2).text() == "99%"
+    assert d._coverage_table.item(0, 3).text() == ""
+
+
+def test_both_invalid_row_uses_fish_label(qtbot):
+    d = _dlg(qtbot, _session(_two_clusters().raw_xy, labels=["a", "b", "c", "d"]))
+    d._top_w.setValue(1000)  # outside the frame
+    d._side_w.setValue(1000)
+    t = d._coverage_table
+    assert [t.item(r, 0).text() for r in range(4)] == ["a", "b", "c", "d"]
+
+
+def test_spin_boxes_have_no_decimals(qtbot):
+    d = _dlg(qtbot)
+    assert d._top_x.decimals() == 0 and d._side_w.decimals() == 0
+
+
+def test_odd_frame_width_gives_whole_pixels(qtbot):
+    d = _dlg(qtbot, _session(_two_clusters().raw_xy, w=1279))
+    top, side = d.result_rects()
+    assert (top.width, side.x, side.width) == (640, 640, 639)
+
+
+def test_custom_first_view_swap_swaps_rects(qtbot):
+    d = _dlg(qtbot)
+    d._top_w.setValue(150)  # Custom now
+    d._side_x.setValue(150)
+    d._side_w.setValue(250)
+    d._split_slider.blockSignals(True)
+    d._split_slider.setValue(70)
+    d._split_slider.blockSignals(False)
+    top, side = d.result_rects()
+    d._first_view_combo.setCurrentIndex(1)
+    assert d._preset_combo.currentText() == "Custom"
+    assert d.result_rects() == (side, top)
+    assert d._split_slider.value() == 70
+
+
+def test_single_mode_initial_rect(qtbot):
+    rect = PanelRect(x=10, y=20, width=100, height=60)
+    d = _dlg(qtbot, mode="single", initial_rect=rect)
+    assert d.result_rect() == rect
 
 
 def test_no_video_size(qtbot):

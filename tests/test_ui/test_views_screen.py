@@ -408,6 +408,38 @@ def _matched(qtbot, tmp_path, monkeypatch, fish_map=None, **kw):
     return store, screen
 
 
+def test_panelled_session_plot_gets_cropped_backdrop(qtbot, tmp_path, monkeypatch) -> None:
+    import numpy as np
+    from PySide6.QtGui import QImage
+
+    from track2data.core.models import PanelRect
+    from ui import views_screen
+    from ui.preview_screen import TrajectoryData
+
+    bg = tmp_path / "bg.png"
+    img = QImage(100, 60, QImage.Format.Format_RGB32)
+    img.fill(0xFF808080)
+    assert img.save(str(bg))
+
+    def fake(_manifest, session_id, _cache):
+        xy = np.zeros((5, 3, 2))
+        return TrajectoryData(
+            raw_xy=xy,
+            xy=xy,
+            fps=30.0,
+            background=bg,
+            size=(40.0, 30.0),
+            crop=PanelRect(x=10, y=5, width=40, height=30),
+        )
+
+    monkeypatch.setattr(views_screen, "load_trajectory_data", fake)
+    _store, screen = _paired(qtbot, tmp_path, ["a", "b", "c"], ["x", "y", "z"])
+    screen._pairs_table.selectRow(0)
+    qtbot.waitUntil(lambda: screen._top_plot.n_frames == 5 and screen._side_plot.n_frames == 5)
+    assert screen._top_plot._size == (40.0, 30.0)
+    assert screen._side_plot._size == (40.0, 30.0)
+
+
 def test_selecting_pair_fills_match_table(qtbot, tmp_path, monkeypatch) -> None:
     _, screen = _matched(qtbot, tmp_path, monkeypatch, {"a": "y", "c": "x"})
     t = screen._match_table
@@ -761,8 +793,9 @@ def _make_panels(
     class StubDialog:
         accept = True
 
-        def __init__(self, session, mode, background_path=None, parent=None):
+        def __init__(self, session, mode, background_path=None, parent=None, initial_rect=None):
             calls["dialogs"].append((mode, background_path))
+            calls.setdefault("initial", []).append(initial_rect)
 
         def exec(self):
             return calls.get("accept", True)
@@ -891,3 +924,16 @@ def test_rebuild_never_writes(qtbot, tmp_path, monkeypatch) -> None:
     store.sessionsChanged.emit()
     screen.refresh_now()
     assert calls == []
+
+
+def test_set_panel_starts_with_current_panel(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import PanelRect
+
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    current = PanelRect(x=1, y=2, width=30, height=40)
+    store.set_session_panel("b", current)
+    screen.refresh_now()
+    _select_panel_row(screen, 1)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 1, timeout=3000)
+    assert calls["initial"] == [current]

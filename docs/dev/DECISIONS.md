@@ -906,7 +906,8 @@ complete pairs.
 ### D-039 · Panel split: a session may carry a panel, applied on read, in panel-relative coordinates
 
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-panel-split-design.md`
-(sub-project F of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It does not change D-037 or D-038.
+(sub-project F of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-038: a panel change clears `fish_map` and `same_ids` of the pair that holds the
+session.
 
 **Decision:** *Model.* `SessionRef.panel` is a `PanelRect(x, y, width, height)` (`x, y >= 0`,
 `width, height > 0`) or unset; manifests without it load unchanged. Panels exist only for a 3-D project

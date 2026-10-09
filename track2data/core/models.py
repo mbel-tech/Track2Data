@@ -428,6 +428,8 @@ class PanelRect(BaseModel):
     project to cut the shared video into its top and side views.
     """
 
+    model_config = ConfigDict(allow_inf_nan=False)
+
     x: float = Field(default=0.0, ge=0)
     y: float = Field(default=0.0, ge=0)
     width: float = Field(gt=0)

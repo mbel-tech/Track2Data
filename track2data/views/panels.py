@@ -10,6 +10,7 @@ result covers the whole frame; ``apply_panel`` turns it into a session of one vi
 * shifted: every whole-frame pixel coordinate moves to panel coordinates (panel top-left is
   (0, 0)): ``raw_xy`` (positions outside the panel become NaN), skeleton points, ``setup_points``
   pairs, ROI polygon vertices and length-calibration end points;
+* logged: with stable identities, a warning names the animals left out;
 * dropped (set to None): per-animal or whole-frame data that cannot be cut, ``bbox_table``,
   ``bbox_summary``, ``identities_groups``, ``fragments`` and the ROI mask path; per-animal data
   whose length does not match the animal count is dropped too;
@@ -25,6 +26,8 @@ The input session is never modified.
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -32,6 +35,8 @@ import numpy as np
 
 from track2data.core.models import PanelRect, Session
 from track2data.views.pairing import fish_labels
+
+logger = logging.getLogger(__name__)
 
 #: An animal is kept when at least this share of its valid positions lies inside the panel.
 MIN_COVERAGE = 0.5
@@ -47,6 +52,18 @@ class AnimalCoverage:
     label: str
     share_inside: float
     n_valid: int
+    n_inside: int = 0
+
+
+def is_kept(cov: AnimalCoverage, stable_identities: bool) -> bool:
+    """The one rule for keeping an animal in a panel (used by ``apply_panel`` and the editor).
+
+    With stable identities: at least ``MIN_COVERAGE`` of its valid positions inside. Without:
+    any position inside (the slots carry no identity, so there is no share to judge).
+    """
+    if stable_identities:
+        return cov.n_valid > 0 and cov.share_inside >= MIN_COVERAGE
+    return cov.n_inside > 0
 
 
 def _check_fits(session: Session, rect: PanelRect) -> None:
@@ -90,6 +107,7 @@ def panel_coverage(session: Session, rect: PanelRect) -> list[AnimalCoverage]:
             label=labels[i] if i < len(labels) else str(i),
             share_inside=float(n_inside[i] / n_valid[i]) if n_valid[i] else 0.0,
             n_valid=int(n_valid[i]),
+            n_inside=int(n_inside[i]),
         )
         for i in range(session.raw_xy.shape[1])
     ]
@@ -143,18 +161,26 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
 
     Raises ValueError when the panel does not fit inside the video.
     """
-    _check_fits(session, rect)
+    cov = panel_coverage(session, rect)  # also checks that the panel fits
     raw = session.raw_xy
-    valid, inside = _masks(raw, rect)
-    n_valid = valid.sum(axis=0)
-    n_inside = inside.sum(axis=0)
-    if session.has_stable_identities:
-        share = np.divide(n_inside, n_valid, out=np.zeros(raw.shape[1]), where=n_valid > 0)
-        keep_mask = (n_valid > 0) & (share >= MIN_COVERAGE)
-    else:
-        keep_mask = n_inside > 0
-    keep = [int(i) for i in np.flatnonzero(keep_mask)]
+    _, inside = _masks(raw, rect)
+    stable = session.has_stable_identities
+    keep = [c.index for c in cov if is_kept(c, stable)]
     n = raw.shape[1]
+    if stable:
+        left_out = [c.label for c in cov if not is_kept(c, stable)]
+        if left_out:
+            logger.warning(
+                "Panel (x %g, y %g, %g x %g) leaves out %d animal(s) with under %d%% of their "
+                "positions inside: %s",
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                len(left_out),
+                round(MIN_COVERAGE * 100),
+                ", ".join(left_out),
+            )
 
     new_xy = raw[:, keep, :].astype(float, copy=True)
     new_xy[~inside[:, keep]] = np.nan
@@ -175,6 +201,9 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
         "fragments": None,
         "roi_mask_path": None,
     }
+    if stable and session.identities_labels is None:
+        # Unlabelled fish keep their original numbers, so both panels (and the editor) agree.
+        update["identities_labels"] = [str(i) for i in keep]
     # Per-animal data of the wrong length cannot be matched to animals: dropped, not guessed.
     bl = session.body_length_px
     update["body_length_px"] = (
@@ -200,7 +229,9 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
             }
             for c in session.length_calibrations
         ]
-    if session.keypoints is not None:
+    if session.keypoints is not None and session.keypoints.xy.shape[1] != n:
+        update["keypoints"] = None  # cannot be matched to the animals: dropped, not guessed
+    elif session.keypoints is not None:
         kp = session.keypoints
         kxy = kp.xy[:, keep].astype(float, copy=True)
         k_in = (
@@ -232,12 +263,18 @@ def preset_rects(
     Returns ``(top_rect, side_rect)``; the first part (left or upper) is the top view when
     ``first_is_top`` is true, else the side view.
     """
+
+    def _cut(total: float) -> float:
+        """The split position as a whole number of pixels (at least 1 from each edge)."""
+        pos = float(math.floor(total * split + 0.5))
+        return min(max(pos, 1.0), total - 1.0) if total >= 2 else pos
+
     if preset == "left_right":
-        w1 = frame_width * split
+        w1 = _cut(frame_width)
         first = PanelRect(x=0, y=0, width=w1, height=frame_height)
         second = PanelRect(x=w1, y=0, width=frame_width - w1, height=frame_height)
     else:
-        h1 = frame_height * split
+        h1 = _cut(frame_height)
         first = PanelRect(x=0, y=0, width=frame_width, height=h1)
         second = PanelRect(x=0, y=h1, width=frame_width, height=frame_height - h1)
     return (first, second) if first_is_top else (second, first)

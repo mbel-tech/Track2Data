@@ -183,7 +183,11 @@ class PanelsSection(QGroupBox):
     def _run_dialog(self, action: str, sid: str, session) -> None:
         bg = getattr(session, "background_image_path", None)
         bg = Path(bg) if bg is not None and Path(bg).is_file() else None
-        dialog = PanelDialog(session, _SPLIT if action == _SPLIT else "single", bg, self)
+        ref = self._ref(sid)
+        initial = ref.panel if ref is not None and action != _SPLIT else None
+        dialog = PanelDialog(
+            session, _SPLIT if action == _SPLIT else "single", bg, self, initial_rect=initial
+        )
         if not dialog.exec():
             return
         if self._ref(sid) is None:
