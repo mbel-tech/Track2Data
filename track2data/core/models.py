@@ -414,18 +414,53 @@ class SceneConfig(BaseModel):
 
 
 MODE_3D_BLOCK_REASON = "3-D fusion is not available yet"
+VIEWS_3D_ONLY = "Views apply to 3-D projects only"
+
+#: Which camera a session was recorded from, in a 3-D project.
+ViewRole = Literal["top", "side"]
+
+
+class PairingPatterns(BaseModel):
+    """Regular expressions that recognise the top and side session of a pair by name.
+
+    Empty means no pattern. Stored in the mode, so they survive a re-scan of the sessions.
+    """
+
+    top_regex: str = ""
+    side_regex: str = ""
+
+
+class ViewPair(BaseModel):
+    """One top session matched with one side session.
+
+    ``fish_map`` maps a top fish label to the side fish label. ``same_ids`` says both views use
+    the same labels, so the map is implied. ``auto`` marks a pair found by the name patterns.
+    """
+
+    top_session_id: str
+    side_session_id: str
+    same_ids: bool = False
+    fish_map: dict[str, str] = {}
+    auto: bool = False
+
+    @model_validator(mode="after")
+    def _two_different_sessions(self) -> ViewPair:
+        if self.top_session_id == self.side_session_id:
+            raise ValueError("a view pair needs two different sessions")
+        return self
 
 
 class ProjectMode(BaseModel):
     """Whether the project is 2-D or 3-D, and for 3-D how the two views are supplied.
 
-    ``layout`` is set if and only if ``dimension == "3d"``. ``id_map`` maps one view's
-    identity labels onto the other's.
+    ``layout`` is set if and only if ``dimension == "3d"``. ``pairing`` holds the name
+    patterns that match top and side sessions. A manifest written before ``pairing``
+    existed may still carry an ``id_map`` key; pydantic ignores it.
     """
 
     dimension: Literal["2d", "3d"] = "2d"
     layout: Literal["single_video_two_panels", "two_videos"] | None = None
-    id_map: dict[str, str] = {}
+    pairing: PairingPatterns = PairingPatterns()
 
     @model_validator(mode="after")
     def _layout_iff_3d(self) -> ProjectMode:
@@ -537,6 +572,9 @@ class SessionRef(BaseModel):
     reader_chosen_by: Literal["detected", "user"] | None = None
     # How sure the scan was when the choice was made ("HIGH", "MEDIUM", "LOW"), for provenance.
     reader_confidence: str | None = None
+    # Which camera recorded this session, in a 3-D project. None until the user (or the name
+    # patterns) says so.
+    view_role: ViewRole | None = None
 
     @field_validator("session_id")
     @classmethod
@@ -604,6 +642,7 @@ class ProjectManifest(BaseModel):
     zones: ZoneSet = ZoneSet()
     scene: SceneConfig = SceneConfig()
     mode: ProjectMode = ProjectMode()
+    view_pairs: list[ViewPair] = []
     metadata_source: MetadataSource | None = None
     mapping: MappingRule | None = None
     preprocess: PreprocessConfig = PreprocessConfig()
