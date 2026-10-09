@@ -860,10 +860,40 @@ have sessions added and be saved, but nothing computes: Processing, Preview and 
 with "3-D fusion is not available yet". The gate is `Engine.require_computable()` and it covers
 every compute entry point, including `compute_metrics` and the `sensitivity` command, not only
 the screens, so the CLI and API cannot produce 2-D numbers for a 3-D project. *id_map.* Reserved
-for sub-project G (ID correspondence between views); E never reads or writes it. *Order.* E, then F
+for sub-project G (ID correspondence between views); E never reads or writes it. (G replaced it by
+`view_pairs` and `mode.pairing`; see D-038.) *Order.* E, then F
 (panel split) and G in either order, then D, then B.
 
 **Rationale:** Fusion, ID correspondence and 3-D metrics all need to know the dimension and the
 recording layout first, and need it fixed before sessions exist. Running the 2-D pipeline on a
 3-D project would give plausible but wrong results, so refusing at the engine is safer than
 hiding buttons.
+
+### D-038 · ID correspondence between views: G owns the pair record, pairing is by regex, and the Views page never blocks
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-id-correspondence-design.md`
+(sub-project G of `docs/3d-movement/2026-10-08-3d-roadmap.md`). Replaces the reserved `id_map` of D-037.
+
+**Decision:** *Ownership.* G owns the pair record and the fish mapping: `ProjectManifest.view_pairs`
+holds `ViewPair(top_session_id, side_session_id, same_ids, fish_map, auto)` and `SessionRef.view_role`
+is `top`, `side` or unset. `mode.id_map` is removed (a manifest that still contains it loads, the key
+is ignored) and replaced by `view_pairs` plus `mode.pairing` (`PairingPatterns`, a top and a side
+regex, both empty by default). *Pairing.* Two regexes, searched in the session id, each with a `key`
+group; sessions with an equal key pair up. An empty `key` means no match, and a key shared by several
+sessions on one side is ambiguous and not paired. A session belongs to at most one pair. *Same IDs.*
+A per-pair tick says fish with the same label are the same fish; otherwise the user matches by hand.
+*Identity-free.* A session without stable identities cannot be matched; the pair is flagged "cannot
+match fish: this session has no stable identities" (matching by geometry is not done). *auto.*
+Applying the pattern again replaces the pairs it made earlier (`auto=True`) and never touches
+hand-made ones. *Navigation.* Views is page 10, belongs to the Sessions sidebar row, shows only in 3-D
+and is reached by Next and Back between Sessions and Calibration; `PAGE_NAMES` keeps its ten entries.
+*Gate.* Pairs never block Next (3-D cannot compute anyway); the Views status is never `blocked`.
+*Status.* The sidebar status uses manifest data only (roles, pairs, `same_ids`, a non-empty map),
+while the page validates fish maps strictly (duplicate, unknown labels, counts) against the sessions'
+labels.
+
+**Rationale:** A fish mapping hangs off a pair of sessions, and one project-wide dictionary cannot
+describe many pairs, so the pair record and its UI belong with the mapping. Regex pairing scales to
+many trials, and the manual path covers names that follow no rule. Keeping hand-made pairs out of
+re-pairing means a correction is never silently undone. Fusion (D) will be the stage that requires
+complete pairs.
