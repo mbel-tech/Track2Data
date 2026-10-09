@@ -137,6 +137,27 @@ def test_apply_right_after_typing_uses_typed_patterns(qtbot, tmp_path) -> None:
     assert len(store.manifest.view_pairs) == 2
 
 
+@pytest.mark.parametrize(
+    ("top", "side", "names", "pair"),
+    [
+        (r"(?P<key>.+)_top$", r"(?P<key>.+)_side$", ("trial01_top", "trial01_side"),
+         ("trial01_top", "trial01_side")),
+        (r"^dorsal_(?P<key>\d+)$", r"^lateral_(?P<key>\d+)$", ("dorsal_01", "lateral_01"),
+         ("dorsal_01", "lateral_01")),
+        (r"^top_(?P<key>.+)$", r"^side_(?P<key>.+)$", ("top_fish3_day2", "side_fish3_day2"),
+         ("top_fish3_day2", "side_fish3_day2")),
+    ],
+)
+def test_help_text_has_three_worked_examples(top, side, names, pair) -> None:
+    from track2data.views.pairing import pair_by_regex
+    from ui.widgets.regex_help import REGEX_HELP_TEXT
+
+    assert REGEX_HELP_TEXT.count("Example") == 3
+    for part in (top, side, *names):
+        assert part in REGEX_HELP_TEXT
+    assert pair_by_regex(list(names), top, side).pairs == [pair]
+
+
 def test_side_help_button_shows_popover(qtbot, tmp_path) -> None:
     _, screen = _make(qtbot, tmp_path)
     screen._side_help_btn.click()
