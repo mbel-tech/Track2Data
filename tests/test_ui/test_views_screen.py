@@ -171,3 +171,139 @@ def test_empty_states(qtbot, tmp_path) -> None:
     store.new_project("p3", tmp_path, mode=ProjectMode(dimension="3d", layout="two_videos"))
     assert screen._empty_label.isVisible()
     assert screen._role_table.rowCount() == 0
+
+
+# ── pair list ──────────────────────────────────────────────────────────────
+
+
+def _facts(sid, labels=None, n=0, stable=True):
+    from ui.store.session_facts import SessionFacts
+
+    return SessionFacts(
+        session_id=sid, reader="idtrackerai", fps=30.0, n_frames=10, n_animals=n,
+        width_px=10, height_px=10, has_stable_identities=stable, track_wo_identities=None,
+        idtrackerai_version=None, length_unit=None, setup_points=None, roi_list=None,
+        has_body_length=False, identities_labels=labels, background_image_path=None,
+    )
+
+
+def _paired(qtbot, tmp_path, top_labels=None, side_labels=None, names=("t1_top", "t1_side")):
+    from track2data.core.models import ViewPair
+
+    store, screen = _make(qtbot, tmp_path, names=names)
+    store.update_view_role("t1_top", "top")
+    store.update_view_role("t1_side", "side")
+    store.update_view_pair(ViewPair(top_session_id="t1_top", side_session_id="t1_side"))
+    if top_labels is not None:
+        store._session_facts["t1_top"] = _facts("t1_top", top_labels, len(top_labels))
+        store._session_facts["t1_side"] = _facts("t1_side", side_labels, len(side_labels))
+        store.sessionFactsChanged.emit()
+    return store, screen
+
+
+def _tick(screen, row=0):
+    return screen._pairs_table.cellWidget(row, 2)
+
+
+def _status(screen, row=0):
+    return screen._pairs_table.item(row, 3)
+
+
+def test_pair_row_needs_matching_without_facts(qtbot, tmp_path) -> None:
+    _, screen = _paired(qtbot, tmp_path)
+    assert screen._pairs_table.rowCount() == 1
+    assert screen._pairs_table.item(0, 0).text() == "t1_top"
+    assert screen._pairs_table.item(0, 1).text() == "t1_side"
+    assert _status(screen).text() == "Needs matching"
+
+
+def test_same_ids_tick_fills_identity_map(qtbot, tmp_path) -> None:
+    store, screen = _paired(qtbot, tmp_path, ["a", "b"], ["a", "b"])
+    assert _status(screen).text() == "Needs matching"
+    _tick(screen).setChecked(True)
+    pair = store.manifest.view_pairs[0]
+    assert pair.same_ids and pair.fish_map == {"a": "a", "b": "b"}
+    assert _status(screen).text() == "Matched"
+    _tick(screen).setChecked(False)
+    pair = store.manifest.view_pairs[0]
+    assert not pair.same_ids and pair.fish_map == {"a": "a", "b": "b"}
+
+
+def test_partial_overlap_maps_shared_and_lists_unmatched(qtbot, tmp_path) -> None:
+    store, screen = _paired(qtbot, tmp_path, ["a", "b"], ["b", "c"])
+    _tick(screen).setChecked(True)
+    assert store.manifest.view_pairs[0].fish_map == {"b": "b"}
+    assert _status(screen).text() == "Matched"
+    tip = _status(screen).toolTip()
+    assert "a" in tip and "c" in tip
+
+
+def test_identity_free_session_cannot_match(qtbot, tmp_path) -> None:
+    store, screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+    refs = [
+        s.model_copy(update={"identity_free_override": True}) if s.session_id == "t1_side" else s
+        for s in store.manifest.sessions
+    ]
+    store.update_sessions(refs)
+    assert _status(screen).text() == "cannot match fish: this session has no stable identities"
+    assert not _tick(screen).isEnabled()
+    _tick(screen).setChecked(True)
+    assert store.manifest.view_pairs[0].fish_map == {}
+
+
+def test_remove_button_deletes_pair(qtbot, tmp_path) -> None:
+    store, screen = _paired(qtbot, tmp_path)
+    screen._pairs_table.cellWidget(0, 4).click()
+    assert store.manifest.view_pairs == []
+    assert screen._pairs_table.rowCount() == 0
+
+
+def test_manual_add_excludes_paired_sessions(qtbot, tmp_path) -> None:
+    store, screen = _paired(
+        qtbot, tmp_path, names=("t1_top", "t1_side", "t2_top", "t2_side")
+    )
+    store.update_view_role("t2_top", "top")
+    assert not screen._manual_add_btn.isEnabled()
+    top_combo = screen._manual_top_combo
+    assert [top_combo.itemText(i) for i in range(top_combo.count())] == ["t2_top"]
+    assert screen._manual_side_combo.count() == 0
+    store.update_view_role("t2_side", "side")
+    assert screen._manual_add_btn.isEnabled()
+    screen._manual_add_btn.click()
+    assert [(p.top_session_id, p.side_session_id) for p in store.manifest.view_pairs] == [
+        ("t1_top", "t1_side"),
+        ("t2_top", "t2_side"),
+    ]
+    assert screen._manual_top_combo.count() == 0
+    assert not screen._manual_add_btn.isEnabled()
+
+
+def test_selection_emits_and_survives_rebuild(qtbot, tmp_path) -> None:
+    store, screen = _paired(
+        qtbot, tmp_path, names=("t1_top", "t1_side", "t2_top", "t2_side")
+    )
+    store.update_view_role("t2_top", "top")
+    store.update_view_role("t2_side", "side")
+    screen._manual_add_btn.click()
+    assert screen._current_pair is None
+    with qtbot.waitSignal(screen.pairSelected) as sig:
+        screen._pairs_table.selectRow(1)
+    assert sig.args == [("t2_top", "t2_side")]
+    with qtbot.assertNotEmitted(screen.pairSelected):
+        store.sessionFactsChanged.emit()
+        store.update_view_pair(store.manifest.view_pairs[1].model_copy(update={"same_ids": True}))
+    assert screen._current_pair == ("t2_top", "t2_side")
+    with qtbot.waitSignal(screen.pairSelected) as sig:
+        store.remove_view_pair("t2_top", "t2_side")
+    assert sig.args == [None]
+
+
+def test_pair_rebuild_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
+    store, _screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+    calls = []
+    monkeypatch.setattr(store, "update_view_pair", lambda *a: calls.append(a))
+    monkeypatch.setattr(store, "remove_view_pair", lambda *a: calls.append(a))
+    store.sessionsChanged.emit()
+    store.viewsChanged.emit()
+    store.sessionFactsChanged.emit()
+    assert calls == []

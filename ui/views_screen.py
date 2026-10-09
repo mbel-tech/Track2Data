@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -16,18 +18,26 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data.core.models import PairingPatterns
-from track2data.views.pairing import pair_by_regex
+from track2data.core.models import PairingPatterns, ViewPair
+from track2data.views.pairing import (
+    fish_labels,
+    identity_map,
+    pair_by_regex,
+    validate_fish_map,
+)
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.regex_help import RegexHelpPopover
 from ui.widgets.weak_slot import weak_slot
 
 ROLE_ITEMS = (("(not set)", None), ("Top", "top"), ("Side", "side"))
+NEEDS_MATCHING = "Needs matching"
 EMPTY_TEXT = "Open a 3-D project and add sessions to set up the views."
 
 
 class ViewsScreen(QWidget):
     """Roles per session and the name patterns that pair top with side sessions."""
+
+    pairSelected = Signal(object)  # (top_id, side_id) or None; user selection changes only
 
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -59,6 +69,43 @@ class ViewsScreen(QWidget):
         self._role_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._role_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         root.addWidget(self._role_table, 1)
+
+        self._pairs_box = QWidget()
+        pairs_lay = QVBoxLayout(self._pairs_box)
+        pairs_lay.setContentsMargins(0, 0, 0, 0)
+        pairs_lay.setSpacing(8)
+        pairs_heading = QLabel("Pairs")
+        pairs_heading.setObjectName("SectionTitle")
+        pairs_lay.addWidget(pairs_heading)
+        self._pairs_table = QTableWidget(0, 5)
+        self._pairs_table.setObjectName("ViewsPairsTable")
+        self._pairs_table.setHorizontalHeaderLabels(
+            ["Top session", "Side session", "Same IDs", "Status", ""]
+        )
+        self._pairs_table.horizontalHeader().setStretchLastSection(False)
+        self._pairs_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Stretch
+        )
+        self._pairs_table.verticalHeader().setVisible(False)
+        self._pairs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._pairs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._pairs_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        pairs_lay.addWidget(self._pairs_table)
+        manual = QHBoxLayout()
+        self._manual_top_combo = QComboBox()
+        self._manual_side_combo = QComboBox()
+        self._manual_add_btn = QPushButton("Add pair")
+        manual.addWidget(QLabel("Top"))
+        manual.addWidget(self._manual_top_combo, 1)
+        manual.addWidget(QLabel("Side"))
+        manual.addWidget(self._manual_side_combo, 1)
+        manual.addWidget(self._manual_add_btn)
+        pairs_lay.addLayout(manual)
+        root.addWidget(self._pairs_box)
+        self._rebuilding = False
+        self._last_pair: tuple[str, str] | None = None
+        self._pairs_table.itemSelectionChanged.connect(self._on_pair_selection)
+        self._manual_add_btn.clicked.connect(self._add_manual_pair)
 
         self._pattern_box = QWidget()
         pbox = QVBoxLayout(self._pattern_box)
@@ -107,6 +154,7 @@ class ViewsScreen(QWidget):
             store.sessionsChanged.connect(self._refresh)
             store.modeChanged.connect(self._refresh)
             store.viewsChanged.connect(self._refresh)
+            store.sessionFactsChanged.connect(self._refresh)
         self._refresh()
 
     def _pattern_row(self, layout: QVBoxLayout, caption: str, placeholder: str):
@@ -141,8 +189,10 @@ class ViewsScreen(QWidget):
         self._empty_label.setVisible(not sessions)
         self._role_table.setVisible(bool(sessions))
         self._pattern_box.setVisible(self._is_3d())
+        self._pairs_box.setVisible(self._is_3d())
         with self._commit.suppressed():
             self._fill_roles(sessions)
+            self._fill_pairs(sessions)
             patterns = m.mode.pairing if m is not None else PairingPatterns()
             for edit, text in (
                 (self._top_regex_edit, patterns.top_regex),
@@ -178,6 +228,155 @@ class ViewsScreen(QWidget):
         role = ROLE_ITEMS[combo.currentIndex()][1]
         try:
             self._store.update_view_role(session_id, role)
+        except ValueError as exc:
+            self._error_label.setText(str(exc))
+
+    # ── pairs ──────────────────────────────────────────────────────────────
+
+    @property
+    def _current_pair(self) -> tuple[str, str] | None:
+        rows = self._pairs_table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        row = rows[0].row()
+        top, side = self._pairs_table.item(row, 0), self._pairs_table.item(row, 1)
+        return (top.text(), side.text()) if top and side else None
+
+    def _labels(self, session_id: str) -> list[str]:
+        facts = self._store.session_facts(session_id)
+        return fish_labels(
+            facts.identities_labels if facts else None, facts.n_animals if facts else 0
+        )
+
+    def _pair_state(self, pair: ViewPair, free: set[str]):
+        """(status text, tooltip, top labels, side labels) for one pair."""
+        top_l, side_l = self._labels(pair.top_session_id), self._labels(pair.side_session_id)
+        msgs = validate_fish_map(
+            pair.fish_map,
+            top_l,
+            side_l,
+            top_identity_free=pair.top_session_id in free,
+            side_identity_free=pair.side_session_id in free,
+        )
+        if msgs:
+            return msgs[0], "\n".join(msgs), top_l, side_l
+        if not pair.fish_map:
+            return NEEDS_MATCHING, "", top_l, side_l
+        left_top = [x for x in top_l if x not in pair.fish_map]
+        left_side = [x for x in side_l if x not in set(pair.fish_map.values())]
+        tip = ""
+        if left_top or left_side:
+            tip = (
+                "Not matched: top " + (", ".join(left_top) or "none")
+                + "; side " + (", ".join(left_side) or "none")
+            )
+        return "Matched", tip, top_l, side_l
+
+    def _fill_pairs(self, sessions) -> None:
+        table = self._pairs_table
+        m = self._manifest()
+        pairs = list(m.view_pairs) if m is not None and self._is_3d() else []
+        free = {s.session_id for s in sessions if s.is_identity_free()}
+        keep = self._last_pair
+        self._rebuilding = True
+        table.blockSignals(True)
+        try:
+            table.clearSelection()
+            table.setRowCount(len(pairs))
+            for row, pair in enumerate(pairs):
+                for col, text in enumerate((pair.top_session_id, pair.side_session_id)):
+                    item = QTableWidgetItem(text)
+                    item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                    table.setItem(row, col, item)
+                status, tip, _, _ = self._pair_state(pair, free)
+                st = QTableWidgetItem(status)
+                st.setToolTip(tip)
+                st.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                table.setItem(row, 3, st)
+                tick = QCheckBox()
+                tick.setChecked(pair.same_ids)
+                tick.setEnabled(
+                    pair.top_session_id not in free and pair.side_session_id not in free
+                )
+                tick.toggled.connect(weak_slot(self._on_same_ids, pair.top_session_id,
+                                               pair.side_session_id, tick))
+                table.setCellWidget(row, 2, tick)
+                btn = QPushButton("Remove")
+                btn.clicked.connect(
+                    weak_slot(self._remove_pair, pair.top_session_id, pair.side_session_id)
+                )
+                table.setCellWidget(row, 4, btn)
+            table.setCurrentCell(-1, -1)
+            table.clearSelection()
+            for row, pair in enumerate(pairs):
+                if keep == (pair.top_session_id, pair.side_session_id):
+                    table.selectRow(row)
+        finally:
+            table.blockSignals(False)
+            self._rebuilding = False
+        self._fill_manual(sessions, pairs)
+        now = self._current_pair
+        if now != self._last_pair:
+            self._last_pair = now
+            self.pairSelected.emit(now)
+
+    def _fill_manual(self, sessions, pairs) -> None:
+        used = {sid for p in pairs for sid in (p.top_session_id, p.side_session_id)}
+        for combo, role in ((self._manual_top_combo, "top"), (self._manual_side_combo, "side")):
+            ids = [
+                s.session_id
+                for s in sessions
+                if s.view_role == role and s.session_id not in used
+            ]
+            previous = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(ids)
+            if previous in ids:
+                combo.setCurrentText(previous)
+            combo.blockSignals(False)
+        self._manual_add_btn.setEnabled(
+            self._manual_top_combo.count() > 0 and self._manual_side_combo.count() > 0
+        )
+
+    def _on_pair_selection(self) -> None:
+        if self._rebuilding:
+            return
+        now = self._current_pair
+        if now != self._last_pair:
+            self._last_pair = now
+            self.pairSelected.emit(now)
+
+    def _find_pair(self, top_id: str, side_id: str) -> ViewPair | None:
+        m = self._manifest()
+        for p in m.view_pairs if m is not None else []:
+            if (p.top_session_id, p.side_session_id) == (top_id, side_id):
+                return p
+        return None
+
+    def _on_same_ids(self, top_id: str, side_id: str, tick: QCheckBox) -> None:
+        pair = self._find_pair(top_id, side_id)
+        if pair is None or not tick.isEnabled():
+            return
+        if tick.isChecked():
+            shared, _ = identity_map(self._labels(top_id), self._labels(side_id))
+            update = {"same_ids": True, "fish_map": shared}
+        else:
+            update = {"same_ids": False}
+        try:
+            self._store.update_view_pair(pair.model_copy(update=update))
+        except ValueError as exc:
+            self._error_label.setText(str(exc))
+
+    def _remove_pair(self, top_id: str, side_id: str) -> None:
+        self._store.remove_view_pair(top_id, side_id)
+
+    def _add_manual_pair(self) -> None:
+        top, side = self._manual_top_combo.currentText(), self._manual_side_combo.currentText()
+        if not top or not side:
+            return
+        try:
+            self._store.update_view_pair(ViewPair(top_session_id=top, side_session_id=side))
         except ValueError as exc:
             self._error_label.setText(str(exc))
 
