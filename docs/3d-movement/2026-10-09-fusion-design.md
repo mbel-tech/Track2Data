@@ -77,8 +77,12 @@ fits together. D does not compute metrics; B does.
    (`None` for one video). `require_computable()` is unchanged.
 4. **Store** (`ui/store/project_store.py`). `update_fusion(top_id, side_id, settings | None)`
    replaces the pair's settings and emits `viewsChanged`; rejected unless the project is 3-D and
-   the pair exists. Changing a pair's `fish_map` or either session's panel keeps the settings (the
-   water column does not depend on the matching).
+   the pair exists. Changing a pair's `fish_map` keeps the settings (the water column does
+   not depend on the matching). Changing the side session's panel shifts `surface_row` and
+   `floor_row` by `old_panel_y - new_panel_y` (rows are side-panel pixels; no panel counts as y = 0),
+   and the pair's fusion is cleared if the shifted rows are invalid (surface below 0 or not above the
+   floor). Changing the top session's panel leaves the settings alone. `split_session_into_panels`
+   creates a fresh pair and drops the old ones, so it never touches existing settings.
 5. **Views page.** A Fusion panel for the selected pair with a status line: "setup needed",
    "ready" with overlap, fused fish and dropped positions, "agreement warning: RMS x cm", or the
    `FusionError` text. A "Set up fusion…" button opens `FusionDialog`
@@ -122,8 +126,10 @@ the exports, and several offsets for one pair.
   session entries and their facts, the layout, and the project's preprocess, calibration and zones
   settings (plus the pickle and blob-diagnostics flags and the video overrides).
 - **The offset suggestion is on demand.** `fuse()` leaves `FusionReport.suggested_offset` as `None`.
-  The dialog's "Suggest offset" button calls `agreement.suggest_offset` (about 1-2 s on long
-  sessions; the scan is vectorised and scans +-5 s around 0 only). `Engine.suggest_offset(pair)` is a
+  The dialog's "Suggest offset" button calls `agreement.suggest_offset` (about 3 s on a 1-hour,
+  5-fish recording; the scan is vectorised and scans +-5 s around 0 only). It needs a calibrated top
+  view (the scan compares positions in cm); without one the button is disabled with a hint to set the
+  scale on the Calibration page, and the summary says so. `Engine.suggest_offset(pair)` is a
   wrapper for worker threads. A lag needs at least 30 jointly valid samples to be scored.
 - **The dialog recomputes on the UI thread.** Its summary and the offset suggestion run in the
   dialog (the suggestion under a wait cursor). Only the Views-page status and the loading of both

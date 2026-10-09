@@ -651,7 +651,10 @@ class ProjectStore(QObject):
 
         The session is probed again and its cached facts dropped. A fish map made against the
         old panel no longer holds, so the pair holding the session loses its map and its
-        "Same IDs" tick (the pair itself stays). The same panel again changes nothing.
+        "Same IDs" tick (the pair itself stays). The water-column rows of a pair this session is
+        the side of are in side-panel pixels, so they move with the panel's top edge; settings
+        that are no longer valid after the move are dropped. The same panel again changes
+        nothing.
         """
         if not self._require_panels():
             return
@@ -661,19 +664,31 @@ class ProjectStore(QObject):
         sessions = list(manifest.sessions)
         if sessions[index].panel == rect:
             return
+        old_y = sessions[index].panel.y if sessions[index].panel is not None else 0.0
+        shift = old_y - (rect.y if rect is not None else 0.0)
         sessions[index] = sessions[index].model_copy(update={"panel": rect})
-        pairs = [
-            p.model_copy(update={"fish_map": {}, "same_ids": False})
-            if self._in_pair(p, session_id) and (p.fish_map or p.same_ids)
-            else p
-            for p in manifest.view_pairs
-        ]
+        pairs = []
+        for p in manifest.view_pairs:
+            if self._in_pair(p, session_id):
+                if p.fish_map or p.same_ids:
+                    p = p.model_copy(update={"fish_map": {}, "same_ids": False})
+                if p.side_session_id == session_id and p.fusion is not None and shift:
+                    p = p.model_copy(update={"fusion": self._shifted_fusion(p.fusion, shift)})
+            pairs.append(p)
         self._manifest = manifest.model_copy(update={"sessions": sessions, "view_pairs": pairs})
         self.sessionsChanged.emit()
         self.viewsChanged.emit()
         if self._session_facts.pop(session_id, None) is not None:
             self.sessionFactsChanged.emit()
         self._submit_probe(session_id, sessions[index].folder)
+
+    @staticmethod
+    def _shifted_fusion(fs: FusionSettings, shift: float) -> FusionSettings | None:
+        """*fs* with both water rows moved by *shift*, or None when that is not valid."""
+        surface, floor = fs.surface_row + shift, fs.floor_row + shift
+        if surface < 0 or surface >= floor:
+            return None
+        return fs.model_copy(update={"surface_row": surface, "floor_row": floor})
 
     def _rederive_same_ids(self) -> None:
         """Re-fill the map of every "Same IDs" pair from the labels now known.

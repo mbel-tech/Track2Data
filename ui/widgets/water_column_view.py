@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.core.models import PanelRect
 from ui.widgets.panel_preview import PanelPreview
 from ui.widgets.weak_slot import weak_slot
 
@@ -129,9 +130,10 @@ class WaterColumnView(QWidget):
         background_path: Path | None,
         video_path: Path | None,
         tracks: np.ndarray | None,
+        crop: PanelRect | None = None,
     ) -> None:
         """Pass through to the preview and redraw the lines on the new scene. Never raises."""
-        self.preview.set_source(frame_size, background_path, video_path, tracks)
+        self.preview.set_source(frame_size, background_path, video_path, tracks, crop)
         self._rebuild_lines()
 
     def set_rows(self, surface: float | None, floor: float | None) -> None:

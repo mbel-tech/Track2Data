@@ -248,7 +248,9 @@ class FusionSection(QGroupBox):
         bg = getattr(side.session, "background_image_path", None)
         bg = Path(bg) if bg is not None and Path(bg).is_file() else None
         same_video = self._manifest().mode.layout == "single_video_two_panels"
-        dialog = FusionDialog(top, side, pair, same_video, bg, self)
+        side_ref = self._ref(pair.side_session_id)
+        crop = side_ref.panel if side_ref is not None else None
+        dialog = FusionDialog(top, side, pair, same_video, bg, self, background_crop=crop)
         if not dialog.exec():
             self._render(self._find_pair(self._ids))
             return

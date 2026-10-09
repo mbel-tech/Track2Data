@@ -965,8 +965,9 @@ valid samples and returns a lag only if its RMS is at least 20% below the lag-0 
 fill `FusionReport.suggested_offset`, the dialog's "Suggest offset" button calls it on demand.
 *Engine.* `fuse_pair`, `fuse_all` (results and error messages per pair) and `suggest_offset`; fusion
 is not cached on disk, its inputs (the two preprocessed sessions) are. *Store and UI.*
-`ProjectStore.update_fusion` (3-D only, the pair must exist) keeps the settings when the fish map or a
-panel changes. The Views page gains a Fusion section (`ui/widgets/fusion_section.py`) with a status
+`ProjectStore.update_fusion` (3-D only, the pair must exist) keeps the settings when the fish map changes;
+a change of the side session's panel shifts the two water rows by the panel's y offset (cleared if they
+become invalid). The Views page gains a Fusion section (`ui/widgets/fusion_section.py`) with a status
 line and "Set up fusion…", which opens `ui/dialogs/fusion_dialog.py` (side-view backdrop with two
 draggable lines, `ui/widgets/water_column_view.py`, typed fields, a live summary). The Views stage
 status warns "Fusion setup needed for ..." while a pair has no settings and still never blocks.
@@ -975,8 +976,10 @@ triangulation, cameras not at right angles, fusion across different frame rates,
 of the water column, a z axis in the exports, several offsets for one pair.
 
 **Rationale:** Right-angle cameras need no calibration, so the fusion can ship before the 3-D metrics.
-Putting the depth beside an ordinary top-view session means all existing 2-D code works on the fused
-session unchanged and B only has to read one more array. Counting out-of-column positions instead of
+Putting the depth beside an ordinary top-view session means the 2-D metrics run on the fused session
+and B only has to read one more array. Caveats: dropped stretches leave `frame_index` gaps without
+separator rows (distance-type metrics bridge them), and IL-15 on a fused session would use the
+top-view y, so B must read `psess.depth`. Counting out-of-column positions instead of
 clipping them keeps a wrong water column visible. Computing on demand from cached inputs avoids a
 second cache whose key would have to track every setting of both sessions.
 

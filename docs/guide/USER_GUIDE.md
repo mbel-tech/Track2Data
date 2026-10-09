@@ -278,8 +278,10 @@ needed.* until you set the pair up, and **Set up fusion…** opens the editor fo
   follows; tick **Flip** if it runs the other way.
 - **Frame offset** shifts the side recording against the top one, in frames (side = top + offset). With
   the layout "One video, two panels" it is hidden and fixed at 0. **Suggest offset** looks for the shift
-  that makes the two views agree best, within ±5 seconds around 0 only; it can take a second or two on a
-  long session and answers "no better offset found" when nothing clearly beats 0.
+  that makes the two views agree best, within ±5 seconds around 0 only; it needs a calibrated top view
+  (set the scale on the Calibration page; the button is greyed out until then), can take about 3
+  seconds on a 1-hour recording with 5 fish, and answers "no better offset found" when nothing clearly
+  beats 0.
 - The summary under the fields updates as you edit: shared frames, fish fused, positions outside the
   water column, and the agreement. **OK** is off while the settings are invalid or the pair cannot be
   fused.

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data.core.models import FusionSettings, PreprocessedSession, ViewPair
+from track2data.core.models import FusionSettings, PanelRect, PreprocessedSession, ViewPair
 from track2data.fusion import FusionError, fuse
 from track2data.fusion.agreement import suggest_offset
 from ui.widgets.water_column_view import WaterColumnView
@@ -37,6 +37,11 @@ _AXES = ("Top-view x", "Top-view y")
 _MAX_ROW = 1_000_000.0
 _FALLBACK_SIZE = 100.0
 _DEFAULT_TANK_CM = 20.0
+#: Pause after the last edit before the summary is recomputed (a long fuse takes ~140 ms).
+_REFRESH_MS = 80
+SUGGEST_NEEDS_CALIBRATION = (
+    "Suggest offset needs a calibrated top view (set the scale on the Calibration page)"
+)
 
 
 class FusionDialog(QDialog):
@@ -48,6 +53,7 @@ class FusionDialog(QDialog):
         same_video: bool,
         background_path: Path | None = None,
         parent: QWidget | None = None,
+        background_crop: PanelRect | None = None,
     ) -> None:
         super().__init__(parent)
         self._top, self._side, self._pair = top, side, pair
@@ -69,8 +75,9 @@ class FusionDialog(QDialog):
         self._water_view.setMinimumHeight(260)
         layout.addWidget(self._water_view, 1)
 
-        self._surface_spin = self._row_spin(1)
-        self._floor_spin = self._row_spin(1)
+        max_row = frame_size[1] if height > 0 else _MAX_ROW
+        self._surface_spin = self._row_spin(1, max_row)
+        self._floor_spin = self._row_spin(1, max_row)
         self._height_spin = QDoubleSpinBox()
         self._height_spin.setDecimals(2)
         self._height_spin.setRange(0.0, 10_000.0)
@@ -82,6 +89,14 @@ class FusionDialog(QDialog):
         self._offset_spin.setRange(-1_000_000, 1_000_000)
         self._offset_spin.setSuffix(" frames")
         self._suggest_btn = QPushButton("Suggest offset")
+        self._can_suggest = top.px_per_cm is not None
+        if not self._can_suggest:
+            self._suggest_btn.setEnabled(False)
+            self._suggest_btn.setToolTip(SUGGEST_NEEDS_CALIBRATION)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(_REFRESH_MS)
+        self._timer.timeout.connect(weak_slot(self._refresh_now))
 
         form = QFormLayout()
         form.addRow("Water surface row", self._surface_spin)
@@ -118,7 +133,9 @@ class FusionDialog(QDialog):
         layout.addWidget(buttons)
 
         # Backdrop once per open; later edits only move the lines.
-        self._water_view.set_source(frame_size, background_path, video.path, side.xy)
+        self._water_view.set_source(
+            frame_size, background_path, video.path, side.xy, background_crop
+        )
 
         start = pair.fusion
         if start is None:
@@ -143,15 +160,15 @@ class FusionDialog(QDialog):
         self._flip_check.toggled.connect(weak_slot(self._on_edit))
         self._water_view.rowsChanged.connect(weak_slot(self._on_rows_dragged, pass_args=True))
         self._suggest_btn.clicked.connect(weak_slot(self._on_suggest))
-        self._refresh()
+        self._refresh_now()
 
     # ---- helpers --------------------------------------------------------------
 
     @staticmethod
-    def _row_spin(decimals: int) -> QDoubleSpinBox:
+    def _row_spin(decimals: int, maximum: float) -> QDoubleSpinBox:
         box = QDoubleSpinBox()
         box.setDecimals(decimals)
-        box.setRange(0.0, _MAX_ROW)
+        box.setRange(0.0, maximum)
         return box
 
     @staticmethod
@@ -189,16 +206,25 @@ class FusionDialog(QDialog):
 
     # ---- events ---------------------------------------------------------------
 
+    def accept(self) -> None:
+        if self._timer.isActive():
+            self._refresh_now()  # never accept on a stale summary
+        if self._ok_button.isEnabled():
+            super().accept()
+
     def _on_edit(self) -> None:
         self._water_view.set_rows(self._surface_spin.value(), self._floor_spin.value())
-        self._refresh()
+        self._timer.start()
 
     def _on_rows_dragged(self, surface: float, floor: float) -> None:
         self._fill_spin(self._surface_spin, surface)
         self._fill_spin(self._floor_spin, floor)
-        self._refresh()
+        self._timer.start()
 
     def _on_suggest(self) -> None:
+        if not self._can_suggest:
+            return
+        self._refresh_now()
         fs, _ = self._current()
         if fs is None:
             return
@@ -218,11 +244,13 @@ class FusionDialog(QDialog):
         else:
             self._fill_spin(self._offset_spin, best)
             note = f"Offset set to {best} frames."
-        self._refresh(note)
+        self._refresh_now(note)
 
     # ---- summary --------------------------------------------------------------
 
-    def _refresh(self, note: str = "") -> None:
+    def _refresh_now(self, note: str = "") -> None:
+        """Recompute the summary and the OK state now (edits go through the debounce timer)."""
+        self._timer.stop()
         fs, reason = self._current()
         if fs is None:
             self._set_summary(reason, ok=False)
@@ -250,6 +278,8 @@ class FusionDialog(QDialog):
                 "Warning: the two views disagree on the shared axis; check the offset, "
                 "the axis and the flip."
             )
+        if not self._can_suggest and not self._same_video:
+            lines.append(SUGGEST_NEEDS_CALIBRATION)
         if note:
             lines.append(note)
         self._set_summary("\n".join(lines), ok=True)

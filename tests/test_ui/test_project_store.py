@@ -1210,6 +1210,68 @@ def test_set_session_panel_clears_the_pairs_map_but_keeps_the_pair(qtbot, store_
     assert pair.fish_map == {} and pair.same_ids is False
 
 
+def _fusion_store(store, y_side: float | None, **fs):
+    """A split pair whose side panel starts at y_side (None: no panel) with fusion settings."""
+    from track2data.core.models import FusionSettings
+
+    top_id, side_id = store.split_session_into_panels("s", _rect(), _rect(50, y_side or 0))
+    if y_side is None:
+        store.set_session_panel(side_id, None)
+    base = dict(surface_row=100.0, floor_row=300.0, tank_height_cm=20.0)
+    base.update(fs)
+    store.update_view_pair(_pair(top_id, side_id, fusion=FusionSettings(**base)))
+    return top_id, side_id
+
+
+@pytest.mark.parametrize(
+    ("old_y", "new_y", "surface", "floor"),
+    [(100, 40, 160.0, 360.0), (40, 100, 40.0, 240.0), (None, 30, 70.0, 270.0)],
+)
+def test_side_panel_move_shifts_the_water_rows(
+    qtbot, store_panels, old_y, new_y, surface, floor
+) -> None:
+    store = store_panels
+    _, side_id = _fusion_store(store, old_y)
+    with qtbot.waitSignal(store.viewsChanged, timeout=1000):
+        store.set_session_panel(side_id, _rect(50, new_y))
+    (pair,) = store.manifest.view_pairs
+    assert (pair.fusion.surface_row, pair.fusion.floor_row) == (surface, floor)
+    assert pair.fusion.tank_height_cm == 20.0
+
+
+def test_side_panel_cleared_shifts_back_to_frame_rows(store_panels) -> None:
+    store = store_panels
+    _, side_id = _fusion_store(store, 30)
+    store.set_session_panel(side_id, None)
+    (pair,) = store.manifest.view_pairs
+    assert (pair.fusion.surface_row, pair.fusion.floor_row) == (130.0, 330.0)
+
+
+def test_side_panel_shift_that_invalidates_clears_fusion(store_panels) -> None:
+    store = store_panels
+    _, side_id = _fusion_store(store, 0, surface_row=20.0, floor_row=300.0)
+    store.set_session_panel(side_id, _rect(50, 50))  # surface -> -30
+    (pair,) = store.manifest.view_pairs
+    assert pair.fusion is None
+
+
+def test_top_panel_change_leaves_fusion(store_panels) -> None:
+    store = store_panels
+    top_id, _ = _fusion_store(store, 40)
+    before = store.manifest.view_pairs[0].fusion
+    store.set_session_panel(top_id, _rect(0, 20))
+    assert store.manifest.view_pairs[0].fusion == before
+
+
+def test_side_panel_shift_emits_views_changed_once(store_panels) -> None:
+    store = store_panels
+    _, side_id = _fusion_store(store, 40)
+    counts = {"views": 0}
+    store.viewsChanged.connect(lambda: counts.__setitem__("views", counts["views"] + 1))
+    store.set_session_panel(side_id, _rect(50, 10))
+    assert counts["views"] == 1
+
+
 def test_is_duplicate_compares_the_panel(tmp_path: Path) -> None:
     from ui.store.project_store import _is_duplicate
 

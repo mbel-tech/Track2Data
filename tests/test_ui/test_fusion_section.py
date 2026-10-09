@@ -65,8 +65,12 @@ def _make(qtbot, tmp_path, monkeypatch, layout="two_videos", with_settings=True)
         return SimpleNamespace(), side
 
     class StubDialog:
-        def __init__(self, top, side, pair, same_video, background_path=None, parent=None):
+        def __init__(
+            self, top, side, pair, same_video, background_path=None, parent=None,
+            background_crop=None,
+        ):
             calls["dialogs"].append((same_video, background_path))
+            calls.setdefault("crops", []).append(background_crop)
             hook = calls.get("during_dialog")
             if hook:
                 hook()
@@ -285,6 +289,22 @@ def test_dialog_gets_existing_background(qtbot, tmp_path, monkeypatch) -> None:
     screen._fusion_btn.click()
     qtbot.waitUntil(lambda: len(calls["dialogs"]) == 2, timeout=3000)
     assert calls["dialogs"][1][1] is None
+
+
+def test_dialog_gets_side_panel_crop(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import PanelRect
+
+    store, screen, calls = _make(qtbot, tmp_path, monkeypatch, layout="single_video_two_panels")
+    _select(screen)
+    screen._fusion_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 1, timeout=3000)
+    assert calls["crops"][0] is None
+    store.set_session_panel("t_side", PanelRect(x=5, y=6, width=50, height=60))
+    screen.refresh_now()
+    _select(screen)
+    screen._fusion_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 2, timeout=3000)
+    assert calls["crops"][1] == PanelRect(x=5, y=6, width=50, height=60)
 
 
 def test_fuse_status_names_unexpected_errors(monkeypatch) -> None:

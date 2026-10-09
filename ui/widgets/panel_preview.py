@@ -63,10 +63,14 @@ class PanelPreview(QGraphicsView):
         background_path: Path | None,
         video_path: Path | None,
         tracks: np.ndarray | None,
+        crop: PanelRect | None = None,
     ) -> None:
         """Choose the backdrop and redraw. Never raises: bad input falls through to "none".
 
-        The rectangles given to ``set_rects`` are kept and redrawn over the new backdrop.
+        With *crop* the background image is cut to that rectangle (a panel session's scene
+        starts at the panel origin). The video-frame fallback is the whole frame, so it is
+        skipped when *crop* is set. The rectangles given to ``set_rects`` are kept and redrawn
+        over the new backdrop.
         """
         scene = self.scene()
         scene.clear()
@@ -80,9 +84,9 @@ class PanelPreview(QGraphicsView):
             width = height = _DEFAULT_SIZE  # unknown size
         scene.setSceneRect(QRectF(0, 0, width, height))
 
-        image = load_backdrop_image(background_path)
+        image = load_backdrop_image(background_path, crop)
         kind: BackdropKind = "image"
-        if image is None:
+        if image is None and crop is None:
             image = self._video_frame(video_path, round(width), round(height))
             kind = "video"
         self._kind = "none"

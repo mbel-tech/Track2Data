@@ -103,3 +103,12 @@ def test_slice_psess_slices_every_per_frame_array() -> None:
     assert s.xy[0, 0, 0] == 50.0  # row 10
     assert s.fps == p.fps and s.session_id == p.session_id
     assert p.n_frames == 100  # original untouched
+
+
+def test_slice_psess_slices_depth() -> None:
+    p = _psess()
+    p.depth = np.tile(np.arange(100.0)[:, None], (1, 2))
+    s = slice_psess(p, 10, 30)
+    assert s.depth.shape == (20, 2)
+    assert s.depth[0, 0] == 10.0
+    assert _psess().depth is None and slice_psess(_psess(), 0, 5).depth is None

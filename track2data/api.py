@@ -886,21 +886,22 @@ class Engine:
                 results[key] = self.fuse_pair(pair)
             except FusionError as exc:
                 errors[key] = str(exc)
+            except Exception as exc:  # one bad pair must not hide the others
+                errors[key] = f"{type(exc).__name__}: {exc}"
         return results, errors
 
     def suggest_offset(self, pair: ViewPair) -> int | None:
         """The frame offset that best aligns the pair's views, or ``None`` (also when the pair
         cannot be fused). For the fusion dialog, on a worker thread."""
         from track2data.fusion.agreement import suggest_offset
-        from track2data.fusion.fuse import FusionError
 
         if self._manifest.mode.layout == "single_video_two_panels":
             return None  # fusion forces the offset to 0 for one video
         try:
             top, side = self._pair_inputs(pair)
-        except FusionError:
+            return suggest_offset(top, side, pair)
+        except Exception:  # FusionError or anything unexpected: no suggestion
             return None
-        return suggest_offset(top, side, pair)
 
     def view_skipped_metrics(self, session: Session | None = None) -> dict[str, str]:
         """Selected metric ids the camera view rules out, mapped to the reason."""
@@ -1421,7 +1422,8 @@ class Engine:
         return written
 
     def require_computable(self) -> None:
-        """Refuse to compute while the project is 3-D (fusion does not exist yet)."""
+        """Refuse to compute while the project is 3-D (the 3-D metrics, sub-project B, do not exist
+        yet; fusion itself works)."""
         if self._manifest.mode.dimension == "3d":
             raise ValueError(MODE_3D_BLOCK_REASON)
 

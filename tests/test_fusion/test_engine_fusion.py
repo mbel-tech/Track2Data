@@ -138,3 +138,36 @@ def test_suggest_offset_none_for_single_video(monkeypatch):
     assert engine.suggest_offset(pair) == -7
     one = _engine(monkeypatch, [pair], {"t": top, "s": side}, layout="single_video_two_panels")
     assert one.suggest_offset(pair) is None
+
+
+def test_fuse_all_collects_any_exception_per_pair(monkeypatch):
+    top, side, pair = make_pair()
+    top2, side2, pair2 = make_pair(top_id="t2", side_id="s2")
+    engine = _engine(
+        monkeypatch,
+        [pair, pair2],
+        {"t": top, "s": side, "t2": top2, "s2": side2},
+        ids=("t", "s", "t2", "s2"),
+    )
+    real = Engine.fuse_pair
+
+    def flaky(self, p):
+        if p.top_session_id == "t":
+            raise KeyError("boom")
+        return real(self, p)
+
+    monkeypatch.setattr(Engine, "fuse_pair", flaky)
+    results, errors = engine.fuse_all()
+    assert set(results) == {("t2", "s2")}
+    assert errors == {("t", "s"): "KeyError: 'boom'"}
+
+
+def test_suggest_offset_returns_none_on_any_exception(monkeypatch):
+    top, side, pair = make_pair()
+    engine = _engine(monkeypatch, [pair], {"t": top, "s": side})
+
+    def boom(*a, **k):
+        raise ValueError("bad")
+
+    monkeypatch.setattr("track2data.fusion.agreement.suggest_offset", boom)
+    assert engine.suggest_offset(pair) is None
