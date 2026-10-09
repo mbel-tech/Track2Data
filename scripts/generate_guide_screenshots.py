@@ -193,6 +193,9 @@ def main() -> int:
     cal._px_spin.setValue(12.5)
     cal.flush()
     shot("03-calibration-custom")
+    cal._radio_session.setChecked(True)
+    cal.flush()
+    shot("03-calibration-session")
     store.update_calibration(CalibrationConfig(mode="bodylength"))
     # 4 Zones -----------------------------------------------------------------
     zones = win._stack.widget(3)

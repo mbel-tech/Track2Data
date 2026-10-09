@@ -193,7 +193,7 @@ Calibration decides which units distances and speeds are reported in. Figure 4 s
 |---|---|---|
 | **Body length** (recommended) | You do not have a reliable scale | `*_bl` columns: distances in body lengths. Physical `*_cm` columns stay empty. |
 | **Custom (px per unit)** | You know the scale | `*_cm` columns, and `*_bl` columns too whenever the tracker recorded body length |
-| **Session calibration** | You used idtracker.ai's *Length Calibration* tool | each session's own ratio; you must confirm the unit |
+| **Session calibration** | Each session already carries a scale: idtracker.ai's *Length Calibration* tool, a Ctrax / JAABA `trx.mat` `pxpermm`, or a scale you gave when importing | each session's own ratio; you must confirm the unit |
 
 In Session calibration mode, Track2Data also records how much your length-calibration clicks disagreed
 (a relative spread, saved in `sessions.csv` as `length_calibration_rel_sd`) and warns when it is above 5%.
@@ -215,6 +215,33 @@ you. A third click starts the measurement over.
 
 If a mode is incomplete (no scale, or an unconfirmed unit) the stage shows ✗ and **Next** is
 disabled until you fix it.
+
+### Session calibration: where each tracker's scale comes from
+
+Only some trackers record a scale. The **ⓘ** button beside the description opens a short note on
+what each tracker in your project records, with links to its documentation. Figure 6 shows the mode.
+
+<figure>
+<img src="images/03-calibration-session.png" alt="Session calibration">
+<figcaption><b>Figure 6.</b> Session calibration: the unit, the choice between several calibrations, the confirmation and each session's readiness.</figcaption>
+</figure>
+
+| Tracker | Where the scale comes from |
+|---|---|
+| **idtracker.ai** | The Validator's *Length Calibration* tool saves one or more measurements. `length_unit` is their average: a factor from pixels to *user-defined units*. idtracker.ai does not record whether you measured in cm or mm, so the **Unit** you pick is your own declaration and you must confirm it. See the [idtrackerai.Session reference](https://idtracker.ai/latest/reference/generated/idtrackerai.Session.html). |
+| **Ctrax / JAABA `trx.mat`** | `pxpermm` (pixels per millimetre), present once the file's units were converted. Track2Data turns it into pixels per cm and ignores a value of exactly 1, which those tools use for "never calibrated". See [the Ctrax trx fields](https://ctrax.sourceforge.net/bmat.html). |
+| **DeepLabCut, SLEAP, Ctrax raw `.mat`** | Their files record no scale. Give **Scale (pixels per cm)** in the confirm step when you add the sessions, or use **Custom** or **Body length**. |
+
+The per-session readiness list says whether each session is calibrated and with which value. A
+session without a scale reads *not calibrated* (idtracker.ai) or *no scale set at import* (other
+trackers). The **Session calibration** card is disabled when no session in the project can supply a
+scale.
+
+**Several calibrations.** An idtracker.ai session can hold several length measurements. With
+**Several calibrations** you choose **Average** (idtracker.ai's own `length_unit`, the default) or
+**Median** (one badly placed click cannot move it). The list shows which one is in use, for example
+*median of 3*. If the saved `length_unit` differs from the average of the session's measurements
+(they were edited after export), the saved value is used and the run log carries a warning.
 
 ### Camera view
 
@@ -245,7 +272,7 @@ one. You can:
 
 <figure>
 <img src="images/04-zones.png" alt="Zones list">
-<figcaption><b>Figure 6.</b> The zone list, with the import and load buttons.</figcaption>
+<figcaption><b>Figure 7.</b> The zone list, with the import and load buttons.</figcaption>
 </figure>
 
 ### Drawing zones
@@ -255,7 +282,7 @@ with their names.
 
 <figure>
 <img src="images/04-zones-canvas.png" alt="Zone canvas">
-<figcaption><b>Figure 7.</b> The zone canvas: saved zones are shaded and named, validator landmarks are blue.</figcaption>
+<figcaption><b>Figure 8.</b> The zone canvas: saved zones are shaded and named, validator landmarks are blue.</figcaption>
 </figure>
 
 | Tool | How |
@@ -282,7 +309,7 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 
 <figure>
 <img src="images/05-metadata.png" alt="Metadata screen">
-<figcaption><b>Figure 8.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
+<figcaption><b>Figure 9.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
 </figure>
 
 1. **Load metadata CSV…**. The first rows are previewed.
@@ -327,7 +354,7 @@ step has an **Enabled** box; the raw data is never overwritten.
 
 <figure>
 <img src="images/06-preprocessing.png" alt="Preprocessing screen">
-<figcaption><b>Figure 9.</b> The Preprocessing screen with the default settings.</figcaption>
+<figcaption><b>Figure 10.</b> The Preprocessing screen with the default settings.</figcaption>
 </figure>
 
 | Step | What it does |
@@ -361,7 +388,7 @@ went, not a measurement:
 
 <figure>
 <img src="images/06-preprocessing-identity-switch.png" alt="Identity switch correction">
-<figcaption><b>Figure 10.</b> The identity switch correction options (experimental, off by default).</figcaption>
+<figcaption><b>Figure 11.</b> The identity switch correction options (experimental, off by default).</figcaption>
 </figure>
 
 **Identity switch correction is experimental and off by default.** It reassigns identities from
@@ -378,7 +405,7 @@ Choose what to compute. Metrics are grouped on three tabs: **Individual** (per a
 
 <figure>
 <img src="images/07-metrics.png" alt="Metrics screen">
-<figcaption><b>Figure 11.</b> The Metrics screen, with search, presets and the three metric tabs.</figcaption>
+<figcaption><b>Figure 12.</b> The Metrics screen, with search, presets and the three metric tabs.</figcaption>
 </figure>
 
 - **Search** filters all tabs by name or ID (`speed`, `IL-2`). The line beneath says which tabs
@@ -410,7 +437,7 @@ zone assignment, metrics, export.
 
 <figure>
 <img src="images/08-processing.png" alt="Processing screen">
-<figcaption><b>Figure 12.</b> The Processing screen: one row per session, with status and duration.</figcaption>
+<figcaption><b>Figure 13.</b> The Processing screen: one row per session, with status and duration.</figcaption>
 </figure>
 
 - The table shows each session's status and duration. A failed session is marked *Failed* and does
@@ -444,12 +471,12 @@ Choose a session and **Load trajectories** (it reuses the cache after a run). Th
 
 <figure>
 <img src="images/09-preview-trajectories.png" alt="Trajectories">
-<figcaption><b>Figure 13.</b> Trajectories with Raw + processed shown: the dashed grey line is a tracking jump that was removed.</figcaption>
+<figcaption><b>Figure 14.</b> Trajectories with Raw + processed shown: the dashed grey line is a tracking jump that was removed.</figcaption>
 </figure>
 
 - Drag the slider, or press ▶, to move through time. **Trail** sets how many past frames are drawn.
 - **Show ▸ Raw + processed** draws the raw path as a dashed grey line next to the processed one, so
-  you can see exactly what gap filling, jump removal and smoothing changed. In Figure 13 the
+  you can see exactly what gap filling, jump removal and smoothing changed. In Figure 14 the
   dashed line is a tracking jump that was removed.
 - **Zones** shows or hides the saved zones. The mouse wheel zooms.
 
@@ -462,7 +489,7 @@ Tick **Occupancy heatmap** to see where the animals spent their time (red = most
 
 <figure>
 <img src="images/09-preview-heatmap.png" alt="Heatmap">
-<figcaption><b>Figure 14.</b> The occupancy heatmap.</figcaption>
+<figcaption><b>Figure 15.</b> The occupancy heatmap.</figcaption>
 </figure>
 
 ### Diagnostics
@@ -473,7 +500,7 @@ changed.
 
 <figure>
 <img src="images/09-preview-diagnostics.png" alt="Diagnostics">
-<figcaption><b>Figure 15.</b> The Diagnostics tab.</figcaption>
+<figcaption><b>Figure 16.</b> The Diagnostics tab.</figcaption>
 </figure>
 
 ### Metrics
@@ -486,7 +513,7 @@ Tick the formats you want, choose where to write them, and press **Export**.
 
 <figure>
 <img src="images/10-export.png" alt="Export screen">
-<figcaption><b>Figure 16.</b> The Export screen, with the file receipt after an export.</figcaption>
+<figcaption><b>Figure 17.</b> The Export screen, with the file receipt after an export.</figcaption>
 </figure>
 
 1. Tick the formats you want.
@@ -516,7 +543,7 @@ After an export, the panel at the bottom gives ready-to-paste code for the files
 
 <figure>
 <img src="images/10-export-code.png" alt="Code snippets">
-<figcaption><b>Figure 17.</b> Ready-to-paste R and Python snippets for the files just written.</figcaption>
+<figcaption><b>Figure 18.</b> Ready-to-paste R and Python snippets for the files just written.</figcaption>
 </figure>
 
 See [Understanding the output files](#understanding-the-output-files) for what the columns mean.
@@ -563,6 +590,7 @@ Definitions, formulas and references for every metric: [`docs/METRICS_SPEC.md`](
 | You see | Why | What to do |
 |---|---|---|
 | **Next** is disabled | A required stage is empty or invalid | Hover over Next: the tooltip names the problem. Check the ✗ / ○ badges in the sidebar |
+| *"Session calibration selected but these sessions have no length_unit"* | A session has no scale (idtracker.ai never calibrated it, or the other tracker's file records none) | Calibrate it in the idtracker.ai Validator, give **Scale (pixels per cm)** when importing, or switch the calibration mode |
 | *"No reader recognised the session folder"* | The folder is not an idtracker.ai output | Pick the session folder itself (the one containing `trajectories/`). Supported: idtracker.ai 6.x output (the legacy v5 layout also works); v4 is not supported yet (a v4-looking folder gets a specific message; see [sending a v4 sample](../IDTRACKERAI_V4_SAMPLES.md)) |
 | Video column says *Not found* | The video path idtracker.ai recorded does not exist on this computer | Select the session and press **Locate Video…** (Sessions). Metrics do not need the video |
 | *READER_NOT_AVAILABLE* | A project session was added with software this version of Track2Data does not have | Install a version that has that reader. Track2Data will not read it with a different one, since that could change the numbers |

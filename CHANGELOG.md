@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Session calibration works beyond idtracker.ai.** The Calibration screen describes the mode per tracker, with an ⓘ note linking to each tracker's documentation, and disables it when no session can supply a scale. DeepLabCut, SLEAP and Ctrax raw files take an optional **Scale (pixels per cm)** import option.
+- **`trx.mat` reader (Ctrax / FlyTracker / JAABA).** Built from the documented layout, unverified against a real sample. `pxpermm` becomes the session scale.
+- **Average or median of several idtracker.ai length calibrations.** The average (idtracker.ai's own `length_unit`) stays the default.
+
 ## [0.2.1] — 2026-10-09
 
 v0.2.0 was tagged, but its packaged Linux and macOS apps could not start, so no binaries were ever
