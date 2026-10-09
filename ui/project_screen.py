@@ -229,12 +229,16 @@ class ProjectScreen(QWidget):
 
     def _selected_mode(self) -> ProjectMode | None:
         """The mode the radios describe, or None for 3D with no layout yet."""
+        # The radios say nothing about the pairing patterns; keep the open project's.
+        pairing = {}
+        if self._store is not None and self._store.manifest is not None:
+            pairing = {"pairing": self._store.manifest.mode.pairing}
         if self._dim_3d.isChecked():
             layout = self._selected_layout()
             if layout is None:
                 return None
-            return ProjectMode(dimension="3d", layout=layout)
-        return ProjectMode()
+            return ProjectMode(dimension="3d", layout=layout, **pairing)
+        return ProjectMode(**pairing)
 
     def _on_dim_toggled(self, checked: bool) -> None:
         if not checked:
