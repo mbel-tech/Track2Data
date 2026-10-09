@@ -260,7 +260,7 @@ def test_eleven_entries_and_views_name() -> None:
 
     assert len(compute_stage_statuses(_manifest(), has_run_results=False)) == 11
     assert len(compute_stage_statuses(None, has_run_results=False)) == 11
-    assert PAGE_NAMES[10] == "Views"
+    assert len(PAGE_NAMES) == 10
     assert len(stage_summaries(_manifest(), has_run_results=False)) == 9
 
 
@@ -285,7 +285,7 @@ def test_views_3d_session_without_role() -> None:
 def test_views_unpaired_session_warns() -> None:
     info = _views(_manifest_3d(sessions=[_vref("t", "top"), _vref("s", "side")]))
     assert info.status == "warning"
-    assert "t" in info.message
+    assert "Session t " in info.message
 
 
 def test_views_pair_without_matching_warns() -> None:
@@ -328,3 +328,13 @@ def test_views_never_blocks_next() -> None:
     ]
     for m in cases:
         assert next_blocker(compute_stage_statuses(m, has_run_results=False), VIEWS) is None
+
+
+def test_next_blocker_for_a_forced_views_status_does_not_raise() -> None:
+    from ui.store.stage_status import StageInfo
+
+    base = compute_stage_statuses(_manifest(), has_run_results=False)
+    for status in ("empty", "valid", "warning", "blocked"):
+        statuses = [*base[:VIEWS], StageInfo(status)]
+        result = next_blocker(statuses, VIEWS)
+        assert result is None or status == "blocked"

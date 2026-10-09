@@ -44,11 +44,14 @@ def _missing_water_column(manifest: ProjectManifest) -> list[str]:
 
 PAGE_NAMES = [
     "Project", "Sessions", "Calibration", "Zones", "Metadata",
-    "Preprocessing", "Metrics", "Processing", "Preview", "Export", "Views",
+    "Preprocessing", "Metrics", "Processing", "Preview", "Export",
 ]
 (
     _PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT, _VIEWS
 ) = range(11)
+
+#: Views is a sub-page of the Sessions stage, so it is not a guide chapter (not in PAGE_NAMES).
+VIEWS_PAGE_NAME = "Views"
 
 #: Pages whose "empty" state stops Next (the pipeline cannot run without them).
 REQUIRED_PAGES = frozenset({_PROJECT, _SESSIONS, _METRICS})
@@ -166,6 +169,7 @@ def _views_status(manifest: ProjectManifest) -> StageInfo:
         if not (p.same_ids or p.fish_map):
             return StageInfo("warning", f"Match the fish of {name}.")
         for sid in (p.top_session_id, p.side_session_id):
+            # A dangling pair id is skipped: this status uses manifest data only.
             ref = by_id.get(sid)
             if ref is not None and ref.is_identity_free():
                 return StageInfo("warning", f"Session {sid} has no stable identities.")
@@ -176,11 +180,12 @@ def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
     """Why leaving *page* forward is not allowed, or None when it is."""
     if not (0 <= page < len(statuses)):
         return None
+    name = VIEWS_PAGE_NAME if page == _VIEWS else PAGE_NAMES[page]
     info = statuses[page]
     if info.status == "blocked":
-        return info.message or f"Fix the {PAGE_NAMES[page]} settings first."
+        return info.message or f"Fix the {name} settings first."
     if info.status == "empty" and page in REQUIRED_PAGES:
-        return info.message or f"Complete the {PAGE_NAMES[page]} step first."
+        return info.message or f"Complete the {name} step first."
     return None
 
 
