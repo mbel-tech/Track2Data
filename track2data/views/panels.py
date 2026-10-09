@@ -156,17 +156,58 @@ def _shift_roi(
     return out
 
 
+def keep_animals(session: Session, keep: list[int]) -> Session:
+    """Return the session reduced to the animals at the indices ``keep`` (in that order).
+
+    Every per-animal field is filtered together: ``n_animals``, identity labels and colours,
+    ``id_probabilities``, ``body_length_px``, ``raw_xy`` and the pose skeleton. Whole-frame
+    coordinates are left alone. Per-animal data whose length does not match the animal count is
+    dropped, as are the tables that cannot be cut by animal (``bbox_table``, ``bbox_summary``,
+    ``identities_groups``, ``fragments``). The input session is never modified.
+    """
+    n = session.raw_xy.shape[1]
+    update: dict[str, Any] = {
+        "raw_xy": session.raw_xy[:, keep, :].astype(float, copy=True),
+        "n_animals": len(keep),
+        "identities_labels": _pick(session.identities_labels, keep, n),
+        "identities_colors": _pick(session.identities_colors, keep, n),
+        "bbox_table": None,
+        "bbox_summary": None,
+        "identities_groups": None,
+        "fragments": None,
+    }
+    if session.has_stable_identities and session.identities_labels is None:
+        # Unlabelled fish keep their original numbers, so both panels (and the editor) agree.
+        update["identities_labels"] = [str(i) for i in keep]
+    # Per-animal data of the wrong length cannot be matched to animals: dropped, not guessed.
+    bl = session.body_length_px
+    update["body_length_px"] = (
+        np.asarray(bl)[keep] if bl is not None and np.asarray(bl).shape[0] == n else None
+    )
+    ip = session.id_probabilities
+    update["id_probabilities"] = (
+        np.asarray(ip)[:, keep] if ip is not None and np.asarray(ip).shape[1] == n else None
+    )
+    kp = session.keypoints
+    if kp is not None and kp.xy.shape[1] != n:
+        update["keypoints"] = None  # cannot be matched to the animals: dropped, not guessed
+    elif kp is not None:
+        conf = None if kp.confidence is None else kp.confidence[:, keep].astype(float, copy=True)
+        update["keypoints"] = kp.model_copy(
+            update={"xy": kp.xy[:, keep].astype(float, copy=True), "confidence": conf}
+        )
+    return session.model_copy(update=update)
+
+
 def apply_panel(session: Session, rect: PanelRect) -> Session:
     """Return the session cut to ``rect``, in panel coordinates (see the module docstring).
 
     Raises ValueError when the panel does not fit inside the video.
     """
     cov = panel_coverage(session, rect)  # also checks that the panel fits
-    raw = session.raw_xy
-    _, inside = _masks(raw, rect)
+    _, inside = _masks(session.raw_xy, rect)
     stable = session.has_stable_identities
     keep = [c.index for c in cov if is_kept(c, stable)]
-    n = raw.shape[1]
     if stable:
         left_out = [c.label for c in cov if not is_kept(c, stable)]
         if left_out:
@@ -182,37 +223,19 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
                 ", ".join(left_out),
             )
 
-    new_xy = raw[:, keep, :].astype(float, copy=True)
+    kept = keep_animals(session, keep)
+    new_xy = kept.raw_xy
     new_xy[~inside[:, keep]] = np.nan
     new_xy[..., 0] -= rect.x
     new_xy[..., 1] -= rect.y
 
     update: dict[str, Any] = {
         "raw_xy": new_xy,
-        "n_animals": len(keep),
         "video": session.video.model_copy(
             update={"width_px": round(rect.width), "height_px": round(rect.height)}
         ),
-        "identities_labels": _pick(session.identities_labels, keep, n),
-        "identities_colors": _pick(session.identities_colors, keep, n),
-        "bbox_table": None,
-        "bbox_summary": None,
-        "identities_groups": None,
-        "fragments": None,
         "roi_mask_path": None,
     }
-    if stable and session.identities_labels is None:
-        # Unlabelled fish keep their original numbers, so both panels (and the editor) agree.
-        update["identities_labels"] = [str(i) for i in keep]
-    # Per-animal data of the wrong length cannot be matched to animals: dropped, not guessed.
-    bl = session.body_length_px
-    update["body_length_px"] = (
-        np.asarray(bl)[keep] if bl is not None and np.asarray(bl).shape[0] == n else None
-    )
-    ip = session.id_probabilities
-    update["id_probabilities"] = (
-        np.asarray(ip)[:, keep] if ip is not None and np.asarray(ip).shape[1] == n else None
-    )
     if session.setup_points is not None:
         update["setup_points"] = {
             k: _shift_points(v, rect.x, rect.y) for k, v in session.setup_points.items()
@@ -229,11 +252,9 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
             }
             for c in session.length_calibrations
         ]
-    if session.keypoints is not None and session.keypoints.xy.shape[1] != n:
-        update["keypoints"] = None  # cannot be matched to the animals: dropped, not guessed
-    elif session.keypoints is not None:
-        kp = session.keypoints
-        kxy = kp.xy[:, keep].astype(float, copy=True)
+    if kept.keypoints is not None:
+        kp = kept.keypoints
+        kxy = kp.xy
         k_in = (
             (kxy[..., 0] >= rect.x)
             & (kxy[..., 0] < rect.x + rect.width)
@@ -243,12 +264,11 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
         kxy[~k_in] = np.nan
         kxy[..., 0] -= rect.x
         kxy[..., 1] -= rect.y
-        conf = None
-        if kp.confidence is not None:
-            conf = kp.confidence[:, keep].astype(float, copy=True)
+        conf = kp.confidence
+        if conf is not None:
             conf[~k_in] = np.nan
         update["keypoints"] = kp.model_copy(update={"xy": kxy, "confidence": conf})
-    return session.model_copy(update=update)
+    return kept.model_copy(update=update)
 
 
 def preset_rects(
