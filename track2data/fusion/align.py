@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from track2data.core.models import PreprocessedSession, ViewPair
+from track2data.core.models import FusionSettings, PreprocessedSession, ViewPair
 from track2data.views.pairing import fish_labels, validate_fish_map
 
 
@@ -85,11 +85,18 @@ def match_fish(
     return keep, side_cols, top_labels, side_labels, fused_labels
 
 
+def _settings(pair: ViewPair) -> FusionSettings:
+    if pair.fusion is None:
+        raise FusionError("no fusion settings for this pair")
+    return pair.fusion
+
+
 def top_axis_cm(
     top: PreprocessedSession, pair: ViewPair, rows: np.ndarray, keep: list[int]
 ) -> np.ndarray:
     """The top view's chosen axis in cm, (len(rows), len(keep))."""
-    axis = 0 if pair.fusion.horizontal_axis == "x" else 1
+    fs = _settings(pair)
+    axis = 0 if fs.horizontal_axis == "x" else 1
     return top.xy[:, :, axis][rows][:, keep] / top.px_per_cm
 
 
@@ -97,7 +104,7 @@ def side_horizontal_cm(
     side: PreprocessedSession, pair: ViewPair, rows: np.ndarray, cols: list[int]
 ) -> np.ndarray:
     """The side view's horizontal position in cm, (len(rows), len(cols)); negated when ``flip``."""
-    fs = pair.fusion
+    fs = _settings(pair)
     side_scale = (fs.floor_row - fs.surface_row) / fs.tank_height_cm
     cm = side.xy[:, :, 0][rows][:, cols] / side_scale
     return -cm if fs.flip else cm
