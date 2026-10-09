@@ -17,9 +17,12 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from track2data.core.models import KinematicsArrays, PreprocessedSession, ViewPair
+from track2data.fusion.agreement import agreement, suggest_offset
 from track2data.views.pairing import fish_labels, validate_fish_map
 from track2data.views.panels import keep_animals
 
+#: Overall RMS above this fraction of the top view's range along the axis is a warning.
+WARN_FRACTION = 0.10
 #: Frame rates that differ by more than this (relative) cannot be aligned frame for frame.
 FPS_TOLERANCE = 0.001
 
@@ -54,7 +57,7 @@ class FusedSession:
     session_id: str
 
 
-def _fusable_rows(psess: PreprocessedSession) -> tuple[np.ndarray, np.ndarray, bool]:
+def fusable_rows(psess: PreprocessedSession) -> tuple[np.ndarray, np.ndarray, bool]:
     """(row numbers, their true video frames, timeline verified) of the observed-video rows."""
     frames, valid = psess.timeline()
     frames = np.asarray(frames)
@@ -65,7 +68,7 @@ def _fusable_rows(psess: PreprocessedSession) -> tuple[np.ndarray, np.ndarray, b
     return rows, frames[rows], bool(valid)
 
 
-def _match_rows(
+def match_rows(
     top_rows: np.ndarray,
     top_frames: np.ndarray,
     side_rows: np.ndarray,
@@ -85,6 +88,57 @@ def _match_rows(
 
 def _take(arr: np.ndarray | None, rows: np.ndarray, cols: list[int]) -> np.ndarray | None:
     return None if arr is None else arr[rows][:, cols]
+
+
+def match_fish(
+    top: PreprocessedSession, side: PreprocessedSession, pair: ViewPair
+) -> tuple[list[int], list[int], list[str]]:
+    """(top columns kept, matching side columns, fused labels) from the pair's ``fish_map``.
+
+    Raises ``FusionError`` for inconsistent labels, an invalid map or no matched fish.
+    """
+    top_labels = fish_labels(top.session.identities_labels, top.n_animals)
+    side_labels = fish_labels(side.session.identities_labels, side.n_animals)
+    for name, psess, labels in (("top", top, top_labels), ("side", side, side_labels)):
+        given = psess.session.identities_labels
+        if given and len(given) != psess.n_animals:
+            raise FusionError(f"fish labels do not match the number of animals in the {name} view")
+        if len(set(labels)) != len(labels):
+            raise FusionError(f"duplicate fish labels in the {name} view")
+    msgs = validate_fish_map(
+        pair.fish_map,
+        top_labels,
+        side_labels,
+        top_identity_free=not top.session.has_stable_identities,
+        side_identity_free=not side.session.has_stable_identities,
+    )
+    if msgs:
+        raise FusionError("; ".join(msgs))
+    if not pair.fish_map:
+        raise FusionError("no fish are matched")
+
+    keep = [i for i, lab in enumerate(top_labels) if lab in pair.fish_map]
+    side_cols = [side_labels.index(pair.fish_map[top_labels[i]]) for i in keep]
+    fused_labels = [top_labels[i] for i in keep]
+    return keep, side_cols, fused_labels
+
+
+def horizontal_cm(
+    top: PreprocessedSession,
+    side: PreprocessedSession,
+    pair: ViewPair,
+    rows: np.ndarray,
+    srows: np.ndarray,
+    keep: list[int],
+    side_cols: list[int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """(top axis, side horizontal) in cm on the matched rows; side negated when ``flip``."""
+    fs = pair.fusion
+    axis = 0 if fs.horizontal_axis == "x" else 1
+    top_cm = top.xy[rows][:, keep, axis] / top.px_per_cm
+    side_scale = (fs.floor_row - fs.surface_row) / fs.tank_height_cm
+    side_cm = side.xy[srows][:, side_cols, 0] / side_scale
+    return top_cm, -side_cm if fs.flip else side_cm
 
 
 def fuse(
@@ -110,35 +164,15 @@ def fuse(
     if abs(top.fps - side.fps) > FPS_TOLERANCE * max(top.fps, side.fps):
         raise FusionError(f"frame rates differ: {top.fps:g} vs {side.fps:g} fps")
 
+    keep, side_cols, fused_labels = match_fish(top, side, pair)
     top_labels = fish_labels(top.session.identities_labels, top.n_animals)
     side_labels = fish_labels(side.session.identities_labels, side.n_animals)
-    for name, psess, labels in (("top", top, top_labels), ("side", side, side_labels)):
-        given = psess.session.identities_labels
-        if given and len(given) != psess.n_animals:
-            raise FusionError(f"fish labels do not match the number of animals in the {name} view")
-        if len(set(labels)) != len(labels):
-            raise FusionError(f"duplicate fish labels in the {name} view")
-    msgs = validate_fish_map(
-        pair.fish_map,
-        top_labels,
-        side_labels,
-        top_identity_free=not top.session.has_stable_identities,
-        side_identity_free=not side.session.has_stable_identities,
-    )
-    if msgs:
-        raise FusionError("; ".join(msgs))
-    if not pair.fish_map:
-        raise FusionError("no fish are matched")
-
-    keep = [i for i, lab in enumerate(top_labels) if lab in pair.fish_map]
-    side_cols = [side_labels.index(pair.fish_map[top_labels[i]]) for i in keep]
-    fused_labels = [top_labels[i] for i in keep]
     matched_side = {pair.fish_map[lab] for lab in fused_labels}
 
     offset = 0 if same_video else fs.frame_offset
-    top_rows, top_frames, top_valid = _fusable_rows(top)
-    side_rows, side_frames, side_valid = _fusable_rows(side)
-    rows, srows = _match_rows(top_rows, top_frames, side_rows, side_frames, offset)
+    top_rows, top_frames, top_valid = fusable_rows(top)
+    side_rows, side_frames, side_valid = fusable_rows(side)
+    rows, srows = match_rows(top_rows, top_frames, side_rows, side_frames, offset)
     if rows.size == 0:
         raise FusionError("no shared frames between the two views")
 
@@ -184,6 +218,19 @@ def fuse(
         id_probabilities_rows=_take(top.id_probabilities_aligned, rows, keep),
         depth=depth,
     )
+    rms: float | None = None
+    per_fish: dict[str, float | None] = {}
+    skipped: str | None = None
+    warning = False
+    if not top.px_per_cm:
+        skipped = "top view not calibrated"
+    else:
+        top_cm, side_cm = horizontal_cm(top, side, pair, rows, srows, keep, side_cols)
+        rms, per_list = agreement(top_cm, side_cm)
+        per_fish = dict(zip(fused_labels, per_list, strict=True))
+        finite = top_cm[np.isfinite(top_cm)]
+        span = float(finite.max() - finite.min()) if finite.size else 0.0
+        warning = rms is not None and span > 0 and rms > WARN_FRACTION * span
     report = FusionReport(
         overlap_frames=int(rows.size),
         top_frames=int(top_rows.size),
@@ -192,5 +239,10 @@ def fuse(
         unmatched_top=[lab for lab in top_labels if lab not in pair.fish_map],
         unmatched_side=[lab for lab in side_labels if lab not in matched_side],
         n_outside_column=int(outside.sum()),
+        agreement_rms_cm=rms,
+        agreement_per_fish_cm=per_fish,
+        agreement_skipped=skipped,
+        agreement_warning=warning,
+        suggested_offset=None if same_video else suggest_offset(top, side, pair),
     )
     return FusedSession(psess=psess, report=report, session_id=fused_id)

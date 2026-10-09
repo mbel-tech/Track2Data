@@ -152,7 +152,6 @@ def test_ids_and_shapes():
     assert fused.session_id == "t+s"
     assert fused.psess.session_id == "t+s"
     assert fused.psess.depth.shape == fused.psess.xy.shape[:2]
-    assert fused.report.agreement_rms_cm is None and fused.report.agreement_skipped is None
     # the inputs are untouched
     top2, side2, _ = make_pair()
     assert top.session.session_id == "t" and top.depth is None
