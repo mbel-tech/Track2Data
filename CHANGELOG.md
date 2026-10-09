@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The release workflow no longer fails when the release already exists.** Publishing a release from the
+  GitHub web page to create the tag leaves a release behind, and `gh release create` then failed after every
+  build had passed, so no binaries were attached. The publish step now uploads to the existing release
+  (keeping its notes) and creates one only when there is none.
+
 ## [0.2.0] — 2026-10-09
 
 ### Added
