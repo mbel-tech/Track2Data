@@ -225,7 +225,9 @@ class ProjectScreen(QWidget):
             return ProjectMode(dimension="3d", layout=layout)
         return ProjectMode()
 
-    def _on_dim_toggled(self, _checked: bool) -> None:
+    def _on_dim_toggled(self, checked: bool) -> None:
+        if not checked:
+            return
         self._layout_box.setVisible(self._dim_3d.isChecked())
         self._write_mode()
 
@@ -235,6 +237,14 @@ class ProjectScreen(QWidget):
             other.blockSignals(True)
             other.setChecked(False)
             other.blockSignals(False)
+        elif (
+            self._store is not None
+            and self._store.manifest is not None
+            and self._store.manifest.mode.layout is not None
+        ):
+            # Unchecking a committed layout would desync UI from the store.
+            self._sync_from_store()
+            return
         self._write_mode()
 
     def _write_mode(self) -> None:

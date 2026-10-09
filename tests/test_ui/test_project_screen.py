@@ -75,15 +75,52 @@ def test_opening_project_syncs_radios_without_writing(qtbot, tmp_path) -> None:
     store.new_project("q", tmp_path, mode=THREE_D)
     path = store.save_project()
     store.new_project("r", tmp_path)
-    assert screen._dim_2d.isChecked()
+    screen._dim_3d.click()
+    screen._layout_single.click()
+    assert store.manifest.mode.layout == "single_video_two_panels"
+    store.save_project()
     emitted: list[int] = []
     store.modeChanged.connect(lambda: emitted.append(1))
+    handler_calls: list[int] = []
+    real_write = screen._write_mode
+    screen._write_mode = lambda: (handler_calls.append(1), real_write())[1]
     store.open_project(path)
+    assert handler_calls == []
     assert screen._dim_3d.isChecked()
     assert screen._layout_two.isChecked()
     assert not screen._layout_single.isChecked()
     assert screen._layout_box.isVisible()
     assert emitted == []
+    assert store.manifest.mode == THREE_D
+
+
+def test_locked_project_sync_does_not_write(qtbot, tmp_path) -> None:
+    store, screen = _make(qtbot, tmp_path, with_project=False)
+    store.new_project("q", tmp_path, mode=THREE_D)
+    store.update_sessions([_session(tmp_path)])
+    path = store.save_project()
+    store.new_project("r", tmp_path)
+    screen._dim_3d.click()
+    screen._layout_single.click()
+    emitted: list[int] = []
+    store.modeChanged.connect(lambda: emitted.append(1))
+    handler_calls: list[int] = []
+    real_write = screen._write_mode
+    screen._write_mode = lambda: (handler_calls.append(1), real_write())[1]
+    store.open_project(path)
+    assert handler_calls == []
+    assert screen._layout_two.isChecked()
+    assert not screen._dim_3d.isEnabled()
+    assert emitted == []
+    assert store.manifest.mode == THREE_D
+
+
+def test_clicking_checked_layout_keeps_it_checked(qtbot, tmp_path) -> None:
+    store, screen = _make(qtbot, tmp_path)
+    screen._dim_3d.click()
+    screen._layout_two.click()
+    screen._layout_two.click()
+    assert screen._layout_two.isChecked()
     assert store.manifest.mode == THREE_D
 
 
