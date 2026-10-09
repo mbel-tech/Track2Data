@@ -57,12 +57,22 @@ reader is blocked on real v4 sample folders — if you have some, see
 Those sessions are exported in pixels only. The run now says so instead of skipping the
 calibration silently.
 
-**Other trackers are not readable yet.** The reader foundation (`scan`, saved readers,
-confirm-before-add, declared options) is in place, but no second tracker has shipped. A scan
-does now *name* formats it recognises but cannot read — SLEAP `.slp`, `trx.mat`, FlyTracker
-`-track.mat`, DANNCE, Multi-Worm Tracker `.blobs`, AnimalTA, DeepLabCut 3-D and FicTrac — and
-says what to export instead, rather than reporting nothing recognised. See
-[[Formats and Interoperability]].
+**Only some trackers are readable.** idtracker.ai, DeepLabCut, SLEAP (analysis HDF5), Ctrax
+(raw `.mat`) and `trx.mat` are. A scan *names* formats it recognises but cannot read — SLEAP
+`.slp`, a `-v7.3` `trx.mat`, FlyTracker `-track.mat`, DANNCE, Multi-Worm Tracker `.blobs`,
+AnimalTA, DeepLabCut 3-D and FicTrac — and says what to export instead. See
+[[Formats and Interoperability]] and [[Compatibility]].
+
+**The `trx.mat` reader has not been checked against a real file.** It follows the documented
+layout (a `trx` struct, 1-based frames, `pxpermm`), and the confirm step labels it so. Compare a
+few trajectories with the tracker's own output before relying on it, and check the position
+orientation in particular.
+
+**Session calibration needs a scale in each session.** idtracker.ai sessions that were never
+calibrated in the Validator, and sessions from trackers that record none (give **Scale (pixels
+per cm)** when adding them), have no scale. The run is blocked with a message naming them
+rather than guessing one. If the saved idtracker.ai `length_unit` differs from the average of its
+measurements, the saved value is used and the run log warns.
 
 **The Zones canvas has no picture for trackers other than idtracker.ai.** idtracker.ai
 sessions show their background image to draw over. A session from any other tracker gets a

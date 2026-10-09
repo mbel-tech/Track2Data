@@ -43,9 +43,18 @@ Decide which units you want *before* recording, because one of them needs an obj
 - **Body lengths (`*_bl`)** need only the tracker's body length, which idtracker.ai 6.x
   records; this is the default mode and the right choice when no physical scale exists.
   Note that an idtracker.ai v5 session carries no body length, so those export in pixels.
-- **idtracker.ai's own Length Calibration tool** gives a per-session scale. Click carefully:
-  Track2Data records how much your clicks disagreed
-  (`length_calibration_rel_sd` in `sessions.csv`) and warns above 5 %.
+- **A scale the tracker already records** is used by **Session calibration**, and which
+  trackers record one differs:
+  - **idtracker.ai**: the Validator's *Length Calibration* tool. Click carefully, and make
+    two or three measurements rather than one: Track2Data records how much your clicks
+    disagreed (`length_calibration_rel_sd` in `sessions.csv`), warns above 5 %, and lets you
+    use the median of several measurements instead of the average.
+  - **Ctrax / JAABA `trx.mat`**: `pxpermm` (pixels per millimetre), once the file's units
+    were converted in Ctrax or JAABA.
+  - **DeepLabCut, SLEAP and Ctrax raw `.mat`** record no scale. Note it down, and give
+    **Scale (pixels per cm)** when you add the sessions.
+  idtracker.ai never records whether you measured in cm or mm, so write the unit down too:
+  you confirm it on the Calibration screen.
 
 If body size itself differs between your groups, prefer `*_bl` for distances between animals
 — body lengths are the comparable quantity.

@@ -1,6 +1,6 @@
 # Compatibility
 
-**Applies to:** Track2Data v0.1.0 and `main` as of 2026-10-08. Reader support changes
+**Applies to:** Track2Data v0.1.0 and `main` as of 2026-10-09. Reader support changes
 between releases; the [changelog](https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md)
 is authoritative.
 
@@ -11,7 +11,10 @@ is authoritative.
 | **idtracker.ai 6.x** output folder | **Supported** | The primary reader. Pick the session folder itself — the one containing `trajectories/` |
 | **idtracker.ai v5** (legacy layout) | **Supported** | Reads, but carries no body length: on the default body-length calibration those sessions export in pixels only, and the run says so |
 | **idtracker.ai v4** | **Not supported** | A v4-looking folder fails with `V4_NOT_SUPPORTED` rather than being misread. Blocked on real sample folders — see [`docs/IDTRACKERAI_V4_SAMPLES.md`](https://github.com/mbel-tech/Track2Data/blob/main/docs/IDTRACKERAI_V4_SAMPLES.md) |
-| **Other trackers** | **In progress** | The foundation is in place (declared reader options, saved reader per session, confirm-before-add); no second tracker has shipped |
+| **DeepLabCut** (CSV; also Lightning Pose) | **Supported** | One session per file. Frame rate and frame size are required options; the optional **Scale (pixels per cm)** feeds Session calibration |
+| **SLEAP** (analysis HDF5) | **Supported** | Export Analysis HDF5 from SLEAP. Same required options and optional scale as DeepLabCut |
+| **Ctrax** (raw `.mat`) | **Supported** | Frame size is a required option; the frame rate comes from the file. Ctrax track ids are fragments, so a session is identity-free. Optional scale as above |
+| **Ctrax / FlyTracker / JAABA** (`trx.mat`) | **Unverified** | Built from the documented layout with no real sample yet, and labelled as such in the confirm step. Classic MATLAB files only. `pxpermm` becomes the session scale |
 
 `track2data list-readers` prints what this build can read and which options each reader
 needs; `track2data scan ROOT` says which software wrote a folder, with the evidence.
@@ -23,7 +26,8 @@ another one, because the same files read differently can be different numbers.
 ### Formats recognised but not readable
 
 A scan names these rather than reporting "nothing recognised", and says what to export
-instead: SLEAP `.slp` projects (export the Analysis HDF5), `trx.mat`, FlyTracker
+instead: SLEAP `.slp` projects (export the Analysis HDF5), a `trx.mat` saved with MATLAB's
+`-v7.3` option (save it again with `-v7`), FlyTracker
 `-track.mat`, DANNCE `save_data_AVG.mat`, Multi-Worm Tracker `.blobs`, AnimalTA detailed
 files, DeepLabCut 3-D tables, and FicTrac logs.
 

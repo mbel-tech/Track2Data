@@ -28,7 +28,8 @@ definitions, formulas and citations are in
 | **`*_cm`** | Physical units, written only when a pixels-per-unit scale (`px_per_cm`) is set. Empty columns mean no scale, not an error. |
 | **`*_bl`** | Body lengths: `value_px / body_length_px`. Independent of `px_per_cm` and of the calibration mode, so it works when no physical scale exists — but needs a body length from the tracker. |
 | **`*_pct`** | **A fraction in [0, 1], not a percentage.** `time_pct = 0.42` means 42 %. The names are kept for backward compatibility; `codebook.csv` states the real unit. |
-| **Calibration mode** | `bodylength` (default), `scalar` (one px_per_cm for the project) or `session` (measured per session). Set on the Calibration screen. |
+| **Calibration mode** | `bodylength` (default), `scalar` (one px_per_cm for the project) or `session` (each session's own scale). Set on the Calibration screen. |
+| **Session scale** | What `session` mode uses, per tracker: idtracker.ai's `length_unit` (the average of its Length Calibration measurements, a factor into user-defined units), a `trx.mat` `pxpermm` (pixels per mm, converted to per cm), or the **Scale (pixels per cm)** you gave when importing a tracker that records none. A project-wide choice of **Average** or **Median** applies to idtracker.ai sessions with several measurements. |
 | **`length_calibration_rel_sd`** | In `sessions.csv`: the spread of the calibration clicks behind a session-mode scale. Above 5 % is warned about. `None` means no estimate (fewer than two clicks), never zero error. |
 
 ## Preprocessing

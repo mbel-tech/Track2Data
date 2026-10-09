@@ -1,6 +1,6 @@
 # Formats and Interoperability
 
-Track2Data reads idtracker.ai output folders and is being extended to other trackers (pre-1.0, see the [changelog](https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md)).
+Track2Data reads idtracker.ai, DeepLabCut, SLEAP (analysis HDF5), Ctrax (raw `.mat`) and `trx.mat` output; [[Compatibility]] has the status of each (pre-1.0, see the [changelog](https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md)).
 
 ## Headless commands
 
@@ -12,6 +12,12 @@ track2data add PROJECT ROOT      # suggest, amend (--reader, --option fps=30), c
 
 A required option the files do not record (for example frame rate) is never defaulted; the reader reports `READER_OPTION_MISSING` instead.
 
+Trackers whose files record no scale accept an optional `px_per_unit` (pixels per cm), which Session calibration then uses:
+
+```bash
+track2data add PROJECT ROOT --reader deeplabcut --option fps=30 --option width_px=1920 --option height_px=1080 --option px_per_unit=14.2
+```
+
 ## idtracker.ai
 
 - [Interoperability overview](https://github.com/mbel-tech/Track2Data/blob/main/docs/INTEROPERABILITY.md)
@@ -19,7 +25,7 @@ A required option the files do not record (for example frame rate) is never defa
 - [idtracker.ai output structure](https://github.com/mbel-tech/Track2Data/blob/main/docs/idtrackerai_output_structure.md)
 - [idtracker.ai v4 samples](https://github.com/mbel-tech/Track2Data/blob/main/docs/IDTRACKERAI_V4_SAMPLES.md)
 
-## Other trackers (in progress)
+## Other trackers
 
 - [Tracker formats: research notes and rollout](https://github.com/mbel-tech/Track2Data/blob/main/docs/tracker-formats/README.md)
 - [Tracker import design](https://github.com/mbel-tech/Track2Data/blob/main/docs/tracker-formats/2026-10-07-tracker-import-design.md)
