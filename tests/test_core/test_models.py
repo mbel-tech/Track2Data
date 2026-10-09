@@ -592,3 +592,47 @@ def test_the_project_hash_depends_on_which_reader_read_the_sessions() -> None:
         manifest(reader="deeplabcut", reader_options={"fps": 30.0}).project_hash()
         != manifest(reader="deeplabcut", reader_options={"fps": 25.0}).project_hash()
     )
+
+
+# ── SceneConfig: the camera view the recording was made from ────────────────
+
+
+def test_manifest_written_before_scene_still_loads_as_unknown() -> None:
+    """The camera view is additive: an old manifest has none and reads as 'unknown', which
+    leaves every metric behaving exactly as before."""
+    import json
+
+    from track2data.core.models import ProjectManifest
+
+    legacy = {
+        "schema_version": 1,
+        "project_name": "p",
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+    }
+    manifest = ProjectManifest.model_validate(json.loads(json.dumps(legacy)))
+    assert manifest.scene.camera_view == "unknown"
+
+
+@pytest.mark.parametrize("view", ["unknown", "top", "side"])
+def test_a_camera_view_round_trips_through_json(view: str) -> None:
+    from track2data.core.models import ProjectManifest, SceneConfig
+
+    now = datetime(2026, 1, 1)
+    manifest = ProjectManifest(
+        project_name="p",
+        created_at=now,
+        updated_at=now,
+        scene=SceneConfig(camera_view=view),
+    )
+    again = ProjectManifest.model_validate_json(manifest.model_dump_json())
+    assert again.scene.camera_view == view
+
+
+def test_an_unknown_camera_view_value_is_rejected() -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import SceneConfig
+
+    with pytest.raises(ValidationError):
+        SceneConfig(camera_view="underwater")

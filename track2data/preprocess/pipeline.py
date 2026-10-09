@@ -18,6 +18,7 @@ from track2data.preprocess.identity_switch import correct_switches
 from track2data.preprocess.jump_detect import detect_jumps
 from track2data.preprocess.kinematics import compute_kinematics
 from track2data.preprocess.smoothing import smooth_trajectories
+from track2data.preprocess.timeline_expand import bridge_gaps, lay_out, plan_expansion
 from track2data.preprocess.validate import validate_coverage
 
 
@@ -42,6 +43,7 @@ def run(
     config: PreprocessConfig,
     *,
     check: Callable[[], None] | None = None,
+    bridge_allowed: bool = True,
 ) -> PreprocessedSession:
     """Run the full preprocessing pipeline on a session.
 
@@ -67,6 +69,9 @@ def run(
         Optional zero-argument callable run before each step so a
         cancellation request is noticed between steps; whatever it raises
         (``OperationCancelled``) propagates.
+    bridge_allowed:
+        False when the caller knows the session must be treated as identity-free (the user's
+        own override), which forbids bridging gaps between tracking intervals.
 
     Returns
     -------
@@ -83,13 +88,40 @@ def run(
     # Start from a copy of raw_xy so the original is never touched.
     xy: np.ndarray = session.raw_xy.copy()
 
+    # 0. Real elapsed time. A session stored as tracking intervals gets its unobserved stretches
+    # back as rows (bridged) or as one NaN separator row each, so no later step reads two
+    # intervals as adjacent frames. None for a session whose rows already are its frames.
+    expansion = plan_expansion(session, config.gap_fill, bridge_allowed=bridge_allowed)
+    raw_rows = id_prob_rows = None
+    if expansion is not None:
+        raw_rows = lay_out(expansion, session.raw_xy)
+        if session.id_probabilities is not None:
+            id_prob_rows = lay_out(expansion, session.id_probabilities)
+        xy = raw_rows.copy()
+        if expansion.bridged_mask.any():
+            _checkpoint("gap fill across tracking intervals")
+            xy, step = bridge_gaps(xy, expansion)
+            report.steps.append(step)
+
     # 1. Gap fill
     _checkpoint("gap fill")
     crossing_mask = None
     if session.fragments is not None:
         from track2data.readers.idtrackerai.fragments import crossing_frame_mask
-        crossing_mask = crossing_frame_mask(session.fragments, session.n_frames)
-    xy, step = fill_gaps(xy, config.gap_fill, crossing_frame_mask=crossing_mask)
+        if expansion is None:
+            crossing_mask = crossing_frame_mask(session.fragments, session.n_frames)
+        else:
+            # fragments are numbered in video frames, so read them off the frame axis
+            on_frames = crossing_frame_mask(
+                session.fragments, int(expansion.frame_index.max()) + 1
+            )
+            crossing_mask = on_frames[expansion.frame_index]
+    xy, step = fill_gaps(
+        xy,
+        config.gap_fill,
+        crossing_frame_mask=crossing_mask,
+        protected_rows=None if expansion is None else ~expansion.tracked_mask,
+    )
     report.steps.append(step)
 
     # 2. Jump detection
@@ -117,6 +149,10 @@ def run(
     if session.fragments is not None:
         from track2data.readers.idtrackerai.fragments import fragment_swap_boundaries
         swap_boundaries = fragment_swap_boundaries(session.fragments)
+        if expansion is not None:
+            # boundary frames -> the rows that carry those frames
+            rows = np.flatnonzero(np.isin(expansion.frame_index, list(swap_boundaries)))
+            swap_boundaries = {int(r) for r in rows}
     xy, step = correct_switches(
         xy, config.identity_switch, swap_boundaries=swap_boundaries
     )
@@ -129,16 +165,29 @@ def run(
 
     # 5. Coverage validation
     _checkpoint("coverage validation")
-    step = validate_coverage(xy, config.coverage, session_id=session.session_id)
+    # Coverage is about what the tracker delivered, so only the stored rows count.
+    observed = xy if expansion is None else xy[expansion.tracked_mask]
+    step = validate_coverage(observed, config.coverage, session_id=session.session_id)
     report.steps.append(step)
 
     # Compute kinematics on final preprocessed xy
     kinematics = compute_kinematics(xy, fps=session.video.fps, cfg=config.kinematics)
 
+    extra: dict = {}
+    if expansion is not None:
+        extra = {
+            "frame_index": expansion.frame_index,
+            "timeline_valid": True,
+            "tracked_mask": expansion.tracked_mask,
+            "separator_mask": expansion.separator_mask,
+            "raw_xy_rows": raw_rows,
+            "id_probabilities_rows": id_prob_rows,
+        }
     return PreprocessedSession(
         session=session,
         xy=xy,
         kinematics=kinematics,
         report=report,
         jump_replaced=jump_replaced,
+        **extra,
     )

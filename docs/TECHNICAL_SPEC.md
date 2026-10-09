@@ -294,6 +294,9 @@ User clicks Run pipeline   ──►  ui/main_window.run_pipeline()
     "orientation_tag": "FT",
     "zone_levels": {"flow": "main", "calm": "main", "centre": "secondary"}
   },
+  "scene": {
+    "camera_view": "unknown"
+  },
   "metadata_source": {
     "path": "D:/data/trial_meta.xlsx",
     "sha256": "9aa2...8c"

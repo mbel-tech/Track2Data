@@ -22,6 +22,7 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 
+from track2data.core.timeline import segment_starts
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
 from track2data.metrics.references import (
@@ -837,13 +838,21 @@ class Z5EntryExitEvents(Metric):
         "event",
         "t_s",
         "frame",
+        "after_gap",
+        "estimated",
         "min_dwell_frames_used",
         "bout_criterion_effective",
     ]
     documentation = MetricDocumentation(
         definition=(
             "Event log of every zone entry and exit for each animal: one row "
-            "per rising or falling edge in the zone-membership series."
+            "per rising or falling edge in the zone-membership series. frame is the "
+            "original video frame and t_s is frame / fps on the video clock, the same "
+            "as the per-frame table. after_gap is True for an 'enter' that is only the "
+            "first observed frame inside the zone after an unobserved stretch "
+            "(between tracking intervals), so the real entry happened in the gap. estimated is "
+            "True when the event falls on a frame that was reconstructed across a gap by the "
+            "project's cross-interval interpolation rather than tracked."
         ),
         formula_plain=(
             "enter at frame t when in_zone[t] and (t == 0 or not in_zone[t-1]); "
@@ -860,6 +869,9 @@ class Z5EntryExitEvents(Metric):
         warnings=[
             "An animal already inside a zone at frame 0 gets an 'enter' event at "
             "frame 0 with no preceding 'exit'.",
+            "A stay is never joined across an unobserved stretch between tracking "
+            "intervals: no 'exit' is emitted where observation stops, and the "
+            "next interval starts a new 'enter' flagged after_gap.",
             "An animal still inside a zone at the final frame gets an 'enter' "
             "event with no matching 'exit' event.",
             "min_dwell_frames_used and bout_criterion_effective report the "
@@ -951,6 +963,29 @@ class Z5EntryExitEvents(Metric):
             self._FIXED_DEFAULT_MIN_DWELL_FRAMES,
         )
 
+        true_frames, _valid = session.timeline()  # type: ignore[attr-defined]
+        tracked = getattr(session, "tracked_mask", None)
+        n_rows = len(true_frames)
+        starts = segment_starts(true_frames)
+        segments = list(zip([0, *starts], [*starts, n_rows], strict=True))
+
+        def _event(
+            zone_name: str, k: int, kind: str, row: int, after_gap: bool
+        ) -> dict[str, object]:
+            frame = int(true_frames[row])
+            return {
+                "session_id": session_id,
+                "zone_name": zone_name,
+                "individual_id": k,
+                "event": kind,
+                "t_s": frame / fps,
+                "frame": frame,
+                "after_gap": after_gap,
+                "estimated": bool(tracked is not None and not tracked[row]),
+                "min_dwell_frames_used": min_dwell_frames,
+                "bout_criterion_effective": criterion_effective,
+            }
+
         rows: list[dict[str, object]] = []
         for arr in zone_arrays:
             for k in range(n_animals):
@@ -958,37 +993,17 @@ class Z5EntryExitEvents(Metric):
                 zone_names = [z for z in np.unique(col) if z != _EMPTY_ZONE_VALUE]
                 for zone_name in zone_names:
                     in_zone: np.ndarray = col == zone_name
-                    spans = _true_run_spans(in_zone, min_dwell_frames)
-                    enter_frames = [start for start, _end in spans]
-                    exit_frames = [
-                        end for _start, end in spans if end < len(in_zone)
-                    ]
-                    for frame in enter_frames:
-                        rows.append(
-                            {
-                                "session_id": session_id,
-                                "zone_name": zone_name,
-                                "individual_id": k,
-                                "event": "enter",
-                                "t_s": frame / fps,
-                                "frame": frame,
-                                "min_dwell_frames_used": min_dwell_frames,
-                                "bout_criterion_effective": criterion_effective,
-                            }
-                        )
-                    for frame in exit_frames:
-                        rows.append(
-                            {
-                                "session_id": session_id,
-                                "zone_name": zone_name,
-                                "individual_id": k,
-                                "event": "exit",
-                                "t_s": frame / fps,
-                                "frame": frame,
-                                "min_dwell_frames_used": min_dwell_frames,
-                                "bout_criterion_effective": criterion_effective,
-                            }
-                        )
+                    # Each unbroken stretch of video is read on its own, so a stay is never
+                    # joined across frames that were not tracked.
+                    for seg_start, seg_end in segments:
+                        spans = _true_run_spans(in_zone[seg_start:seg_end], min_dwell_frames)
+                        for start, end in spans:
+                            row_in, row_out = seg_start + start, seg_start + end
+                            rows.append(
+                                _event(zone_name, k, "enter", row_in, seg_start > 0 and start == 0)
+                            )
+                            if row_out < seg_end:
+                                rows.append(_event(zone_name, k, "exit", row_out, False))
 
         if not rows:
             return pd.DataFrame(columns=empty_cols)
@@ -1014,16 +1029,28 @@ class Z6LatencyToFirstEntry(Metric):
         "zone_name",
         "individual_id",
         "first_entry_t_s",
+        "origin_frame",
+        "first_entry_after_gap",
     ]
     documentation = MetricDocumentation(
-        definition=("Time (in seconds) of each animal's first entry into each named zone."),
+        definition=(
+            "Time (in seconds) from the start of tracked observation to each animal's first "
+            "entry into each named zone. origin_frame is the video frame that time is "
+            "measured from (the first tracked frame, or the first frame of the time bin), so "
+            "the entry's video time is origin_frame / fps + first_entry_t_s. Time omitted "
+            "between tracking intervals counts as elapsed time."
+        ),
         formula_plain=(
-            "first_entry_t_s[k, z] = min(t_s) over Z-5 'enter' events for "
-            "(zone_name == z, individual_id == k); inf if the animal never enters"
+            "first_entry_t_s[k, z] = (min(frame) over Z-5 'enter' events for "
+            "(zone_name == z, individual_id == k) - origin_frame) / fps; inf if the animal "
+            "never enters"
         ),
         inputs=["Z-5 event log"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
         warnings=[
+            "first_entry_after_gap is True when the animal was already inside the zone at the "
+            "first frame observed after an unobserved stretch; its true entry was earlier, so "
+            "the latency is an upper bound.",
             "NaN when the individual never enters the zone is encoded as inf "
             "(rather than NaN) so results sort as 'latest possible'.",
             "The source paradigm is rodent (mouse light/dark box) and gives "
@@ -1096,6 +1123,9 @@ class Z6LatencyToFirstEntry(Metric):
 
         events = Z5EntryExitEvents().compute(session, cfg)
         enters = events[events["event"] == "enter"]
+        fps: float = session.fps  # type: ignore[attr-defined]
+        true_frames, _valid = session.timeline()  # type: ignore[attr-defined]
+        origin_frame = int(true_frames[0]) if len(true_frames) else 0
 
         zone_names = sorted(enters["zone_name"].unique().tolist())
         if not zone_names:
@@ -1107,13 +1137,20 @@ class Z6LatencyToFirstEntry(Metric):
                 match = enters[
                     (enters["zone_name"] == zone_name) & (enters["individual_id"] == k)
                 ]
-                first_entry_t_s = float(match["t_s"].min()) if len(match) > 0 else float("inf")
+                if len(match) > 0:
+                    first = match.loc[match["frame"].idxmin()]
+                    first_entry_t_s = float(first["frame"] - origin_frame) / fps
+                    after_gap = bool(first["after_gap"])
+                else:
+                    first_entry_t_s, after_gap = float("inf"), False
                 rows.append(
                     {
                         "session_id": session_id,
                         "zone_name": zone_name,
                         "individual_id": k,
                         "first_entry_t_s": first_entry_t_s,
+                        "origin_frame": origin_frame,
+                        "first_entry_after_gap": after_gap,
                     }
                 )
 
@@ -1514,7 +1551,11 @@ class ZoneDwellTimeDistribution(Metric):
             pending_enter_t: float | None = None
             for _, event_row in group.iterrows():
                 if event_row["event"] == "enter":
-                    pending_enter_t = float(event_row["t_s"])
+                    # An entry that is only the first frame seen after an unobserved gap has an
+                    # unknown start: its dwell would be a fabricated, truncated number.
+                    pending_enter_t = (
+                        None if bool(event_row["after_gap"]) else float(event_row["t_s"])
+                    )
                 elif event_row["event"] == "exit" and pending_enter_t is not None:
                     durations.append(float(event_row["t_s"]) - pending_enter_t)
                     pending_enter_t = None

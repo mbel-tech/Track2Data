@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from track2data.exporters.base import Exporter, ExportPayload, SessionProvenance
+from track2data.metrics.availability import view_label
 
 
 class ReadmeExporter(Exporter):
@@ -69,6 +70,7 @@ class ReadmeExporter(Exporter):
         ]
 
         readme_lines += self._provenance_lines(p.provenance)
+        readme_lines += self._camera_view_lines(p.provenance)
 
         readme_lines += [
             "## Metrics computed",
@@ -137,6 +139,27 @@ class ReadmeExporter(Exporter):
         )
 
         return [readme_path, manifest_path]
+
+    @staticmethod
+    def _camera_view_lines(p: SessionProvenance) -> list[str]:
+        """The camera view the project declared and, when a depth metric was computed, the
+        water column it was measured against. Written only when there is something to say, so
+        a run from a project that never declared a view keeps its README exactly as it was."""
+        if p.camera_view == "unknown" and p.water_column is None:
+            return []
+        lines = ["## Camera view", "", "| Field | Value |", "|-------|-------|"]
+        if p.camera_view != "unknown":
+            label = view_label(p.camera_view)
+            lines.append(f"| Camera view | {label[0].upper() + label[1:]} |")
+        if p.water_column is not None:
+            top, bottom = p.water_column.get("top_px"), p.water_column.get("bottom_px")
+            source = p.water_column.get("source")
+            if top is None or bottom is None:
+                lines.append(f"| Water column | none ({source}) |")
+            else:
+                lines.append(f"| Water column | rows {top:g} to {bottom:g} px ({source}) |")
+        lines.append("")
+        return lines
 
     @staticmethod
     def _provenance_lines(prov: object) -> list[str]:

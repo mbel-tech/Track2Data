@@ -864,7 +864,7 @@ def test_social_preset_selects_group_metrics_and_everything_selects_all(qtbot) -
     screen.apply_preset("All metrics")
     screen.flush()
     m = store.manifest.metrics
-    assert len(m.individual) == 12 and len(m.group) == 13 and len(m.zone) == 9
+    assert len(m.individual) == 13 and len(m.group) == 13 and len(m.zone) == 9
 
 
 def test_all_presets_only_name_registered_metrics() -> None:
@@ -882,11 +882,11 @@ def test_counter_shows_selected_of_total_by_level(qtbot) -> None:
 
     screen = MetricsScreen(store=_make_store())
     qtbot.addWidget(screen)
-    assert "0 / 34" in screen._counter.text()
+    assert "0 / 35" in screen._counter.text()
     screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0).setCheckState(
         Qt.CheckState.Checked
     )
-    assert "1 / 34" in screen._counter.text()
+    assert "1 / 35" in screen._counter.text()
     assert "1 individual" in screen._counter.text()
 
 
@@ -950,6 +950,142 @@ def test_timepoint_preserved_when_other_fields_are_applied(qtbot) -> None:
     screen.flush()
     assert store.manifest.metrics.timepoint_minutes == 10
     assert store.manifest.metrics.individual == ["IL-1"]
+
+
+# ── camera view: rows a view rules out ───────────────────────────────────────
+
+
+def _il15_item(screen):
+    return screen._ind_table.item(_row_for_id(screen._ind_table, "IL-15"), 0)
+
+
+def _il15_name_item(screen):
+    return screen._ind_table.item(_row_for_id(screen._ind_table, "IL-15"), 1)
+
+
+def _set_view(store, view: str) -> None:
+    from track2data.core.models import SceneConfig
+
+    store.update_scene(SceneConfig(camera_view=view))
+
+
+def _is_enabled(item) -> bool:
+    return bool(item.flags() & Qt.ItemFlag.ItemIsEnabled)
+
+
+def test_a_superseded_metric_keeps_its_explanation_after_the_graying_pass(qtbot) -> None:
+    """Regression: the identity pass used to reset every tooltip it did not own, erasing Z-2's
+    'superseded by Z-8' note as soon as a project was open."""
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+
+    z2 = screen._zone_table.item(_row_for_id(screen._zone_table, "Z-2"), 1)
+    assert "kept for output compatibility" in z2.toolTip()
+
+
+def test_a_side_view_metric_is_greyed_until_the_view_is_declared(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+
+    assert not _is_enabled(_il15_item(screen))
+
+
+def test_the_greyed_row_names_the_fix(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen(store=_make_store())
+    qtbot.addWidget(screen)
+
+    for item in (_il15_item(screen), _il15_name_item(screen)):
+        assert "side" in item.toolTip()
+        assert "Calibration" in item.toolTip()
+
+
+def test_a_side_view_project_enables_the_row_and_clears_the_note(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    _set_view(store, "side")
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    assert _is_enabled(_il15_item(screen))
+    assert _il15_item(screen).toolTip() == ""
+
+
+def test_a_top_down_project_keeps_the_row_greyed_and_says_why(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    _set_view(store, "top")
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    assert not _is_enabled(_il15_item(screen))
+    assert "top-down" in _il15_item(screen).toolTip()
+
+
+def test_the_row_follows_the_camera_view_live(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    item = _il15_item(screen)
+    assert not _is_enabled(item)
+
+    _set_view(store, "side")
+    assert _is_enabled(item)
+
+    _set_view(store, "top")
+    assert not _is_enabled(item)
+
+
+def test_an_identity_free_project_without_a_view_shows_both_reasons(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", True, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    tip = _il15_item(screen).toolTip()
+    assert "identity-free" in tip
+    assert "Calibration" in tip
+
+
+def test_an_identity_free_side_view_project_keeps_only_the_identity_reason(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    _set_view(store, "side")
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("s1", True, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    tip = _il15_item(screen).toolTip()
+    assert "identity-free" in tip
+    assert "Calibration" not in tip
+
+
+def test_rows_with_no_view_requirement_are_untouched_by_the_view(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    _set_view(store, "top")
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    assert _is_enabled(_il1_include_item(screen))
+    assert _il1_include_item(screen).toolTip() == ""
 
 
 def test_preset_pill_names_the_matching_preset_and_goes_custom_on_edit(qtbot) -> None:

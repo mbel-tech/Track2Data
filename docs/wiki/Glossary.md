@@ -53,6 +53,7 @@ cleanup: see [[Statistics and Pseudoreplication]] and `track2data sensitivity`.
 | **Coverage (D-11)** | `n_frames_total`, `n_frames_used`, `frac_frames_used`, `n_jump_replaced`, `frac_jump_replaced`. The columns that tell a ratio from 200 frames apart from one from 20,000. |
 | **Distortion index (D-16)** | `rms_displacement_px`, `frac_frames_altered`, `path_length_ratio`, `distortion_index` — how far preprocessing moved the trajectory it was given. |
 | **Fragment** | A continuous stretch of frames the tracker assigned to one identity. `fragment_length_median` and friends are counted in **frames**; `certainty_mean` and D-14's certain-frame fraction describe how sure the tracker was. |
+| **Camera view** | A project setting on the Calibration screen: Not set, Top-down or Side view. Metrics that only make sense for one view (IL-15, depth, for a side view) are skipped until it is declared. Recorded in `manifest.json` and in the run README. |
 | **Identity stability (D-5)** | `identity_stability_status` — a categorical flag, not a number. |
 | **Tracking accuracy (D-2)** | `estimated_accuracy`, the tracker's own estimate; `fraction_identified` and the D-3 `id_prob_*` columns describe the identity-probability distribution. |
 
@@ -63,6 +64,7 @@ cleanup: see [[Statistics and Pseudoreplication]] and `track2data sensitivity`.
 | **Path length** | IL-1 | `path_length_px` / `_cm` / `_bl` — a *total*, so it scales with session duration |
 | **Speed** | IL-2 | `mean_speed_*`, `median_speed_*`, `max_speed_*` |
 | **Thigmotaxis** | IL-14, IL-3 | `mean_wall_distance_px`, `wall_contact_time_pct`; `time_in_centre_pct` |
+| **Depth (vertical position)** | IL-15 | `mean_depth_fraction`, `median_depth_fraction`, `sd_depth_fraction` (0 = water surface, 1 = tank floor), `mean_depth_cm`, `frac_outside_extent`, `depth_extent_source`. Needs a side view and a main zone from the waterline to the floor. Height above the floor is 1 − depth |
 | **Freezing / activity** | IL-4 | `active_fraction`, `freezing_fraction`, `threshold_px_s` |
 | **Bout** | IL-7, Z-3 | A run of consecutive frames meeting a criterion. `min_bout_frames_used` and `bout_criterion_effective` record the criterion actually applied — report it |
 | **Tortuosity** | IL-5 | `tortuosity` — path length ÷ net displacement |

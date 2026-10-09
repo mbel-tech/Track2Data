@@ -1,5 +1,5 @@
 """
-Individual-level metrics: IL-1, IL-2, IL-3, IL-4, IL-5, IL-6, IL-7, IL-8.
+Individual-level metrics: IL-1 to IL-11, IL-14 and IL-15.
 
 Each class implements :class:`track2data.metrics.base.Metric` and returns
 a :class:`pandas.DataFrame` with at least the columns ``session_id``,
@@ -8,6 +8,7 @@ a :class:`pandas.DataFrame` with at least the columns ``session_id``,
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 import numpy as np
@@ -37,6 +38,8 @@ from track2data.metrics.references import (
     SIMON_1994,
     STEWART_2012,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _bl_px(session: PreprocessedSession, k: int) -> float:
@@ -87,6 +90,8 @@ class PathLength(Metric):
         inputs=["PreprocessedSession.xy"],
         assumptions=[
             "Post-smoothing xy is used; gaps produce no displacement",
+            "An animal with no valid consecutive pair of positions has no measured "
+            "distance: it reports NaN (pixels and converted units), never 0",
             "Interpolated frames contribute a straight line, which understates "
             "the real path across a gap -- see D-11's frac_interpolated for how "
             "much of this value rests on them",
@@ -131,7 +136,13 @@ class PathLength(Metric):
             # Consecutive displacements, skipping pairs where either frame is NaN
             diff = traj[1:] - traj[:-1]  # (n_frames-1, 2)
             valid = ~(np.isnan(diff[:, 0]) | np.isnan(diff[:, 1]))
-            path_px = float(np.sqrt((diff[valid] ** 2).sum(axis=1)).sum())
+            # No valid consecutive pair means no displacement was ever measured: that is
+            # unavailable, not a distance of zero. (An empty sum is 0.0, which would read as
+            # "did not move" for an animal that was never tracked.)
+            if valid.any():
+                path_px = float(np.sqrt((diff[valid] ** 2).sum(axis=1)).sum())
+            else:
+                path_px = float("nan")
 
             row: dict = {
                 "session_id": session.session_id,
@@ -808,7 +819,11 @@ class FreezingBouts(Metric):
             "cfg['min_bout_frames'] (explicit override; else per derive_bout_criterion)",
             "cfg['derive_bout_criterion'] (bool, default False)",
         ],
-        assumptions=["Same as IL-4"],
+        assumptions=[
+            "Same as IL-4",
+            "An animal with no usable speed (all NaN) reports NaN count and durations, not 0 "
+            "bouts: nothing was classified. Missing speeds break a run, they never join two",
+        ],
         warnings=[
             "Discards short pauses; min duration is study-specific",
             "min_bout_frames_used and bout_criterion_effective report the "
@@ -981,8 +996,12 @@ class FreezingBouts(Metric):
             run_lengths = _true_run_lengths(inactive_per_animal[k])
             qualifying = [n for n in run_lengths if n >= min_bout_frames]
 
-            bout_count = len(qualifying)
-            if bout_count > 0:
+            bout_count: float = len(qualifying)
+            if bool(np.isnan(speed[:, k]).all()):
+                # Nothing was classified as active or inactive, so "no bouts" would claim a
+                # finding the data cannot support.
+                bout_count = total_duration = mean_duration = float("nan")
+            elif bout_count > 0:
                 total_duration = float(sum(qualifying) / fps)
                 mean_duration = float(total_duration / bout_count)
             else:
@@ -1605,6 +1624,152 @@ class WallDistanceThigmotaxis(Metric):
         return pd.DataFrame(records)
 
 
+# ── IL-15: Vertical position (depth) ──────────────────────────────────────────
+
+#: Above this share of tracked frames outside the water column, IL-15 logs a warning: the zones
+#: probably do not match the video, or the tracker is following reflections.
+_OUTSIDE_EXTENT_WARN = 0.05
+
+
+class VerticalPosition(Metric):
+    """IL-15 — Depth in the water column, from a side-view recording.
+
+    Depth is a fraction: 0 at the water surface, 1 at the tank floor. The surface and floor are
+    the top and bottom edges of the project's main zones (see ``zones.extent``). Only a project
+    that declared a side camera view is offered this metric: on a top-down recording the y axis
+    is not depth.
+    """
+
+    id = "IL-15"
+    name = "vertical_position"
+    label = "Vertical Position (Depth)"
+    level = "individual"
+    priority = "optional"
+    requires_identity = True
+    valid_camera_views = frozenset({"side"})
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        "mean_depth_fraction",
+        "median_depth_fraction",
+        "sd_depth_fraction",
+        # Emitted unconditionally: NaN when the session is uncalibrated, rather than absent.
+        "mean_depth_cm",
+        "frac_outside_extent",
+        "depth_extent_source",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Where each individual swims in the water column: the mean, median and standard "
+            "deviation of depth as a fraction of the column (0 = water surface, 1 = tank "
+            "floor), the mean distance below the surface in cm when the session is "
+            "calibrated, and the share of tracked frames that fell outside the column."
+        ),
+        formula_plain=(
+            "T, B = top and bottom image rows of the main zones (T < B); "
+            "d[t,k] = (y[t,k] - T) / (B - T) for frames with T <= y[t,k] <= B; "
+            "mean/median/SD (n-1) of d over those frames; "
+            "mean_depth_cm = mean(y - T) / px_per_cm; "
+            "frac_outside_extent = share of non-NaN frames with y < T or y > B"
+        ),
+        inputs=[
+            "PreprocessedSession.xy (the y column)",
+            "cfg['water_column'] (derived per session from the main zones)",
+            "PreprocessedSession.px_per_cm (optional)",
+        ],
+        assumptions=[
+            "The project declares a side camera view (Calibration screen); the top edge of "
+            "the main zones is the water surface and the bottom edge the tank floor",
+            "The camera is upright: image rows grow downward, so a larger y is deeper",
+            "Every main-level additive zone is pooled into one column, so tanks side by side "
+            "share it; tanks stacked on top of each other would pool into one tall column",
+            "Frames outside the column are dropped and counted, never clipped to the surface "
+            "or floor",
+            "Interpolated frames are included",
+        ],
+        warnings=[
+            "No refraction or parallax correction: a fish near the front glass looks "
+            "larger and sits at a different apparent depth than one at the back, and depth "
+            "in cm uses a single scale for the whole picture",
+            "A column taken from zones that do not match the video, or a tracker following "
+            "reflections, shows up as a high frac_outside_extent",
+            "Without a main zone there is no depth: the values are NaN and "
+            "depth_extent_source says why. The video frame is never used instead",
+            "Depth is measured from the surface; height above the floor is 1 - depth",
+        ],
+        citation=(
+            "Standard descriptive statistic of vertical position in the water column; no "
+            "single originating work defines this mean-depth fraction. The construct, vertical "
+            "position as a behavioural measure in novel-tank assays, is in the supporting "
+            "references."
+        ),
+        supporting_references=[CACHAT_2010, EGAN_2009, MAXIMINO_2010, STEWART_2012, KALUEFF_2013],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="water_column",
+            label="Water column",
+            kind="float",
+            derived=True,
+            help=(
+                "Derived from the project's main zones: the top edge is the water surface, "
+                "the bottom edge the tank floor."
+            ),
+        ),
+    ]
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        column = (cfg or {}).get("water_column") or {}
+        top, bottom = column.get("top_px"), column.get("bottom_px")
+        source = str(column.get("source", "none:not_derived"))
+        has_extent = top is not None and bottom is not None and bottom > top
+        if not has_extent:
+            top = bottom = None
+            if not source.startswith("none:"):
+                source = "none:degenerate_zone"
+
+        records: list[dict] = []
+        for k in range(session.n_animals):
+            y = session.xy[:, k, 1]
+            tracked = y[np.isfinite(y)]
+            row: dict = {
+                "session_id": session.session_id,
+                "metric_id": self.id,
+                "individual_id": k,
+                "mean_depth_fraction": np.nan,
+                "median_depth_fraction": np.nan,
+                "sd_depth_fraction": np.nan,
+                "mean_depth_cm": np.nan,
+                "frac_outside_extent": np.nan,
+                "depth_extent_source": source,
+            }
+            if top is not None and bottom is not None and tracked.size:
+                inside = tracked[(tracked >= top) & (tracked <= bottom)]
+                outside = float((tracked.size - inside.size) / tracked.size)
+                row["frac_outside_extent"] = outside
+                if inside.size:
+                    d = (inside - top) / (bottom - top)
+                    row["mean_depth_fraction"] = float(d.mean())
+                    row["median_depth_fraction"] = float(np.median(d))
+                    if inside.size > 1:
+                        row["sd_depth_fraction"] = float(d.std(ddof=1))
+                    if session.px_per_cm is not None:
+                        row["mean_depth_cm"] = float((inside - top).mean() / session.px_per_cm)
+                if outside > _OUTSIDE_EXTENT_WARN:
+                    logger.warning(
+                        "IL-15: %.0f%% of animal %d's tracked frames in session %s fall outside "
+                        "the water column (%s); check the main zones against the video.",
+                        100 * outside,
+                        k,
+                        session.session_id,
+                        source,
+                    )
+            records.append(row)
+
+        return pd.DataFrame(records, columns=self.output_columns)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -1621,3 +1786,4 @@ _register(HomeBaseOccupancy)
 _register(RoamingEntropy)
 _register(CircularHeadingStats)
 _register(WallDistanceThigmotaxis)
+_register(VerticalPosition)

@@ -93,7 +93,8 @@ exporters, not metrics.
 **Binning rules.** Each bin is a slice of the session, but anything a metric
 derives *from the data* is resolved once on the whole session so bins stay
 comparable: the IL-4/IL-7 activity threshold (`mean speed x multiplier`), the fitted
-bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the Z-2/Z-8 zone areas.
+bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the IL-15 water column, the
+Z-2/Z-8 zone areas.
 Consequences: IL-1 path length loses the one step across each bin edge, so bins sum
 to slightly less than the whole session; Z-1 `time_s` is exactly additive; Z-6
 `first_entry_t_s` is a latency from the start of the bin. Z-5 event `frame`/`t_s` stay
@@ -127,6 +128,7 @@ Level             Category                 IDs
 Individual        Locomotion               IL-1, IL-2, IL-6
                   Activity / freezing      IL-4, IL-7
                   Space use                IL-3, IL-9, IL-10, IL-14
+                  Vertical position        IL-15
                   Path geometry            IL-5, IL-8, IL-11
 Group             Social spacing           GL-1, GL-2, GL-13
                   Cohesion                 GL-4, GL-6, GL-10, GL-15
@@ -171,8 +173,8 @@ info-button modal (§6).
 | **Formula** | `Σ_t ‖xy[t+1, k] − xy[t, k]‖` over non-NaN frame pairs |
 | **Output columns** | `individual_id`, `path_length_px`, `path_length_cm`, `path_length_bl` |
 | **Units** | px / cm / BL |
-| **Assumptions** | Inter-frame displacement reflects real movement (not jump artefacts) |
-| **Warnings** | Under-smoothed data inflates path length; NaN gaps are skipped (not interpolated for this metric) |
+| **Assumptions** | Inter-frame displacement reflects real movement (not jump artefacts). A pair counts only when both positions are valid; an animal with no such pair has **no measured distance**, reported as NaN (px, cm and BL), never as 0. A legitimate 0 means valid pairs that did not move |
+| **Warnings** | Under-smoothed data inflates path length; NaN gaps are skipped (not interpolated for this metric), so a partly observed path is the length of its observed steps |
 | **Reference** | Standard kinematics |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
@@ -295,7 +297,7 @@ info-button modal (§6).
 | **Formula** | Run-length encode `inactive`; keep runs ≥ `min_bout_frames`. `min_bout_frames` defaults to a fixed **5 frames**. Switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`) to this session's own pooled inactive-run lengths across every individual, still falling back to the fixed 5 when that fit does not converge. The switch **overrides** an explicit `min_bout_frames`, which applies only while the switch is off. |
 | **Output columns** | `individual_id`, `freezing_bout_count`, `mean_freezing_duration_s`, `total_freezing_duration_s`, `min_bout_frames_used`, `bout_criterion_effective` |
 | **Units** | count; seconds; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
-| **Assumptions** | Same as IL-4 |
+| **Assumptions** | Same as IL-4. An animal with no usable speed at all (every value NaN) gets NaN for the count and both durations: nothing was classified, so "no bouts" is not a finding. With usable speeds and no qualifying run the count and total are 0 and the mean duration is 0 (the historical convention). Missing speeds break a run, they never join two |
 | **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_bout_frames` (int, frames, no declared default — resolved per the switch) |
 | **Warnings** | Discards short pauses; min duration is study-specific. `min_bout_frames_used`/`bout_criterion_effective` report the threshold actually applied and how it was derived (`fixed`, `log_survivorship`, or `fixed_fallback` when a requested fit did not converge). With the switch **on** the threshold is fit per session and can differ session to session — check `min_bout_frames_used` before comparing freezing-bout counts across sessions. |
 | **Reference** | Cachat et al. 2010, Nat. Protoc. 5(11):1786-1799 (measuring behavioral and endocrine responses to novelty stress in adult zebrafish) — DOI [10.1038/nprot.2010.140](https://doi.org/10.1038/nprot.2010.140) |
@@ -389,6 +391,24 @@ info-button modal (§6).
 | **Reference** | Simon et al. 1994, Behav. Brain Res. 61(1):59-64 (thigmotaxis as an index of anxiety in mice) — DOI [10.1016/0166-4328(94)90008-6](https://doi.org/10.1016/0166-4328(94)90008-6) |
 | **Supporting references** | Schnorr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish) (DOI: 10.1016/j.bbr.2011.12.016); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031) |
 
+#### IL-15 — Vertical position (depth)
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Vertical position (depth in the water column) |
+| **Level** | Individual; trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.xy` (the y column); the water column, derived per session from the main zones (never user-supplied); `px_per_cm` when calibrated |
+| **Required preprocessing** | Zone assignment is not needed; main-level zones must exist. The project's **camera view must be set to side view** (Calibration screen) or the metric is skipped and the run records why |
+| **Formula** | `T`, `B` = top and bottom image rows of the main zones (`T < B`); `d[t,k] = (y[t,k] − T) / (B − T)` for frames with `T ≤ y[t,k] ≤ B`; `mean_depth_fraction`, `median_depth_fraction` and `sd_depth_fraction` (n − 1) over those frames; `mean_depth_cm = mean(y − T) / px_per_cm`; `frac_outside_extent` = share of non-NaN frames with `y < T` or `y > B` |
+| **Output columns** | `individual_id`, `mean_depth_fraction`, `median_depth_fraction`, `sd_depth_fraction`, `mean_depth_cm`, `frac_outside_extent`, `depth_extent_source` |
+| **Units** | fraction (0 = water surface, 1 = tank floor); cm; fraction; categorical |
+| **Assumptions** | The project declares a side camera view, and the top edge of the main zones is the water surface and the bottom edge the tank floor. The camera is upright: image rows grow downward, so a larger y is deeper. Every main-level additive ("+") zone is pooled into one column, so tanks side by side share it; tanks stacked on top of each other would pool into one tall column. Subtractive ("−") zones and secondary-level zones do not move the extent. Frames outside the column are dropped and counted, never clipped to the surface or floor. Interpolated frames are included. |
+| **Warnings** | No refraction or parallax correction: a fish near the front glass looks larger and sits at a different apparent depth than one at the back, and depth in cm uses a single scale for the whole picture. A column taken from zones that do not match the video, or a tracker following reflections, shows up as a high `frac_outside_extent` (a warning is logged above 5 %). Without a main zone there is no depth: the values are NaN and `depth_extent_source` says why (`none:no_main_zone`, `none:degenerate_zone`, `none:frame_size_mismatch` for zones drawn at another recorded frame size, `none:not_derived`); the video frame is never used instead. Depth is measured from the surface; height above the floor is `1 − depth`. For band occupancy, latency, visits and dwell on a side view, draw stacked secondary-level zones and use Z-1 to Z-9. |
+| **Parameters** | `water_column` is `derived=True` and cannot be overridden. |
+| **Reference** | Standard descriptive statistic of vertical position in the water column; no single originating work defines this mean-depth fraction. The construct, vertical position as a behavioural measure in novel-tank assays, is in the supporting references. |
+| **Supporting references** | Cachat et al. 2010, Nat. Protoc. 5(11):1786-1799 (measuring behavioral and endocrine responses to novelty stress in adult zebrafish) (DOI: 10.1038/nprot.2010.140); Egan et al. 2009, Behav. Brain Res. 205(1):38-44 (understanding behavioral and physiological phenotypes of stress and anxiety in zebrafish) (DOI: 10.1016/j.bbr.2009.06.022); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031); Stewart et al. 2012, Neuropharmacology 62(1):135-143 (modeling anxiety using adult zebrafish: a conceptual review -- no operational threshold given) (DOI: 10.1016/j.neuropharm.2011.07.037); Kalueff et al. 2013, Zebrafish 10(1):70-86 (towards a comprehensive catalog of zebrafish behavior 1.0 and beyond) (DOI: 10.1089/zeb.2012.0861) |
+
 ### 4.2 Zone metrics
 
 #### Z-1 — Time in each zone
@@ -468,7 +488,9 @@ info-button modal (§6).
 | **Priority** | Optional |
 | **Inputs** | Z-1 zone-membership series; configurable `min_dwell_frames` (fixed 1, or fitted when `derive_bout_criterion` is on) |
 | **Formula** | Emit one row per edge transition with `t_s = frame / fps`; a run inside a zone shorter than `min_dwell_frames` produces no enter/exit events at all. `min_dwell_frames` defaults to a fixed **1 frame**; switching `derive_bout_criterion` on instead fits the Sibly, Nott & Fletcher 1990 log-survivorship bout-criterion interval (`metrics/bouts.py`, shared with Z-3/Z-4) to this session's own pooled in-zone run lengths, still falling back to the fixed 1 when that fit does not converge. The switch **overrides** an explicit `min_dwell_frames`, which applies only while the switch is off. |
-| **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame`, `min_dwell_frames_used`, `bout_criterion_effective` |
+| **Output columns** | `zone_name`, `individual_id`, `event` (enter/exit), `t_s`, `frame`, `after_gap`, `min_dwell_frames_used`, `bout_criterion_effective` |
+| **Time base** | `frame` is the original **video frame** and `t_s = frame / fps` on the video clock, exactly as in the per-frame table (tracking that starts at frame 1000 reports 1010, not 10). Sessions without usable `tracking_intervals` fall back to the stored row position, with a logged warning. In a time-binned run an event keeps its original frame; bins do not reset the clock |
+| **Gaps** | Each unbroken stretch of video between tracking intervals is read on its own: a stay is never joined across frames that were not tracked, no `exit` is emitted where observation stops, and the first observed frame inside a zone after a gap is an `enter` with `after_gap = True` (the real entry happened in the gap) |
 | **Units** | seconds; frames; categorical (`log_survivorship` / `fixed` / `fixed_fallback`) |
 | **Parameters** | `derive_bout_criterion` (bool, **default `False`** — the opt-in switch), `min_dwell_frames` (int, frames, no declared default — resolved per the switch) |
 | **Warnings** | `min_dwell_frames_used`/`bout_criterion_effective` report the threshold actually applied and how it was derived; Z-6 and Z-9 inherit whichever was used here, since both forward their own cfg into this compute() unchanged. |
@@ -483,11 +505,11 @@ info-button modal (§6).
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
 | **Inputs** | Z-5 event log; forwards `min_dwell_frames`/`derive_bout_criterion` to Z-5 |
-| **Formula** | Per zone, per individual: `t_s` of first "enter" event (after Z-5's debounce) |
-| **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s` |
+| **Formula** | Per zone, per individual: `(frame of first "enter" event − origin_frame) / fps` (after Z-5's debounce). The origin is the first tracked video frame (the first frame of the bin in a time-binned run), so latency counts time since tracking began, and time omitted between tracking intervals counts as elapsed time, not zero. Video time of the entry is `origin_frame / fps + first_entry_t_s` |
+| **Output columns** | `zone_name`, `individual_id`, `first_entry_t_s`, `origin_frame`, `first_entry_after_gap` |
 | **Units** | seconds |
 | **Parameters** | `derive_bout_criterion` (bool, **default `False`**), `min_dwell_frames` (int, frames, no declared default); both forwarded to Z-5 unchanged |
-| **Warnings** | NaN when the individual never enters; encode as `inf` for sortability. The source paradigm (mouse light/dark box) gives no censoring convention of its own for a never-entering animal — the `inf` encoding is this tool's own deliberate choice, not something the citation specifies. Inherits Z-5's `derive_bout_criterion` switch: with it on, a brief flicker no longer counts as the first entry. |
+| **Warnings** | `first_entry_after_gap` is True when the animal was already inside the zone at the first frame observed after an unobserved gap, so the latency is an upper bound. NaN when the individual never enters; encode as `inf` for sortability. The source paradigm (mouse light/dark box) gives no censoring convention of its own for a never-entering animal — the `inf` encoding is this tool's own deliberate choice, not something the citation specifies. Inherits Z-5's `derive_bout_criterion` switch: with it on, a brief flicker no longer counts as the first entry. |
 | **Reference** | Bourin & Hascoet 2003, Eur. J. Pharmacol. 463(1-3):55-65 (the mouse light/dark box test) — DOI [10.1016/S0014-2999(03)01274-3](https://doi.org/10.1016/S0014-2999(03)01274-3) |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
@@ -541,7 +563,7 @@ info-button modal (§6).
 | **Level** | Zone; trial summary |
 | **Priority** | Optional |
 | **Inputs** | Z-5 event log; forwards `min_dwell_frames`/`derive_bout_criterion` to Z-5 |
-| **Formula** | Pair each "enter" event with its next "exit" event (same zone, individual) from the Z-5 event log; `dwell_s = exit.t_s − enter.t_s`; mean/median/max computed over all paired visits. A visit still open at the final frame (Z-5's unmatched "enter") is excluded, not counted as an open-ended visit. |
+| **Formula** | Pair each "enter" event with its next "exit" event (same zone, individual) from the Z-5 event log; `dwell_s = exit.t_s − enter.t_s`; mean/median/max computed over all paired visits. A visit still open at the final frame (Z-5's unmatched "enter") is excluded, not counted as an open-ended visit, and so is a visit whose "enter" is flagged `after_gap` (it began in an unobserved stretch, so its duration is unknown). A visit is never joined across frames that were not tracked. |
 | **Output columns** | `zone_name`, `individual_id`, `n_visits`, `mean_dwell_s`, `median_dwell_s`, `max_dwell_s` |
 | **Units** | count; seconds |
 | **Assumptions** | Zone arrays are pre-assigned object arrays of zone-name strings |
@@ -802,6 +824,7 @@ three together.
 | IL-10 Roaming Entropy | ❌ | Per-animal time series |
 | IL-11 Circular Statistics of Heading | ❌ | Per-animal time series |
 | IL-14 Wall-Distance Thigmotaxis | ❌ | Per-animal time series |
+| IL-15 Vertical Position (Depth) | ❌ | Per-animal time series |
 | GL-1 Nearest-Neighbour Distance | ✅ | Unordered point set per frame |
 | GL-2 Inter-Individual Distance | ✅ | Unordered point set per frame |
 | GL-3 Polarisation | ❌ | Heading requires per-individual tracklets |
@@ -921,7 +944,8 @@ selection, and exported alongside the metrics CSV in a separate
 | **Priority** | Diagnostic |
 | **Inputs** | `Session.has_stable_identities`, `Session.quality["fraction_identified"]` |
 | **Formula** | `identity_free` if `has_stable_identities=False`; else `not_assessed` if `fraction_identified` is missing and the session's reader is registered with `provides_identification_quality = False` (a tracker with no such metric); else `stable` if `fraction_identified >= 0.5` (default 0.0 when missing); else `weak` |
-| **Output columns** | `identity_stability_status` |
+| **Output columns** | `identity_stability_status`, `identity_free_reason`, `identified_fraction` |
+| **Assumptions** | `identity_free` covers two different situations, so `identity_free_reason` says which: `declared` (the tracker was told not to identify, or the user ticked Identity-free for the session), `low_identification` (identities were requested but `fraction_identified < 0.5`), `unknown` (the tracker did not say which), `not_applicable` (a tracker with no identification quality); empty when the status is not `identity_free`. The Preview quality grid leaves `declared` and `not_applicable` unjudged and flags the other two. `identified_fraction` is the tracker's `fraction_identified`, NaN when absent |
 | **Reference** | Track2Data engineering threshold on idtracker.ai's own fraction_identified (PRD §5.2, FR-IMP-3); not an external scientific result |
 | **Supporting references** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) (DOI: 10.1038/s41592-018-0295-5) |
 
@@ -961,8 +985,8 @@ selection, and exported alongside the metrics CSV in a separate
 | **Level** | Session summary |
 | **Priority** | Diagnostic |
 | **Inputs** | `Session.fragments` (both individual and crossing fragments) |
-| **Formula** | `crossing_fragment_fraction = n_crossing_fragments / n_fragments`; `crossing_frame_fraction = sum(len of crossing fragments) / sum(len of all fragments)` |
-| **Output columns** | `crossing_fragment_fraction`, `crossing_frame_fraction` |
+| **Formula** | `crossing_fragment_fraction = n_crossing_fragments / n_fragments`; `crossing_frame_fraction = sum(len of crossing fragments) / sum(len of all fragments)` (a share of **fragment duration**: concurrent individual fragments each add to the denominator, so it shrinks as the group grows); `crossing_unique_frame_fraction = |union of crossing frames| / tracked frames` (overlapping crossings count once; this is the share of the recording with animals in contact, and is what the Preview quality grid reports) |
+| **Output columns** | `crossing_fragment_fraction`, `crossing_frame_fraction`, `crossing_unique_frame_fraction` |
 | **Units** | fraction ∈ [0, 1] |
 | **Warnings** | Directly quantifies a confound for every GL-* metric: animals inside a crossing fragment are by definition touching or overlapping for that whole span, so distance- and orientation-based group metrics are unreliable there. The frame-weighted fraction is the one to read — crossing and individual fragments have very different typical lengths. |
 | **Reference** | Romero-Ferrero et al. 2019, Nat. Methods 16:179-182 (idtracker.ai) — DOI [10.1038/s41592-018-0295-5](https://doi.org/10.1038/s41592-018-0295-5) |
@@ -1127,6 +1151,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | IL-9, IL-10 | `metrics/individual.py` | `HomeBaseOccupancy`, `RoamingEntropy` | Share `_occupancy_grid_counts` |
 | IL-11 | `metrics/individual.py` | `CircularHeadingStats` | np-only; Zar's Rayleigh-test approximation |
 | IL-14 | `metrics/individual.py` | `WallDistanceThigmotaxis` | `shapely` -- the only IL-* metric with that dependency |
+| IL-15 | `metrics/individual.py` | `VerticalPosition` | np-only; the water column comes from `zones/extent.py`, derived in `metrics/derived.py`; gated by `Metric.valid_camera_views` (`metrics/availability.py`) |
 
 ### 5.1 Shared computations (no duplicated work)
 
@@ -1357,7 +1382,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 15 of the 34
+   it is disabled with an explanatory tooltip for the 15 of the 35
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by

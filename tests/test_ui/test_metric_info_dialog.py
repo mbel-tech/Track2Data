@@ -237,3 +237,23 @@ def test_click_inside_dialog_does_not_close_it(qtbot) -> None:
     qtbot.mouseClick(dlg, Qt.MouseButton.LeftButton)
 
     assert dlg.isVisible() is True
+
+
+def test_dialog_names_the_camera_view_a_metric_needs(qtbot) -> None:
+    from ui.dialogs.metric_info_dialog import MetricInfoDialog
+
+    dlg = MetricInfoDialog(metrics.get("IL-15"))
+    qtbot.addWidget(dlg)
+    text = _dialog_text(dlg)
+
+    assert "side view" in text
+    assert "Calibration" in text
+
+
+def test_dialog_omits_the_camera_view_notice_for_ordinary_metrics(qtbot) -> None:
+    from ui.dialogs.metric_info_dialog import MetricInfoDialog
+
+    dlg = MetricInfoDialog(metrics.get("IL-1"))
+    qtbot.addWidget(dlg)
+
+    assert "camera view" not in _dialog_text(dlg).lower()

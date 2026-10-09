@@ -58,12 +58,13 @@ from track2data.core.progress import (
     ProgressEvent,
     emit,
 )
-from track2data.core.timeline import map_array_index_to_true_frame as _map_array_index_to_true_frame
+from track2data.core.timeline import timeline_problem
 from track2data.readers import find_reader, read_session
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from track2data.core.models import CameraView
     from track2data.core.session_consistency import SessionSummary
     from track2data.metrics.base import Metric
     from track2data.readers.index import ScanBudget
@@ -337,18 +338,26 @@ class Engine:
         return scan(roots, budget=budget, progress=progress, token=token)
 
     def import_session(self, folder: Path) -> Session:
-        """Auto-detect reader and return a Session for *folder*.
+        """Auto-detect the reader, read *folder* and apply the project's import settings.
 
-        Trajectory formats that execute code on load are refused unless this
-        project has opted in via ``security.allow_pickle_trajectories``. A
-        folder that also carries an h5 or csv trajectory imports normally
-        either way -- the reader falls through to it.
+        Trajectory formats that execute code on load are refused unless this project has
+        opted in via ``security.allow_pickle_trajectories``. A folder that also carries an h5
+        or csv trajectory imports normally either way -- the reader falls through to it.
         """
-        folder = Path(folder)
-        allow_pickle = self._manifest.security.allow_pickle_trajectories
-        session = read_session(folder, allow_pickle=allow_pickle)
+        session = read_session(
+            Path(folder), allow_pickle=self._manifest.security.allow_pickle_trajectories
+        )
+        return self._apply_import_settings(session)
 
-        if self._manifest.calibration.body_length_source == "blobs":
+    def _apply_import_settings(self, session: Session) -> Session:
+        """Settings that act on a freshly read session: blob-derived body lengths, tracker
+        corrections and the video override. The one place they are applied, so a saved reader
+        and an auto-detected one behave the same. Blob files are idtracker.ai's, so other
+        readers' sessions skip the enrichment (the video override still applies)."""
+        allow_pickle = self._manifest.security.allow_pickle_trajectories
+        blob_capable = session.reader.startswith("idtrackerai")
+
+        if self._manifest.calibration.body_length_source == "blobs" and blob_capable:
             if allow_pickle:
                 from track2data.readers.idtrackerai.blobs import (
                     enrich_session_with_blob_body_length,
@@ -372,7 +381,7 @@ class Engine:
                     session.session_id,
                 )
 
-        if self._manifest.blob_diagnostics:
+        if self._manifest.blob_diagnostics and blob_capable:
             if allow_pickle:
                 from track2data.readers.idtrackerai.blobs import (
                     enrich_session_with_blob_corrections,
@@ -388,6 +397,11 @@ class Engine:
                     session.session_id,
                 )
 
+        return self._apply_video_override(session)
+
+    def _apply_video_override(self, session: Session) -> Session:
+        """Point *session* at the replacement video the manifest records under its id, when
+        that file exists. Only the path changes; fps, size and frame count stay."""
         override = self._manifest.video_overrides.get(session.session_id)
         if override is not None and Path(override).exists():
             session = session.model_copy(
@@ -424,27 +438,32 @@ class Engine:
         and the export all key on one name whatever id the reader derived from the files.
         """
         if ref.reader is None:
+            # Settings are applied inside import_session, once; only the override is looked
+            # up again below, because the manifest keys it by the entry's id and the reader
+            # may have derived another.
             session = self.import_session(ref.folder)
-        else:
-            try:
-                session = read_session(
-                    Path(ref.folder),
-                    reader=ref.reader,
-                    options=ref.reader_options,
-                    allow_pickle=self._manifest.security.allow_pickle_trajectories,
-                )
-            except ImportError_ as exc:
-                if exc.code != "READER_UNKNOWN":
-                    raise
-                raise ImportError_(
-                    f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
-                    "which is not available here",
-                    code="READER_NOT_AVAILABLE",
-                    subject=ref.reader,
-                    remediation="Install the plug-in that provides this reader, or remove the "
-                    "session and add it again so a reader is detected afresh.",
-                ) from exc
-        return session.model_copy(update={"session_id": ref.session_id})
+            session = session.model_copy(update={"session_id": ref.session_id})
+            return self._apply_video_override(session)
+        try:
+            session = read_session(
+                Path(ref.folder),
+                reader=ref.reader,
+                options=ref.reader_options,
+                allow_pickle=self._manifest.security.allow_pickle_trajectories,
+            )
+        except ImportError_ as exc:
+            if exc.code != "READER_UNKNOWN":
+                raise
+            raise ImportError_(
+                f"Session {ref.session_id!r} was added with reader {ref.reader!r}, "
+                "which is not available here",
+                code="READER_NOT_AVAILABLE",
+                subject=ref.reader,
+                remediation="Install the plug-in that provides this reader, or remove the "
+                "session and add it again so a reader is detected afresh.",
+            ) from exc
+        session = session.model_copy(update={"session_id": ref.session_id})
+        return self._apply_import_settings(session)
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -482,7 +501,7 @@ class Engine:
     # ── preprocessed-session cache ─────────────────────────────────────────
 
     #: Bump when PreprocessedSession's layout or preprocessing semantics change.
-    _CACHE_SCHEMA = 2
+    _CACHE_SCHEMA = 6
 
     def _cache_key(self, ref: SessionRef) -> tuple[Any, str] | None:
         """(store, key) for the session *ref* describes, or None when caching is
@@ -513,6 +532,7 @@ class Engine:
                 "schema": self._CACHE_SCHEMA,
                 "app": __version__,
                 "reader_options": ref.reader_options,
+                "import_settings": self._import_settings_fingerprint(ref),
                 "preprocess": m.preprocess.model_dump(mode="json"),
                 "calibration": m.calibration.model_dump(mode="json"),
                 "zones": m.zones.model_dump(mode="json"),
@@ -520,6 +540,26 @@ class Engine:
         )
         store = CacheStore(self._cache_dir)
         return store, store.key(reader_name, folder_fingerprint(ref.folder), config_hash)
+
+    def _import_settings_fingerprint(self, ref: SessionRef) -> dict[str, Any]:
+        """The project settings, besides the configs, that change what importing *ref* returns.
+
+        The cache holds the imported session along with its preprocessed arrays, so any
+        setting :meth:`_apply_import_settings` acts on has to be in the key, or a rerun
+        after changing it would be served the old session. Pickle permission decides whether
+        the blob enrichment can happen at all. The video override is keyed by the manifest's
+        id for this entry, so another session's override never invalidates this one; whether
+        the file exists is part of it because a missing file is ignored on import.
+        """
+        m = self._manifest
+        override = m.video_overrides.get(ref.session_id)
+        return {
+            "allow_pickle_trajectories": m.security.allow_pickle_trajectories,
+            "blob_diagnostics": m.blob_diagnostics,
+            "video_override": (
+                None if override is None else [str(override), Path(override).exists()]
+            ),
+        }
 
     def preprocess_ref(self, ref: SessionRef) -> PreprocessedSession:
         """Preprocess the session a manifest entry describes, reusing/filling the cache
@@ -585,7 +625,20 @@ class Engine:
         """
         from track2data.preprocess.pipeline import run as pp_run
 
-        psess = pp_run(session, self._manifest.preprocess, check=self._cancel_check)
+        problem = timeline_problem(session.tracking_intervals, int(session.raw_xy.shape[0]))
+        if problem is not None:
+            logger.warning(
+                "Session %s: %s; frame numbers and times fall back to the stored row position "
+                "and are not verified video times.",
+                session.session_id,
+                problem,
+            )
+        psess = pp_run(
+            session,
+            self._manifest.preprocess,
+            check=self._cancel_check,
+            bridge_allowed=not self.identity_free_for(session),
+        )
         return self.apply_calibration_and_zones(psess)
 
     def apply_calibration_and_zones(
@@ -726,6 +779,13 @@ class Engine:
                 return ref.identity_free_override
         return session.track_wo_identities is True
 
+    def _identity_free_override(self, session_id: str) -> bool | None:
+        """The user's own identity-free answer for *session_id*, None when they gave none."""
+        for ref in self._manifest.sessions:
+            if ref.session_id == session_id:
+                return ref.identity_free_override
+        return None
+
     def identity_skipped_metrics(self, identity_free: bool) -> dict[str, str]:
         """Selected metric ids that an identity-free session must not run,
         mapped to the reason, for the export record.
@@ -753,6 +813,38 @@ class Engine:
             cls = get(mid)
             if cls is not None and cls.requires_identity:
                 skipped[mid] = reason
+        return skipped
+
+    def camera_view_for(self, session: Session | None = None) -> CameraView:
+        """The camera view *session* was recorded from.
+
+        Project-level today. Every caller asks here rather than reading the manifest, so a
+        per-session view (a project mixing top and side recordings) is a change to this one
+        method.
+        """
+        return self._manifest.scene.camera_view
+
+    def view_skipped_metrics(self, session: Session | None = None) -> dict[str, str]:
+        """Selected metric ids the camera view rules out, mapped to the reason."""
+        from track2data.metrics import get
+        from track2data.metrics.availability import view_skipped_metrics
+
+        selected = [
+            *self._manifest.metrics.individual,
+            *self._manifest.metrics.group,
+            *self._manifest.metrics.zone,
+        ]
+        return view_skipped_metrics(selected, self.camera_view_for(session), get)
+
+    def skipped_metrics(
+        self, identity_free: bool, session: Session | None = None
+    ) -> dict[str, str]:
+        """Every selected metric id this session must not run, mapped to the reason, for the
+        export record: the identity gate and the camera-view gate together. A metric that both
+        gates rule out carries both reasons."""
+        skipped = self.identity_skipped_metrics(identity_free)
+        for mid, reason in self.view_skipped_metrics(session).items():
+            skipped[mid] = f"{skipped[mid]}; also {reason}" if mid in skipped else reason
         return skipped
 
     def _bin_seconds(self) -> float | None:
@@ -798,12 +890,6 @@ class Engine:
             df = self._compute_one(
                 cls, slice_psess(psess, w.start_row, w.stop_row), window_cfg, identity_free
             )
-            if cls.id == "Z-5" and not df.empty:
-                # event frame/time are relative to the slice; keep them on the
-                # session axis, as in an unbinned run
-                df = df.copy()
-                df["frame"] = df["frame"] + w.start_row
-                df["t_s"] = df["t_s"] + w.start_row / psess.fps
             parts.append(_with_bin_columns(df, w))
         non_empty = [p for p in parts if not p.empty]
         if not non_empty:
@@ -850,19 +936,34 @@ class Engine:
         # D-5 IdentityStability is precisely the record of that fact, so
         # suppressing the diagnostics would remove the evidence for the
         # skips below.
-        results.update(compute_all_diagnostics(psess))
+        results.update(
+            compute_all_diagnostics(
+                psess,
+                identity_free_declared=self._identity_free_override(psess.session_id),
+            )
+        )
 
         sel = self._manifest.metrics
 
         is_identity_free = self.identity_free_for(psess.session, identity_free)
-        skipped = self.identity_skipped_metrics(is_identity_free)
-        if skipped:
+        identity_skipped = self.identity_skipped_metrics(is_identity_free)
+        view_skipped = self.view_skipped_metrics(psess.session)
+        skipped = self.skipped_metrics(is_identity_free, psess.session)
+        if identity_skipped:
             logger.warning(
                 "Skipping identity-dependent metrics (%s) for session %s: "
                 "the session is identity-free, so per-individual results "
                 "would not correspond to individual animals.",
-                ", ".join(sorted(skipped)),
+                ", ".join(sorted(identity_skipped)),
                 psess.session_id,
+            )
+        if view_skipped:
+            logger.warning(
+                "Skipping metrics (%s) for session %s: the project's camera view is %s, "
+                "which they are not meaningful for.",
+                ", ".join(sorted(view_skipped)),
+                psess.session_id,
+                self.camera_view_for(psess.session),
             )
 
         bin_seconds = self._bin_seconds()
@@ -959,7 +1060,7 @@ class Engine:
 
         ``frame``/``time_s`` are the true video frame/time when
         ``Session.tracking_intervals`` reconciles with the array length
-        (see ``_map_array_index_to_true_frame``); ``in_tracking_interval``
+        (see ``PreprocessedSession.timeline``); ``in_tracking_interval``
         records whether that mapping was trusted (True) or the raw array
         position was used as a fallback (NaN -- not False, since "outside
         the interval" is not what an unreconciled mapping means).
@@ -971,14 +1072,15 @@ class Engine:
         n_animals = psess.n_animals
         fps = psess.fps
 
-        true_frame_per_row, mapping_valid = _map_array_index_to_true_frame(
-            psess.session.tracking_intervals, n_frames
-        )
+        true_frame_per_row, mapping_valid = psess.timeline()
         frames = np.repeat(true_frame_per_row, n_animals)
         individuals = np.tile(np.arange(n_animals), n_frames)
         time_s = frames / fps
         in_interval_fill = True if mapping_valid else np.nan
         in_interval = np.full(n_frames * n_animals, in_interval_fill)
+        if psess.tracked_mask is not None:
+            # rows inserted for unobserved video are estimates, not tracked frames
+            in_interval = np.repeat(psess.tracked_mask, n_animals)
 
         xy_flat = psess.xy.reshape(-1, 2)
         speed_flat = psess.kinematics.speed_px_s.reshape(-1)
@@ -996,6 +1098,9 @@ class Engine:
             "speed_px_s": speed_flat,
             "heading_rad": heading_flat,
         })
+        if psess.separator_mask is not None:
+            # a separator row only keeps two tracking intervals apart; it is not a frame
+            df["_separator"] = np.repeat(psess.separator_mask, n_animals)
 
         # Distinct from was_interpolated, which covers only gap-filled frames
         # that started as NaN. A jump-replaced position started as a real
@@ -1038,7 +1143,7 @@ class Engine:
             ]
 
         threshold = self._manifest.metrics.quality_threshold
-        id_prob = psess.session.id_probabilities
+        id_prob = psess.id_probabilities_aligned
         if id_prob is not None:
             df["id_probability"] = id_prob.reshape(-1)
         elif threshold > 0:
@@ -1067,6 +1172,9 @@ class Engine:
         self._attach_metadata(
             df, psess, self.identity_free_for(psess.session, identity_free)
         )
+
+        if "_separator" in df.columns:
+            df = df[~df["_separator"]].drop(columns="_separator")
 
         return df.sort_values(["session_id", "individual_id", "frame"]).reset_index(
             drop=True
@@ -1129,7 +1237,20 @@ class Engine:
         # display name and whether it was ever tested on real output; the manifest entry knows
         # who chose it and with which options. A reader that is no longer registered has neither.
         reader_cls = find_reader(session.reader)
+        camera_view = self.camera_view_for(session)
+        water_column = None
+        from track2data.metrics import get as _get_metric
+        from track2data.metrics.availability import view_dependent_metrics
+
+        if view_dependent_metrics(metric_results, "side", _get_metric):
+            from track2data.metrics.derived import derive_metric_params
+
+            water_column = derive_metric_params("IL-15", psess, self._manifest.zones)[
+                "water_column"
+            ]
         provenance = SessionProvenance(
+            camera_view=camera_view,
+            water_column=water_column,
             reader=session.reader,
             source_software=(reader_cls.display_name or reader_cls.name) if reader_cls else None,
             reader_verification=reader_cls.verification if reader_cls else None,
@@ -1182,7 +1303,7 @@ class Engine:
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
-            skipped_metrics=self.identity_skipped_metrics(is_identity_free),
+            skipped_metrics=self.skipped_metrics(is_identity_free, psess.session),
         )
 
     def export(
@@ -1483,6 +1604,14 @@ class Engine:
             logger.exception("Could not write the run summary to %s", out_dir)
         return written
 
+    def _camera_view_summary(self) -> list[str]:
+        """One summary bullet naming the declared camera view; nothing when none was declared,
+        so a project that never set one keeps its summary exactly as it was."""
+        from track2data.metrics.availability import view_label
+
+        view = self._manifest.scene.camera_view
+        return [] if view == "unknown" else [f"- Camera view: {view_label(view)}"]
+
     def _project_readme_text(
         self,
         results: list[SessionRunResult],
@@ -1508,6 +1637,7 @@ class Engine:
             "",
             f"- Project hash: `{self._manifest.project_hash()}`",
             f"- Sessions processed: {len(ok)} of {len(results)}",
+            *self._camera_view_summary(),
             "",
             "Per-session outputs are in the subdirectory named after each "
             "session. `sessions.csv` lists every session's frame rate, group "
@@ -1813,7 +1943,7 @@ class Engine:
         sel = self._manifest.metrics
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
-        issues.extend(self._identity_selection_issues())
+        issues.extend(self._gate_selection_issues())
         return issues
 
     def consistency_warnings(self) -> list[str]:
@@ -1846,6 +1976,7 @@ class Engine:
             *heterogeneity_warnings(summaries),
             *calibration_spread_warnings(summaries),
             *reader_advisories(summaries),
+            *self._view_selection_notes(),
         ]
 
     def _session_summaries(self) -> list[SessionSummary]:
@@ -1892,8 +2023,11 @@ class Engine:
         # thing that decides whether *_cm columns are real.
         return session.length_unit
 
-    def _identity_selection_issues(self) -> list[str]:
-        """Warn when the identity gate would empty the whole run.
+    def _gate_selection_issues(self) -> list[str]:
+        """Warn when the identity gate and the camera-view gate would, together, empty the
+        whole run.
+
+        The identity half, in full:
 
         Selecting only identity-dependent metrics on a project where every
         session is identity-free is not an error -- compute_metrics skips
@@ -1910,24 +2044,63 @@ class Engine:
         safeguard, and it isn't worth reading 70 session folders for.
         """
         sessions = self._manifest.sessions
-        if not sessions or not all(ref.is_identity_free() for ref in sessions):
-            return []
-        selected = [
+        selected = {
             *self._manifest.metrics.individual,
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
-        ]
-        if not selected:
+        }
+        if not sessions or not selected:
             return []
-        skipped = self.identity_skipped_metrics(True)
-        if len(skipped) < len(set(selected)):
+        identity = (
+            self.identity_skipped_metrics(True)
+            if all(ref.is_identity_free() for ref in sessions)
+            else {}
+        )
+        view = self.view_skipped_metrics()
+        if len(set(identity) | set(view)) < len(selected):
+            return []
+        if not view:
+            return [
+                "Every session is identity-free and every selected metric "
+                f"({', '.join(sorted(identity))}) requires identity, so the run "
+                "would produce diagnostics only. Select identity-independent "
+                "metrics, or untick 'Identity-free' for the sessions that do "
+                "preserve identities."
+            ]
+        if not identity:
+            fix = (
+                "Set the camera view on the Calibration screen, or select metrics "
+                "that apply to this recording."
+            )
+            return [
+                f"Every selected metric ({', '.join(sorted(view))}) needs a different "
+                "camera view than the project's, so the run would produce diagnostics "
+                f"only. {fix}"
+            ]
+        return [
+            f"Every selected metric ({', '.join(sorted(selected))}) is ruled out, by the "
+            "identity-free sessions or by the project's camera view, so the run would "
+            "produce diagnostics only. Untick 'Identity-free' where identities were "
+            "preserved, set the camera view on the Calibration screen, or select other "
+            "metrics."
+        ]
+
+    def _view_selection_notes(self) -> list[str]:
+        """Say which selected metrics the camera view will skip, when others still run.
+
+        When *every* selected metric is ruled out, validate() already blocks the run with its
+        own message, so this stays silent rather than repeat it.
+        """
+        selected = {
+            *self._manifest.metrics.individual,
+            *self._manifest.metrics.group,
+            *self._manifest.metrics.zone,
+        }
+        view = self.view_skipped_metrics()
+        if not view or len(view) >= len(selected):
             return []
         return [
-            "Every session is identity-free and every selected metric "
-            f"({', '.join(sorted(skipped))}) requires identity, so the run "
-            "would produce diagnostics only. Select identity-independent "
-            "metrics, or untick 'Identity-free' for the sessions that do "
-            "preserve identities."
+            f"{mid} will be skipped: {reason}." for mid, reason in sorted(view.items())
         ]
 
     def _session_calibration_issues(self) -> list[str]:
