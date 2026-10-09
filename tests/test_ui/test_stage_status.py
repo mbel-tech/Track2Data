@@ -18,10 +18,13 @@ from track2data.core.models import (
     ProjectManifest,
     ProjectMode,
     SessionRef,
+    ViewPair,
 )
 from ui.store.stage_status import SESSIONS_NEEDS_LAYOUT, compute_stage_statuses, next_blocker
 
-PROJECT, SESSIONS, CALIB, ZONES, META, PREP, METRICS, PROC, PREVIEW, EXPORT = range(10)
+(
+    PROJECT, SESSIONS, CALIB, ZONES, META, PREP, METRICS, PROC, PREVIEW, EXPORT, VIEWS
+) = range(11)
 
 
 def _manifest(**kw) -> ProjectManifest:
@@ -40,7 +43,9 @@ def _status(manifest, *, has_run=False):
 def test_no_project_blocks_everything_after_project() -> None:
     st = _status(None)
     assert st[PROJECT] == "empty"
-    assert all(s == "blocked" for s in st[1:])
+    assert all(s == "blocked" for s in st[1:VIEWS])
+    assert st[VIEWS] == "empty"
+    assert len(st) == 11
 
 
 def test_fresh_project_needs_sessions_and_metrics() -> None:
@@ -120,7 +125,7 @@ def test_next_blocker_gates_required_pages_only() -> None:
     assert next_blocker(bad_cal, CALIB) is not None
 
 
-@pytest.mark.parametrize("page", range(10))
+@pytest.mark.parametrize("page", range(11))
 def test_every_page_has_a_message_for_non_valid_states(page) -> None:
     for s in compute_stage_statuses(None, has_run_results=False):
         assert isinstance(s.message, str)
@@ -237,3 +242,89 @@ def test_3d_stage_summaries_say_not_available() -> None:
 
     out = stage_summaries(_manifest_3d(), has_run_results=False)
     assert out[-2:] == ["Not available yet", "Not available yet"]
+
+
+# ── Views page ───────────────────────────────────────────────────────────────
+
+
+def _views(manifest) -> object:
+    return compute_stage_statuses(manifest, has_run_results=False)[VIEWS]
+
+
+def _vref(sid, role, **kw) -> SessionRef:
+    return _ref(sid, view_role=role, **kw)
+
+
+def test_eleven_entries_and_views_name() -> None:
+    from ui.store.stage_status import PAGE_NAMES, stage_summaries
+
+    assert len(compute_stage_statuses(_manifest(), has_run_results=False)) == 11
+    assert len(compute_stage_statuses(None, has_run_results=False)) == 11
+    assert PAGE_NAMES[10] == "Views"
+    assert len(stage_summaries(_manifest(), has_run_results=False)) == 9
+
+
+def test_views_empty_for_2d_and_no_project() -> None:
+    assert _views(_manifest(sessions=[_ref()])).status == "empty"
+    assert compute_stage_statuses(None, has_run_results=False)[VIEWS].status == "empty"
+
+
+def test_views_3d_without_sessions() -> None:
+    info = _views(_manifest_3d())
+    assert (info.status, info.message) == ("empty", "Add sessions first.")
+
+
+def test_views_3d_session_without_role() -> None:
+    info = _views(_manifest_3d(sessions=[_vref("t", "top"), _ref("x")]))
+    assert (info.status, info.message) == (
+        "empty",
+        "Choose a view (top or side) for every session.",
+    )
+
+
+def test_views_unpaired_session_warns() -> None:
+    info = _views(_manifest_3d(sessions=[_vref("t", "top"), _vref("s", "side")]))
+    assert info.status == "warning"
+    assert "t" in info.message
+
+
+def test_views_pair_without_matching_warns() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert _views(m).status == "warning"
+
+
+def test_views_identity_free_pair_warns() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top", track_wo_identities=True), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", same_ids=True)],
+    )
+    info = _views(m)
+    assert info.status == "warning"
+    assert "identit" in info.message
+
+
+@pytest.mark.parametrize("kw", [{"same_ids": True}, {"fish_map": {"0": "1"}}])
+def test_views_matched_pair_is_valid(kw) -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", **kw)],
+    )
+    assert _views(m).status == "valid"
+
+
+def test_views_never_blocks_next() -> None:
+    cases = [
+        _manifest(),
+        _manifest_3d(),
+        _manifest_3d(sessions=[_ref("x")]),
+        _manifest_3d(sessions=[_vref("t", "top"), _vref("s", "side")]),
+        _manifest_3d(
+            sessions=[_vref("t", "top"), _vref("s", "side")],
+            view_pairs=[ViewPair(top_session_id="t", side_session_id="s", same_ids=True)],
+        ),
+    ]
+    for m in cases:
+        assert next_blocker(compute_stage_statuses(m, has_run_results=False), VIEWS) is None

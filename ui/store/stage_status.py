@@ -44,9 +44,11 @@ def _missing_water_column(manifest: ProjectManifest) -> list[str]:
 
 PAGE_NAMES = [
     "Project", "Sessions", "Calibration", "Zones", "Metadata",
-    "Preprocessing", "Metrics", "Processing", "Preview", "Export",
+    "Preprocessing", "Metrics", "Processing", "Preview", "Export", "Views",
 ]
-_PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT = range(10)
+(
+    _PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT, _VIEWS
+) = range(11)
 
 #: Pages whose "empty" state stops Next (the pipeline cannot run without them).
 REQUIRED_PAGES = frozenset({_PROJECT, _SESSIONS, _METRICS})
@@ -63,11 +65,12 @@ def compute_stage_statuses(
 ) -> list[StageInfo]:
     if manifest is None:
         blocked = StageInfo("blocked", "Create or open a project first.")
-        return [StageInfo("empty", "Create or open a project.")] + [blocked] * 9
+        first = StageInfo("empty", "Create or open a project.")
+        return [first] + [blocked] * 9 + [StageInfo("empty")]
 
     out: list[StageInfo] = [StageInfo("valid", manifest.project_name)] + [
         StageInfo("empty")
-    ] * 9
+    ] * 10
 
     # Sessions
     sessions = manifest.sessions
@@ -140,7 +143,33 @@ def compute_stage_statuses(
     if mode.dimension == "3d":
         # Fusion is not available yet, so nothing can be computed or shown.
         out[_PROC] = out[_PREVIEW] = out[_EXPORT] = StageInfo("blocked", MODE_3D_BLOCK_REASON)
+    out[_VIEWS] = _views_status(manifest)
     return out
+
+
+def _views_status(manifest: ProjectManifest) -> StageInfo:
+    """Status of the Views page (3-D only; manifest data only, never blocking)."""
+    if manifest.mode.dimension != "3d":
+        return StageInfo("empty")
+    sessions = manifest.sessions
+    if not sessions:
+        return StageInfo("empty", "Add sessions first.")
+    if any(s.view_role is None for s in sessions):
+        return StageInfo("empty", "Choose a view (top or side) for every session.")
+    by_id = {s.session_id: s for s in sessions}
+    paired = {sid for p in manifest.view_pairs for sid in (p.top_session_id, p.side_session_id)}
+    for s in sessions:
+        if s.session_id not in paired:
+            return StageInfo("warning", f"Session {s.session_id} is not paired.")
+    for p in manifest.view_pairs:
+        name = f"{p.top_session_id} / {p.side_session_id}"
+        if not (p.same_ids or p.fish_map):
+            return StageInfo("warning", f"Match the fish of {name}.")
+        for sid in (p.top_session_id, p.side_session_id):
+            ref = by_id.get(sid)
+            if ref is not None and ref.is_identity_free():
+                return StageInfo("warning", f"Session {sid} has no stable identities.")
+    return StageInfo("valid", f"{len(manifest.view_pairs)} pair(s) matched.")
 
 
 def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
