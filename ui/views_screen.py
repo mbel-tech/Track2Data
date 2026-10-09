@@ -29,6 +29,7 @@ from track2data.views.pairing import (
 )
 from ui.preview_screen import TrajectoryData, load_trajectory_data
 from ui.widgets.autocommit import AutoCommit
+from ui.widgets.panels_section import PanelsSection
 from ui.widgets.regex_help import RegexHelpPopover
 from ui.widgets.trajectory_view import TrajectoryView
 from ui.widgets.weak_slot import weak_slot
@@ -78,6 +79,14 @@ class ViewsScreen(QWidget):
         self._role_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._role_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         root.addWidget(self._role_table, 1)
+
+        self._panels_box = PanelsSection(store)
+        self._panels_table = self._panels_box._table
+        self._split_btn = self._panels_box._split_btn
+        self._set_panel_btn = self._panels_box._set_btn
+        self._clear_panel_btn = self._panels_box._clear_btn
+        self._panels_status = self._panels_box._status
+        root.addWidget(self._panels_box)
 
         self._pairs_box = QWidget()
         pairs_lay = QVBoxLayout(self._pairs_box)
@@ -274,6 +283,7 @@ class ViewsScreen(QWidget):
         self._empty_label.setVisible(not sessions)
         self._role_table.setVisible(bool(sessions))
         self._pattern_box.setVisible(self._is_3d())
+        self._panels_box.rebuild()
         self._pairs_box.setVisible(self._is_3d())
         with self._commit.suppressed():
             self._fill_roles(sessions)

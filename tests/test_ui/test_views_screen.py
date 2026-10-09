@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -736,3 +737,157 @@ def test_flush_commits_freshly_typed_pattern(qtbot, tmp_path) -> None:
     screen.flush()
     assert store.manifest.mode.pairing.top_regex == TOP
     assert not screen._commit.pending
+
+
+# ── Panels section ──────────────────────────────────────────────────────────
+
+
+def _make_panels(
+    qtbot, tmp_path: Path, monkeypatch, layout="single_video_two_panels", names=("a", "b")
+):
+    from track2data.core.models import PanelRect
+    from ui.store.project_store import ProjectStore
+    from ui.views_screen import ViewsScreen
+    from ui.widgets import panels_section
+
+    calls: dict = {"dialogs": [], "loads": []}
+
+    def fake_load(manifest, session_id, cache_dir):
+        calls["loads"].append(session_id)
+        if calls.get("fail"):
+            raise RuntimeError("boom")
+        return SimpleNamespace(background_image_path=None)
+
+    class StubDialog:
+        accept = True
+
+        def __init__(self, session, mode, background_path=None, parent=None):
+            calls["dialogs"].append((mode, background_path))
+
+        def exec(self):
+            return calls.get("accept", True)
+
+        def result_rects(self):
+            return PanelRect(x=0, y=0, width=50, height=100), PanelRect(
+                x=50, y=0, width=50, height=100
+            )
+
+        def result_rect(self):
+            return PanelRect(x=5, y=6, width=40, height=30)
+
+    monkeypatch.setattr(panels_section, "load_unpanelled_session", fake_load)
+    monkeypatch.setattr(panels_section, "PanelDialog", StubDialog)
+    store = ProjectStore()
+    screen = ViewsScreen(store)
+    qtbot.addWidget(screen)
+    screen.show()
+    store.new_project("p", tmp_path, mode=ProjectMode(dimension="3d", layout=layout))
+    store.update_sessions(_refs(tmp_path, names))
+    screen.refresh_now()
+    return store, screen, calls
+
+
+def _select_panel_row(screen, row):
+    screen._panels_table.selectRow(row)
+
+
+def test_panels_box_visibility(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    assert screen._panels_box.isVisible()
+    _, screen2, _ = _make_panels(qtbot, tmp_path, monkeypatch, layout="two_videos")
+    assert not screen2._panels_box.isVisible()
+
+
+def test_panels_box_hidden_for_2d(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    store.new_project("q", tmp_path, mode=ProjectMode())
+    screen.refresh_now()
+    assert not screen._panels_box.isVisible()
+
+
+def test_panels_table_and_button_states(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import PanelRect
+
+    store, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    store.set_session_panel("b", PanelRect(x=1, y=2, width=30, height=40))
+    screen.refresh_now()
+    t = screen._panels_table
+    assert [(t.item(r, 0).text(), t.item(r, 1).text()) for r in range(2)] == [
+        ("a", "whole video"),
+        ("b", "1, 2, 30 \u00d7 40"),
+    ]
+    assert not screen._split_btn.isEnabled()
+    assert not screen._set_panel_btn.isEnabled()
+    _select_panel_row(screen, 0)
+    assert screen._split_btn.isEnabled() and screen._set_panel_btn.isEnabled()
+    assert not screen._clear_panel_btn.isEnabled()
+    _select_panel_row(screen, 1)
+    assert not screen._split_btn.isEnabled() and screen._set_panel_btn.isEnabled()
+    assert screen._clear_panel_btn.isEnabled()
+
+
+def test_split_applies_dialog_rects(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    _select_panel_row(screen, 0)
+    screen._split_btn.click()
+    qtbot.waitUntil(lambda: screen._panels_table.rowCount() == 3, timeout=3000)
+    assert calls["dialogs"] == [("split", None)]
+    names = [s.session_id for s in store.manifest.sessions]
+    assert names == ["a__top", "a__side", "b"]
+    assert store.manifest.sessions[0].panel.width == 50
+
+
+def test_set_and_clear_panel(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    _select_panel_row(screen, 1)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: store.manifest.sessions[1].panel is not None, timeout=3000)
+    assert calls["dialogs"] == [("single", None)]
+    assert store.manifest.sessions[1].panel.x == 5
+    screen.refresh_now()
+    _select_panel_row(screen, 1)
+    screen._clear_panel_btn.click()
+    assert store.manifest.sessions[1].panel is None
+
+
+def test_cancelled_dialog_writes_nothing(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    calls["accept"] = False
+    before = store.manifest
+    _select_panel_row(screen, 0)
+    screen._split_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 1, timeout=3000)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 2, timeout=3000)
+    assert store.manifest is before
+
+
+def test_load_failure_shows_error(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    calls["fail"] = True
+    _select_panel_row(screen, 0)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: "boom" in screen._panels_status.text(), timeout=3000)
+    assert calls["dialogs"] == []
+
+
+def test_session_removed_meanwhile_is_ignored(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    _select_panel_row(screen, 0)
+    screen._split_btn.click()
+    store.update_sessions(_refs(tmp_path, ["b"]))
+    qtbot.waitUntil(lambda: "no longer" in screen._panels_status.text(), timeout=3000)
+    assert calls["dialogs"] == []
+    assert [s.session_id for s in store.manifest.sessions] == ["b"]
+
+
+def test_rebuild_never_writes(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(store, "set_session_panel", lambda *a: calls.append(a))
+    monkeypatch.setattr(store, "split_session_into_panels", lambda *a: calls.append(a))
+    _select_panel_row(screen, 0)
+    screen.refresh_now()
+    store.sessionsChanged.emit()
+    screen.refresh_now()
+    assert calls == []
