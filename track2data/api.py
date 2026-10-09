@@ -65,8 +65,9 @@ from track2data.readers import find_reader, read_session
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from track2data.core.models import CameraView
+    from track2data.core.models import CameraView, ViewPair
     from track2data.core.session_consistency import SessionSummary
+    from track2data.fusion.fuse import FusedSession
     from track2data.metrics.base import Metric
     from track2data.readers.index import ScanBudget
     from track2data.readers.scan import ScanResult
@@ -838,6 +839,62 @@ class Engine:
         method.
         """
         return self._manifest.scene.camera_view
+
+    def _pair_inputs(self, pair: ViewPair) -> tuple[PreprocessedSession, PreprocessedSession]:
+        from track2data.fusion.fuse import FusionError
+
+        by_id = {ref.session_id: ref for ref in self._manifest.sessions}
+        for sid in (pair.top_session_id, pair.side_session_id):
+            if sid not in by_id:
+                raise FusionError(f"session not in the project: {sid}")
+        return (
+            self.preprocess_ref(by_id[pair.top_session_id]),
+            self.preprocess_ref(by_id[pair.side_session_id]),
+        )
+
+    def fuse_pair(self, pair: ViewPair) -> FusedSession:
+        """Fuse a matched top/side pair into one session with a depth (see ``track2data.fusion``).
+
+        Both sessions come through :meth:`preprocess_ref` (cached); nothing is stored, so a
+        changed setting or offset always gives a fresh result. Raises ``FusionError``.
+        """
+        from track2data.fusion.fuse import fuse
+
+        top, side = self._pair_inputs(pair)
+        same_video = self._manifest.mode.layout == "single_video_two_panels"
+        return fuse(top, side, pair, same_video=same_video)
+
+    def fuse_all(
+        self,
+    ) -> tuple[dict[tuple[str, str], FusedSession], dict[tuple[str, str], str]]:
+        """Fuse every pair that has fusion settings: results and error messages, both keyed by
+        ``(top_id, side_id)``. Pairs without settings are skipped; a failing pair is reported,
+        not raised."""
+        from track2data.fusion.fuse import FusionError
+
+        results: dict[tuple[str, str], FusedSession] = {}
+        errors: dict[tuple[str, str], str] = {}
+        for pair in self._manifest.view_pairs:
+            if pair.fusion is None:
+                continue
+            key = (pair.top_session_id, pair.side_session_id)
+            try:
+                results[key] = self.fuse_pair(pair)
+            except FusionError as exc:
+                errors[key] = str(exc)
+        return results, errors
+
+    def suggest_offset(self, pair: ViewPair) -> int | None:
+        """The frame offset that best aligns the pair's views, or ``None`` (also when the pair
+        cannot be fused). For the fusion dialog, on a worker thread."""
+        from track2data.fusion.agreement import suggest_offset
+        from track2data.fusion.fuse import FusionError
+
+        try:
+            top, side = self._pair_inputs(pair)
+        except FusionError:
+            return None
+        return suggest_offset(top, side, pair)
 
     def view_skipped_metrics(self, session: Session | None = None) -> dict[str, str]:
         """Selected metric ids the camera view rules out, mapped to the reason."""
