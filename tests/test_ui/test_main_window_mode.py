@@ -100,3 +100,60 @@ def test_2d_project_page_is_not_blocked(qtbot, tmp_path) -> None:
     win._go_to_page(0)
     assert win._stack.widget(0).pending_mode_message() is None
     assert win._next_action.isEnabled()
+
+
+# ── the Views page (page 10) in the route ──────────────────────────────────
+
+
+def _routed_window(qtbot, tmp_path: Path, mode: ProjectMode):
+    win = _window(qtbot, tmp_path)
+    win._store.update_mode(mode)
+    win._store.update_sessions([_ref(tmp_path)])
+    win._go_to_page(1)
+    return win
+
+
+def test_3d_next_from_sessions_goes_through_views(qtbot, tmp_path) -> None:
+    win = _routed_window(qtbot, tmp_path, THREE_D)
+    win._go_next()
+    assert win._stack.currentIndex() == 10
+    win._go_next()
+    assert win._stack.currentIndex() == 2
+    win._go_back()
+    assert win._stack.currentIndex() == 10
+    win._go_back()
+    assert win._stack.currentIndex() == 1
+
+
+def test_2d_next_from_sessions_skips_views(qtbot, tmp_path) -> None:
+    win = _routed_window(qtbot, tmp_path, ProjectMode())
+    win._go_next()
+    assert win._stack.currentIndex() == 2
+
+
+def test_views_page_footer_and_sidebar(qtbot, tmp_path) -> None:
+    win = _routed_window(qtbot, tmp_path, THREE_D)
+    win._go_to_page(10)
+    assert win._btn_next.text() == "Next: Calibration →"
+    assert win._btn_back.text() == "← Sessions"
+    assert not win._btn_run.isHidden()
+    assert win._sidebar.currentRow() == 1
+
+
+def test_footer_unchanged_on_late_pages(qtbot, tmp_path) -> None:
+    win = _routed_window(qtbot, tmp_path, THREE_D)
+    win._go_to_page(8)
+    assert win._btn_next.text() == "Export dataset →"
+    assert win._btn_run.isHidden()
+    win._go_to_page(9)
+    assert win._btn_next.text() == "Done"
+    assert not win._next_action.isEnabled()
+    assert win._btn_run.isHidden()
+
+
+def test_mode_change_refreshes_footer(qtbot, tmp_path) -> None:
+    win = _window(qtbot, tmp_path)
+    win._go_to_page(1)
+    assert win._btn_next.text() == "Next: Calibration →"
+    win._store.update_mode(THREE_D)
+    assert win._btn_next.text() == "Next: Sessions →"  # the Views page, under Sessions

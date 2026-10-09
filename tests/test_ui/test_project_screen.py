@@ -200,3 +200,38 @@ def test_create_from_locked_2d_project_does_not_block_later_3d(qtbot, tmp_path) 
     screen._dim_3d.click()
     screen._layout_two.click()
     assert store.manifest.mode == THREE_D
+
+
+def test_mode_switch_keeps_pairing_patterns(qtbot, tmp_path) -> None:
+    from track2data.core.models import PairingPatterns
+
+    store, screen = _make(qtbot, tmp_path)
+    screen._dim_3d.click()
+    screen._layout_two.click()
+    patterns = PairingPatterns(top_regex="(?P<key>.+)_top$", side_regex="(?P<key>.+)_side$")
+    store.update_pairing(patterns)
+    store.update_sessions([_session(tmp_path)])
+    store.update_sessions([])
+    screen._dim_2d.click()
+    assert store.manifest.mode.dimension == "2d"
+    screen._dim_3d.click()
+    screen._layout_two.click()
+    assert store.manifest.mode.dimension == "3d"
+    assert store.manifest.mode.pairing == patterns
+
+
+@pytest.mark.parametrize("locked", [False, True])
+def test_new_project_starts_with_default_patterns(qtbot, tmp_path, locked) -> None:
+    from track2data.core.models import PairingPatterns
+
+    store, screen = _make(qtbot, tmp_path)
+    screen._dim_3d.click()
+    screen._layout_two.click()
+    store.update_pairing(PairingPatterns(top_regex="(?P<key>.+)_top$", side_regex=""))
+    if locked:
+        store.update_sessions([_session(tmp_path)])
+    screen._name_edit.setText("second")
+    screen._selected_dir = str(tmp_path)
+    screen._create_btn.click()
+    assert store.manifest.project_name == "second"
+    assert store.manifest.mode.pairing == PairingPatterns()

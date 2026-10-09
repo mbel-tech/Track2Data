@@ -653,7 +653,7 @@ def test_mode_defaults_to_2d() -> None:
     assert m.mode == ProjectMode()
     assert m.mode.dimension == "2d"
     assert m.mode.layout is None
-    assert m.mode.id_map == {}
+    assert not hasattr(m.mode, "id_map")
 
 
 def test_mode_3d_requires_layout() -> None:
@@ -674,13 +674,14 @@ def test_mode_2d_rejects_layout() -> None:
         ProjectMode(dimension="2d", layout="two_videos")
 
 
-def test_mode_roundtrip_keeps_id_map() -> None:
-    from track2data.core.models import ProjectMode
+def test_mode_roundtrip_keeps_pairing() -> None:
+    from track2data.core.models import PairingPatterns, ProjectMode
 
-    m = _mode_manifest(mode=ProjectMode(dimension="3d", layout="two_videos", id_map={"a": "b"}))
+    pairing = PairingPatterns(top_regex="_top$", side_regex="_side$")
+    m = _mode_manifest(mode=ProjectMode(dimension="3d", layout="two_videos", pairing=pairing))
     restored = ProjectManifest.model_validate(m.model_dump())
     assert restored == m
-    assert restored.mode.id_map == {"a": "b"}
+    assert restored.mode.pairing == pairing
 
 
 def test_old_manifest_without_mode_loads() -> None:
@@ -695,3 +696,76 @@ def test_project_hash_depends_on_mode() -> None:
 
     mode3d = ProjectMode(dimension="3d", layout="single_video_two_panels")
     assert _mode_manifest().project_hash() != _mode_manifest(mode=mode3d).project_hash()
+
+
+# ── View roles, pairs and pairing patterns ────────────────────────────────────
+
+
+def test_view_defaults() -> None:
+    from track2data.core.models import (
+        VIEWS_3D_ONLY,
+        PairingPatterns,
+        ProjectMode,
+        SessionRef,
+        ViewPair,
+    )
+
+    ref = SessionRef(session_id="a", folder=Path("/x"), sha256="0")
+    assert ref.view_role is None
+    pair = ViewPair(top_session_id="a", side_session_id="b")
+    assert pair.same_ids is False
+    assert pair.fish_map == {}
+    assert pair.auto is False
+    assert PairingPatterns() == PairingPatterns(top_regex="", side_regex="")
+    assert ProjectMode().pairing == PairingPatterns()
+    assert _mode_manifest().view_pairs == []
+    assert VIEWS_3D_ONLY == "Views apply to 3-D projects only"
+
+
+def test_view_pair_rejects_same_session() -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import ViewPair
+
+    with pytest.raises(ValidationError):
+        ViewPair(top_session_id="a", side_session_id="a")
+
+
+def test_old_manifest_with_id_map_loads() -> None:
+    data = _mode_manifest().model_dump()
+    data["mode"]["id_map"] = {"a": "b"}
+    m = ProjectManifest.model_validate(data)
+    assert not hasattr(m.mode, "id_map")
+
+
+def test_manifest_without_view_fields_loads() -> None:
+    data = _mode_manifest().model_dump(exclude={"view_pairs"})
+    assert ProjectManifest.model_validate(data).view_pairs == []
+
+
+def _views_manifest() -> ProjectManifest:
+    from track2data.core.models import PairingPatterns, ProjectMode, SessionRef, ViewPair
+
+    return _mode_manifest(
+        sessions=[
+            SessionRef(session_id="a", folder=Path("/x"), sha256="0", view_role="top"),
+            SessionRef(session_id="b", folder=Path("/y"), sha256="1", view_role="side"),
+        ],
+        mode=ProjectMode(
+            dimension="3d",
+            layout="two_videos",
+            pairing=PairingPatterns(top_regex="top", side_regex="side"),
+        ),
+        view_pairs=[ViewPair(top_session_id="a", side_session_id="b", fish_map={"0": "1"})],
+    )
+
+
+def test_views_roundtrip_json() -> None:
+    m = _views_manifest()
+    assert ProjectManifest.model_validate_json(m.model_dump_json()) == m
+
+
+def test_project_hash_depends_on_pairs() -> None:
+    m = _views_manifest()
+    other = m.model_copy(update={"view_pairs": []})
+    assert m.project_hash() != other.project_hash()

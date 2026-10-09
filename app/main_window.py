@@ -46,6 +46,7 @@ from app.navigation import WizardSidebar
 from app.state import ProjectStore
 from app.theme import RESOURCES, theme
 from track2data import __version__
+from track2data.core.models import ProjectMode
 from ui.calibration_screen import CalibrationScreen
 from ui.export_screen import ExportScreen
 from ui.import_screen import ImportScreen
@@ -57,6 +58,8 @@ from ui.processing_screen import ProcessingScreen
 
 # Placeholder screen imports — all 10 wizard pages.
 from ui.project_screen import ProjectScreen
+from ui.store.screen_flow import next_page, prev_page
+from ui.views_screen import ViewsScreen
 from ui.widgets.weak_slot import weak_slot
 from ui.zones_screen import ZonesScreen
 
@@ -150,6 +153,7 @@ class MainWindow(QMainWindow):
             ProcessingScreen(self._store),   # 7 — stage 5 (last)
             PreviewScreen(self._store),      # 8 — stage 6 (first)
             ExportScreen(self._store),       # 9 — stage 6 (last)
+            ViewsScreen(self._store),        # 10 — stage 1, 3-D only (routed after Sessions)
         ]
         # Direct reference (not a self._stack index lookup) so _action_run()
         # has exactly one call path into the real run, shared with this
@@ -493,7 +497,6 @@ class MainWindow(QMainWindow):
         self._flush_current_page()
         self._stack.setCurrentIndex(page_index)
         self._sidebar.sync_to_page(page_index)
-        self._back_action.setEnabled(page_index > 0)
         self._update_next_action()
 
     def _on_project_opened(self) -> None:
@@ -543,28 +546,30 @@ class MainWindow(QMainWindow):
         from ui.store.stage_status import next_blocker
 
         page = self._stack.currentIndex()
-        last = self._stack.count() - 1
         statuses = getattr(self, "_page_statuses", None)
         reason = next_blocker(statuses, page) if statuses else None
         if page == 0:
             reason = self._project_screen.pending_mode_message() or reason
-        self._next_action.setEnabled(page < last and reason is None)
+        self._next_action.setEnabled(next_page(self._mode(), page) is not None and reason is None)
         self._next_action.setToolTip(reason or "Go to the next step")
         self._refresh_footer_labels(page)
 
     def _refresh_footer_labels(self, page: int) -> None:
         from app.navigation import PAGE_TO_STAGE, STAGES
 
-        if page > 0:
-            self._btn_back.setText(f"← {STAGES[PAGE_TO_STAGE[page - 1]][0]}".replace("&", "&&"))
+        mode = self._mode()
+        prev_p, next_p = prev_page(mode, page), next_page(mode, page)
+        self._back_action.setEnabled(prev_p is not None)
+        if prev_p is not None:
+            self._btn_back.setText(f"← {STAGES[PAGE_TO_STAGE[prev_p]][0]}".replace("&", "&&"))
         else:
             self._btn_back.setText("← Back")
         if page == 8:
             text, role = "Export dataset →", "accent"
-        elif page >= self._stack.count() - 1:
+        elif next_p is None:
             text, role = "Done", "primary"
         else:
-            text = f"Next: {STAGES[PAGE_TO_STAGE[page + 1]][0]} →".replace("&", "&&")
+            text = f"Next: {STAGES[PAGE_TO_STAGE[next_p]][0]} →".replace("&", "&&")
             role = "primary"
         self._btn_next.setText(text)
         if self._btn_next.property("role") != role:
@@ -573,7 +578,7 @@ class MainWindow(QMainWindow):
             self._btn_next.style().polish(self._btn_next)
         ran = self._store.run_results is not None
         self._btn_run.setText("⟶ Re-run pipeline" if ran else "⟶ Run pipeline")
-        self._btn_run.setVisible(page < 8)
+        self._btn_run.setVisible(page not in (8, 9))
 
     def _flush_current_page(self) -> None:
         """Commit the outgoing screen's debounced edits before leaving it."""
@@ -585,11 +590,20 @@ class MainWindow(QMainWindow):
         if callable(flush):
             flush()
 
+    def _mode(self) -> ProjectMode:
+        """The open project's mode; 2-D while no project is open."""
+        manifest = self._store.manifest
+        return manifest.mode if manifest is not None else ProjectMode()
+
     def _go_back(self) -> None:
-        self._go_to_page(self._stack.currentIndex() - 1)
+        target = prev_page(self._mode(), self._stack.currentIndex())
+        if target is not None:
+            self._go_to_page(target)
 
     def _go_next(self) -> None:
-        self._go_to_page(self._stack.currentIndex() + 1)
+        target = next_page(self._mode(), self._stack.currentIndex())
+        if target is not None:
+            self._go_to_page(target)
 
     # ── actions ─────────────────────────────────────────────────────────────
 

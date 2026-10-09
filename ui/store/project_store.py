@@ -21,21 +21,26 @@ from PySide6.QtCore import QObject, Signal
 
 from track2data.core.ids import default_session_id, uniquify
 from track2data.core.models import (
+    VIEWS_3D_ONLY,
     CalibrationConfig,
     ExportTarget,
     MappingRule,
     MetadataSource,
     MetricSelection,
+    PairingPatterns,
     PreprocessConfig,
     ProjectManifest,
     ProjectMode,
     RunResult,
     SceneConfig,
     SessionRef,
+    ViewPair,
+    ViewRole,
     ZoneSet,
 )
 from track2data.core.progress import CancellationToken, OperationCancelled
 from track2data.readers import find_reader
+from track2data.views.pairing import PairingResult, pair_by_regex
 from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
@@ -135,6 +140,7 @@ class ProjectStore(QObject):
     zonesChanged       = Signal()
     sceneChanged       = Signal()
     modeChanged        = Signal()
+    viewsChanged       = Signal()
     metadataChanged    = Signal()
     preprocessChanged  = Signal()
     metricsChanged     = Signal()
@@ -193,6 +199,7 @@ class ProjectStore(QObject):
             self.projectChanged, self.sessionsChanged, self.calibrationChanged,
             self.zonesChanged, self.metadataChanged, self.preprocessChanged,
             self.metricsChanged, self.exportChanged, self.modeChanged,
+            self.viewsChanged,
         ):
             signal.connect(self._on_manifest_changed)
 
@@ -449,6 +456,133 @@ class ProjectStore(QObject):
             self.set_run_results(None)
         self.modeChanged.emit()
 
+    # ── views: roles, pairing, view pairs (3-D projects only) ──────────────
+
+    def _require_3d(self) -> bool:
+        """False with no project open; raises unless the open project is 3-D."""
+        if self._manifest is None:
+            return False
+        if self._manifest.mode.dimension != "3d":
+            raise ValueError(VIEWS_3D_ONLY)
+        return True
+
+    def _set_views(self, sessions: list[SessionRef], pairs: list[ViewPair]) -> None:
+        assert self._manifest is not None
+        self._manifest = self._manifest.model_copy(
+            update={"sessions": sessions, "view_pairs": pairs}
+        )
+        self.viewsChanged.emit()
+
+    @staticmethod
+    def _in_pair(pair: ViewPair, session_id: str) -> bool:
+        return session_id in (pair.top_session_id, pair.side_session_id)
+
+    def update_view_role(self, session_id: str, role: ViewRole | None) -> None:
+        """Set a session's view role; a changed role drops pairs containing it."""
+        if not self._require_3d():
+            return
+        assert self._manifest is not None
+        sessions = list(self._manifest.sessions)
+        index = next((i for i, s in enumerate(sessions) if s.session_id == session_id), None)
+        if index is None:
+            raise ValueError(f"unknown session: {session_id}")
+        ref = sessions[index]
+        if ref.view_role == role:
+            return
+        sessions[index] = ref.model_copy(update={"view_role": role})
+        pairs = [p for p in self._manifest.view_pairs if not self._in_pair(p, session_id)]
+        self._set_views(sessions, pairs)
+
+    def update_pairing(self, patterns: PairingPatterns) -> None:
+        """Store the name patterns in the mode. They are not applied until asked."""
+        if not self._require_3d():
+            return
+        assert self._manifest is not None
+        mode = self._manifest.mode.model_copy(update={"pairing": patterns})
+        self._manifest = self._manifest.model_copy(update={"mode": mode})
+        self.modeChanged.emit()
+
+    def apply_regex_pairing(self) -> PairingResult:
+        """Run the stored patterns over the sessions; set roles and reconcile auto pairs.
+
+        Sessions in a hand-made pair are left alone. If a pattern is invalid nothing
+        changes and the result carries the errors.
+        """
+        if not self._require_3d():
+            return PairingResult()
+        assert self._manifest is not None
+        manifest = self._manifest
+        hand_made = {
+            sid
+            for p in manifest.view_pairs
+            if not p.auto
+            for sid in (p.top_session_id, p.side_session_id)
+        }
+        ids = [s.session_id for s in manifest.sessions if s.session_id not in hand_made]
+        patterns = manifest.mode.pairing
+        result = pair_by_regex(ids, patterns.top_regex, patterns.side_regex)
+        if result.errors:
+            return result
+        roles: dict[str, ViewRole] = {sid: "top" for sid in result.top_ids}
+        roles.update({sid: "side" for sid in result.side_ids})
+        sessions = [
+            s.model_copy(update={"view_role": roles[s.session_id]})
+            if s.session_id in roles and s.view_role != roles[s.session_id]
+            else s
+            for s in manifest.sessions
+        ]
+        wanted = set(result.pairs)
+        pairs = [
+            p for p in manifest.view_pairs
+            if not p.auto or (p.top_session_id, p.side_session_id) in wanted
+        ]
+        present = {(p.top_session_id, p.side_session_id) for p in pairs}
+        pairs += [
+            ViewPair(top_session_id=t, side_session_id=sd, auto=True)
+            for t, sd in result.pairs
+            if (t, sd) not in present
+        ]
+        if sessions != list(manifest.sessions) or pairs != list(manifest.view_pairs):
+            self._set_views(sessions, pairs)
+        return result
+
+    def update_view_pair(self, pair: ViewPair) -> None:
+        """Add a pair, or replace the one with the same two sessions."""
+        if not self._require_3d():
+            return
+        assert self._manifest is not None
+        roles = {s.session_id: s.view_role for s in self._manifest.sessions}
+        for sid in (pair.top_session_id, pair.side_session_id):
+            if sid not in roles:
+                raise ValueError(f"unknown session: {sid}")
+        if roles[pair.top_session_id] != "top":
+            raise ValueError(f"{pair.top_session_id} is not a top session")
+        if roles[pair.side_session_id] != "side":
+            raise ValueError(f"{pair.side_session_id} is not a side session")
+        key = (pair.top_session_id, pair.side_session_id)
+        pairs = list(self._manifest.view_pairs)
+        for other in pairs:
+            if (other.top_session_id, other.side_session_id) == key:
+                continue
+            if self._in_pair(other, pair.top_session_id) or self._in_pair(
+                other, pair.side_session_id
+            ):
+                raise ValueError("a session can be in one pair only")
+        pairs = [p for p in pairs if (p.top_session_id, p.side_session_id) != key] + [pair]
+        self._set_views(list(self._manifest.sessions), pairs)
+
+    def remove_view_pair(self, top_session_id: str, side_session_id: str) -> None:
+        if not self._require_3d():
+            return
+        assert self._manifest is not None
+        key = (top_session_id, side_session_id)
+        pairs = [
+            p for p in self._manifest.view_pairs
+            if (p.top_session_id, p.side_session_id) != key
+        ]
+        if len(pairs) != len(self._manifest.view_pairs):
+            self._set_views(list(self._manifest.sessions), pairs)
+
     def update_zone_vertices(self, index: int, vertices: list[tuple[float, float]]) -> None:
         """Replace one zone's vertices after checking the new shape.
 
@@ -477,8 +611,18 @@ class ProjectStore(QObject):
         """Replace the session list and emit sessionsChanged."""
         if self._manifest is None:
             return
-        self._manifest = self._manifest.model_copy(update={"sessions": list(sessions)})
+        kept = {s.session_id for s in sessions}
+        pairs = [
+            p for p in self._manifest.view_pairs
+            if p.top_session_id in kept and p.side_session_id in kept
+        ]
+        pairs_dropped = len(pairs) != len(self._manifest.view_pairs)
+        self._manifest = self._manifest.model_copy(
+            update={"sessions": list(sessions), "view_pairs": pairs}
+        )
         self.sessionsChanged.emit()
+        if pairs_dropped:
+            self.viewsChanged.emit()
         # Prune cached facts for anything no longer in the list, so a
         # removed session's stale entry doesn't linger indefinitely.
         kept_ids = {s.session_id for s in sessions}

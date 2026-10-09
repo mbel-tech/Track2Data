@@ -807,3 +807,206 @@ def test_no_op_mode_update_keeps_run_results(store) -> None:
     store.set_run_results(_fake_results())
     store.update_mode(ProjectMode())
     assert store.run_results is not None
+
+
+# ── views: roles, pairing, view pairs ──────────────────────────────────────
+
+
+@pytest.fixture
+def store3d(store, tmp_path: Path):
+    store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    store.update_sessions([_ref(tmp_path, n) for n in ("a_top", "a_side", "b_top", "b_side")])
+    return store
+
+
+def _name_patterns():
+    from track2data.core.models import PairingPatterns
+
+    return PairingPatterns(top_regex=r"(?P<key>.*)_top", side_regex=r"(?P<key>.*)_side")
+
+
+def _roles(store) -> dict[str, str | None]:
+    return {s.session_id: s.view_role for s in store.manifest.sessions}
+
+
+def _pair(top: str, side: str, **kw):
+    from track2data.core.models import ViewPair
+
+    return ViewPair(top_session_id=top, side_session_id=side, **kw)
+
+
+def test_update_view_role_sets_role_emits_and_marks_dirty(qtbot, store3d) -> None:
+    store3d.save_project()
+    assert not store3d.dirty
+    with qtbot.waitSignal(store3d.viewsChanged, timeout=1000):
+        store3d.update_view_role("a_top", "top")
+    assert _roles(store3d)["a_top"] == "top"
+    assert store3d.dirty
+
+
+def test_view_mutators_rejected_in_2d(store, tmp_path: Path) -> None:
+    from track2data.core.models import VIEWS_3D_ONLY, PairingPatterns
+
+    store.update_sessions([_ref(tmp_path, "a")])
+    calls = [
+        lambda: store.update_view_role("a", "top"),
+        lambda: store.update_pairing(PairingPatterns(top_regex="x")),
+        lambda: store.apply_regex_pairing(),
+        lambda: store.update_view_pair(_pair("a", "b")),
+        lambda: store.remove_view_pair("a", "b"),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError, match=VIEWS_3D_ONLY):
+            call()
+    assert VIEWS_3D_ONLY == "Views apply to 3-D projects only"
+
+
+def test_view_mutators_are_no_ops_without_a_project(qtbot) -> None:
+    from ui.store.project_store import ProjectStore
+
+    empty = ProjectStore()
+    empty.update_view_role("a", "top")
+    empty.remove_view_pair("a", "b")
+    empty.tasks.shutdown(1000)
+
+
+def test_same_role_again_is_a_no_op(qtbot, store3d) -> None:
+    store3d.update_view_role("a_top", "top")
+    with qtbot.assertNotEmitted(store3d.viewsChanged):
+        store3d.update_view_role("a_top", "top")
+
+
+def test_changing_a_role_drops_pairs_containing_the_session(store3d) -> None:
+    for sid, role in (("a_top", "top"), ("a_side", "side"), ("b_top", "top"), ("b_side", "side")):
+        store3d.update_view_role(sid, role)
+    store3d.update_view_pair(_pair("a_top", "a_side"))
+    store3d.update_view_pair(_pair("b_top", "b_side"))
+    store3d.update_view_role("a_side", "top")
+    assert [(p.top_session_id, p.side_session_id) for p in store3d.manifest.view_pairs] == [
+        ("b_top", "b_side")
+    ]
+    store3d.update_view_role("b_top", None)
+    assert store3d.manifest.view_pairs == []
+    assert _roles(store3d)["b_top"] is None
+
+
+def test_update_view_pair_upserts_by_session_pair(qtbot, store3d) -> None:
+    store3d.update_view_role("a_top", "top")
+    store3d.update_view_role("a_side", "side")
+    with qtbot.waitSignal(store3d.viewsChanged, timeout=1000):
+        store3d.update_view_pair(_pair("a_top", "a_side"))
+    store3d.update_view_pair(_pair("a_top", "a_side", same_ids=True))
+    pairs = store3d.manifest.view_pairs
+    assert len(pairs) == 1 and pairs[0].same_ids
+
+
+def test_update_view_pair_rejects_unknown_wrong_role_and_second_pair(store3d) -> None:
+    for sid, role in (("a_top", "top"), ("a_side", "side"), ("b_top", "top"), ("b_side", "side")):
+        store3d.update_view_role(sid, role)
+    with pytest.raises(ValueError):
+        store3d.update_view_pair(_pair("a_top", "nope"))
+    with pytest.raises(ValueError):
+        store3d.update_view_pair(_pair("a_side", "a_top"))  # swapped roles
+    store3d.update_view_pair(_pair("a_top", "a_side"))
+    with pytest.raises(ValueError):
+        store3d.update_view_pair(_pair("a_top", "b_side"))
+    with pytest.raises(ValueError):
+        store3d.update_view_pair(_pair("b_top", "a_side"))
+    assert len(store3d.manifest.view_pairs) == 1
+
+
+def test_remove_view_pair(qtbot, store3d) -> None:
+    store3d.update_view_role("a_top", "top")
+    store3d.update_view_role("a_side", "side")
+    store3d.update_view_pair(_pair("a_top", "a_side"))
+    with qtbot.waitSignal(store3d.viewsChanged, timeout=1000):
+        store3d.remove_view_pair("a_top", "a_side")
+    assert store3d.manifest.view_pairs == []
+    with qtbot.assertNotEmitted(store3d.viewsChanged):
+        store3d.remove_view_pair("a_top", "a_side")
+
+
+def test_removing_a_session_drops_only_its_pairs(qtbot, store3d) -> None:
+    for sid, role in (("a_top", "top"), ("a_side", "side"), ("b_top", "top"), ("b_side", "side")):
+        store3d.update_view_role(sid, role)
+    store3d.update_view_pair(_pair("a_top", "a_side"))
+    store3d.update_view_pair(_pair("b_top", "b_side"))
+    remaining = [s for s in store3d.manifest.sessions if s.session_id != "a_side"]
+    with qtbot.waitSignals([store3d.sessionsChanged, store3d.viewsChanged], timeout=1000):
+        store3d.update_sessions(remaining)
+    assert [(p.top_session_id, p.side_session_id) for p in store3d.manifest.view_pairs] == [
+        ("b_top", "b_side")
+    ]
+    assert _roles(store3d) == {"a_top": "top", "b_top": "top", "b_side": "side"}
+
+
+def test_update_sessions_without_dropped_pairs_does_not_emit_views(qtbot, store3d) -> None:
+    with qtbot.assertNotEmitted(store3d.viewsChanged):
+        store3d.update_sessions(list(store3d.manifest.sessions))
+
+
+def test_update_pairing_stores_patterns_without_applying(store3d) -> None:
+
+    store3d.update_pairing(_name_patterns())
+    assert store3d.manifest.mode.pairing.top_regex == r"(?P<key>.*)_top"
+    assert store3d.manifest.mode.layout == "two_videos"
+    assert store3d.manifest.view_pairs == []
+    assert set(_roles(store3d).values()) == {None}
+
+
+def test_apply_regex_pairing_sets_roles_and_adds_auto_pairs(store3d) -> None:
+
+    store3d.update_pairing(_name_patterns())
+    result = store3d.apply_regex_pairing()
+    assert sorted(result.pairs) == [("a_top", "a_side"), ("b_top", "b_side")]
+    assert _roles(store3d) == {
+        "a_top": "top", "a_side": "side", "b_top": "top", "b_side": "side",
+    }
+    pairs = store3d.manifest.view_pairs
+    assert len(pairs) == 2 and all(p.auto for p in pairs)
+
+
+def test_apply_regex_pairing_keeps_existing_pair_details(store3d) -> None:
+
+    store3d.update_pairing(_name_patterns())
+    store3d.apply_regex_pairing()
+    store3d.update_view_pair(_pair("a_top", "a_side", fish_map={"0": "1"}, auto=True))
+    store3d.update_view_pair(_pair("b_top", "b_side", same_ids=True, auto=False))
+    store3d.apply_regex_pairing()
+    by_top = {p.top_session_id: p for p in store3d.manifest.view_pairs}
+    assert by_top["a_top"].fish_map == {"0": "1"} and by_top["a_top"].auto
+    assert by_top["b_top"].same_ids and not by_top["b_top"].auto
+
+
+def test_apply_regex_pairing_removes_stale_auto_pairs_only(store3d) -> None:
+    from track2data.core.models import PairingPatterns
+
+    store3d.update_pairing(_name_patterns())
+    store3d.apply_regex_pairing()
+    # b becomes a hand-made pair; a stays auto and then stops matching.
+    store3d.update_view_pair(_pair("b_top", "b_side", auto=False))
+    store3d.update_pairing(
+        PairingPatterns(top_regex=r"zzz(?P<key>.*)", side_regex=r"yyy(?P<key>.*)")
+    )
+    store3d.apply_regex_pairing()
+    assert [(p.top_session_id, p.side_session_id, p.auto) for p in store3d.manifest.view_pairs] == [
+        ("b_top", "b_side", False)
+    ]
+
+
+def test_apply_regex_pairing_does_not_repair_a_hand_made_session(store3d) -> None:
+
+    for sid, role in (("a_top", "top"), ("b_side", "side")):
+        store3d.update_view_role(sid, role)
+    store3d.update_view_pair(_pair("a_top", "b_side"))
+    store3d.update_pairing(_name_patterns())
+    store3d.apply_regex_pairing()
+    pairs = [(p.top_session_id, p.side_session_id, p.auto) for p in store3d.manifest.view_pairs]
+    assert pairs == [("a_top", "b_side", False)]
+
+
+def test_apply_regex_pairing_emits_views_changed_once(qtbot, store3d) -> None:
+
+    store3d.update_pairing(_name_patterns())
+    with qtbot.waitSignal(store3d.viewsChanged, timeout=1000):
+        store3d.apply_regex_pairing()

@@ -28,8 +28,13 @@ STAGES: list[tuple[str, int]] = [
     ("Preview & Export", 8),
 ]
 
-# Maps each page index → its parent stage index (9 stages, 10 pages).
-PAGE_TO_STAGE: list[int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 8]
+# The 3-D-only Views page: appended after the original 10, so their indices
+# are unchanged. It is routed between Sessions and Calibration (screen_flow).
+VIEWS_PAGE = 10
+
+# Maps each page index → its parent stage index (9 stages, 11 pages; Views
+# sits under Sessions).
+PAGE_TO_STAGE: list[int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 1]
 
 STATUS_ROLE = Qt.ItemDataRole.UserRole
 SUMMARY_ROLE = Qt.ItemDataRole.UserRole + 1
