@@ -882,15 +882,20 @@ regex, both empty by default). *Pairing.* Two regexes, searched in the session i
 group; sessions with an equal key pair up. An empty `key` means no match, and a key shared by several
 sessions on one side is ambiguous and not paired. A session belongs to at most one pair. *Same IDs.*
 A per-pair tick says fish with the same label are the same fish; otherwise the user matches by hand.
+`fish_map` is the single authority (what D reads); `same_ids` only says the map was derived from equal
+labels. While it is set the map is re-derived when new labels arrive; the tick is disabled until both
+sessions' labels are known; any hand edit of the map clears it.
 *Identity-free.* A session without stable identities cannot be matched; the pair is flagged "cannot
 match fish: this session has no stable identities" (matching by geometry is not done). *auto.*
-Applying the pattern again replaces the pairs it made earlier (`auto=True`) and never touches
-hand-made ones. *Navigation.* Views is page 10, belongs to the Sessions sidebar row, shows only in 3-D
+Applying the pattern again keeps the pairs it made earlier (`auto=True`) that it still produces, with
+their matching, removes the ones it no longer produces, and never touches hand-made ones. A user change
+to a pair (ticking or unticking Same IDs, editing the map) makes it hand-made (`auto=False`). *Navigation.* Views is page 10, belongs to the Sessions sidebar row, shows only in 3-D
 and is reached by Next and Back between Sessions and Calibration; `PAGE_NAMES` keeps its ten entries.
 *Gate.* Pairs never block Next (3-D cannot compute anyway); the Views status is never `blocked`.
-*Status.* The sidebar status uses manifest data only (roles, pairs, `same_ids`, a non-empty map),
-while the page validates fish maps strictly (duplicate, unknown labels, counts) against the sessions'
-labels.
+*Status.* The Views status (`stage_status`) is manifest-only (roles, pairs, identity-free flags, a
+non-empty map means matched) and drives the Sessions row: in 3-D that row shows the worse of the
+Sessions and Views statuses. The page validates fish maps strictly (duplicate, unknown labels, counts)
+against the sessions' labels.
 
 **Rationale:** A fish mapping hangs off a pair of sessions, and one project-wide dictionary cannot
 describe many pairs, so the pair record and its UI belong with the mapping. Regex pairing scales to

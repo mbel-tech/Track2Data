@@ -201,23 +201,36 @@ Calibration. In 2-D projects it does not exist.
   `(?P<key>.+)_side$` matches `trial01_side` with the same key, so the two are paired. The **ⓘ**
   button next to each field explains this in the app. A line under the fields says how many
   sessions each pattern catches and lists unpaired or ambiguous ones (several sessions with the
-  same key are not paired). An empty `key` means no match. Press **Pair by pattern** to set the
-  roles and create the pairs; pressing it again replaces the pairs it made earlier, and never
-  touches pairs you made by hand.
+  same key are not paired) and sessions that match **both** patterns ("Match both patterns"; these
+  are not paired). An empty `key` means no match. Press **Pair by pattern** to set the roles and
+  create the pairs. Pressing it again keeps the pairs it made earlier that the patterns still
+  produce, with their matching, and removes the ones they no longer produce. Sessions in pairs you
+  made or changed by hand are skipped: the button never touches those pairs.
 - **Pairs.** One row per pair, with a **Same IDs** tick, a **Status** and **Remove**. To pair by
   hand, choose a top and a side session below the list (only sessions with that role and not yet in
   a pair are offered) and press **Add pair**. A session belongs to at most one pair.
 - **Same IDs.** Tick it when fish with the same label are the same fish in both views; the fish map
-  is then filled in from the labels. Leave it unticked to match by hand.
+  is then filled in for the labels present in **both** views (the others stay unmatched), and filled
+  in again if the labels of either session change. The tick is disabled while either session has no
+  stable identities or its fish labels are not known yet (hover over it to see which). Unticking
+  clears only the tick and keeps the map. Changing a fish in the matching table clears the tick and
+  makes the pair yours, so **Pair by pattern** no longer touches it; ticking or unticking does too.
 - **Match fish.** Select a pair to get a table with one row per top-view fish and a dropdown for the
   side-view fish (or *(no match)*; a side fish already used is marked). Selecting a row highlights
   that fish and its match in the two track plots beside the table.
-- **Status.** *Needs matching*: no fish matched yet. *Matched*: a fish map exists (a tooltip lists
-  fish still unmatched). Otherwise the status is the problem, for example "cannot match fish: this
-  session has no stable identities" (identity-free sessions cannot be matched), "duplicate side
-  fish: ...", "unknown top fish: ..." or "3 top fish vs 2 side fish". The sidebar badge is ○ until
-  every session has a role, ⚠ while a session is unpaired or a pair needs matching or has no
-  stable identities, and ✓ when every pair is matched. It never stops you from continuing.
+- **Status.** The fish map is checked first. If the checks find a problem, the status shows it and
+  the tooltip lists all of them, for example "cannot match fish: this session has no stable
+  identities" (identity-free sessions cannot be matched), "duplicate side fish: ...", "unknown top
+  fish: ..." or "3 top fish vs 2 side fish" (an unequal count is shown even before any fish is
+  matched). Only when nothing is wrong does the status read *Needs matching* (no fish matched yet)
+  or *Matched* (at least one fish matched; the tooltip lists fish still unmatched).
+- **Sidebar.** In a 3-D project the **Sessions** row of the sidebar shows the worse of the Sessions
+  and Views statuses, and its tooltip adds the Views message (for example "Views: Session t1_top
+  is not paired."). Its summary line counts sessions and pairs. The row keeps its number, without
+  the ✓, until every session has a view; it gets the ✓ once every session has one, and the
+  tooltip still lists what is left (an unpaired session, a pair to match, a session without stable
+  identities). The sidebar checks the saved roles and pairs only; the page checks the fish maps
+  against the fish labels. None of this stops you from continuing.
 
 This only records the correspondence. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project
 still cannot be run: Processing, Preview and Export stay blocked.

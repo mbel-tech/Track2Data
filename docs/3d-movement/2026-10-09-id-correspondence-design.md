@@ -49,8 +49,11 @@ G is built and tested against any two sessions, so it does not wait for F.
    - `SessionRef.view_role: Literal["top", "side"] | None = None`.
    - `ViewPair(top_session_id: str, side_session_id: str, same_ids: bool = False,
      fish_map: dict[str, str] = {}, auto: bool = False)`. `fish_map` maps a top-view label to a
-     side-view label; a fish not in it is unmatched. `auto` marks pairs made by the pattern. A
-     session belongs to at most one pair.
+     side-view label; a fish not in it is unmatched. `fish_map` is the single authority fusion
+     reads; `same_ids` only says the map was derived from equal labels (while it is set the map is
+     re-derived when new labels arrive; any hand edit clears it). `auto` marks pairs made by the
+     pattern; ticking or unticking "same IDs" or editing the map makes the pair hand-made
+     (`auto=False`). A session belongs to at most one pair.
    - `PairingPatterns(top_regex: str = "", side_regex: str = "")`, stored as
      `ProjectMode.pairing` and edited through `modeChanged`.
    - `ProjectManifest.view_pairs: list[ViewPair] = []`.
@@ -67,8 +70,9 @@ G is built and tested against any two sessions, so it does not wait for F.
      duplicate side targets, unknown labels, a difference in fish counts, and the identity-free
      message above.
 3. **Store** (`ui/store/project_store.py`). `update_view_role(session_id, role)`,
-   `update_pairing(patterns)`, `apply_regex_pairing()` (replaces the auto-created pairs, keeps
-   hand-made ones), `update_view_pair(pair)`, `remove_view_pair(top_id, side_id)`, and a
+   `update_pairing(patterns)`, `apply_regex_pairing()` (keeps auto-created pairs it still
+   produces, with their matching, removes the ones it no longer produces, keeps hand-made ones),
+   `update_view_pair(pair)` (replaces a pair in place), `remove_view_pair(top_id, side_id)`, and a
    `viewsChanged` signal wired into `_on_manifest_changed`. Removing a session removes its pairs
    and clears nothing else. All of this is for 3-D projects only; the calls are rejected in 2-D.
 4. **The Views step** (`ui/views_screen.py`, 3-D only: page 10, belongs to the Sessions sidebar row, reached by Next/Back between Sessions and Calibration in 3-D projects).
@@ -81,9 +85,13 @@ G is built and tested against any two sessions, so it does not wait for F.
      "no match"; beside it two `TrajectoryView` plots with the selected fish highlighted.
 5. **Navigation.** The sidebar and page lists are static today. Views is a new page (page 10, belongs to the
    Sessions sidebar row), shown only in 3-D projects; in 2-D it is hidden and skipped by Next and Back. `screen_flow(mode)` returns
-   which variant of the Sessions-to-Calibration route to show. `stage_status` marks Views `empty`
+   which variant of the Sessions-to-Calibration route to show; for now it always returns `"standard"`, and
+   `page_route(mode)`, `next_page` and `prev_page` return the route itself (3-D inserts Views
+   after Sessions). `stage_status` marks Views `empty`
    until every session has a role, `warning` while any pair needs matching or is identity-free,
-   and `valid` when every pair has a complete map. It never returns `blocked`.
+   and `valid` when every pair has a non-empty `fish_map` (fish seen in one view only may stay
+   unmatched). It never returns `blocked`. In 3-D the Sessions sidebar row shows the worse of the
+   Sessions and Views statuses.
 6. **Hand-off to D.** `manifest.view_pairs[i].fish_map` is the mapping between the two views.
    F creates the `ViewPair` for the two panels of one video.
 
