@@ -83,7 +83,13 @@ a = Analysis(  # noqa: F821 -- Analysis/PYZ/EXE are injected by PyInstaller
     [str(REPO_ROOT / "app" / "main.py")],
     pathex=[str(REPO_ROOT)],
     binaries=[],
-    datas=[],
+    # app/theme.py and app/fonts.py read their files relative to the app/
+    # package (Path(__file__).parent / "resources"), which in a frozen build
+    # is <bundle>/app/resources. PyInstaller only follows imports, so none of
+    # it is collected unless it is listed here: without it the app dies on
+    # start-up (FileNotFoundError: track2data-light.qss) and the fonts and
+    # icons silently fall back.
+    datas=[(str(REPO_ROOT / "app" / "resources"), "app/resources")],
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},

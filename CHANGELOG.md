@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The packaged Linux and macOS apps crashed on start.** The PyInstaller spec bundled
+  no data files, so the frozen app could not find its theme stylesheets (`app/resources/track2data-light.qss`) and
+  failed with `FileNotFoundError` before showing a window; the bundled fonts and icons would have been skipped too.
+  The Windows build was missing the same files. The spec now ships `app/resources`. Found by the release workflow's smoke test on the v0.2.0 tag, which is why
+  v0.2.0 has no binaries. Running from source was not affected.
+- **The release workflow no longer fails when the release already exists.** Publishing a release from the
+  GitHub web page to create the tag leaves a release behind, and `gh release create` then failed after every
+  build had passed, so no binaries were attached. The publish step now uploads to the existing release
+  (keeping its notes) and creates one only when there is none.
+
 ## [0.2.0] — 2026-10-09
 
 ### Added
