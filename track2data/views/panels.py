@@ -11,9 +11,14 @@ result covers the whole frame; ``apply_panel`` turns it into a session of one vi
   (0, 0)): ``raw_xy`` (positions outside the panel become NaN), skeleton points, ``setup_points``
   pairs, ROI polygon vertices and length-calibration end points;
 * dropped (set to None): per-animal or whole-frame data that cannot be cut, ``bbox_table``,
-  ``bbox_summary``, ``identities_groups``, ``fragments``, the blob body-length source, the ROI
-  mask and background image paths;
-* left alone: everything else (quality, frame-indexed data, provenance).
+  ``bbox_summary``, ``identities_groups``, ``fragments`` and the ROI mask path; per-animal data
+  whose length does not match the animal count is dropped too;
+* left alone: everything else, including ``background_image_path`` (a whole-frame image that
+  consumers crop) and ``blob_body_length_source_file`` (the lengths are filtered, not recomputed).
+
+Panel bounds are half-open (``x <= px < x + width``), so a position on the line shared by two
+panels belongs to one panel only. Coordinate pairs are shifted at any nesting depth, so
+idtracker.ai's ``{"BP1": [[x, y]]}`` landmarks keep their shape.
 
 The input session is never modified.
 """
@@ -58,16 +63,16 @@ def _check_fits(session: Session, rect: PanelRect) -> None:
 
 
 def _masks(raw_xy: np.ndarray, rect: PanelRect) -> tuple[np.ndarray, np.ndarray]:
-    """(valid, inside) boolean arrays of shape (n_frames, n_animals)."""
+    """(valid, inside) boolean arrays of shape (n_frames, n_animals); bounds are half-open."""
     x, y = raw_xy[..., 0], raw_xy[..., 1]
     valid = np.isfinite(x) & np.isfinite(y)
     with np.errstate(invalid="ignore"):
         inside = (
             valid
             & (x >= rect.x)
-            & (x <= rect.x + rect.width)
+            & (x < rect.x + rect.width)
             & (y >= rect.y)
-            & (y <= rect.y + rect.height)
+            & (y < rect.y + rect.height)
         )
     return valid, inside
 
@@ -90,17 +95,29 @@ def panel_coverage(session: Session, rect: PanelRect) -> list[AnimalCoverage]:
     ]
 
 
-def _pick(seq: list | None, keep: list[int]) -> list | None:
-    return None if seq is None else [seq[i] for i in keep if i < len(seq)]
+def _pick(seq: list | None, keep: list[int], n_animals: int) -> list | None:
+    """Filter a per-animal list; data that does not have one entry per animal is dropped (None)."""
+    if seq is None or len(seq) != n_animals:
+        return None
+    return [seq[i] for i in keep]
 
 
-def _shift_pair(value: Any, dx: float, dy: float) -> Any:
-    if (
-        isinstance(value, (list, tuple, np.ndarray))
-        and len(value) == 2
-        and all(isinstance(v, (int, float, np.integer, np.floating)) for v in value)
-    ):
-        return [float(value[0]) - dx, float(value[1]) - dy]
+def _is_num(v: Any) -> bool:
+    return isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool)
+
+
+def _shift_points(value: Any, dx: float, dy: float) -> Any:
+    """Shift every numeric [x, y] pair found at any depth, keeping nesting and container type."""
+    if isinstance(value, np.ndarray):
+        if value.dtype.kind in "iuf" and value.ndim >= 1 and value.shape[-1] == 2:
+            return value.astype(float) - np.array([dx, dy])
+        return value
+    if isinstance(value, (list, tuple)):
+        if len(value) == 2 and all(_is_num(v) for v in value):
+            out = [float(value[0]) - dx, float(value[1]) - dy]
+        else:
+            out = [_shift_points(v, dx, dy) for v in value]
+        return tuple(out) if isinstance(value, tuple) else out
     return value
 
 
@@ -137,6 +154,7 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
     else:
         keep_mask = n_inside > 0
     keep = [int(i) for i in np.flatnonzero(keep_mask)]
+    n = raw.shape[1]
 
     new_xy = raw[:, keep, :].astype(float, copy=True)
     new_xy[~inside[:, keep]] = np.nan
@@ -149,23 +167,26 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
         "video": session.video.model_copy(
             update={"width_px": round(rect.width), "height_px": round(rect.height)}
         ),
-        "identities_labels": _pick(session.identities_labels, keep),
-        "identities_colors": _pick(session.identities_colors, keep),
+        "identities_labels": _pick(session.identities_labels, keep, n),
+        "identities_colors": _pick(session.identities_colors, keep, n),
         "bbox_table": None,
         "bbox_summary": None,
         "identities_groups": None,
         "fragments": None,
-        "blob_body_length_source_file": None,
         "roi_mask_path": None,
-        "background_image_path": None,
     }
-    if session.body_length_px is not None:
-        update["body_length_px"] = np.asarray(session.body_length_px)[keep]
-    if session.id_probabilities is not None:
-        update["id_probabilities"] = np.asarray(session.id_probabilities)[:, keep]
+    # Per-animal data of the wrong length cannot be matched to animals: dropped, not guessed.
+    bl = session.body_length_px
+    update["body_length_px"] = (
+        np.asarray(bl)[keep] if bl is not None and np.asarray(bl).shape[0] == n else None
+    )
+    ip = session.id_probabilities
+    update["id_probabilities"] = (
+        np.asarray(ip)[:, keep] if ip is not None and np.asarray(ip).shape[1] == n else None
+    )
     if session.setup_points is not None:
         update["setup_points"] = {
-            k: _shift_pair(v, rect.x, rect.y) for k, v in session.setup_points.items()
+            k: _shift_points(v, rect.x, rect.y) for k, v in session.setup_points.items()
         }
     if session.roi_list is not None:
         update["roi_list"] = _shift_roi(session.roi_list, rect.x, rect.y)
@@ -173,21 +194,29 @@ def apply_panel(session: Session, rect: PanelRect) -> Session:
         update["length_calibrations"] = [
             {
                 **c,
-                **{k: _shift_pair(c[k], rect.x, rect.y) for k in ("point_A", "point_B") if k in c},
+                **{
+                    k: _shift_points(c[k], rect.x, rect.y) for k in ("point_A", "point_B") if k in c
+                },
             }
             for c in session.length_calibrations
         ]
     if session.keypoints is not None:
         kp = session.keypoints
         kxy = kp.xy[:, keep].astype(float, copy=True)
-        kxy[:, :, :, 0] -= rect.x
-        kxy[:, :, :, 1] -= rect.y
-        update["keypoints"] = kp.model_copy(
-            update={
-                "xy": kxy,
-                "confidence": None if kp.confidence is None else kp.confidence[:, keep],
-            }
-        )
+        k_in = (
+            (kxy[..., 0] >= rect.x)
+            & (kxy[..., 0] < rect.x + rect.width)
+            & (kxy[..., 1] >= rect.y)
+            & (kxy[..., 1] < rect.y + rect.height)
+        )  # NaN compares False, so missing points stay outside
+        kxy[~k_in] = np.nan
+        kxy[..., 0] -= rect.x
+        kxy[..., 1] -= rect.y
+        conf = None
+        if kp.confidence is not None:
+            conf = kp.confidence[:, keep].astype(float, copy=True)
+            conf[~k_in] = np.nan
+        update["keypoints"] = kp.model_copy(update={"xy": kxy, "confidence": conf})
     return session.model_copy(update=update)
 
 
