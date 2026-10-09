@@ -333,3 +333,38 @@ class TestTheUsersIdentityFreeOverride:
         )
         psess = Engine(manifest).preprocess(_session())
         assert psess.xy.shape[0] == 21  # the override wins; the gap stays a break
+
+
+class TestZoneOccupancyIgnoresSeparatorRows:
+    """A separator row is not a frame, so it must not dilute a percentage of the session."""
+
+    def _in_zone(self):
+        import dataclasses
+
+        from track2data.core.models import ROI, ZoneSet
+        from track2data.zones.geometry import assign_zones
+
+        psess = run(_session(), _cfg())  # 20 tracked rows + 1 separator
+        everything = ZoneSet(
+            rois=[ROI(name="all", vertices=[(-500, -500), (500, -500), (500, 500), (-500, 500)])]
+        )
+        main, sec = assign_zones(psess.xy, everything)
+        return dataclasses.replace(psess, main_zone=main, sec_zone=sec)
+
+    def test_time_in_zone_percentage_is_over_real_frames(self) -> None:
+        from track2data.metrics.zone import TimeInZone
+
+        row = TimeInZone().compute(self._in_zone()).iloc[0]
+        assert row["time_pct"] == pytest.approx(1.0)  # not 20 / 21
+        assert row["time_s"] == pytest.approx(20 / FPS)
+
+    def test_the_identity_free_pooled_view_agrees(self) -> None:
+        from track2data.metrics.zone import TimeInZone, pooled_view
+
+        row = TimeInZone().compute(pooled_view(self._in_zone())).iloc[0]
+        assert row["time_pct"] == pytest.approx(1.0)
+
+    def test_the_other_occupancy_measures_use_the_same_denominator(self) -> None:
+        from track2data.metrics.zone import _frame_count
+
+        assert _frame_count(self._in_zone()) == 20

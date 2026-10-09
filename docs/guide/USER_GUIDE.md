@@ -106,7 +106,14 @@ from the command line.
 
 **Notes**
 
-- **File ▸ Save project** writes the file; settings are also kept in memory as you edit.
+- **Changes are saved automatically** about half a second after you stop editing. The footer says
+  **Unsaved changes** while one is pending and **Saved** once the file is on disk; if writing fails
+  it says **Not saved** (hover for the reason) and your edits stay open. **File ▸ Save project**
+  saves at once, including any value you have typed but not yet confirmed. The file is replaced
+  atomically, so a failed save never leaves a half-written project.
+- Closing the window, **New project** and **Open project** save first, and do nothing if saving
+  fails. A reopened project saves back to the file it came from, and **New project** will not
+  overwrite an existing project of the same name.
 - Reopening a project re-reads each session folder in the background, so frame counts and
   calibration readiness appear again after a moment.
 - Preprocessed sessions are cached in `.t2d_cache/` inside the project folder. It is safe to delete
@@ -422,6 +429,15 @@ Results are written to `<project>/exports/<timestamp>/<session>/`.
 
 Look before you export. Four tabs: **Summary**, **Diagnostics**, **Metrics**, **Trajectories**.
 
+**Are these results current?** If you change a setting that affects the numbers (sessions,
+calibration, zones, metadata, preprocessing, metrics) after a run, a warning appears at the top of
+Preview and the sidebar says *Settings changed · re-run*: what you are looking at came from the
+older settings. Changing only where or in which format to export does not do this, and putting a
+setting back clears the warning. A run that finishes after you edited is judged against the settings
+it started with, so it cannot make newer edits look current, and a run that finishes for a project you
+have since replaced is discarded. A run in which no session succeeded is shown as *No successful
+sessions*, not as ready. Export recomputes the metrics under the current settings either way.
+
 ### Trajectories
 
 Choose a session and **Load trajectories** (it reuses the cache after a run). Then:
@@ -484,7 +500,7 @@ Tick the formats you want, choose where to write them, and press **Export**.
    | README | provenance record (always written alongside the others) |
 
 2. **Browse output directory…** or keep the default.
-3. **Export**. Metrics and files are produced again, but preprocessing comes from the cache when
+3. **Export**. Metrics and files are produced again under the current settings, but preprocessing comes from the cache when
    nothing relevant changed.
 
 The **receipt** lists every file with its size and SHA-256. **Copy CLI equivalent** gives the
