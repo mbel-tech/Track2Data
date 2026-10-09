@@ -20,9 +20,10 @@ import functools
 from datetime import UTC, datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -54,6 +55,9 @@ _STAGE_LABELS = {
 
 class ProcessingScreen(QWidget):
     """Stage 6c — Validate and run the preprocessing + metrics pipeline."""
+
+    #: A setup check was clicked: the wizard page to show.
+    navigateRequested = Signal(int)
 
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -120,7 +124,8 @@ class ProcessingScreen(QWidget):
         self._workers.setToolTip(
             "Sessions processed at the same time. 1 runs them one after another."
         )
-        btn_row.addWidget(self._workers)
+        self._workers.hide()  # the segmented control below drives it
+        btn_row.addWidget(self._build_workers_segments())
         btn_row.addStretch()
         root.addLayout(btn_row)
 
@@ -161,6 +166,36 @@ class ProcessingScreen(QWidget):
         ("Metadata", 4), ("Preprocessing", 5), ("Metrics", 6),
     )
 
+    #: Worker counts offered by the segmented control (those above the CPU count are disabled).
+    _WORKER_CHOICES = (1, 2, 4, 8)
+
+    def _build_workers_segments(self) -> QWidget:
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        group = QButtonGroup(box)
+        group.setExclusive(True)
+        self._worker_buttons: dict[int, QPushButton] = {}
+        top = self._workers.maximum()
+        for n in self._WORKER_CHOICES:
+            btn = QPushButton(str(n))
+            btn.setProperty("role", "segment")
+            btn.setCheckable(True)
+            btn.setEnabled(n <= top)
+            btn.setToolTip(self._workers.toolTip())
+            btn.clicked.connect(lambda _c=False, n=n: self._workers.setValue(n))
+            group.addButton(btn)
+            row.addWidget(btn)
+            self._worker_buttons[n] = btn
+        self._workers.valueChanged.connect(self._sync_worker_buttons)
+        self._sync_worker_buttons(self._workers.value())
+        return box
+
+    def _sync_worker_buttons(self, value: int) -> None:
+        for n, btn in self._worker_buttons.items():
+            btn.setChecked(n == value)
+
     def _build_setup_check(self) -> QFrame:
         card = QFrame()
         card.setProperty("card", True)
@@ -181,11 +216,21 @@ class ProcessingScreen(QWidget):
             dot.setProperty("check", "ok")
             text = QLabel()
             text.setWordWrap(True)
-            cell = QHBoxLayout()
+            dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            button = QPushButton()
+            button.setObjectName("CheckCell")
+            button.setFlat(True)
+            button.setMinimumHeight(52)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(f"Go to {name}")
+            button.clicked.connect(lambda _c=False, page=_page: self.navigateRequested.emit(page))
+            cell = QHBoxLayout(button)
+            cell.setContentsMargins(6, 4, 6, 4)
             cell.setSpacing(10)
             cell.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
             cell.addWidget(text, 1)
-            grid.addLayout(cell, i // 3, i % 3)
+            grid.addWidget(button, i // 3, i % 3)
             self._check_labels[name] = (dot, text)
         col.addLayout(grid)
         if self._store is not None:

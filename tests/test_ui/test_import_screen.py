@@ -96,7 +96,7 @@ def test_table_shows_dash_placeholders_before_facts_are_cached(qtbot, tmp_path: 
     row = [screen._table.item(0, c).text() for c in range(screen._table.columnCount())]
     # Trailing "" is the Identity-free checkbox cell, which carries a
     # check state rather than text.
-    assert row == ["session_a", "—", "—", "—", "—", "—", "", "—"]
+    assert row == ["session_a", "—", "—", "—", "—", "—", "", "—", "—"]
 
 
 def test_table_shows_session_facts_once_cached(qtbot, tmp_path: Path) -> None:
@@ -127,7 +127,7 @@ def test_table_shows_session_facts_once_cached(qtbot, tmp_path: Path) -> None:
     qtbot.addWidget(screen)
 
     row = [screen._table.item(0, c).text() for c in range(screen._table.columnCount())]
-    assert row == ["session_a", "idtrackerai", "30.0", "1000", "4", "Stable", "", "Not found"]
+    assert row == ["session_a", "idtrackerai", "30.0", "1000", "4", "Stable", "", "—", "Not found"]
 
 
 def test_table_refreshes_when_facts_arrive_after_construction(qtbot, tmp_path: Path) -> None:
@@ -847,3 +847,41 @@ def test_store_rejects_a_missing_file_or_unknown_session(tmp_path: Path) -> None
     with pytest.raises(KeyError):
         store.set_video_path("ghost", video)
     assert store.manifest.video_overrides == {}
+
+
+def test_tracked_coverage_column_shows_a_percentage_with_a_traffic_light(qtbot, tmp_path) -> None:
+    from dataclasses import replace
+
+    from ui.import_screen import _COL_COVERAGE, ImportScreen
+    from ui.store.session_facts import SessionFacts
+
+    store = _make_store(tmp_path)
+    _add_ref(store, "session_a", tmp_path)
+    base = SessionFacts(
+        session_id="session_a", reader="idtrackerai", fps=30.0, n_frames=1000, n_animals=4,
+        width_px=640, height_px=480, has_stable_identities=True, track_wo_identities=False,
+        idtrackerai_version=None, length_unit=None, setup_points=None, roi_list=None,
+        has_body_length=False, background_image_path=None,
+    )
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    for coverage, level in ((0.996, "good"), (0.90, "check"), (0.5, "review")):
+        store._session_facts["session_a"] = replace(base, tracked_coverage=coverage)
+        screen._refresh_table()
+        item = screen._table.item(0, _COL_COVERAGE)
+        assert item.text() == f"{coverage * 100:.1f} %"
+        assert screen._coverage_level(coverage) == level
+        assert not item.icon().isNull()
+
+
+def test_facts_measure_coverage_from_missing_positions() -> None:
+    import numpy as np
+
+    from ui.store.session_facts import _tracked_coverage
+
+    xy = np.zeros((10, 2, 2))
+    assert _tracked_coverage(xy) == 1.0
+    xy[0, 0, :] = np.nan  # one of 20 positions lost
+    xy[1, 1, 0] = np.nan  # a lost x alone also counts as missing
+    assert _tracked_coverage(xy) == 0.9
+    assert _tracked_coverage(np.zeros((0, 2, 2))) is None

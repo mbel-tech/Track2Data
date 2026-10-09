@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Teal Field interface refresh.** Light and dark themes (system default, remembered), a
+  painted stage sidebar with live summaries, a footer bar in place of the toolbar, a run-log
+  drawer, toasts, and a restyle of all nine screens. New with it: a command palette (Ctrl+K), a
+  Sessions detail pane and tracked-coverage column, Calibration mode cards, a Processing setup
+  check with a segmented workers control, a Preview quality grid (traffic-light cells and a plain
+  "why this needs a look" card per session), editable saved zones (drag the white handles, delete),
+  a metrics preset pill with per-tab counts, and an export receipt dialog. Atkinson Hyperlegible
+  and IBM Plex Mono load from `app/resources/fonts/` when present.
 - **Side-view depth: a camera-view setting and IL-15 vertical position.** The Calibration
   screen has a new *Camera view* setting (Not set / Top-down / Side view), saved with the
   project. It defaults to Not set, so existing projects behave exactly as before. Declaring a

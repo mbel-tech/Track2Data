@@ -41,7 +41,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -61,9 +60,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.theme import theme
 from ui.store.quality_grid import SessionQuality, assess_session, count_verdicts
 from ui.widgets.dataframe_table import clear_table, populate_table
+from ui.widgets.dots import level_icon
 from ui.widgets.trajectory_view import TrajectoryView
 
 
@@ -486,27 +485,6 @@ class PreviewScreen(QWidget):
 
     # ── quality grid ─────────────────────────────────────────────────────
 
-    def _level_colour(self, level: str) -> str:
-        dark = theme.name == "dark"
-        return {
-            "good": "#3fa7b5" if dark else "#3a9a72",
-            "check": "#e8b64c" if dark else "#e0a92a",
-            "review": "#ff8a76" if dark else "#d1453b",
-        }.get(level, "#88949b")
-
-    @staticmethod
-    def _dot_icon(colour: str) -> QIcon:
-        """A filled circle; an icon, so a selected row's text colour cannot hide it."""
-        pixmap = QPixmap(12, 12)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(colour))
-        painter.drawEllipse(1, 1, 10, 10)
-        painter.end()
-        return QIcon(pixmap)
-
     def _render_quality_grid(self, run_results) -> None:
         self._qualities = [assess_session(s) for s in run_results.sessions]
         counts = count_verdicts(self._qualities, set())
@@ -521,10 +499,10 @@ class PreviewScreen(QWidget):
                 (q.coverage, q.identity, q.crossings, q.jumps, q.interpolated), start=1
             ):
                 item = QTableWidgetItem(cell.text)
-                item.setIcon(self._dot_icon(self._level_colour(cell.level)))
+                item.setIcon(level_icon(cell.level))
                 table.setItem(row, col, item)
             verdict_item = QTableWidgetItem(q.verdict)
-            verdict_item.setIcon(self._dot_icon(self._level_colour(q.verdict.lower())))
+            verdict_item.setIcon(level_icon(q.verdict.lower()))
             table.setItem(row, len(_QUALITY_HEADERS) - 1, verdict_item)
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
