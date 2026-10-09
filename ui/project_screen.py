@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -22,9 +23,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QVBoxLayout,
     QWidget,
 )
+
+from track2data.core.models import ProjectMode
 
 
 class ProjectScreen(QWidget):
@@ -37,6 +41,9 @@ class ProjectScreen(QWidget):
         self._build_ui()
         if store is not None:
             store.projectChanged.connect(self._on_project_changed)
+            store.projectChanged.connect(self._sync_from_store)
+            store.modeChanged.connect(self._sync_from_store)
+            store.sessionsChanged.connect(self._sync_from_store)
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -82,6 +89,54 @@ class ProjectScreen(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         root.addWidget(form_box)
 
+        # ── analysis type (2D / 3D) ─────────────────────────────────────
+        mode_box = QWidget()
+        mode_box.setMaximumWidth(600)
+        mode_lay = QVBoxLayout(mode_box)
+        mode_lay.setContentsMargins(0, 0, 0, 0)
+        mode_lay.setSpacing(6)
+        mode_lay.addWidget(QLabel("Analysis type"))
+        dim_row = QHBoxLayout()
+        self._dim_2d = QRadioButton("2D")
+        self._dim_3d = QRadioButton("3D")
+        self._dim_2d.setChecked(True)
+        self._dim_group = QButtonGroup(self)
+        self._dim_group.addButton(self._dim_2d)
+        self._dim_group.addButton(self._dim_3d)
+        dim_row.addWidget(self._dim_2d)
+        dim_row.addWidget(self._dim_3d)
+        dim_row.addStretch()
+        mode_lay.addLayout(dim_row)
+
+        self._layout_box = QWidget()
+        layout_lay = QVBoxLayout(self._layout_box)
+        layout_lay.setContentsMargins(18, 0, 0, 0)
+        layout_lay.setSpacing(2)
+        self._layout_single = QRadioButton("One video, two panels (top and side in one frame)")
+        self._layout_two = QRadioButton("Two videos (top and side tracked separately)")
+        # Non-exclusive so "3D chosen, no layout yet" can show neither selected.
+        self._layout_group = QButtonGroup(self)
+        self._layout_group.setExclusive(False)
+        self._layout_group.addButton(self._layout_single)
+        self._layout_group.addButton(self._layout_two)
+        layout_lay.addWidget(self._layout_single)
+        layout_lay.addWidget(self._layout_two)
+        self._layout_box.setVisible(False)
+        mode_lay.addWidget(self._layout_box)
+
+        self._lock_label = QLabel("")
+        self._lock_label.setProperty("role", "muted")
+        self._lock_label.setVisible(False)
+        mode_lay.addWidget(self._lock_label)
+        root.addWidget(mode_box)
+
+        self._dim_2d.toggled.connect(self._on_dim_toggled)
+        self._dim_3d.toggled.connect(self._on_dim_toggled)
+        self._layout_single.toggled.connect(
+            lambda on: self._on_layout_toggled(self._layout_single, on)
+        )
+        self._layout_two.toggled.connect(lambda on: self._on_layout_toggled(self._layout_two, on))
+
         # ── action buttons ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
         self._create_btn = QPushButton("Create Project")
@@ -121,13 +176,17 @@ class ProjectScreen(QWidget):
         if not self._selected_dir:
             QMessageBox.warning(self, "Validation", "Please select a project directory.")
             return
+        mode = self._selected_mode()
+        if mode is None:
+            QMessageBox.warning(self, "Validation", "Choose a 3-D layout.")
+            return
         directory = Path(self._selected_dir)
         if not directory.exists():
             QMessageBox.warning(self, "Validation", f"Directory does not exist:\n{directory}")
             return
         try:
             if self._store is not None:
-                self._store.new_project(name, directory)
+                self._store.new_project(name, directory, mode=mode)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to create project:\n{exc}")
 
@@ -147,3 +206,70 @@ class ProjectScreen(QWidget):
         if self._store is not None and self._store.manifest is not None:
             name = self._store.manifest.project_name
             self._status_label.setText(f"Project: {name}")
+
+    # ── mode controls ──────────────────────────────────────────────────────
+
+    def _selected_layout(self) -> str | None:
+        if self._layout_single.isChecked():
+            return "single_video_two_panels"
+        if self._layout_two.isChecked():
+            return "two_videos"
+        return None
+
+    def _selected_mode(self) -> ProjectMode | None:
+        """The mode the radios describe, or None for 3D with no layout yet."""
+        if self._dim_3d.isChecked():
+            layout = self._selected_layout()
+            if layout is None:
+                return None
+            return ProjectMode(dimension="3d", layout=layout)
+        return ProjectMode()
+
+    def _on_dim_toggled(self, _checked: bool) -> None:
+        self._layout_box.setVisible(self._dim_3d.isChecked())
+        self._write_mode()
+
+    def _on_layout_toggled(self, button: QRadioButton, checked: bool) -> None:
+        if checked:
+            other = self._layout_two if button is self._layout_single else self._layout_single
+            other.blockSignals(True)
+            other.setChecked(False)
+            other.blockSignals(False)
+        self._write_mode()
+
+    def _write_mode(self) -> None:
+        """Push the radios into the open project; ignore incomplete 3D choices."""
+        if self._store is None or self._store.manifest is None:
+            return
+        mode = self._selected_mode()
+        if mode is None or mode == self._store.manifest.mode:
+            return
+        try:
+            self._store.update_mode(mode)
+        except ValueError:
+            self._sync_from_store()
+
+    def _sync_from_store(self) -> None:
+        """Show the stored mode and lock state without writing anything back."""
+        store = self._store
+        if store is None or store.manifest is None:
+            return
+        mode = store.manifest.mode
+        widgets = (self._dim_2d, self._dim_3d, self._layout_single, self._layout_two)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            is_3d = mode.dimension == "3d"
+            self._dim_2d.setChecked(not is_3d)
+            self._dim_3d.setChecked(is_3d)
+            self._layout_single.setChecked(mode.layout == "single_video_two_panels")
+            self._layout_two.setChecked(mode.layout == "two_videos")
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+        self._layout_box.setVisible(is_3d)
+        lock = store.mode_locked
+        for w in widgets:
+            w.setEnabled(lock is None)
+        self._lock_label.setText(lock or "")
+        self._lock_label.setVisible(lock is not None)
