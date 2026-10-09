@@ -12,7 +12,7 @@ It is a desktop application and a Python engine you can drive headlessly for bat
 
 **New here? Start with the [user guide](docs/guide/USER_GUIDE.md)**: a single step-by-step walkthrough of the app with screenshots, also available as a [PDF download](docs/guide/Track2Data_User_Guide.pdf).
 
-> **Status:** v0.1.0, pre-1.0. Usable, and its numbers are tested against
+> **Status:** v0.2.0, pre-1.0. Usable, and its numbers are tested against
 > analytic ground truth and a reference R pipeline — but read the
 > [CHANGELOG](CHANGELOG.md) before upgrading, since metric definitions are
 > still being corrected.
