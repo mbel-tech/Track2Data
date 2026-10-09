@@ -165,14 +165,16 @@ def _views_status(manifest: ProjectManifest) -> StageInfo:
         if s.session_id not in paired:
             return StageInfo("warning", f"Session {s.session_id} is not paired.")
     for p in manifest.view_pairs:
-        name = f"{p.top_session_id} / {p.side_session_id}"
-        if not (p.same_ids or p.fish_map):
-            return StageInfo("warning", f"Match the fish of {name}.")
+        # Problems first, then matching -- the same order as the page's pair status.
         for sid in (p.top_session_id, p.side_session_id):
             # A dangling pair id is skipped: this status uses manifest data only.
             ref = by_id.get(sid)
             if ref is not None and ref.is_identity_free():
                 return StageInfo("warning", f"Session {sid} has no stable identities.")
+        # fish_map is the authority: a pair is matched iff its map is non-empty.
+        if not p.fish_map:
+            name = f"{p.top_session_id} / {p.side_session_id}"
+            return StageInfo("warning", f"Match the fish of {name}.")
     return StageInfo("valid", f"{len(manifest.view_pairs)} pair(s) matched.")
 
 

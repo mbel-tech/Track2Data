@@ -38,6 +38,8 @@ NEEDS_MATCHING = "Needs matching"
 NO_MATCH = "(no match)"
 USED_MARK = " (used)"
 EMPTY_TEXT = "Open a 3-D project and add sessions to set up the views."
+SAME_IDS_FREE_TIP = "A session in this pair has no stable identities."
+SAME_IDS_WAIT_TIP = "Available once the fish labels of both sessions are known."
 
 
 class ViewsScreen(QWidget):
@@ -348,9 +350,15 @@ class ViewsScreen(QWidget):
                 table.setItem(row, 3, st)
                 tick = QCheckBox()
                 tick.setChecked(pair.same_ids)
-                tick.setEnabled(
-                    pair.top_session_id not in free and pair.side_session_id not in free
-                )
+                ids = (pair.top_session_id, pair.side_session_id)
+                if any(sid in free for sid in ids):
+                    tip = SAME_IDS_FREE_TIP
+                elif any(self._store.session_facts(sid) is None for sid in ids):
+                    tip = SAME_IDS_WAIT_TIP
+                else:
+                    tip = ""
+                tick.setEnabled(not tip)
+                tick.setToolTip(tip)
                 tick.toggled.connect(weak_slot(self._on_same_ids, pair.top_session_id,
                                                pair.side_session_id, tick))
                 table.setCellWidget(row, 2, tick)
@@ -412,11 +420,12 @@ class ViewsScreen(QWidget):
         pair = self._find_pair(top_id, side_id)
         if pair is None or not tick.isEnabled():
             return
+        # Ticking or unticking takes the pair over: "Pair by pattern" leaves it alone.
         if tick.isChecked():
             shared, _ = identity_map(self._labels(top_id), self._labels(side_id))
-            update = {"same_ids": True, "fish_map": shared}
+            update = {"same_ids": True, "fish_map": shared, "auto": False}
         else:
-            update = {"same_ids": False}
+            update = {"same_ids": False, "auto": False}
         try:
             self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
@@ -558,8 +567,10 @@ class ViewsScreen(QWidget):
             fish_map.pop(top_label, None)
         else:
             fish_map[top_label] = side
+        # A hand edit means the map no longer follows the labels, and the pair is the user's.
+        update = {"fish_map": fish_map, "same_ids": False, "auto": False}
         try:
-            self._store.update_view_pair(pair.model_copy(update={"fish_map": fish_map}))
+            self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
             self._refresh()
             self._match_issues.setText(str(exc))

@@ -306,13 +306,32 @@ def test_views_identity_free_pair_warns() -> None:
     assert "identit" in info.message
 
 
-@pytest.mark.parametrize("kw", [{"same_ids": True}, {"fish_map": {"0": "1"}}])
+@pytest.mark.parametrize(
+    "kw", [{"same_ids": True, "fish_map": {"0": "0"}}, {"fish_map": {"0": "1"}}]
+)
 def test_views_matched_pair_is_valid(kw) -> None:
     m = _manifest_3d(
         sessions=[_vref("t", "top"), _vref("s", "side")],
         view_pairs=[ViewPair(top_session_id="t", side_session_id="s", **kw)],
     )
     assert _views(m).status == "valid"
+
+
+def test_views_ticked_pair_with_empty_map_needs_matching() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", same_ids=True)],
+    )
+    info = _views(m)
+    assert (info.status, info.message) == ("warning", "Match the fish of t / s.")
+
+
+def test_views_identity_free_reported_before_missing_map() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side", track_wo_identities=True)],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert _views(m).message == "Session s has no stable identities."
 
 
 def test_views_never_blocks_next() -> None:

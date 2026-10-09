@@ -564,3 +564,67 @@ def test_cleared_selection_never_writes(qtbot, tmp_path, monkeypatch) -> None:
     screen._on_pair_selected(None)
     store.sessionFactsChanged.emit()
     assert calls == [] and screen._match_table.rowCount() == 0
+
+
+# ── who owns a pair; Same IDs vs the fish map ──────────────────────────────
+
+
+def _auto_paired(qtbot, tmp_path, monkeypatch):
+    _fake_loader(monkeypatch)
+    store, screen = _make(qtbot, tmp_path, names=("t1_top", "t1_side"))
+    screen._top_regex_edit.setText(TOP)
+    screen._side_regex_edit.setText(SIDE)
+    screen._apply_btn.click()
+    assert store.manifest.view_pairs[0].auto
+    store._session_facts["t1_top"] = _facts("t1_top", ["a", "b"], 2)
+    store._session_facts["t1_side"] = _facts("t1_side", ["a", "b"], 2)
+    store.sessionFactsChanged.emit()
+    return store, screen
+
+
+def test_ticking_or_unticking_makes_the_pair_hand_made(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _auto_paired(qtbot, tmp_path, monkeypatch)
+    _tick(screen).setChecked(True)
+    assert not store.manifest.view_pairs[0].auto
+    store.update_view_pair(store.manifest.view_pairs[0].model_copy(update={"auto": True}))
+    _tick(screen).setChecked(False)
+    pair = store.manifest.view_pairs[0]
+    assert not pair.auto and not pair.same_ids
+
+
+def test_combo_change_makes_pair_hand_made_and_clears_same_ids(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    store, screen = _auto_paired(qtbot, tmp_path, monkeypatch)
+    _tick(screen).setChecked(True)
+    store.update_view_pair(store.manifest.view_pairs[0].model_copy(update={"auto": True}))
+    _select(qtbot, screen)
+    _match_combo(screen, 0).setCurrentIndex(2)  # a -> b
+    pair = store.manifest.view_pairs[0]
+    assert pair.fish_map == {"a": "b", "b": "b"}
+    assert not pair.same_ids and not pair.auto
+    assert not _tick(screen).isChecked()
+
+
+def test_reapplying_a_broken_pattern_keeps_hand_matched_pair(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _auto_paired(qtbot, tmp_path, monkeypatch)
+    _select(qtbot, screen)
+    _match_combo(screen, 0).setCurrentIndex(2)  # a -> b, by hand
+    screen._side_regex_edit.setText("(?P<key>.+)_sdie$")  # typo
+    screen._apply_btn.click()
+    pairs = store.manifest.view_pairs
+    assert [(p.top_session_id, p.side_session_id) for p in pairs] == [("t1_top", "t1_side")]
+    assert pairs[0].fish_map == {"a": "b"}
+
+
+def test_same_ids_tick_disabled_until_both_labels_known(qtbot, tmp_path) -> None:
+    store, screen = _paired(qtbot, tmp_path)
+    assert not _tick(screen).isEnabled()
+    assert "labels" in _tick(screen).toolTip()
+    store._session_facts["t1_top"] = _facts("t1_top", ["a"], 1)
+    store.sessionFactsChanged.emit()
+    assert not _tick(screen).isEnabled()
+    store._session_facts["t1_side"] = _facts("t1_side", ["a"], 1)
+    store.sessionFactsChanged.emit()
+    assert _tick(screen).isEnabled()
+    assert _tick(screen).toolTip() == ""
