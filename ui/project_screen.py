@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -29,10 +30,15 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import ProjectMode
+from ui.store.stage_status import SESSIONS_NEEDS_LAYOUT
+from ui.widgets.weak_slot import weak_slot
 
 
 class ProjectScreen(QWidget):
     """Stage 1 — Create or open a project."""
+
+    #: The pending-3-D-layout state changed; ask :meth:`pending_mode_message`.
+    pendingModeChanged = Signal()
 
     def __init__(self, store=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -133,9 +139,11 @@ class ProjectScreen(QWidget):
         self._dim_2d.toggled.connect(self._on_dim_toggled)
         self._dim_3d.toggled.connect(self._on_dim_toggled)
         self._layout_single.toggled.connect(
-            lambda on: self._on_layout_toggled(self._layout_single, on)
+            weak_slot(self._on_layout_toggled, self._layout_single, pass_args=True)
         )
-        self._layout_two.toggled.connect(lambda on: self._on_layout_toggled(self._layout_two, on))
+        self._layout_two.toggled.connect(
+            weak_slot(self._on_layout_toggled, self._layout_two, pass_args=True)
+        )
 
         # ── action buttons ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -178,8 +186,11 @@ class ProjectScreen(QWidget):
             return
         mode = self._selected_mode()
         if mode is None:
-            QMessageBox.warning(self, "Validation", "Choose a 3-D layout.")
+            QMessageBox.warning(self, "Validation", SESSIONS_NEEDS_LAYOUT + ".")
             return
+        if self._store is not None and self._store.mode_locked is not None:
+            # The radios are disabled and show the open project, not a choice for this one.
+            mode = ProjectMode()
         directory = Path(self._selected_dir)
         if not directory.exists():
             QMessageBox.warning(self, "Validation", f"Directory does not exist:\n{directory}")
@@ -230,6 +241,7 @@ class ProjectScreen(QWidget):
             return
         self._layout_box.setVisible(self._dim_3d.isChecked())
         self._write_mode()
+        self._refresh_pending()
 
     def _on_layout_toggled(self, button: QRadioButton, checked: bool) -> None:
         if checked:
@@ -246,6 +258,7 @@ class ProjectScreen(QWidget):
             self._sync_from_store()
             return
         self._write_mode()
+        self._refresh_pending()
 
     def _write_mode(self) -> None:
         """Push the radios into the open project; ignore incomplete 3D choices."""
@@ -281,5 +294,25 @@ class ProjectScreen(QWidget):
         lock = store.mode_locked
         for w in widgets:
             w.setEnabled(lock is None)
-        self._lock_label.setText(lock or "")
-        self._lock_label.setVisible(lock is not None)
+        self._refresh_pending()
+
+    def pending_mode_message(self) -> str | None:
+        """Why the user must stay on this page: 3D is picked but no layout is.
+
+        The store keeps the old mode until a layout is chosen, so without this the
+        choice would be lost silently once a session is added.
+        """
+        store = self._store
+        if store is None or store.manifest is None or store.mode_locked is not None:
+            return None
+        if self._dim_3d.isChecked() and self._selected_layout() is None:
+            return SESSIONS_NEEDS_LAYOUT
+        return None
+
+    def _refresh_pending(self) -> None:
+        store = self._store
+        lock = store.mode_locked if store is not None else None
+        text = lock or self.pending_mode_message() or ""
+        self._lock_label.setText(text)
+        self._lock_label.setVisible(bool(text))
+        self.pendingModeChanged.emit()

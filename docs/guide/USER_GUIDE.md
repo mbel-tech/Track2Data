@@ -118,6 +118,12 @@ from the command line.
   calibration readiness appear again after a moment.
 - Preprocessed sessions are cached in `.t2d_cache/` inside the project folder. It is safe to delete
   (`track2data cache clear --cache-dir <dir>` does it too); it is rebuilt when needed.
+- **2D or 3D.** The **Analysis type** choice sets whether the project is a 2-D analysis (the default) or
+  a 3-D one. 3D also asks how the recording was made: **One video, two panels** (top and side views in
+  one frame) or **Two videos** (top and side tracked separately). The choice locks after the first
+  session is added; remove all sessions to change it. A 3-D project can be set up and saved, but it
+  cannot be run yet: Processing, Preview and Export say "3-D fusion is not available yet", and
+  Calibration, Zones and Metrics apply to the 2-D tracks only.
 
 ## 2. Sessions
 

@@ -1,6 +1,6 @@
 # 2D / 3D project mode (sub-project E)
 
-**Status:** draft 2026-10-09, awaiting review
+**Status:** implemented 2026-10-09
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). E is the entry point for the 3-D
 sub-projects F, G, D and B below.
 
@@ -49,7 +49,7 @@ F and G are independent of each other. Order: E, F and G, D, B.
    separately)", each with a one-line help text. Both can be set at create time or later while
    unlocked. Once locked the controls are disabled with "Remove all sessions to change the mode".
 4. **Stage status.** `compute_stage_statuses` marks Sessions `blocked` with "Choose a 3-D layout"
-   when `dimension == "3d"` and `layout is None`. In a 3-D project, Processing and Export are
+   when `dimension == "3d"` and `layout is None`. In a 3-D project, Processing, Preview and Export are
    `blocked` with "3-D fusion is not available yet". 2-D projects are unchanged.
 5. **Routing.** A pure `screen_flow(mode)` returns which Sessions-step variant to show. In E every
    mode returns the existing 2-D Sessions screen. F and G replace the 3-D entries without touching
@@ -70,3 +70,10 @@ F and G are independent of each other. Order: E, F and G, D, B.
 
 Panel definition and cropping (F), ID correspondence logic or UI (G), frame sync and fusion (D),
 3-D metrics (B), reading native 3-D tracker files (roadmap A), per-session camera views.
+
+- `screen_flow()` exists as a seam but no screen calls it yet; F and G wire it in.
+- `build_payload`/`preprocess*` are not gated (they back the Preview/Zones/Calibration screens
+  that read 2-D tracks); the gate covers `run`, `run_session`, `run_all`, `export`,
+  `compute_metrics` and `run_sensitivity`.
+- `id_map` is cleared when the mode is replaced (fine while no sessions exist; G must keep it in
+  mind).

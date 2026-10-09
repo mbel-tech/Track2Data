@@ -24,6 +24,7 @@ Status = Literal["empty", "valid", "warning", "blocked"]
 
 SESSIONS_NEEDS_LAYOUT = "Choose a 3-D layout"
 
+
 def _missing_water_column(manifest: ProjectManifest) -> list[str]:
     """The selected metrics that need a water column the zones do not give.
 

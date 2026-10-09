@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 if TYPE_CHECKING:
+    from track2data.api import Engine
     from track2data.core.models import ProjectManifest
     from track2data.metrics.base import Metric
     from track2data.readers.base import SessionReader
@@ -54,6 +55,15 @@ def _load_manifest(project: str) -> ProjectManifest:
     except Exception as exc:
         click.echo(f"[error] Cannot read manifest: {exc}", err=True)
         sys.exit(1)
+
+
+def _refuse_3d(engine: Engine) -> None:
+    """Exit 2 before any output is made when the project is 3-D."""
+    try:
+        engine.require_computable()
+    except ValueError as exc:
+        click.echo(f"[error] {exc}", err=True)
+        sys.exit(2)
 
 
 # ── CLI group ─────────────────────────────────────────────────────────────────
@@ -103,6 +113,7 @@ def run(
 
     # Validate before running.
     engine = Engine(manifest, cache_dir=Path(cache_dir) if cache_dir else None)
+    _refuse_3d(engine)
     issues = engine.validate()
     if issues:
         for issue in issues:
@@ -633,6 +644,7 @@ def sensitivity(
 
     manifest = _load_manifest(project)
     engine = Engine(manifest)
+    _refuse_3d(engine)
 
     def _ints(raw: str | None, default: tuple[int, ...]) -> tuple[int, ...]:
         if raw is None:

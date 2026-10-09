@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`trx.mat` reader (Ctrax / FlyTracker / JAABA).** Built from the documented layout, unverified against a real sample. `pxpermm` becomes the session scale.
 - **Average or median of several idtracker.ai length calibrations.** The average (idtracker.ai's own `length_unit`) stays the default.
 - **Wiki and guide:** the user guide, Before You Record, Glossary, Compatibility, Known Issues and Formats pages describe the per-tracker scale and the readers that exist today.
+- **A project can now be marked 2D or 3D.** The Project screen has an "Analysis type" choice. 3D asks how the
+  recording was made: one video with the top and side views in two panels, or two separate videos. The choice is saved
+  in the project file (`mode`; older projects load as 2D) and is locked once the project has a session: remove all
+  sessions to change it. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project can be set up and saved but
+  not run: Processing, Preview and Export are blocked with "3-D fusion is not available yet", and the engine, `compute_metrics`
+  and the `sensitivity` command refuse the same way. Calibration, Zones and Metrics show a banner saying they apply
+  to the 2-D tracks only. 2D projects behave exactly as before. The project fingerprint (`project_hash`, printed in the
+  run README and log) of existing projects changes once, because the new `mode` setting is part of it.
 
 ### Fixed
 
