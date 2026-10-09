@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from track2data.core.models import SceneConfig
 from ui.widgets.autocommit import AutoCommit
+from ui.widgets.mode_banner import ModeBanner
 
 _UNIT_CHOICES = ["cm", "mm", "m"]
 
@@ -132,6 +133,9 @@ class CalibrationScreen(QWidget):
         )
         subtitle.setObjectName("PageLead")
         root.addWidget(subtitle)
+
+        if self._store is not None:
+            root.addWidget(ModeBanner(self._store))
 
         # ── mode selection ────────────────────────────────────────────────
         mode_row = QHBoxLayout()

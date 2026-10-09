@@ -342,3 +342,68 @@ def test_main_window_follows_a_setup_check_click(qtbot) -> None:
     win._processing_screen.navigateRequested.emit(3)
     assert win._stack.currentIndex() == 3
     win.close()
+
+
+# ── 3-D mode ─────────────────────────────────────────────────────────────────
+
+
+def _set_3d(store) -> None:
+    from track2data.core.models import ProjectMode
+
+    store._manifest = store._manifest.model_copy(
+        update={"mode": ProjectMode(dimension="3d", layout="two_videos")}
+    )
+
+
+def test_run_button_disabled_in_3d(qtbot, tmp_path: Path, tiny_real_session: Path) -> None:
+    from track2data.core.models import MODE_3D_BLOCK_REASON
+    from ui.processing_screen import ProcessingScreen
+
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._run_btn.isEnabled() is True
+
+    _set_3d(store)
+    store.modeChanged.emit()
+    assert screen._run_btn.isEnabled() is False
+    assert screen._status_label.text() == MODE_3D_BLOCK_REASON
+
+    # A finishing task must not re-enable Run in a 3-D project.
+    screen._current_task_id = "t"
+    screen._on_task_finished("t", RuntimeError("x"))
+    assert screen._run_btn.isEnabled() is False
+    screen._current_task_id = "t"
+    screen._on_task_cancelled("t")
+    assert screen._run_btn.isEnabled() is False
+
+    store._manifest = store._manifest.model_copy(
+        update={"mode": store._manifest.mode.model_copy(update={"dimension": "2d"})}
+    )
+    store.modeChanged.emit()
+    assert screen._run_btn.isEnabled() is True
+
+
+def test_start_run_refuses_3d(
+    qtbot, tmp_path: Path, tiny_real_session: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from track2data.core.models import MODE_3D_BLOCK_REASON
+    from ui.processing_screen import ProcessingScreen
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "ui.processing_screen.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warnings.append(a[2]) or None),
+    )
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    _set_3d(store)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    started: list[object] = []
+    store.tasks.taskStarted.connect(started.append)
+
+    screen.start_run()
+
+    assert len(warnings) == 1
+    assert MODE_3D_BLOCK_REASON in warnings[0]
+    assert started == []

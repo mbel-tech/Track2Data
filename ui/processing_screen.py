@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from track2data.core.models import MODE_3D_BLOCK_REASON
 from track2data.core.parallel import worker_count
 from ui.widgets.weak_slot import weak_slot
 
@@ -71,6 +72,7 @@ class ProcessingScreen(QWidget):
         self._build_ui()
         if store is not None:
             store.projectChanged.connect(self._on_project_changed)
+            store.modeChanged.connect(self._on_project_changed)
             store.sessionsChanged.connect(self._rebuild_status_table)
             store.taskProgress.connect(self._on_task_progress)
             store.taskFinished.connect(self._on_task_finished)
@@ -411,8 +413,27 @@ class ProcessingScreen(QWidget):
     def _on_project_changed(self) -> None:
         has = self._store is not None and self._store.has_project
         self._validate_btn.setEnabled(has)
-        self._run_btn.setEnabled(has)
+        self._run_btn.setEnabled(self._compute_allowed())
+        self._show_block_reason()
         self._rebuild_status_table()
+
+    def _compute_allowed(self) -> bool:
+        """A project is open and is not a 3-D project (fusion is not available yet)."""
+        if self._store is None or not self._store.has_project:
+            return False
+        return self._store.manifest.mode.dimension != "3d"
+
+    def _show_block_reason(self) -> None:
+        """Show why Run is off while a 3-D project is open; clear it again afterwards."""
+        blocked = (
+            self._store is not None
+            and self._store.has_project
+            and self._store.manifest.mode.dimension == "3d"
+        )
+        if blocked:
+            self._status_label.setText(MODE_3D_BLOCK_REASON)
+        elif self._status_label.text() == MODE_3D_BLOCK_REASON:
+            self._status_label.setText("Ready")
 
     def _rebuild_status_table(self) -> None:
         self._session_rows.clear()
@@ -454,7 +475,7 @@ class ProcessingScreen(QWidget):
         if task_id != self._current_task_id:
             return
         self._current_task_id = None
-        self._run_btn.setEnabled(self._store is not None and self._store.has_project)
+        self._run_btn.setEnabled(self._compute_allowed())
         self._cancel_btn.setEnabled(False)
 
         from track2data.core.models import RunResult
@@ -493,7 +514,7 @@ class ProcessingScreen(QWidget):
         if task_id != self._current_task_id:
             return
         self._current_task_id = None
-        self._run_btn.setEnabled(self._store is not None and self._store.has_project)
+        self._run_btn.setEnabled(self._compute_allowed())
         self._cancel_btn.setEnabled(False)
         self._status_label.setText("Cancelled.")
         for row in self._session_rows.values():

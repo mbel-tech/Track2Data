@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.hashing import file_sha256
-from track2data.core.models import ExportTarget, RunResult
+from track2data.core.models import MODE_3D_BLOCK_REASON, ExportTarget, RunResult
 from track2data.exporters import list_exporters
 from ui.widgets.labels import label_for
 
@@ -99,6 +99,7 @@ class ExportScreen(QWidget):
         self._build_ui()
         if store is not None:
             store.projectChanged.connect(self._on_project_changed)
+            store.modeChanged.connect(self._update_export_enabled)
             store.taskFinished.connect(self._on_task_finished)
             store.tasks.taskCancelled.connect(self._on_task_cancelled)
             self._on_project_changed()
@@ -311,11 +312,18 @@ class ExportScreen(QWidget):
 
     def _update_export_enabled(self, _state: int | None = None) -> None:
         has_project = self._store is not None and self._store.has_project
+        blocked = has_project and self._store.manifest.mode.dimension == "3d"
         running = self._current_task_id is not None
         needs_overwrite_ack = (
             self._overwrite_checkbox.isVisible() and not self._overwrite_checkbox.isChecked()
         )
-        self._export_btn.setEnabled(has_project and not running and not needs_overwrite_ack)
+        self._export_btn.setEnabled(
+            has_project and not blocked and not running and not needs_overwrite_ack
+        )
+        if blocked:
+            self._status_label.setText(MODE_3D_BLOCK_REASON)
+        elif self._status_label.text() == MODE_3D_BLOCK_REASON:
+            self._status_label.setText("")
         self._cancel_btn.setEnabled(running)
 
     def _run_export(self) -> None:
