@@ -146,3 +146,57 @@ def test_create_3d_without_layout_warns_and_creates_nothing(qtbot, tmp_path, mon
     screen._create_project()
     assert len(calls) == 1
     assert store.manifest is None
+
+
+def test_pending_message_appears_and_clears(qtbot, tmp_path) -> None:
+    from ui.store.stage_status import SESSIONS_NEEDS_LAYOUT
+
+    store, screen = _make(qtbot, tmp_path)
+    assert screen.pending_mode_message() is None
+    with qtbot.waitSignal(screen.pendingModeChanged, timeout=1000):
+        screen._dim_3d.click()
+    assert screen.pending_mode_message() == SESSIONS_NEEDS_LAYOUT
+    assert screen._lock_label.text() == SESSIONS_NEEDS_LAYOUT
+    assert screen._lock_label.isVisible()
+    assert store.manifest.mode == ProjectMode()
+    with qtbot.waitSignal(screen.pendingModeChanged, timeout=1000):
+        screen._layout_two.click()
+    assert screen.pending_mode_message() is None
+    assert screen._lock_label.text() == ""
+    screen._dim_2d.click()
+    assert screen.pending_mode_message() is None
+
+
+def test_pending_message_is_none_while_locked_or_without_project(qtbot, tmp_path) -> None:
+    _, screen = _make(qtbot, tmp_path, with_project=False)
+    screen._dim_3d.click()
+    assert screen.pending_mode_message() is None
+
+
+def test_create_from_locked_3d_project_makes_a_2d_project(qtbot, tmp_path) -> None:
+    store, screen = _make(qtbot, tmp_path, with_project=False)
+    store.new_project("locked3d", tmp_path, mode=THREE_D)
+    store.update_sessions([_session(tmp_path)])
+    assert store.mode_locked is not None
+    screen._name_edit.setText("fresh")
+    screen._selected_dir = str(tmp_path)
+    screen._create_project()
+    assert store.manifest.project_name == "fresh"
+    assert store.manifest.mode == ProjectMode()
+    assert screen._dim_2d.isChecked()
+    assert screen._dim_2d.isEnabled()
+    screen._dim_3d.click()
+    screen._layout_single.click()
+    assert store.manifest.mode.dimension == "3d"
+
+
+def test_create_from_locked_2d_project_does_not_block_later_3d(qtbot, tmp_path) -> None:
+    store, screen = _make(qtbot, tmp_path)
+    store.update_sessions([_session(tmp_path)])
+    screen._name_edit.setText("fresh")
+    screen._selected_dir = str(tmp_path)
+    screen._create_project()
+    assert store.mode_locked is None
+    screen._dim_3d.click()
+    screen._layout_two.click()
+    assert store.manifest.mode == THREE_D

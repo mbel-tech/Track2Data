@@ -442,7 +442,11 @@ class ProjectStore(QObject):
             return
         if self.mode_locked is not None:
             raise ValueError(MODE_LOCK_REASON)
+        dimension_changed = mode.dimension != self._manifest.mode.dimension
         self._manifest = self._manifest.model_copy(update={"mode": mode})
+        if dimension_changed:
+            # Results from the other dimension describe data this project no longer has.
+            self.set_run_results(None)
         self.modeChanged.emit()
 
     def update_zone_vertices(self, index: int, vertices: list[tuple[float, float]]) -> None:

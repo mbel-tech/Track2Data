@@ -14,6 +14,7 @@ class ModeBanner(QLabel):
         super().__init__(BANNER_TEXT, parent)
         self._store = store
         self.setObjectName("ModeBanner")
+        self.setProperty("role", "warn")
         self.setWordWrap(True)
         store.projectChanged.connect(self._refresh)
         store.modeChanged.connect(self._refresh)

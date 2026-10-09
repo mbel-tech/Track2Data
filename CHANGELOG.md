@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   sessions to change it. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project can be set up and saved but
   not run: Processing, Preview and Export are blocked with "3-D fusion is not available yet", and the engine, `compute_metrics`
   and the `sensitivity` command refuse the same way. Calibration, Zones and Metrics show a banner saying they apply
-  to the 2-D tracks only. 2D projects behave exactly as before.
+  to the 2-D tracks only. 2D projects behave exactly as before. The project fingerprint (`project_hash`, printed in the
+  run README and log) of existing projects changes once, because the new `mode` setting is part of it.
 
 ### Fixed
 

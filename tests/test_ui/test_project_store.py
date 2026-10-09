@@ -781,3 +781,29 @@ def test_saved_3d_project_with_sessions_opens_locked(store, tmp_path: Path) -> N
     store.open_project(path)
     assert store.manifest.mode.dimension == "3d"
     assert store.mode_locked == "Remove all sessions to change the mode"
+
+
+def _fake_results():
+    from track2data.core.models import RunResult
+
+    return RunResult(sessions=[])
+
+
+def test_update_mode_marks_project_dirty_and_persists(qtbot, store) -> None:
+    store.save_project()
+    assert not store.dirty
+    with qtbot.waitSignal(store.persistenceChanged, timeout=1000):
+        store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    assert store.dirty
+
+
+def test_dimension_change_clears_run_results(store) -> None:
+    store.set_run_results(_fake_results())
+    store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    assert store.run_results is None
+
+
+def test_no_op_mode_update_keeps_run_results(store) -> None:
+    store.set_run_results(_fake_results())
+    store.update_mode(ProjectMode())
+    assert store.run_results is not None

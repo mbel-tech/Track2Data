@@ -154,6 +154,8 @@ class MainWindow(QMainWindow):
         # Direct reference (not a self._stack index lookup) so _action_run()
         # has exactly one call path into the real run, shared with this
         # screen's own Run button (issue #22).
+        self._project_screen = pages[0]
+        self._project_screen.pendingModeChanged.connect(self._update_next_action)
         self._processing_screen = pages[7]
         self._processing_screen.navigateRequested.connect(self._go_to_page)
         for page in pages:
@@ -194,6 +196,7 @@ class MainWindow(QMainWindow):
         theme.changed.connect(self._on_theme_changed)
         self._store.projectChanged.connect(self._update_statusbar)
         self._store.sessionsChanged.connect(self._update_statusbar)
+        self._store.modeChanged.connect(self._update_statusbar)
         self._store.projectChanged.connect(self._on_project_opened)
         for sig in (
             self._store.projectChanged,
@@ -472,7 +475,8 @@ class MainWindow(QMainWindow):
             name = info["name"]
             n = info["n_sessions"]
             self._status_project.setText(f"Project: {name}  |  Sessions: {n}")
-            self._run_action.setEnabled(n > 0)
+            three_d = self._store.manifest.mode.dimension == "3d"
+            self._run_action.setEnabled(n > 0 and not three_d)
 
     # ── navigation ──────────────────────────────────────────────────────────
 
@@ -480,6 +484,11 @@ class MainWindow(QMainWindow):
         """Switch the stacked widget to *page_index* and sync the sidebar."""
         n = self._stack.count()
         if not (0 <= page_index < n):
+            return
+        if (
+            page_index > self._stack.currentIndex() == 0
+            and self._project_screen.pending_mode_message()
+        ):
             return
         self._flush_current_page()
         self._stack.setCurrentIndex(page_index)
@@ -500,9 +509,12 @@ class MainWindow(QMainWindow):
         self._page_statuses = compute_stage_statuses(
             self._store.manifest, has_run_results=self._store.run_results is not None
         )
-        has_run = self._store.run_results is not None
+        manifest = self._store.manifest
+        # In 3-D nothing can be computed, so stages 7/8 stay blocked whatever results exist.
+        three_d = manifest is not None and manifest.mode.dimension == "3d"
+        has_run = self._store.run_results is not None and not three_d
         summaries = stage_summaries(self._store.manifest, has_run_results=has_run)
-        if self._store.results_stale:
+        if has_run and self._store.results_stale:
             summaries[7] = summaries[8] = "Settings changed · re-run"
         elif has_run:
             results = self._store.run_results.sessions
@@ -524,7 +536,6 @@ class MainWindow(QMainWindow):
                 elif not self._store.run_results.sessions:
                     self._sidebar.set_status(stage_index, "empty", summary=summaries[stage_index])
         self._sidebar.set_locked(len(STAGES) - 1, not has_run)
-        manifest = self._store.manifest
         self._project_sub.setText(manifest.project_name if manifest else f"v{APP_VERSION}")
         self._update_next_action()
 
@@ -535,6 +546,8 @@ class MainWindow(QMainWindow):
         last = self._stack.count() - 1
         statuses = getattr(self, "_page_statuses", None)
         reason = next_blocker(statuses, page) if statuses else None
+        if page == 0:
+            reason = self._project_screen.pending_mode_message() or reason
         self._next_action.setEnabled(page < last and reason is None)
         self._next_action.setToolTip(reason or "Go to the next step")
         self._refresh_footer_labels(page)
