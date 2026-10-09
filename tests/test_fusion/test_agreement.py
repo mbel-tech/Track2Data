@@ -109,12 +109,14 @@ def test_warning_threshold(noise_cm, warn):
 
 def test_suggest_offset_recovers_lag():
     h = walk(400, 3)
-    # side frame = top frame + 7  =>  side row j shows top row j - 7... roll by -7 puts top[i+7]
-    # at row i; we need side[i + 7] == top[i], i.e. a roll by +7
+    # side frame = top frame + 7, so side[i + 7] == top[i]: build() rolls the side by +7
     top, side, pair = build(h, lag=7)
     assert suggest_offset(top, side, pair) == 7
     fused = fuse(top, side, pair, same_video=False)
-    assert fused.report.suggested_offset == 7
+    assert fused.report.suggested_offset is None  # fuse leaves the (slow) scan to the caller
+    # fusing at the suggested offset makes the views agree
+    pair.fusion = pair.fusion.model_copy(update={"frame_offset": 7})
+    assert fuse(top, side, pair, same_video=False).report.agreement_rms_cm < 0.01
     top, side, pair = build(h, lag=-4)
     assert suggest_offset(top, side, pair) == -4
 
@@ -145,7 +147,32 @@ def test_suggest_offset_none_cases():
     assert suggest_offset(top, side, pair) is None
 
 
-def test_same_video_leaves_suggestion_empty():
+def test_fuse_never_fills_suggestion():
     h = walk(400, 3)
     top, side, pair = build(h, lag=7)
     assert fuse(top, side, pair, same_video=True).report.suggested_offset is None
+    assert fuse(top, side, pair, same_video=False).report.suggested_offset is None
+
+
+def test_timing_smoke_100k_frames():
+    import time
+
+    n = 100_000
+    h = walk(n, 3, seed=2)
+    top, side, pair = build(h, lag=7)
+    t0 = time.perf_counter()
+    assert suggest_offset(top, side, pair) == 7
+    scan = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    fuse(top, side, pair, same_video=False)
+    assert scan < 3.0 and time.perf_counter() - t0 < 1.0
+
+
+def test_suggest_offset_with_frame_gaps_matches_consecutive_path():
+    h = walk(400, 3)
+    top, side, pair = build(h, lag=7)
+    top.frame_index = np.arange(400) * 1  # same frames, but forces nothing special
+    gap = np.arange(400) + (np.arange(400) >= 200)  # one skipped frame in both views
+    top.frame_index = gap
+    side.frame_index = gap
+    assert suggest_offset(top, side, pair) == 7

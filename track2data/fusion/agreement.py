@@ -10,6 +10,14 @@ from __future__ import annotations
 import numpy as np
 
 from track2data.core.models import PreprocessedSession, ViewPair
+from track2data.fusion.align import (
+    FusionError,
+    fusable_rows,
+    match_fish,
+    match_sorted,
+    side_horizontal_cm,
+    top_axis_cm,
+)
 
 #: Fewest jointly valid samples for a fish's RMS to mean anything.
 MIN_FISH_SAMPLES = 3
@@ -55,33 +63,48 @@ def suggest_offset(
 
     Lags in ``[-window, +window]`` frames, ``window = round(5 s * fps)``, are scored by overall
     RMS; lags with fewer than 30 jointly valid samples are skipped. The best lag is returned only
-    if its RMS is at least 20% lower than the lag-0 RMS (and it is not 0).
+    if its RMS is at least 20% lower than the lag-0 RMS (and it is not 0). Also ``None`` when the
+    pair has no settings, the top view has no ``px_per_cm``, or the pair cannot be fused at all
+    (``FusionError`` from the fish map or labels is swallowed: the caller sees fuse's error).
     """
-    from track2data.fusion.fuse import (
-        FusionError,
-        fusable_rows,
-        horizontal_cm,
-        match_fish,
-        match_rows,
-    )
-
     fs = pair.fusion
     if fs is None or not top.px_per_cm:
         return None
     try:
-        keep, side_cols, _ = match_fish(top, side, pair)
+        keep, side_cols, _, _, _ = match_fish(top, side, pair)
     except FusionError:
         return None
     top_rows, top_frames, _ = fusable_rows(top)
     side_rows, side_frames, _ = fusable_rows(side)
+    if top_rows.size == 0 or side_rows.size == 0:
+        return None
+    # centimetres once over all eligible rows; each lag then only indexes into these
+    top_cm = top_axis_cm(top, pair, top_rows, keep)
+    side_cm = side_horizontal_cm(side, pair, side_rows, side_cols)
+    order = np.argsort(side_frames, kind="stable")
+    sorted_frames = side_frames[order]
+    side_cm = side_cm[order]
     window = round(LAG_WINDOW_S * top.fps)
 
+    # Consecutive frame numbers (the usual case) match by slicing, with no index arrays.
+    def consecutive(f: np.ndarray) -> bool:
+        return bool(np.all(np.diff(f) == 1))
+
+    fast = consecutive(top_frames) and consecutive(sorted_frames)
+
+    def matched(lag: int) -> tuple[np.ndarray, np.ndarray]:
+        if not fast:
+            hit, pos = match_sorted(top_frames, sorted_frames, lag)
+            return top_cm[hit], side_cm[pos]
+        shift = int(top_frames[0]) + lag - int(sorted_frames[0])  # side index of top row 0
+        lo, hi = max(0, -shift), min(top_cm.shape[0], side_cm.shape[0] - shift)
+        return top_cm[lo:hi], side_cm[lo + shift : hi + shift]
+
     def rms_at(lag: int) -> float | None:
-        rows, srows = match_rows(top_rows, top_frames, side_rows, side_frames, lag)
-        if rows.size == 0:
+        t_cm, s_cm = matched(lag)
+        if t_cm.shape[0] == 0:
             return None
-        t_cm, s_cm = horizontal_cm(top, side, pair, rows, srows, keep, side_cols)
-        if int((np.isfinite(t_cm) & np.isfinite(s_cm)).sum()) < MIN_LAG_SAMPLES:
+        if int(np.isfinite(t_cm + s_cm).sum()) < MIN_LAG_SAMPLES:
             return None
         return agreement(t_cm, s_cm)[0]
 
@@ -90,6 +113,8 @@ def suggest_offset(
         return None
     best_lag, best = 0, base
     for lag in range(-window, window + 1):
+        if lag == 0:
+            continue
         r = rms_at(lag)
         if r is not None and r < best:
             best_lag, best = lag, r
