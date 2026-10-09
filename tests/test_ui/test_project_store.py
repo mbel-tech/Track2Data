@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from track2data.core.models import ProjectManifest, Session, SessionRef, VideoInfo
+from track2data.core.models import ProjectManifest, ProjectMode, Session, SessionRef, VideoInfo
 from ui.store.session_facts import SessionFacts
 
 
@@ -740,3 +740,44 @@ def test_add_confirmed_without_a_project_does_nothing(qtbot, tmp_path: Path) -> 
     empty = ProjectStore()
     assert empty.add_confirmed([_ref(tmp_path, "a", reader="toy")]) == []
     empty.tasks.shutdown(1000)
+
+
+def test_update_mode_sets_mode_and_emits(qtbot, store) -> None:
+    with qtbot.waitSignal(store.modeChanged, timeout=1000):
+        store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    assert store.manifest.mode.layout == "two_videos"
+
+
+def test_update_mode_rejected_with_sessions(store, tmp_path: Path) -> None:
+    store.update_sessions([_ref(tmp_path, "a")])
+    with pytest.raises(ValueError):
+        store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    assert store.manifest.mode == ProjectMode()
+
+
+def test_mode_locked_message_and_unlock(store, tmp_path: Path) -> None:
+    store.update_sessions([_ref(tmp_path, "a")])
+    assert store.mode_locked == "Remove all sessions to change the mode"
+    store.update_sessions([])
+    assert store.mode_locked is None
+
+
+def test_switch_3d_to_2d_clears_layout(store) -> None:
+    store.update_mode(ProjectMode(dimension="3d", layout="single_video_two_panels"))
+    store.update_mode(ProjectMode())
+    assert store.manifest.mode.layout is None
+
+
+def test_new_project_accepts_mode(store, tmp_path: Path) -> None:
+    mode = ProjectMode(dimension="3d", layout="two_videos")
+    assert store.new_project("p", tmp_path, mode)
+    assert store.manifest.mode == mode
+
+
+def test_saved_3d_project_with_sessions_opens_locked(store, tmp_path: Path) -> None:
+    store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    store.update_sessions([_ref(tmp_path, "a")])
+    path = store.save_project()
+    store.open_project(path)
+    assert store.manifest.mode.dimension == "3d"
+    assert store.mode_locked == "Remove all sessions to change the mode"

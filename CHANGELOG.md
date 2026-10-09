@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`trx.mat` reader (Ctrax / FlyTracker / JAABA).** Built from the documented layout, unverified against a real sample. `pxpermm` becomes the session scale.
 - **Average or median of several idtracker.ai length calibrations.** The average (idtracker.ai's own `length_unit`) stays the default.
 
+### Fixed
+
+- **The test run no longer crashes at exit, and runs about three times faster.** After every test had passed, the Qt
+  tests intermittently ended with "QObject: shared QObject was deleted directly" and a segfault (exit 139), which
+  failed CI on a green run. The cause was in the application, not the tests: PySide keeps a `lambda` or
+  `functools.partial` slot in a table the garbage collector cannot see, so a slot that captured `self` and was
+  connected to a signal of one of the screen's own widgets made the screen (and, through the main window, the whole
+  window, its store and its screens) uncollectable. Those objects were then destroyed at interpreter shutdown, after the
+  QApplication. Every such slot (about thirty, across the main window, the screens and the dialogs), a `QAction` handler, two stored callbacks (`AutoCommit`, the save guard) and the
+  task runner's cleanup callback now hold their owner weakly (`ui/widgets/weak_slot.py`). Leaked UI objects after
+  the UI tests fell from 1056 to the one `ThemeManager` singleton plus background-task plumbing. In the app itself
+  this also means a closed window, a replaced screen or a finished dialog is actually freed.
+
 ## [0.2.1] — 2026-10-09
 
 v0.2.0 was tagged, but its packaged Linux and macOS apps could not start, so no binaries were ever

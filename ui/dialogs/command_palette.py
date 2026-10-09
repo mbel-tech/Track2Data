@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.widgets.weak_slot import weak_slot
+
 
 @dataclass(frozen=True)
 class Command:
@@ -71,8 +73,8 @@ class CommandPalette(QDialog):
         self._list = QListWidget()
         self._list.setObjectName("PaletteList")
         self._list.setFixedHeight(320)
-        self._list.itemActivated.connect(lambda _item: self._run_current())
-        self._list.itemClicked.connect(lambda _item: self._run_current())
+        self._list.itemActivated.connect(weak_slot(self._run_current))
+        self._list.itemClicked.connect(weak_slot(self._run_current))
         col.addWidget(self._list)
         self._refresh()
 

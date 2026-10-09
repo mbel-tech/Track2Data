@@ -28,6 +28,7 @@ from track2data.core.models import (
     MetricSelection,
     PreprocessConfig,
     ProjectManifest,
+    ProjectMode,
     RunResult,
     SceneConfig,
     SessionRef,
@@ -37,6 +38,8 @@ from track2data.core.progress import CancellationToken, OperationCancelled
 from track2data.readers import find_reader
 from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
+
+MODE_LOCK_REASON = "Remove all sessions to change the mode"
 
 
 def _is_pickle_refusal(exc: object) -> bool:
@@ -131,6 +134,7 @@ class ProjectStore(QObject):
     calibrationChanged = Signal()
     zonesChanged       = Signal()
     sceneChanged       = Signal()
+    modeChanged        = Signal()
     metadataChanged    = Signal()
     preprocessChanged  = Signal()
     metricsChanged     = Signal()
@@ -175,7 +179,7 @@ class ProjectStore(QObject):
         self._tasks.taskProgress.connect(self.taskProgress)
         self._tasks.taskFinished.connect(self.taskFinished)
         self._tasks.taskFailed.connect(self._on_task_failed)
-        self._tasks.taskLog.connect(lambda _task_id, line: self.append_log(line))
+        self._tasks.taskLog.connect(self._on_task_log)
         # Session probes run in their own lane and report on probe* signals, so
         # they never drive the main window's Cancel button or failure dialog.
         self._tasks.probeFinished.connect(self._on_identity_probe_finished)
@@ -188,7 +192,7 @@ class ProjectStore(QObject):
         for signal in (
             self.projectChanged, self.sessionsChanged, self.calibrationChanged,
             self.zonesChanged, self.metadataChanged, self.preprocessChanged,
-            self.metricsChanged, self.exportChanged,
+            self.metricsChanged, self.exportChanged, self.modeChanged,
         ):
             signal.connect(self._on_manifest_changed)
 
@@ -321,6 +325,9 @@ class ProjectStore(QObject):
             self._tasks.cancel(task_id)
         self._identity_probes.clear()
 
+    def _on_task_log(self, _task_id: str, line: str) -> None:
+        self.append_log(line)
+
     def _on_task_failed(self, task_id: str, message: str, tb: str) -> None:
         exc = RuntimeError(message)
         exc.traceback = tb
@@ -328,7 +335,9 @@ class ProjectStore(QObject):
 
     # ── project lifecycle ──────────────────────────────────────────────────
 
-    def new_project(self, name: str, directory: Path) -> bool:
+    def new_project(
+        self, name: str, directory: Path, mode: ProjectMode | None = None
+    ) -> bool:
         """Create a blank manifest for a new project."""
         target = Path(directory) / f"{name}.t2d.json"
         if target.exists():
@@ -345,6 +354,7 @@ class ProjectStore(QObject):
             project_name=name,
             created_at=now,
             updated_at=now,
+            **({} if mode is None else {"mode": mode}),
         )
         self._project_dir = Path(directory)
         self._manifest_path = target
@@ -419,6 +429,21 @@ class ProjectStore(QObject):
             return
         self._manifest = self._manifest.model_copy(update={"scene": scene})
         self.sceneChanged.emit()
+
+    @property
+    def mode_locked(self) -> str | None:
+        """The reason the mode cannot change, or None while it still can."""
+        if self._manifest is not None and self._manifest.sessions:
+            return MODE_LOCK_REASON
+        return None
+
+    def update_mode(self, mode: ProjectMode) -> None:
+        if self._manifest is None:
+            return
+        if self.mode_locked is not None:
+            raise ValueError(MODE_LOCK_REASON)
+        self._manifest = self._manifest.model_copy(update={"mode": mode})
+        self.modeChanged.emit()
 
     def update_zone_vertices(self, index: int, vertices: list[tuple[float, float]]) -> None:
         """Replace one zone's vertices after checking the new shape.

@@ -37,6 +37,7 @@ from track2data.core.models import MappingRule, MetadataSource
 from track2data.metadata.schema import CANONICAL, resolve_column
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.labels import label_for
+from ui.widgets.weak_slot import weak_slot
 
 _CANONICAL_FIELDS = list(CANONICAL)
 
@@ -135,7 +136,7 @@ class MetadataScreen(QWidget):
             self._combos[field] = combo
             combo.currentIndexChanged.connect(self._auto.trigger)
             if field == "individual_id":
-                combo.currentIndexChanged.connect(lambda _i: self._update_match_mode_enabled())
+                combo.currentIndexChanged.connect(weak_slot(self._update_match_mode_enabled))
             self._mapping_form.addRow(f"{label_for(field, _FIELD_LABELS)}:", combo)
         root.addLayout(self._mapping_form)
 
@@ -157,7 +158,7 @@ class MetadataScreen(QWidget):
         root.addWidget(extra_label)
         self._extra_list = QListWidget()
         self._extra_list.setMaximumHeight(110)
-        self._extra_list.itemChanged.connect(lambda _item: self._auto.trigger())
+        self._extra_list.itemChanged.connect(weak_slot(self._auto.trigger))
         root.addWidget(self._extra_list)
 
         self._match_label = QLabel("")

@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 from track2data.core.errors import ZoneValidationError
 from track2data.core.models import ROI, ZoneSet
 from ui.widgets.labels import label_for
+from ui.widgets.weak_slot import weak_slot
 from ui.widgets.zone_canvas import ZoneCanvas, polygon_area
 
 #: Minimum vertices for a valid polygon.
@@ -162,7 +163,7 @@ class ZonesScreen(QWidget):
         self._canvas.selectionChanged.connect(self._on_canvas_selection_changed)
         self._custom_point_btn.toggled.connect(self._canvas.set_custom_point_mode)
         for tool, btn in self._tool_buttons.items():
-            btn.clicked.connect(lambda _checked=False, t=tool: self._canvas.set_tool(t))
+            btn.clicked.connect(weak_slot(self._set_tool, tool))
         self._undo_btn.clicked.connect(self._canvas.undo_last_point)
         self._fit_btn.clicked.connect(self._canvas.fit_to_view)
 
@@ -449,6 +450,9 @@ class ZonesScreen(QWidget):
             facts.setup_points,
             frame_size=(facts.width_px, facts.height_px),
         )
+
+    def _set_tool(self, tool: object) -> None:
+        self._canvas.set_tool(tool)
 
     def _on_canvas_selection_changed(self) -> None:
         n = len(self._canvas.selected_points())

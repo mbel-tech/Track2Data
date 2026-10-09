@@ -18,7 +18,6 @@ Escape) rejects it and discards the edits.
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any
 
 from PySide6.QtCore import QEvent
@@ -38,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.metrics.base import Metric, MetricParameter
+from ui.widgets.weak_slot import weak_slot
 
 
 def _as_bool(value: Any) -> bool:
@@ -146,7 +146,7 @@ class MetricConfigDialog(QDialog):
         reset_btn.setFixedWidth(28)
         default_label = "auto" if param.default is None else str(param.default)
         reset_btn.setToolTip(f"Reset to default ({default_label})")
-        reset_btn.clicked.connect(partial(self._reset_to_default, param))
+        reset_btn.clicked.connect(weak_slot(self._reset_to_default, param))
         row_layout.addWidget(reset_btn)
         self._reset_buttons[param.name] = reset_btn
 
@@ -169,7 +169,7 @@ class MetricConfigDialog(QDialog):
             row = self._rows.get(param.name)
             if row is None or not isinstance(controller, QCheckBox):
                 continue
-            sync = partial(self._sync_dependent_row, param.name, controller)
+            sync = weak_slot(self._sync_dependent_row, param.name, controller)
             controller.toggled.connect(sync)
             sync()
 
@@ -178,7 +178,7 @@ class MetricConfigDialog(QDialog):
 
     def _connect_edited_signal(self, param: MetricParameter, widget: QWidget) -> None:
         """Mark a row edited the first time its widget changes."""
-        mark = partial(self._mark_edited, param.name)
+        mark = weak_slot(self._mark_edited, param.name)
         if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
             widget.valueChanged.connect(mark)
         elif isinstance(widget, QComboBox):
