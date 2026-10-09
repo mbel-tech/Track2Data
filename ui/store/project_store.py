@@ -175,7 +175,7 @@ class ProjectStore(QObject):
         self._tasks.taskProgress.connect(self.taskProgress)
         self._tasks.taskFinished.connect(self.taskFinished)
         self._tasks.taskFailed.connect(self._on_task_failed)
-        self._tasks.taskLog.connect(lambda _task_id, line: self.append_log(line))
+        self._tasks.taskLog.connect(self._on_task_log)
         # Session probes run in their own lane and report on probe* signals, so
         # they never drive the main window's Cancel button or failure dialog.
         self._tasks.probeFinished.connect(self._on_identity_probe_finished)
@@ -320,6 +320,9 @@ class ProjectStore(QObject):
         for task_id in list(self._identity_probes):
             self._tasks.cancel(task_id)
         self._identity_probes.clear()
+
+    def _on_task_log(self, _task_id: str, line: str) -> None:
+        self.append_log(line)
 
     def _on_task_failed(self, task_id: str, message: str, tb: str) -> None:
         exc = RuntimeError(message)

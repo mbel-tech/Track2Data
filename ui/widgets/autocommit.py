@@ -10,6 +10,7 @@ from the store, which would otherwise commit (and re-emit) in a loop.
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
@@ -21,7 +22,13 @@ class AutoCommit(QObject):
         self, commit: Callable[[], None], parent: QObject | None = None, delay_ms: int = 200
     ) -> None:
         super().__init__(parent)
-        self._commit = commit
+        # Held weakly: ``commit`` is almost always a bound method of the screen
+        # that owns this object, and a strong reference makes screen and helper
+        # keep each other alive through Shiboken's parent/child ownership, which
+        # the garbage collector cannot trace (see ui/widgets/weak_slot.py).
+        self._commit: Callable[[], None] | None = (
+            weakref.WeakMethod(commit) if hasattr(commit, "__self__") else commit  # type: ignore[assignment]
+        )
         self._suppressed = 0
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -51,4 +58,6 @@ class AutoCommit(QObject):
             self._suppressed -= 1
 
     def _fire(self) -> None:
-        self._commit()
+        commit = self._commit() if isinstance(self._commit, weakref.WeakMethod) else self._commit
+        if commit is not None:
+            commit()

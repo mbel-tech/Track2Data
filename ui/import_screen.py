@@ -38,6 +38,7 @@ and greys those rows on the Metrics screen.
 
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -65,6 +66,7 @@ from track2data.readers import find_reader
 from track2data.readers.confirm import ConfirmDraft
 from ui.dialogs.confirm_format_dialog import ConfirmFormatDialog
 from ui.widgets.dots import level_icon
+from ui.widgets.weak_slot import weak_slot
 
 _COLUMN_HEADERS = [
     "Session ID",
@@ -446,10 +448,17 @@ class ImportScreen(QWidget):
             return
         existing = list(self._store.manifest.sessions) if self._store.manifest else []
         dialog = ConfirmFormatDialog(ConfirmDraft(result, existing=existing), self)
-        dialog.finished.connect(lambda code, d=dialog: self._on_confirm_finished(d, code))
+        dialog.finished.connect(
+            weak_slot(self._on_confirm_finished_ref, weakref.ref(dialog), pass_args=True)
+        )
         self._dialog = dialog
         # open(), never exec(): exec() would block the GUI driver's event loop.
         dialog.open()
+
+    def _on_confirm_finished_ref(self, dialog_ref: weakref.ref, code: int) -> None:
+        dialog = dialog_ref()
+        if dialog is not None:
+            self._on_confirm_finished(dialog, code)
 
     def _on_confirm_finished(self, dialog: ConfirmFormatDialog, code: int) -> None:
         if self._dialog is dialog:

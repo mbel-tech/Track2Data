@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.readers.params import ReaderParameter
+from ui.widgets.weak_slot import weak_slot
 
 _FLOAT_LOW, _FLOAT_HIGH = -1e9, 1e9
 _INT_LOW, _INT_HIGH = -2_000_000_000, 2_000_000_000
@@ -132,7 +133,7 @@ class ReaderOptionsForm(QWidget):
             spin.setSpecialValueText("required" if spec.required else "not set")
             self._sentinels[name] = low
             spin.setValue(float(spec.default) if spec.default is not None else low)
-            spin.valueChanged.connect(lambda v, n=name: self._edited(n, self._read(n)))
+            spin.valueChanged.connect(weak_slot(self._on_control_changed, name))
             return spin
         if kind == "int":
             int_spin = QSpinBox()
@@ -141,12 +142,12 @@ class ReaderOptionsForm(QWidget):
             int_spin.setSpecialValueText("required" if spec.required else "not set")
             self._sentinels[name] = low_i
             int_spin.setValue(int(spec.default) if spec.default is not None else low_i)
-            int_spin.valueChanged.connect(lambda v, n=name: self._edited(n, self._read(n)))
+            int_spin.valueChanged.connect(weak_slot(self._on_control_changed, name))
             return int_spin
         if kind == "bool":
             check = QCheckBox()
             check.setChecked(bool(spec.default))
-            check.toggled.connect(lambda checked, n=name: self._edited(n, self._read(n)))
+            check.toggled.connect(weak_slot(self._on_control_changed, name))
             return check
         if kind == "choice":
             combo = QComboBox()
@@ -155,7 +156,7 @@ class ReaderOptionsForm(QWidget):
             combo.addItems(list(spec.choices))
             if spec.default is not None:
                 combo.setCurrentText(str(spec.default))
-            combo.currentIndexChanged.connect(lambda i, n=name: self._edited(n, self._read(n)))
+            combo.currentIndexChanged.connect(weak_slot(self._on_control_changed, name))
             return combo
         if kind == "multichoice":
             listing = QListWidget()
@@ -165,24 +166,27 @@ class ReaderOptionsForm(QWidget):
                 item.setCheckState(Qt.CheckState.Unchecked)
                 listing.addItem(item)
             listing.setMaximumHeight(min(110, 24 * max(1, len(spec.choices)) + 8))
-            listing.itemChanged.connect(lambda item, n=name: self._edited(n, self._read(n)))
+            listing.itemChanged.connect(weak_slot(self._on_control_changed, name))
             return listing
         if kind == "path":
             holder = QWidget()
             holder_layout = QHBoxLayout(holder)
             holder_layout.setContentsMargins(0, 0, 0, 0)
             edit = QLineEdit()
-            edit.textChanged.connect(lambda text, n=name: self._edited(n, self._read(n)))
+            edit.textChanged.connect(weak_slot(self._on_control_changed, name))
             browse = QPushButton("Browse…")
             browse.setProperty("role", "outline")
-            browse.clicked.connect(lambda _checked=False, e=edit: self._browse(e))
+            browse.clicked.connect(weak_slot(self._browse, edit))
             holder_layout.addWidget(edit, 1)
             holder_layout.addWidget(browse)
             return holder
         edit_text = QLineEdit()
         edit_text.setPlaceholderText("required" if spec.required else "optional")
-        edit_text.textChanged.connect(lambda text, n=name: self._edited(n, self._read(n)))
+        edit_text.textChanged.connect(weak_slot(self._on_control_changed, name))
         return edit_text
+
+    def _on_control_changed(self, name: str) -> None:
+        self._edited(name, self._read(name))
 
     def _browse(self, edit: QLineEdit) -> None:
         chosen, _filter = QFileDialog.getOpenFileName(self, "Choose a file")

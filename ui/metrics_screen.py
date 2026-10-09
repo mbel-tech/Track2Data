@@ -18,8 +18,6 @@ and in docs/METRICS_SPEC.md.
 
 from __future__ import annotations
 
-from functools import partial
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -43,6 +41,7 @@ from track2data.metrics.availability import view_unavailable_reason
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 from ui.widgets.autocommit import AutoCommit
+from ui.widgets.weak_slot import weak_slot
 
 _COLUMN_HEADERS = ["Include", "Name", "Info", "Config"]
 _COL_INCLUDE, _COL_NAME, _COL_INFO, _COL_CONFIG = range(4)
@@ -201,12 +200,12 @@ class MetricsScreen(QWidget):
         # calls flush() when the screen is left.
         for table in (self._ind_table, self._grp_table, self._zone_table):
             table.itemChanged.connect(self._on_item_changed)
-        self._quality_spin.valueChanged.connect(
-            lambda _v: self._auto.trigger() if self._differs_from_store() else None
-        )
-        self._timepoint_spin.valueChanged.connect(
-            lambda _v: self._auto.trigger() if self._differs_from_store() else None
-        )
+        self._quality_spin.valueChanged.connect(weak_slot(self._trigger_if_changed))
+        self._timepoint_spin.valueChanged.connect(weak_slot(self._trigger_if_changed))
+
+    def _trigger_if_changed(self) -> None:
+        if self._differs_from_store():
+            self._auto.trigger()
 
     def flush(self) -> None:
         """Commit any pending edit now (called when the screen is left)."""
@@ -347,7 +346,7 @@ class MetricsScreen(QWidget):
                 info_btn = QPushButton("ⓘ")
                 info_btn.setFixedSize(28, 28)
                 info_btn.setProperty("role", "icon")
-                info_btn.clicked.connect(partial(self._show_metric_info, metric_cls))
+                info_btn.clicked.connect(weak_slot(self._show_metric_info, metric_cls))
                 table.setCellWidget(row, _COL_INFO, info_btn)
 
             config_btn = QPushButton("⚙")
@@ -358,7 +357,7 @@ class MetricsScreen(QWidget):
             # metric isn't required to define it and shouldn't crash the
             # whole screen for not doing so.
             if getattr(metric_cls, "parameters", []):
-                config_btn.clicked.connect(partial(self._show_metric_config, metric_cls))
+                config_btn.clicked.connect(weak_slot(self._show_metric_config, metric_cls))
             else:
                 config_btn.setEnabled(False)
                 config_btn.setToolTip("This metric has no configurable parameters.")
