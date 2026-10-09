@@ -357,3 +357,60 @@ def test_next_blocker_for_a_forced_views_status_does_not_raise() -> None:
         statuses = [*base[:VIEWS], StageInfo(status)]
         result = next_blocker(statuses, VIEWS)
         assert result is None or status == "blocked"
+
+
+# ── the sidebar Sessions row ────────────────────────────────────────────────
+
+
+def _row(manifest):
+    from ui.store.stage_status import sessions_row
+
+    return sessions_row(compute_stage_statuses(manifest, has_run_results=False), manifest)
+
+
+def test_sessions_row_2d_is_the_sessions_status() -> None:
+    m = _manifest(sessions=[_ref()])
+    assert _row(m) == compute_stage_statuses(m, has_run_results=False)[SESSIONS]
+    assert _row(None) == compute_stage_statuses(None, has_run_results=False)[SESSIONS]
+
+
+@pytest.mark.parametrize(
+    ("sessions", "pairs", "expected"),
+    [
+        ([_vref("t", "top"), _vref("s", "side")], [], "warning"),  # valid + warning
+        ([_vref("t", "top"), _ref("x")], [], "empty"),  # valid + empty
+        (
+            [_vref("t", "top"), _vref("s", "side")],
+            [ViewPair(top_session_id="t", side_session_id="s", fish_map={"0": "0"})],
+            "valid",
+        ),
+        (
+            [_vref("t", "top", track_wo_identities=True), _ref("x")],
+            [],
+            "warning",  # warning + empty
+        ),
+    ],
+)
+def test_sessions_row_3d_is_the_worse_status(sessions, pairs, expected) -> None:
+    m = _manifest_3d(sessions=sessions, view_pairs=pairs)
+    row = _row(m)
+    assert row.status == expected
+    views = compute_stage_statuses(m, has_run_results=False)[VIEWS]
+    assert f"Views: {views.message}" in row.message
+
+
+def test_sessions_row_3d_blocked_layout_stays_blocked() -> None:
+    mode = ProjectMode.model_construct(dimension="3d", layout=None)
+    m = _manifest().model_copy(update={"mode": mode})
+    assert _row(m).status == "blocked"
+
+
+def test_3d_sessions_summary_counts_pairs() -> None:
+    from ui.store.stage_status import stage_summaries
+
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert stage_summaries(m, has_run_results=False)[1] == "2 sessions · 1 pair"
+    assert stage_summaries(_manifest(sessions=[_ref()]), has_run_results=False)[1] == "1 session"

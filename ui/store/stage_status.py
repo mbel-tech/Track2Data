@@ -19,6 +19,7 @@ from track2data.core.models import MODE_3D_BLOCK_REASON, ProjectManifest
 from track2data.metrics import get as _get_metric
 from track2data.metrics.availability import view_dependent_metrics
 from track2data.zones.extent import water_column
+from ui.store.screen_flow import VIEWS_PAGE as _VIEWS
 
 Status = Literal["empty", "valid", "warning", "blocked"]
 
@@ -47,8 +48,8 @@ PAGE_NAMES = [
     "Preprocessing", "Metrics", "Processing", "Preview", "Export",
 ]
 (
-    _PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT, _VIEWS
-) = range(11)
+    _PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT
+) = range(10)
 
 #: Views is a sub-page of the Sessions stage, so it is not a guide chapter (not in PAGE_NAMES).
 VIEWS_PAGE_NAME = "Views"
@@ -178,6 +179,26 @@ def _views_status(manifest: ProjectManifest) -> StageInfo:
     return StageInfo("valid", f"{len(manifest.view_pairs)} pair(s) matched.")
 
 
+#: How bad each status is, for combining two (higher is worse).
+_SEVERITY: dict[str, int] = {"valid": 0, "empty": 1, "warning": 2, "blocked": 3}
+
+
+def sessions_row(statuses: list[StageInfo], manifest: ProjectManifest | None) -> StageInfo:
+    """What the sidebar's Sessions row shows.
+
+    In a 3-D project the Views page sits under Sessions, so the row shows the worse of
+    the two statuses and the Views message is added to its tooltip. Next is unaffected:
+    it still follows each page's own status.
+    """
+    sessions = statuses[_SESSIONS]
+    if manifest is None or manifest.mode.dimension != "3d":
+        return sessions
+    views = statuses[_VIEWS]
+    status = max(sessions.status, views.status, key=_SEVERITY.__getitem__)
+    parts = [sessions.message, f"{VIEWS_PAGE_NAME}: {views.message}" if views.message else ""]
+    return StageInfo(status, "\n".join(p for p in parts if p))
+
+
 def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
     """Why leaving *page* forward is not allowed, or None when it is."""
     if not (0 <= page < len(statuses)):
@@ -206,6 +227,12 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
     sel = manifest.metrics
     n_metrics = len(sel.individual) + len(sel.group) + len(sel.zone)
     n_sessions = len(manifest.sessions)
+    sessions_text = (
+        f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions"
+    )
+    if manifest.mode.dimension == "3d" and n_sessions:
+        n_pairs = len(manifest.view_pairs)
+        sessions_text += f" · {n_pairs} pair{'s' if n_pairs != 1 else ''}"
     if manifest.metadata_source is None:
         meta = "Not set"
     elif manifest.mapping is None or not manifest.mapping.rules:
@@ -219,7 +246,7 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
         preview_text = "Results ready" if has_run_results else "Needs a run"
     return [
         manifest.project_name or "Unnamed",
-        f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions",
+        sessions_text,
         cal_text,
         "Draw the water column"
         if _missing_water_column(manifest)
