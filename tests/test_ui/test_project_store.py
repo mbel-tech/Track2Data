@@ -1134,17 +1134,18 @@ def test_split_uniquifies_taken_ids(store_panels, tmp_path: Path) -> None:
     store = store_panels
     store.update_sessions([*store.manifest.sessions, _ref(tmp_path, "s__top")])
     top_id, side_id = store.split_session_into_panels("s", _rect(), _rect(50))
-    assert top_id != "s__top" and top_id.startswith("s__top")
-    assert side_id == "s__side"
+    assert (top_id, side_id) == ("s__top__2", "s__side")
+    (pair,) = store.manifest.view_pairs
+    assert (pair.top_session_id, pair.side_session_id) == ("s__top__2", "s__side")
 
 
 def test_split_refuses_unknown_second_and_already_panelled(store_panels) -> None:
     store = store_panels
     store.split_session_into_panels("s", _rect(), _rect(50))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unknown session: s"):
         store.split_session_into_panels("s", _rect(), _rect(50))  # replaced already
-    with pytest.raises(ValueError):
-        store.split_session_into_panels("s__top", _rect(), _rect(50))  # has a panel
+    with pytest.raises(ValueError, match="s__top already has a panel"):
+        store.split_session_into_panels("s__top", _rect(), _rect(50))
 
 
 def test_split_wrong_layout_or_2d_raises_exact_message(store, tmp_path: Path) -> None:
@@ -1168,6 +1169,7 @@ def test_panel_mutators_are_no_ops_without_a_project(qtbot) -> None:
 
     empty = ProjectStore()
     empty.set_session_panel("s", _rect())
+    assert empty.split_session_into_panels("s", _rect(), _rect(50)) == ("", "")
     empty.tasks.shutdown(1000)
 
 
@@ -1176,8 +1178,8 @@ def test_set_session_panel_sets_clears_and_reprobes(qtbot, store_panels) -> None
     store._session_facts["s"] = SessionFacts.from_session(
         _fake_session(store.manifest.sessions[0].folder)
     )
-    with qtbot.waitSignal(store.sessionsChanged, timeout=1000):
-        store.set_session_panel("s", _rect())
+    with qtbot.waitSignals([store.sessionsChanged, store.viewsChanged], timeout=1000):
+        store.set_session_panel("s", _rect())  # no pair, still announced to the views
     assert store.manifest.sessions[0].panel == _rect()
     assert store.probes == ["s"]
     assert store.session_facts("s") is None
@@ -1247,3 +1249,34 @@ def test_probe_with_a_panel_that_does_not_fit_logs_and_keeps_the_facts(
     qtbot.waitUntil(lambda: store.session_facts("s") is not None, timeout=3000)
     assert any("does not fit" in line for line in logged)
     assert store.session_facts("s").n_animals == 1
+
+
+def test_split_carries_the_video_override_and_drops_the_old_pair(
+    store_panels, tmp_path: Path
+) -> None:
+    store = store_panels
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    store.set_video_path("s", video)
+    store.update_sessions([*store.manifest.sessions, _ref(tmp_path, "t")])
+    store.update_view_role("s", "top")
+    store.update_view_role("t", "side")
+    store.update_view_pair(_pair("s", "t"))
+    top_id, side_id = store.split_session_into_panels("s", _rect(), _rect(50))
+    overrides = store.manifest.video_overrides
+    assert overrides == {top_id: video, side_id: video}
+    assert [(p.top_session_id, p.side_session_id) for p in store.manifest.view_pairs] == [
+        (top_id, side_id)
+    ]
+
+
+def test_a_probe_finishing_after_its_session_was_split_is_ignored(
+    qtbot, monkeypatch, store_panels
+) -> None:
+    store = store_panels
+    store._identity_probes["task-1"] = "s"
+    store.split_session_into_panels("s", _rect(), _rect(50))
+    store.sessionsChanged.connect(lambda: pytest.fail("spurious sessionsChanged"))
+    store._on_identity_probe_finished("task-1", _fake_session(Path("s")))
+    assert store.session_facts("s") is None
+    assert not store._session_facts

@@ -594,6 +594,13 @@ class ProjectStore(QObject):
             raise ValueError(PANELS_ONLY_FOR_SINGLE_VIDEO)
         return True
 
+    def _index_of(self, session_id: str) -> int:
+        assert self._manifest is not None
+        for i, s in enumerate(self._manifest.sessions):
+            if s.session_id == session_id:
+                return i
+        raise ValueError(f"unknown session: {session_id}")
+
     def split_session_into_panels(
         self, session_id: str, top_rect: PanelRect, side_rect: PanelRect
     ) -> tuple[str, str]:
@@ -607,10 +614,8 @@ class ProjectStore(QObject):
             return ("", "")
         assert self._manifest is not None
         manifest = self._manifest
+        index = self._index_of(session_id)
         sessions = list(manifest.sessions)
-        index = next((i for i, s in enumerate(sessions) if s.session_id == session_id), None)
-        if index is None:
-            raise ValueError(f"unknown session: {session_id}")
         original = sessions[index]
         if original.panel is not None:
             raise ValueError(f"{session_id} already has a panel")
@@ -651,10 +656,8 @@ class ProjectStore(QObject):
             return
         assert self._manifest is not None
         manifest = self._manifest
+        index = self._index_of(session_id)
         sessions = list(manifest.sessions)
-        index = next((i for i, s in enumerate(sessions) if s.session_id == session_id), None)
-        if index is None:
-            raise ValueError(f"unknown session: {session_id}")
         if sessions[index].panel == rect:
             return
         sessions[index] = sessions[index].model_copy(update={"panel": rect})
@@ -666,8 +669,7 @@ class ProjectStore(QObject):
         ]
         self._manifest = manifest.model_copy(update={"sessions": sessions, "view_pairs": pairs})
         self.sessionsChanged.emit()
-        if pairs != list(manifest.view_pairs):
-            self.viewsChanged.emit()
+        self.viewsChanged.emit()
         if self._session_facts.pop(session_id, None) is not None:
             self.sessionFactsChanged.emit()
         self._submit_probe(session_id, sessions[index].folder)
@@ -868,6 +870,10 @@ class ProjectStore(QObject):
         session_id = self._identity_probes.pop(task_id, None)
         if session_id is None:
             return  # not an identity-probe task (e.g. a pipeline run/preview)
+        if self._manifest is None or all(
+            r.session_id != session_id for r in self._manifest.sessions
+        ):
+            return  # split or removed while the probe ran
         if isinstance(result, Exception):
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
             if _is_pickle_refusal(result):
