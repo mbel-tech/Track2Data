@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from track2data.calibration.session_unit import calibration_ratios
+
 if TYPE_CHECKING:
     from track2data.core.models import Session
 
@@ -90,6 +92,9 @@ class SessionFacts:
     video_path: Path | None = None
     # Share of (frame, animal) positions the tracker found; None when not measured.
     tracked_coverage: float | None = None
+    # Pixels per unit of each usable Validator length calibration (idtracker.ai sessions may hold
+    # several); empty when the tracker records none. Lets the screen show the mean or median.
+    calibration_ratios: tuple[float, ...] = ()
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -123,4 +128,5 @@ class SessionFacts:
             background_image_path=session.background_image_path,
             video_path=session.video.path,
             tracked_coverage=_tracked_coverage(session.raw_xy),
+            calibration_ratios=tuple(calibration_ratios(session.length_calibrations)),
         )

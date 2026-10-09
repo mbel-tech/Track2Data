@@ -1279,7 +1279,11 @@ class Engine:
             fraction_identified=quality.get("fraction_identified"),
             silhouette_score=quality.get("silhouette_score"),
             fragment_connectivity=quality.get("fragment_connectivity"),
-            length_unit=session.length_unit,
+            length_unit=(
+                psess.px_per_cm
+                if self._manifest.calibration.mode == "session" and psess.px_per_cm
+                else session.length_unit
+            ),
             length_unit_label=self._manifest.calibration.length_unit_label,
             length_unit_confirmed_by_user=self._manifest.calibration.length_unit_confirmed_by_user,
             body_length_reliable=session.body_length_reliable,
@@ -2016,7 +2020,11 @@ class Engine:
         if cfg.mode == "scalar":
             return cfg.px_per_cm if cfg.px_per_cm and cfg.px_per_cm > 0 else None
         if cfg.mode == "session":
-            return session.length_unit
+            from track2data.calibration.session_unit import session_scale
+
+            return session_scale(
+                session.length_unit, session.length_calibrations, cfg.session_calibration_stat
+            )
         # "bodylength" derives a per-animal scale from body_length_px rather
         # than a single session-wide ratio; it produces *_bl columns whether
         # or not a length_unit exists, so treat the session's own unit as the
@@ -2113,6 +2121,8 @@ class Engine:
         -- validate() is an explicit pre-flight action, not something
         called on every keystroke, so this is worth the cost for a
         complete report instead of a partial one."""
+        from track2data.calibration.session_unit import session_scale
+
         missing: list[str] = []
         unreadable: list[str] = []
         for ref in self._manifest.sessions:
@@ -2121,7 +2131,14 @@ class Engine:
             except Exception:
                 unreadable.append(ref.session_id)
                 continue
-            if session.length_unit is None:
+            if (
+                session_scale(
+                    session.length_unit,
+                    session.length_calibrations,
+                    self._manifest.calibration.session_calibration_stat,
+                )
+                is None
+            ):
                 missing.append(ref.session_id)
 
         issues: list[str] = []

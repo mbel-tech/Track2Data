@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import math
+import statistics
 from typing import Any
 
 from track2data.core.errors import CalibrationError
@@ -70,8 +71,11 @@ def apply_session_calibration(
         )
 
     session = psess.session
+    scale = session_scale(
+        session.length_unit, session.length_calibrations, cfg.session_calibration_stat
+    )
 
-    if session.length_unit is None:
+    if scale is None:
         raise CalibrationError(
             f"Session '{session.session_id}' has no length_unit -- it was never "
             "calibrated in the idtracker.ai validator (or its length_unit was "
@@ -94,9 +98,50 @@ def apply_session_calibration(
             n_clicks,
             100 * rel_sd,
         )
-    return dataclasses.replace(
-        psess, px_per_cm=session.length_unit, px_per_cm_rel_sd=rel_sd
+    return dataclasses.replace(psess, px_per_cm=scale, px_per_cm_rel_sd=rel_sd)
+
+
+def calibration_ratios(calibrations: list[dict[str, Any]] | None) -> list[float]:
+    """Pixels per unit from each usable calibration click pair; malformed entries are skipped."""
+    ratios: list[float] = []
+    for entry in calibrations or []:
+        try:
+            ax, ay = entry["point_A"]
+            bx, by = entry["point_B"]
+            distance = float(entry["distance"])
+            px = math.hypot(float(bx) - float(ax), float(by) - float(ay))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if distance > 0 and px > 0 and math.isfinite(px) and math.isfinite(distance):
+            ratios.append(px / distance)
+    return ratios
+
+
+def session_scale(
+    length_unit: float | None,
+    calibrations: list[dict[str, Any]] | None,
+    stat: str = "mean",
+) -> float | None:
+    """The pixels-per-unit a session is calibrated with, or None when it has none.
+
+    ``"mean"`` is the session's own ``length_unit`` (idtracker.ai records the mean of its
+    calibrations). ``"median"`` is the median of the usable per-calibration ratios, falling back
+    to ``length_unit`` when there are none (every non-idtracker.ai session). A session without a
+    valid ``length_unit`` is uncalibrated whatever its calibrations hold. Nothing here raises on
+    odd input.
+    """
+    own = (
+        float(length_unit)
+        if isinstance(length_unit, int | float) and math.isfinite(length_unit) and length_unit > 0
+        else None
     )
+    if own is None:
+        # idtracker.ai writes -1 for "never calibrated"; clicks next to it do not override that.
+        return None
+    ratios = calibration_ratios(calibrations)
+    if stat == "median" and ratios:
+        return float(statistics.median(ratios))
+    return own
 
 
 def length_calibration_spread(
@@ -114,17 +159,7 @@ def length_calibration_spread(
     by their mean, or None when fewer than two usable entries exist (one
     click carries no spread). Malformed entries are skipped, never fatal.
     """
-    ratios: list[float] = []
-    for entry in calibrations or []:
-        try:
-            ax, ay = entry["point_A"]
-            bx, by = entry["point_B"]
-            distance = float(entry["distance"])
-            px = math.hypot(float(bx) - float(ax), float(by) - float(ay))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if distance > 0 and px > 0 and math.isfinite(px) and math.isfinite(distance):
-            ratios.append(px / distance)
+    ratios = calibration_ratios(calibrations)
     n = len(ratios)
     if n < 2:
         return n, None

@@ -381,6 +381,11 @@ class CalibrationConfig(BaseModel):
     # confirmed_by_user records whether anyone actually verified it.
     length_unit_label: str = "cm"
     length_unit_confirmed_by_user: bool = False
+    # Which scale "session" mode takes when a session holds several Validator length
+    # calibrations (Session.length_calibrations). "mean" is idtracker.ai's own length_unit (and
+    # the default, so nothing changes for existing projects); "median" is the median of the
+    # per-calibration ratios, which one badly placed click cannot move.
+    session_calibration_stat: Literal["mean", "median"] = "mean"
     # Where the per-identity body length comes from (bodylength mode and every
     # *_bl column). "session" is the session-wide scalar idtracker.ai records
     # and the default. "blobs" derives a per-identity value from

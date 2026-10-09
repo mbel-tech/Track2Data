@@ -19,7 +19,7 @@ Widgets:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -34,10 +34,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from track2data.calibration.session_unit import session_scale
 from track2data.core.models import SceneConfig
 from ui.widgets.autocommit import AutoCommit
 
@@ -49,16 +51,84 @@ _IDT_INFO = (
 )
 _OTHER_INFO = (
     "Only idtracker.ai records a calibration. For this tracker's files, Session calibration "
-    "uses the scale you gave when importing them (\"Scale (pixels per cm)\")."
+    'uses the scale you gave when importing them ("Scale (pixels per cm)").'
 )
 _NO_SCALE_TIP = (
     "None of these sessions carries a calibration. idtracker.ai sessions record one in the "
-    "validator; for other trackers give \"Scale (pixels per cm)\" when importing."
+    'validator; for other trackers give "Scale (pixels per cm)" when importing.'
+)
+
+
+_IDT_DOC = "https://idtracker.ai/latest/reference/generated/idtrackerai.Session.html"
+_CTRAX_DOC = "https://ctrax.sourceforge.net/bmat.html"
+
+#: (raw stat value, label) for the choice between several length calibrations.
+_STAT_CHOICES = (
+    ("mean", "Average (idtracker.ai's own length unit)"),
+    ("median", "Median of the calibrations"),
 )
 
 
 def _is_idtrackerai(reader: str) -> bool:
     return reader.startswith("idtrackerai")
+
+
+def _is_ctrax(reader: str) -> bool:
+    return reader in ("ctrax_mat", "trx_mat")
+
+
+def _info_html(readers: set[str]) -> str:
+    """What each tracker records, for the trackers in the project (all of them when none yet)."""
+    idt = any(_is_idtrackerai(r) for r in readers)
+    ctrax = any(_is_ctrax(r) for r in readers)
+    other = any(not _is_idtrackerai(r) and not _is_ctrax(r) for r in readers)
+    everything = not readers
+    parts: list[str] = []
+    if idt or everything:
+        parts.append(
+            "<p><b>idtracker.ai</b> records the scale itself: the Validator's Length Calibration "
+            "tool saves one or more measurements, and <code>length_unit</code> is their average. "
+            "When a session holds several, choose the average or the median below. "
+            f'<a href="{_IDT_DOC}">idtrackerai.Session reference</a></p>'
+        )
+    if ctrax or everything:
+        parts.append(
+            "<p><b>Ctrax / JAABA <code>trx.mat</code></b> records <code>pxpermm</code> (pixels per "
+            "millimetre) once its units have been converted; Track2Data turns it into pixels per "
+            "cm and ignores the tool's default of exactly 1. Ctrax's raw <code>.mat</code> "
+            "records no scale. "
+            f'<a href="{_CTRAX_DOC}">Ctrax trx fields</a></p>'
+        )
+    if other or everything:
+        parts.append(
+            "<p><b>DeepLabCut, SLEAP and Ctrax raw files</b> record no scale. Give "
+            "&ldquo;Scale (pixels per cm)&rdquo; when importing them, or use Custom or "
+            "Body length.</p>"
+        )
+    return "".join(parts)
+
+
+class _InfoBubble(QFrame):
+    """A small popup that closes when you click elsewhere; its links open in the browser."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.setProperty("card", True)
+        self.setMaximumWidth(420)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(14, 10, 14, 10)
+        self._label = QLabel()
+        self._label.setWordWrap(True)
+        self._label.setTextFormat(Qt.TextFormat.RichText)
+        self._label.setOpenExternalLinks(True)
+        col.addWidget(self._label)
+
+    def show_at(self, html: str, anchor: QWidget) -> None:
+        self._label.setText(html)
+        self.adjustSize()
+        self.move(anchor.mapToGlobal(QPoint(0, anchor.height() + 4)))
+        self.show()
+
 
 #: (raw CameraView value, label, what it means for the project).
 _VIEW_CHOICES = (
@@ -164,8 +234,10 @@ class CalibrationScreen(QWidget):
 
         mode_row.setSpacing(14)
         for radio, text in (
-            (self._radio_bl, "Scales each animal by its own median body length. "
-                             "Outputs in BL and cm."),
+            (
+                self._radio_bl,
+                "Scales each animal by its own median body length. Outputs in BL and cm.",
+            ),
             (self._radio_scalar, "One px-per-cm factor for every session. Measure it on a frame."),
             (
                 self._radio_session,
@@ -177,9 +249,7 @@ class CalibrationScreen(QWidget):
         root.addLayout(mode_row)
 
         # ── BL info ───────────────────────────────────────────────────────
-        self._bl_label = QLabel(
-            "Body length will be derived from session bounding boxes."
-        )
+        self._bl_label = QLabel("Body length will be derived from session bounding boxes.")
         self._bl_label.setProperty("role", "muted")
         self._bl_label.setWordWrap(True)
         root.addWidget(self._bl_label)
@@ -210,17 +280,36 @@ class CalibrationScreen(QWidget):
         session_layout.setContentsMargins(0, 0, 0, 0)
         session_layout.setSpacing(8)
 
+        info_row = QHBoxLayout()
         session_info = QLabel(_IDT_INFO)
         self._session_info = session_info
         session_info.setProperty("role", "muted")
         session_info.setWordWrap(True)
-        session_layout.addWidget(session_info)
+        info_row.addWidget(session_info, 1)
+        self._info_btn = QToolButton()
+        self._info_btn.setText("\u24d8")
+        self._info_btn.setAutoRaise(True)
+        self._info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._info_btn.setToolTip("What each tracker records, with links to its documentation")
+        self._info_btn.setAccessibleName("Calibration info")
+        self._info_btn.clicked.connect(self._show_info)
+        info_row.addWidget(self._info_btn, 0, Qt.AlignmentFlag.AlignTop)
+        session_layout.addLayout(info_row)
+        self._bubble = _InfoBubble(self)
 
         unit_form = QFormLayout()
         unit_form.setContentsMargins(0, 0, 0, 0)
         self._unit_combo = QComboBox()
         self._unit_combo.addItems(_UNIT_CHOICES)
         unit_form.addRow("Unit:", self._unit_combo)
+        self._stat_combo = QComboBox()
+        for value, label in _STAT_CHOICES:
+            self._stat_combo.addItem(label, value)
+        self._stat_combo.setToolTip(
+            "Used when a session holds several length calibrations (idtracker.ai)."
+        )
+        self._stat_label = QLabel("Several calibrations:")
+        unit_form.addRow(self._stat_label, self._stat_combo)
         session_layout.addLayout(unit_form)
 
         self._confirm_check = QCheckBox(
@@ -269,6 +358,8 @@ class CalibrationScreen(QWidget):
             radio.toggled.connect(self._auto.trigger)
         self._px_spin.valueChanged.connect(self._auto.trigger)
         self._unit_combo.currentIndexChanged.connect(self._auto.trigger)
+        self._stat_combo.currentIndexChanged.connect(self._auto.trigger)
+        self._stat_combo.currentIndexChanged.connect(self._refresh_readiness)
         self._confirm_check.toggled.connect(self._auto.trigger)
         self._view_combo.currentIndexChanged.connect(self._update_view_help)
         self._view_combo.currentIndexChanged.connect(self._view_auto.trigger)
@@ -308,6 +399,7 @@ class CalibrationScreen(QWidget):
             "px_per_cm": self._px_spin.value() if mode == "scalar" else None,
         }
         if mode == "session":
+            updates["session_calibration_stat"] = self._stat_combo.currentData()
             updates["length_unit_label"] = self._unit_combo.currentText()
             updates["length_unit_confirmed_by_user"] = self._confirm_check.isChecked()
         cfg = current.model_copy(update=updates)
@@ -352,6 +444,9 @@ class CalibrationScreen(QWidget):
                 self._radio_session.setChecked(True)
                 if cfg.length_unit_label in _UNIT_CHOICES:
                     self._unit_combo.setCurrentText(cfg.length_unit_label)
+                self._stat_combo.setCurrentIndex(
+                    max(0, self._stat_combo.findData(cfg.session_calibration_stat))
+                )
                 self._confirm_check.setChecked(cfg.length_unit_confirmed_by_user)
             else:
                 self._radio_bl.setChecked(True)
@@ -413,8 +508,14 @@ class CalibrationScreen(QWidget):
             all_facts.append(facts)
             if facts is None:
                 text = f"{ref.session_id} — checking…"
-            elif facts.length_unit is not None:
-                text = f"{ref.session_id} — calibrated ({facts.length_unit:.4g} px per unit)"
+            elif (scale := self._scale_of(facts)) is not None:
+                many = len(facts.calibration_ratios)
+                how = (
+                    f", {self._stat_combo.currentText().split(' (')[0].lower()} of {many}"
+                    if many > 1
+                    else ""
+                )
+                text = f"{ref.session_id} — calibrated ({scale:.4g} px per unit{how})"
             elif _is_idtrackerai(facts.reader):
                 text = f"{ref.session_id} — not calibrated"
             else:
@@ -436,9 +537,29 @@ class CalibrationScreen(QWidget):
             len(known) < len(all_facts)
             or not known
             or has_idt
-            or any(f.length_unit is not None for f in known)
+            or any(self._scale_of(f) is not None for f in known)
         )
+        # The average/median choice only matters for idtracker.ai sessions.
+        self._stat_label.setVisible(has_idt)
+        self._stat_combo.setVisible(has_idt)
         self._set_session_available(available)
+
+    def _scale_of(self, facts) -> float | None:
+        ratios = list(facts.calibration_ratios)
+        return session_scale(
+            facts.length_unit,
+            [{"point_A": [0, 0], "point_B": [r, 0], "distance": 1.0} for r in ratios],
+            self._stat_combo.currentData() or "mean",
+        )
+
+    def _show_info(self) -> None:
+        readers: set[str] = set()
+        if self._store is not None and self._store.manifest is not None:
+            for ref in self._store.manifest.sessions:
+                facts = self._store.session_facts(ref.session_id)
+                if facts is not None:
+                    readers.add(facts.reader)
+        self._bubble.show_at(_info_html(readers), self._info_btn)
 
     def _set_session_available(self, available: bool) -> None:
         enabled = available or self._radio_session.isChecked()

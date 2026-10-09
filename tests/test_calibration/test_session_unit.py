@@ -134,3 +134,48 @@ class TestApplySessionCalibrationErrors:
         with pytest.raises(CalibrationError) as exc_info:
             apply_session_calibration(psess_uncalibrated, cfg)
         assert exc_info.value.code == "CAL-SESSION-MISSING"
+
+
+# ── several length calibrations: mean or median ───────────────────────────────
+
+
+def _clicks(*ratios: float) -> list[dict]:
+    """Calibration clicks along x: ratio = pixels / distance, with distance 10."""
+    return [{"point_A": [0, 0], "point_B": [r * 10.0, 0], "distance": 10.0} for r in ratios]
+
+
+def _calibrated(length_unit, calibrations, stat):
+    session = _make_session(length_unit=length_unit)
+    session.length_calibrations = calibrations
+    psess = PreprocessedSession(session=session, xy=session.raw_xy, kinematics=_make_kinematics())
+    cfg = CalibrationConfig(mode="session", session_calibration_stat=stat)
+    return apply_session_calibration(psess, cfg)
+
+
+def test_mean_keeps_the_sessions_own_length_unit() -> None:
+    out = _calibrated(4.0, _clicks(2.0, 3.0, 10.0), "mean")
+    assert out.px_per_cm == pytest.approx(4.0)
+
+
+def test_median_is_the_median_of_the_clicks_not_the_mean() -> None:
+    out = _calibrated(5.0, _clicks(2.0, 3.0, 10.0), "median")
+    assert out.px_per_cm == pytest.approx(3.0)
+
+
+def test_median_falls_back_to_length_unit_without_usable_clicks() -> None:
+    bad = [{"point_A": [0, 0]}, "junk", {"point_A": [0, 0], "point_B": [1, 1], "distance": 0}]
+    assert _calibrated(4.0, bad, "median").px_per_cm == pytest.approx(4.0)
+    assert _calibrated(4.0, None, "median").px_per_cm == pytest.approx(4.0)
+
+
+def test_malformed_clicks_among_good_ones_are_skipped() -> None:
+    clicks = [*_clicks(2.0, 4.0, 6.0), {"nonsense": 1}, None]
+    assert _calibrated(4.0, clicks, "median").px_per_cm == pytest.approx(4.0)
+    assert _calibrated(4.5, clicks, "mean").px_per_cm == pytest.approx(4.5)
+
+
+def test_clicks_do_not_override_a_missing_length_unit() -> None:
+    with pytest.raises(CalibrationError):
+        _calibrated(None, _clicks(2.0, 4.0), "median")
+
+
