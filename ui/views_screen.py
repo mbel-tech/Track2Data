@@ -229,6 +229,10 @@ class ViewsScreen(QWidget):
             store.sessionsChanged.connect(self._refresh)
             store.modeChanged.connect(self._refresh)
             store.viewsChanged.connect(self._refresh)
+            # Fusion status depends on these project settings too (dirty/showEvent path).
+            store.calibrationChanged.connect(self._refresh)
+            store.preprocessChanged.connect(self._refresh)
+            store.zonesChanged.connect(self._refresh)
             store.sessionFactsChanged.connect(self._on_facts_changed)
             store.taskFinished.connect(self._on_traj_task_finished)
         self.refresh_now()

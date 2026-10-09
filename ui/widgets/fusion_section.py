@@ -14,6 +14,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from track2data.core.models import ViewPair
+from track2data.fusion.align import FusionError
 from ui.dialogs.fusion_dialog import FusionDialog
 from ui.widgets.weak_slot import weak_slot
 
@@ -27,7 +28,13 @@ def fuse_status(manifest, pair: ViewPair, cache_dir: Path | None):
     """Fuse one pair. Runs on a worker thread; raises FusionError with a message."""
     from track2data.api import Engine
 
-    return Engine(manifest, cache_dir=cache_dir).fuse_pair(pair)
+    try:
+        return Engine(manifest, cache_dir=cache_dir).fuse_pair(pair)
+    except FusionError:
+        raise
+    except Exception as exc:  # the task runner keeps only the message, so name the type here
+        name = type(exc).__name__
+        raise FusionError(f"{name}: {exc}" if str(exc) else name) from exc
 
 
 def load_pair_sessions(manifest, pair: ViewPair, cache_dir: Path | None):
@@ -114,7 +121,19 @@ class FusionSection(QGroupBox):
             r.model_dump_json() if (r := self._ref(sid)) is not None else None for sid in ids
         )
         facts = tuple(self._store.session_facts(sid) for sid in ids)
-        return (pair.model_dump_json(), refs, facts, m.mode.layout)
+        # Engine.fuse_pair also depends on these project settings (see Engine._cache_key).
+        settings = (
+            m.preprocess.model_dump_json(),
+            m.calibration.model_dump_json(),
+            m.zones.model_dump_json(),
+            m.security.allow_pickle_trajectories,
+            m.blob_diagnostics,
+            tuple(str(m.video_overrides.get(sid)) for sid in ids),
+            tuple(
+                m.video_overrides[sid].exists() if sid in m.video_overrides else None for sid in ids
+            ),
+        )
+        return (pair.model_dump_json(), refs, facts, m.mode.layout, settings)
 
     # ── selection and rebuild (never writes) ───────────────────────────────
 
@@ -195,7 +214,7 @@ class FusionSection(QGroupBox):
             elif task_id in self._load_pending:
                 self._on_load_finished(self._load_pending.pop(task_id), result)
         except Exception as exc:  # never raise out of a slot
-            self._note = str(exc)
+            self._note = str(exc) or type(exc).__name__
             self._render(self._find_pair(self._ids))
 
     def _on_status_finished(self, key: object, result: object) -> None:
@@ -205,6 +224,7 @@ class FusionSection(QGroupBox):
             self._result_text = str(result) or type(result).__name__
         else:
             self._result_text = ready_text(result.report)  # type: ignore[attr-defined]
+        self._note = ""
         self._render(self._find_pair(self._ids))
 
     def _on_load_finished(self, ids: tuple[str, str], result: object) -> None:
@@ -225,7 +245,7 @@ class FusionSection(QGroupBox):
     def _run_dialog(self, pair: ViewPair, sessions: object) -> None:
         top, side = sessions  # type: ignore[misc]
         ids = (pair.top_session_id, pair.side_session_id)
-        bg = getattr(side, "background_image_path", None)
+        bg = getattr(side.session, "background_image_path", None)
         bg = Path(bg) if bg is not None and Path(bg).is_file() else None
         same_video = self._manifest().mode.layout == "single_video_two_panels"
         dialog = FusionDialog(top, side, pair, same_video, bg, self)
@@ -239,5 +259,5 @@ class FusionSection(QGroupBox):
         try:
             self._store.update_fusion(ids[0], ids[1], dialog.result_settings())
         except Exception as exc:  # the store rejected the change, or the dialog failed
-            self._note = str(exc)
+            self._note = str(exc) or type(exc).__name__
         self.rebuild()

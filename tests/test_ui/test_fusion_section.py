@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +10,10 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-import track2data.api  # noqa: F401  (preloaded: worker threads import it concurrently)
+# Preloaded so the store's own background work (session-facts probes) does not import
+# track2data.api on a worker thread during garbage collection, which can segfault on 3.13.
+# Tests only; production does not preload.
+import track2data.api  # noqa: F401
 from track2data.core.models import FusionSettings, ProjectMode, SessionRef, ViewPair
 from track2data.fusion.fuse import FusionError
 
@@ -43,6 +47,10 @@ def _make(qtbot, tmp_path, monkeypatch, layout="two_videos", with_settings=True)
 
     def fake_fuse(manifest, pair, cache_dir):
         calls["fuse"].append(pair.fusion)
+        gate = calls.get("gate")
+        if gate is not None:
+            gate.wait(5)
+        calls["calib"] = manifest.calibration.px_per_cm
         res = calls["result"]
         if isinstance(res, Exception):
             raise res
@@ -52,7 +60,9 @@ def _make(qtbot, tmp_path, monkeypatch, layout="two_videos", with_settings=True)
         calls["load"].append(pair.top_session_id)
         if calls.get("fail"):
             raise RuntimeError("boom")
-        return SimpleNamespace(), SimpleNamespace(background_image_path=None)
+        bg = calls.get("bg")
+        side = SimpleNamespace(session=SimpleNamespace(background_image_path=bg))
+        return SimpleNamespace(), side
 
     class StubDialog:
         def __init__(self, top, side, pair, same_video, background_path=None, parent=None):
@@ -145,16 +155,16 @@ def test_fusion_error_shown_verbatim(qtbot, tmp_path, monkeypatch) -> None:
 
 
 def test_stale_result_ignored(qtbot, tmp_path, monkeypatch) -> None:
-    _, screen, _ = _make(qtbot, tmp_path, monkeypatch)
-    section = screen._fusion_box
+    _, screen, calls = _make(qtbot, tmp_path, monkeypatch)
+    gate = calls["gate"] = threading.Event()
     _select(screen)
-    qtbot.waitUntil(lambda: screen._fusion_status.text().startswith("Ready"), timeout=3000)
-    old_key = section._key
-    section._on_status_finished(("stale",), SimpleNamespace(report=_report(overlap_frames=1)))
-    assert "1 shared frames" not in screen._fusion_status.text()
-    assert section._key == old_key
+    qtbot.waitUntil(lambda: len(calls["fuse"]) == 1, timeout=3000)
     screen._pairs_table.clearSelection()
     assert screen._fusion_status.text() == "Select a pair."
+    gate.set()
+    qtbot.wait(200)
+    assert screen._fusion_status.text() == "Select a pair."
+    assert screen._fusion_box._result_text is None
 
 
 def test_accept_updates_store_once_and_refreshes(qtbot, tmp_path, monkeypatch) -> None:
@@ -208,9 +218,11 @@ def test_removed_session_while_loading(qtbot, tmp_path, monkeypatch) -> None:
     _select(screen)
     screen._fusion_btn.click()
     store.update_sessions(_refs(tmp_path, ("t_top",)))
+    qtbot.waitUntil(lambda: calls["load"] == ["t_top"], timeout=3000)
     qtbot.wait(150)
     assert calls["dialogs"] == []
     assert OTHER not in [p.fusion for p in store.manifest.view_pairs]
+    assert screen._fusion_status.text() == "Select a pair."
 
 
 def test_removed_during_dialog_writes_nothing(qtbot, tmp_path, monkeypatch) -> None:
@@ -231,3 +243,71 @@ def test_rebuild_never_writes(qtbot, tmp_path, monkeypatch) -> None:
     for _ in range(3):
         screen._fusion_box.rebuild()
         screen.refresh_now()
+
+
+def test_calibration_change_resubmits_status(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import CalibrationConfig
+
+    store, screen, calls = _make(qtbot, tmp_path, monkeypatch)
+    _select(screen)
+    qtbot.waitUntil(lambda: screen._fusion_status.text().startswith("Ready"), timeout=3000)
+    assert len(calls["fuse"]) == 1
+    calls["result"] = _report(agreement_rms_cm=None, agreement_skipped="top view not calibrated")
+    store.update_calibration(CalibrationConfig(mode="scalar", px_per_cm=None))
+    qtbot.waitUntil(lambda: len(calls["fuse"]) == 2, timeout=3000)
+    qtbot.waitUntil(lambda: "not calibrated" in screen._fusion_status.text(), timeout=3000)
+    store.update_calibration(CalibrationConfig(mode="scalar", px_per_cm=5.0))
+    qtbot.waitUntil(lambda: len(calls["fuse"]) == 3, timeout=3000)
+    qtbot.waitUntil(lambda: calls["calib"] == 5.0, timeout=3000)
+
+
+def test_unrelated_change_does_not_resubmit(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make(qtbot, tmp_path, monkeypatch)
+    _select(screen)
+    qtbot.waitUntil(lambda: screen._fusion_status.text().startswith("Ready"), timeout=3000)
+    store.metadataChanged.emit()
+    store.exportChanged.emit()
+    screen.refresh_now()
+    qtbot.wait(150)
+    assert len(calls["fuse"]) == 1
+
+
+def test_dialog_gets_existing_background(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen, calls = _make(qtbot, tmp_path, monkeypatch)
+    bg = tmp_path / "bg.png"
+    bg.write_bytes(b"x")
+    calls["bg"] = bg
+    _select(screen)
+    screen._fusion_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 1, timeout=3000)
+    assert calls["dialogs"][0][1] == bg
+    calls["bg"] = tmp_path / "missing.png"
+    screen._fusion_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 2, timeout=3000)
+    assert calls["dialogs"][1][1] is None
+
+
+def test_fuse_status_names_unexpected_errors(monkeypatch) -> None:
+    from track2data.api import Engine
+    from ui.widgets import fusion_section
+
+    def boom(self, pair):
+        raise KeyError()
+
+    monkeypatch.setattr(Engine, "fuse_pair", boom)
+    with pytest.raises(FusionError, match=r"^KeyError$"):
+        fusion_section.fuse_status(SimpleNamespace(), None, None)
+    monkeypatch.setattr(Engine, "fuse_pair", lambda self, pair: (_ for _ in ()).throw(OSError("x")))
+    with pytest.raises(FusionError, match=r"^OSError: x$"):
+        fusion_section.fuse_status(SimpleNamespace(), None, None)
+
+
+def test_blank_error_and_note_cleared(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen, calls = _make(qtbot, tmp_path, monkeypatch)
+    calls["result"] = FusionError("")
+    _select(screen)
+    qtbot.waitUntil(lambda: screen._fusion_status.text() == "RuntimeError", timeout=3000)
+    section = screen._fusion_box
+    section._note = "old note"
+    section._on_status_finished(section._key, SimpleNamespace(report=_report()))
+    assert screen._fusion_status.text().startswith("Ready")
