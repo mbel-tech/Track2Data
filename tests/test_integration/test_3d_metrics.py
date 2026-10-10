@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.test_fusion import scene
 from tests.test_fusion.scene import FPS, N_FRAMES, TANK_CM, build_scene
-from tests.test_integration.test_3d_run import OLD_SESSIONS_HEADER
+from tests.test_integration.test_3d_run import OLD_SESSIONS_HEADER, _files
 from track2data.api import Engine
 from track2data.core.models import CalibrationConfig, MetricSelection, ProjectMode
 
@@ -73,7 +74,7 @@ def test_exported_values_match_the_scene(scalar_run: Path) -> None:
     nnd = _value(long, "GL-16", "mean_nnd_3d_cm")
     np.testing.assert_allclose(nnd, NND_CM, rtol=0.02)
     assert nnd > _value(long, "GL-1", "mean_nnd_cm")
-    assert _value(long, "GL-16", "n_skipped_frames") == 0
+    assert _value(long, "GL-16", "n_skipped_frames_3d") == 0
 
 
 def test_both_units_have_the_3d_tables(scalar_run: Path) -> None:
@@ -118,3 +119,64 @@ def test_a_2d_project_skips_the_3d_metrics_and_is_unchanged(tmp_path: Path) -> N
     out2 = tmp_path / "out2"
     Engine(control).run(out2, exporters=EXPORTERS)
     pd.testing.assert_frame_equal(_long(out, "t1"), _long(out2, "t1"))
+
+
+def _sinking_side(shift: float = 0.0) -> np.ndarray:
+    """Side rows 150 + 50 k + t: every fish sinks 1 px/frame (0.1 cm/frame in a 20 cm column)."""
+    out = scene.top_xy(shift)
+    t = np.arange(N_FRAMES, dtype=float)
+    for k in range(3):
+        out[:, k, 1] = 150.0 + 50.0 * k + t
+    return out
+
+
+@pytest.fixture(scope="module")
+def sinking_runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    base = tmp_path_factory.mktemp("m3d_sink")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(scene, "side_xy", _sinking_side)
+        manifest = build_scene(base / "data")
+    manifest = manifest.model_copy(
+        update={"metrics": _selection(individual=["IL-16", "IL-17"], group=["GL-1", "GL-16"])}
+    )
+    exporters = [*EXPORTERS, "csv_wide", "feather"]
+    Engine(manifest).run(base / "serial", exporters=exporters)
+    Engine(manifest).run(base / "parallel", exporters=exporters, n_workers=2)
+    return base / "serial", base / "parallel"
+
+
+def test_changing_depth_end_to_end(sinking_runs: Path) -> None:
+    long = _long(sinking_runs[0])
+    step = math.hypot(0.1, 0.1)
+    for fish in (0, 1):
+        assert _value(long, "IL-16", "n_valid_steps", fish) == 99
+        np.testing.assert_allclose(
+            _value(long, "IL-16", "path_length_3d_cm", fish), 99 * step, rtol=1e-4
+        )
+    # fish 2 reaches the floor row (300) at frame 50 and is outside the water column after it
+    assert _value(long, "IL-16", "n_valid_steps", 2) == 50
+    np.testing.assert_allclose(_value(long, "IL-16", "path_length_3d_cm", 2), 50 * step, rtol=1e-3)
+    for fish in range(3):
+        np.testing.assert_allclose(
+            _value(long, "IL-17", "mean_speed_3d_cm_s", fish), FPS * step, rtol=1e-3
+        )
+    np.testing.assert_allclose(_value(long, "GL-16", "mean_nnd_3d_cm"), NND_CM, rtol=1e-3)
+    assert _value(long, "GL-16", "n_skipped_frames_3d") == 49
+    assert _value(long, "GL-1", "n_skipped_frames") == 0
+
+
+def test_merged_group_table_keeps_gl1_and_gl16_skip_counts_apart(sinking_runs: Path) -> None:
+    table = pd.read_csv(sinking_runs[0] / "t1+s1" / "group_dynamics_summary.csv")
+    assert not [c for c in table.columns if c.endswith(("_x", "_y"))]
+    assert table["n_skipped_frames"].iloc[0] == 0
+    assert table["n_skipped_frames_3d"].iloc[0] == 49
+    from track2data.exporters.schema import unit_for_column
+
+    assert unit_for_column("n_skipped_frames_3d") == unit_for_column("n_skipped_frames") == "frames"
+
+
+def test_serial_and_parallel_runs_agree_for_the_3d_metrics(sinking_runs: Path) -> None:
+    serial, parallel = (_files(r) for r in sinking_runs)
+    assert serial.keys() == parallel.keys()
+    assert [n for n in serial if serial[n] != parallel[n]] == []
+    assert b"path_length_3d_cm" in serial["t1+s1/metrics_long.csv"]

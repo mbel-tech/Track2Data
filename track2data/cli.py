@@ -238,7 +238,12 @@ def list_metrics(level: str | None) -> None:
     idy_w = len("IDENTITY")
     # Likewise for the camera view: the CLI user declares it by editing the manifest, so this is
     # where they find out which metrics a declared view switches on.
-    view_w = max(len("VIEW"), *(len(required_views_text(m) or "any") for m in metrics))
+    def _view_text(m: Any) -> str:
+        if getattr(m, "requires_depth_scale", False):
+            return "fused 3-D + cm scale"
+        return required_views_text(m) or "any"
+
+    view_w = max(len("VIEW"), *(len(_view_text(m)) for m in metrics))
 
     click.echo(
         f"{'ID':<{id_w}}  {'LEVEL':<{lvl_w}}  {'IDENTITY':<{idy_w}}  {'VIEW':<{view_w}}  NAME"
@@ -247,7 +252,7 @@ def list_metrics(level: str | None) -> None:
     for m in metrics:
         label = getattr(m, "label", getattr(m, "name", ""))
         needs = "required" if m.requires_identity else "free"
-        view = required_views_text(m) or "any"
+        view = _view_text(m)
         click.echo(
             f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {view:<{view_w}}  {label}"
         )

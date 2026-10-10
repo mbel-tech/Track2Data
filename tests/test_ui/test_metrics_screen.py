@@ -1239,3 +1239,20 @@ def test_depth_scale_row_refreshes_when_the_store_signals_calibration_or_mode(
     assert _is_enabled(item())
     store.update_mode(ProjectMode(dimension="2d"))
     assert not _is_enabled(item())
+
+
+def test_preset_leaves_identity_needing_rows_unticked_when_every_session_is_identity_free(
+    qtbot,
+) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("a", True, None), ("b", True, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    screen.apply_preset("Standard locomotor")  # IL-1, IL-2, IL-4 all need identities
+    screen.flush()
+    assert store.manifest.metrics.individual == []
+    assert screen.current_preset_name() == "None"

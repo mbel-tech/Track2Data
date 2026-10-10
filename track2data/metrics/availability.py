@@ -59,8 +59,9 @@ DEPTH_SCALE_REASONS = frozenset({NEEDS_FUSED_REASON, NEEDS_CM_MODE_REASON, NEEDS
 
 # Manifest-level answers cannot know a unit's scale yet; they pass these stand-ins and leave the
 # per-unit check to the run. The manifest answer is therefore optimistic: it only catches a 2-D
-# project and a bodylength calibration, and a scalar project with no px_per_cm passes it. A
-# caller deciding for a run unit must overwrite both values from the unit.
+# project, a bodylength calibration and a scalar project with no px_per_cm (a session
+# calibration's scale is only known per unit). A caller deciding for a run unit must overwrite
+# both values from the unit.
 _SCALE_ASSUMED = 1.0
 
 
@@ -92,16 +93,20 @@ def depth_scale_reason(
 def manifest_depth_scale(manifest: Any) -> dict[str, Any]:
     """Keyword arguments of :func:`depth_scale_reason` decided from the manifest alone.
 
-    Optimistic about the scale: ``px_per_cm`` / ``depth_height_cm`` are placeholders (1.0), so
-    only the dimension and the calibration mode can rule a metric out here. Replace both from
-    the run unit before asking about a unit.
+    Optimistic about the scale: ``depth_height_cm`` is a placeholder (1.0) and so is
+    ``px_per_cm`` except in scalar mode, where the manifest's own value is used (None when unset).
+    Session calibration is only known per unit. Replace both from the run unit before asking
+    about a unit.
     """
     is_3d = manifest.mode.dimension == "3d"
+    px_per_cm: float | None = _SCALE_ASSUMED
+    if manifest.calibration.mode == "scalar":
+        px_per_cm = manifest.calibration.px_per_cm
     return {
         "dimension": manifest.mode.dimension,
         "calibration_mode": manifest.calibration.mode,
         "has_depth": is_3d,
-        "px_per_cm": _SCALE_ASSUMED,
+        "px_per_cm": px_per_cm,
         "depth_height_cm": _SCALE_ASSUMED,
     }
 

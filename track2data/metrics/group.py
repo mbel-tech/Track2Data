@@ -183,7 +183,7 @@ class NearestNeighbourDistance3D(Metric):
         "mean_nnd_3d_cm",
         "median_nnd_3d_cm",
         "mean_nnd_3d_bl",
-        "n_skipped_frames",
+        "n_skipped_frames_3d",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -271,7 +271,7 @@ class NearestNeighbourDistance3D(Metric):
                     "mean_nnd_3d_cm": mean_nnd,
                     "median_nnd_3d_cm": median_nnd,
                     "mean_nnd_3d_bl": mean_nnd_bl,
-                    "n_skipped_frames": n_skipped,
+                    "n_skipped_frames_3d": n_skipped,
                 }
             ]
         )

@@ -120,6 +120,7 @@ _EXPLICIT_UNITS: dict[str, str] = {
     "n_frames_used": "frames",
     "n_classified_frames": "frames",
     "n_skipped_frames": "frames",
+    "n_skipped_frames_3d": "frames",
     "nan_frames_count": "frames",
     "number_of_error_frames": "frames",
     "n_interpolated": "frames",

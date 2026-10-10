@@ -17,7 +17,7 @@ PX_PER_CM = 8.0
 HEIGHT_CM = 200.0
 COLUMNS = [
     "session_id", "metric_id", "mean_nnd_3d_cm", "median_nnd_3d_cm",
-    "mean_nnd_3d_bl", "n_skipped_frames",
+    "mean_nnd_3d_bl", "n_skipped_frames_3d",
 ]
 STATS = COLUMNS[2:5]
 
@@ -69,7 +69,7 @@ def test_three_fish_known_points() -> None:
     assert row["mean_nnd_3d_cm"] == pytest.approx(22.0 / 3.0)
     assert row["median_nnd_3d_cm"] == pytest.approx(22.0 / 3.0)
     assert row["mean_nnd_3d_bl"] == pytest.approx(22.0 / 3.0 / 2.0)
-    assert row["n_skipped_frames"] == 0
+    assert row["n_skipped_frames_3d"] == 0
 
 
 def test_mean_and_median_over_frames() -> None:
@@ -96,14 +96,14 @@ def test_frame_with_any_nan_component_is_skipped_and_counted() -> None:
     psess.depth[1, 2] = np.nan
     psess.xy[3, 0, 0] = np.nan
     row = _run(psess).iloc[0]
-    assert row["n_skipped_frames"] == 2
+    assert row["n_skipped_frames_3d"] == 2
     assert row["mean_nnd_3d_cm"] == pytest.approx(22.0 / 3.0)
 
 
 def test_one_fish_is_nan_and_every_frame_skipped() -> None:
     row = _run(_fused(np.zeros((6, 1, 3)), body_length_cm=2.0)).iloc[0]
     assert np.isnan(row[STATS].astype(float)).all()
-    assert row["n_skipped_frames"] == 6
+    assert row["n_skipped_frames_3d"] == 6
 
 
 def test_all_frames_skipped_is_nan_not_zero() -> None:
@@ -111,7 +111,7 @@ def test_all_frames_skipped_is_nan_not_zero() -> None:
     psess.depth[:, 0] = np.nan
     row = _run(psess).iloc[0]
     assert np.isnan(row[STATS].astype(float)).all()
-    assert row["n_skipped_frames"] == 4
+    assert row["n_skipped_frames_3d"] == 4
 
 
 def test_unknown_body_length_gives_nan_bl_only() -> None:
@@ -128,7 +128,7 @@ def test_session_without_depth_or_scale_gives_nan_columns(missing: str) -> None:
     assert list(df.columns) == COLUMNS
     assert len(df) == 1
     assert np.isnan(df.iloc[0][STATS].astype(float)).all()
-    assert df.iloc[0]["n_skipped_frames"] == 4
+    assert df.iloc[0]["n_skipped_frames_3d"] == 4
 
 
 def test_equals_gl1_when_depth_is_constant_including_the_bl_convention() -> None:
@@ -140,7 +140,7 @@ def test_equals_gl1_when_depth_is_constant_including_the_bl_convention() -> None
     g1 = NearestNeighbourDistance().compute(psess).iloc[0]
     assert g3["mean_nnd_3d_cm"] == pytest.approx(g1["mean_nnd_cm"], rel=1e-12)
     assert g3["mean_nnd_3d_bl"] == pytest.approx(g1["mean_nnd_bl"], rel=1e-12)
-    assert g3["n_skipped_frames"] == g1["n_skipped_frames"]
+    assert g3["n_skipped_frames_3d"] == g1["n_skipped_frames"]
 
 
 def test_at_least_gl1_per_frame_where_both_are_valid() -> None:
@@ -157,7 +157,7 @@ def test_at_least_gl1_per_frame_where_both_are_valid() -> None:
         g3 = _run(one).iloc[0]
         g1 = NearestNeighbourDistance().compute(one).iloc[0]
         if t in (4, 9):
-            assert np.isnan(g3["mean_nnd_3d_cm"]) and g3["n_skipped_frames"] == 1
+            assert np.isnan(g3["mean_nnd_3d_cm"]) and g3["n_skipped_frames_3d"] == 1
             assert np.isfinite(g1["mean_nnd_cm"])  # GL-1 keeps the frame
             continue
         assert g3["mean_nnd_3d_cm"] >= g1["mean_nnd_cm"] - 1e-12
@@ -175,7 +175,7 @@ def test_binned_values_match_the_windows_of_the_whole_session() -> None:
         part = _run(slice_psess(psess, w.start_row, w.stop_row)).iloc[0]
         assert part["mean_nnd_3d_cm"] == pytest.approx(whole["mean_nnd_3d_cm"])
         assert part["mean_nnd_3d_bl"] == pytest.approx(whole["mean_nnd_3d_bl"])
-        assert part["n_skipped_frames"] == 0
+        assert part["n_skipped_frames_3d"] == 0
 
 
 def test_binned_means_average_to_the_whole_session_mean() -> None:

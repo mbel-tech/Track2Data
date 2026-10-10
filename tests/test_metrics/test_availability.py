@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from track2data.metrics.availability import view_skipped_metrics, view_unavailable_reason
+from track2data.metrics.availability import (
+    depth_scale_reason,
+    view_skipped_metrics,
+    view_unavailable_reason,
+)
 
 
 class _AnyView:
@@ -121,3 +125,27 @@ def test_view_skipped_metrics_adds_the_depth_scale_reason() -> None:
     }
     # without the depth-scale arguments the answer is the camera-view one only
     assert view_skipped_metrics(ids, "top", lookup) == {}
+
+
+def test_manifest_depth_scale_uses_the_scalar_value_when_set() -> None:
+    from tests.test_api import _make_manifest
+    from track2data.core.models import CalibrationConfig, ProjectMode
+    from track2data.metrics.availability import manifest_depth_scale
+
+    three_d = ProjectMode(dimension="3d", layout="two_videos")
+    unset = _make_manifest(calibration=CalibrationConfig(mode="scalar")).model_copy(
+        update={"mode": three_d}
+    )
+    assert manifest_depth_scale(unset)["px_per_cm"] is None
+    from track2data.metrics import get
+
+    assert (
+        depth_scale_reason(get("IL-16"), **manifest_depth_scale(unset))
+        == "needs a cm scale for the top view"
+    )
+    calibration = CalibrationConfig(mode="scalar", px_per_cm=9.0)
+    given = unset.model_copy(update={"calibration": calibration})
+    assert manifest_depth_scale(given)["px_per_cm"] == 9.0
+    assert depth_scale_reason(get("IL-16"), **manifest_depth_scale(given)) is None
+    session = unset.model_copy(update={"calibration": CalibrationConfig(mode="session")})
+    assert depth_scale_reason(get("IL-16"), **manifest_depth_scale(session)) is None
