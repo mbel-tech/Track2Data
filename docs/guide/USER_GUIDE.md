@@ -579,11 +579,12 @@ fusion settings and fuses without an error becomes one **run unit**, named `<top
 `t1+s1`), and is processed like an ordinary session: its top-view tracks give the usual metrics, and
 the fusion's depth gives vertical position (IL-15). Results go to `<run>/<top>+<side>/`.
 
-- **Processing** shows a "3-D run" line under the checks: `Will run: t1+s1, t2+s2`, then one
+- **Processing** shows one more check, a status dot followed by `Will run: t1+s1, t2+s2`, then one
   `Skipped: <session> — <reason>` line per session that will be left out. A skipped session is a
   warning, not a problem: the other units still run. The line says *Checking which pairs can run…*
-  for a moment, because every pair is fused to check it. If no pair can run, Start is off and the line
-  says why ("Nothing will run: ...").
+  for a moment, because every pair is fused to check it. If no pair can run, **Run pipeline** is off
+  and the line says why ("Nothing will run: ..."). The page's **Validate pipeline** button reports the same
+  outcome ("✓ 2 unit(s) will run" or "✗ Nothing will run: ...").
 - **Skip reasons** are "not in a fusable pair" (the session has no pair), "pair t+s: no fusion
   settings for this pair", or the fusion error with the prefix "pair t+s: " (for example, the frame
   rates differ). Both sessions of a skipped pair are listed.
@@ -592,6 +593,11 @@ the fusion's depth gives vertical position (IL-15). Results go to `<run>/<top>+<
   is reported by the Processing check and at run time, and does not stop the other pairs.
 - **Preview ▸ Trajectories** lists the run units; loading one fuses the pair and shows the top-view
   tracks under the unit's name.
+- **Validate** (and `track2data validate`) looks only at the sessions that run: the consistency
+  checks (frame rate, resolution, calibration spread) read the top session of each pair with fusion
+  settings, so a side camera with another resolution is not reported, and session calibration needs a
+  scale on both sessions of such pairs (the side view is preprocessed before fusing), not on the
+  sessions that are skipped.
 - **Export** runs the same units. `track2data run` does the same from the command line and prints the
   skipped sessions; `track2data validate` lists unfusable pairs and unpaired sessions as notes, and fails
   only when no pair can run.
@@ -601,7 +607,18 @@ What the files contain, for a fused unit:
 - The per-frame table (`master_fish_by_frame.csv`, the Feather file and the Excel sheet) has two more
   columns, `depth_fraction` (0 = water surface, 1 = tank floor) and `depth_cm` (the fraction times the
   tank height; empty when the height is unknown). A frame where the position or the depth is missing
-  has both empty. The wide CSV has no per-frame table.
+  has both empty. The wide CSV has no per-frame table. Where the fused frames jump (a frame one of
+  the views lacks), the track keeps a break, as for a 2-D session tracked in separate intervals: no
+  row is written for the missing frames, and path length and the other frame-to-frame metrics do not
+  bridge the gap.
+- **Fish numbering.** `individual_id` numbers the fused fish 0, 1, 2, … in the top view's order.
+  When the fish map leaves a top fish out, the ones after it move up (top fish 0 and 2 become fused
+  fish 0 and 1); `individual_label` keeps the top view's identity (`0` and `2`).
+- **Metadata.** A unit carries the TOP session's metadata: the row you mapped for `t1` gives the
+  `group_id`, treatment and other columns of `t1+s1` (the side session's row is not used).
+  Per-animal metadata matches the fused fish by the top session's label, or, with matching by index,
+  by the top session's animal index (so in the example above the row for animal 2 goes to fused
+  fish 1).
 - **IL-15** takes the depth from the fusion: mean, median and SD of the depth fraction,
   `mean_depth_cm`, and `frac_outside_extent`, the share of the fish's side-view positions that fell
   outside the water column (they are left empty in the depth, not clipped). `depth_extent_source` is
@@ -609,11 +626,16 @@ What the files contain, for a fused unit:
 - The unit's `README.md` has a **3-D fusion** section (settings, frames in common, fish fused and left
   out, positions outside the water column, agreement), and `manifest.json` repeats it under
   `run_metadata.fusion`.
+- `PROJECT_SUMMARY.md` says "Units processed (fused pairs): 2 of 2; 1 session skipped".
 - `sessions.csv` has one row per unit, with extra columns for the fusion: `unit_kind`,
   `top_session_id`, `side_session_id`, the offset, axis, flip, surface and floor rows and tank height,
   the overlap, fish fused and left out, positions outside the column, the agreement and its warning or
   reason it was skipped, and `side_trajectory_sha256` (the checksum of the side view's trajectory
-  file; the usual `trajectory_sha256` is the top view's).
+  file; the usual `trajectory_sha256` is the top view's). A unit that fails after fusing keeps
+  these columns next to its error.
+- The unit's README lists the top session's preprocessing steps; the side session went through the
+  same preprocessing settings. The pooled `all_sessions/manifest.json` repeats each unit's fusion
+  under `run_metadata.fusion`.
 - If anything was skipped, `skipped.csv` (`session_id`, `reason`) and a **Skipped sessions** table in
   `PROJECT_SUMMARY.md` list it. Without skips, neither exists. A 2-D project's output is unchanged.
 
@@ -623,9 +645,6 @@ Limits of this version:
 - There is no 3-D speed, path length or neighbour distance yet: speed, distances and the like are
   measured in the top-view plane. The 3-D versions are the next step (sub-project B2).
 - `sensitivity` refuses 3-D projects ("sensitivity is not supported for 3-D projects yet").
-- Session metadata (the table you map on the Metadata page) is matched to the project's single
-  sessions by their ids, so it does not reach the fused units (`t1+s1`) yet: their outputs have no
-  metadata columns.
 - Every run fuses the pairs again; nothing fused is cached.
 
 ## 9. Preview

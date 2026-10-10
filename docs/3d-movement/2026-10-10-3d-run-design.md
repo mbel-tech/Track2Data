@@ -131,7 +131,28 @@ Where the build differs from the text above, the build is right.
 - **The plan is built on the worker pool** (like the Fusion section), never on the GUI thread; stale
   results are ignored, and `TaskRunner.closed` stops resubmission while the window closes.
 - **Workers fuse their own pair by index.** A parallel worker receives the manifest JSON, the unit
-  kind and the unit's index in the plan, rebuilds the plan and fuses that pair; no array is pickled.
+  kind and the unit's index into `manifest.view_pairs` (a pair unit) or `manifest.sessions` (a
+  session unit), builds that one `RunUnit` and fuses the pair; it does not rebuild the plan, and no
+  array is pickled.
+- **Skip reason and view helper names.** An unpaired session's reason is "not in a fusable pair" and a
+  pair without settings gives "pair t+s: no fusion settings for this pair" (not "not in a pair" /
+  "pair has no fusion settings"). The fused session's view comes from `Engine.camera_view_for_psess`
+  (`"top"` when the session has a depth), not from `camera_view_for(session)`, which still takes a
+  plain `Session`.
+- **`frac_outside_extent` reads `depth_outside_mask`,** so a time bin counts its own outside samples;
+  `depth_outside` is that mask's sum over the session.
+- **Frame jumps get a separator row.** `fuse` inserts one NaN separator row (with `separator_mask` and
+  `tracked_mask` set, the 2-D convention of `preprocess/timeline_expand.py`) on every per-row array
+  where the kept frames jump, so path length and the other frame-to-frame metrics never bridge a gap;
+  separator rows are never exported. A fusion without jumps is unchanged.
+- **Metadata.** A unit carries the TOP session's metadata (looked up by the unit id among the
+  manifest's pairs, never by splitting it on `+`); per-animal metadata matches by the top session's
+  label, or by its index through `PreprocessedSession.source_animal_index`.
+- **Pre-flight checks read the sessions that run.** In 3-D the consistency report summarises the top
+  session of each pair with fusion settings, and session calibration checks both sessions of such pairs.
+- **Run records.** `PROJECT_SUMMARY.md` says "Units processed (fused pairs): N of M; K sessions
+  skipped" in 3-D; the pooled `all_sessions/manifest.json` carries each unit's `run_metadata.fusion`;
+  the unit README says its preprocessing steps are the top session's.
 - **`depth_outside_mask` was added** (per frame and animal) beside `depth_outside`, so IL-15 counts the
   outside positions of a time window, not only of the whole session.
 - **`validate()` stays blocking-only.** The notes about unfusable pairs and unpaired sessions come from
@@ -149,8 +170,6 @@ Where the build differs from the text above, the build is right.
 
 ### Known limits
 
-- Session-level metadata is keyed by manifest session ids, so it does **not** attach to pair units
-  (`t1+s1`) yet.
 - All fused data of a plan is recomputed on every run (the plan, the Preview of a unit, a serial run
   from the GUI); nothing fused is cached.
 - `csv_wide` has no per-frame table, so it carries no depth columns.

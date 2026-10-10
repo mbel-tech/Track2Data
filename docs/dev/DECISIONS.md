@@ -873,6 +873,8 @@ hiding buttons.
 
 ### D-038 · ID correspondence between views: G owns the pair record, pairing is by regex, and the Views page never blocks
 
+Superseded in part by D-041 (3-D projects now compute fused pairs, so "3-D cannot compute anyway" no longer holds; pairs still never block Next).
+
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-id-correspondence-design.md`
 (sub-project G of `docs/3d-movement/2026-10-08-3d-roadmap.md`). Replaces the reserved `id_map` of D-037.
 
@@ -940,6 +942,8 @@ later stages (fusion D, 3-D metrics B) two ordinary sessions with their own vide
 
 ### D-040 · Fusion of top and side views: two cameras at right angles, computed on demand, depth beside the top-view session
 
+Superseded in part by D-041 (a 3-D project now runs its fused pairs and `Engine.require_computable()` gates on the run plan; the fusion itself stands, and since D-041 a frame jump in the fused rows gets a NaN separator row).
+
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-fusion-design.md`
 (sub-project D of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-038 (the pair record
 gains the fusion settings) and D-039 (the fused session is built from the two panel sessions) and
@@ -1006,9 +1010,18 @@ session only ("3-D projects compute fused sessions only"), `run_session` is 2-D 
 unfusable pairs come from `Engine.validation_issues()`. *Running.* A pair unit takes its
 `PreprocessedSession` from `fuse_pair`; everything after is the 2-D code. A serial run reuses the
 plan's fusion; a parallel worker receives the unit index and the manifest (no arrays) and fuses its
-own pair, so serial and parallel runs write identical files. Fused sessions are not cached.
+own pair, so serial and parallel runs write identical files. Fused sessions are not cached. Where
+the fused frames jump, `fuse` inserts one NaN separator row on every per-row array (the 2-D
+convention of `preprocess/timeline_expand.py`), so no metric that diffs rows bridges a gap.
+*Metadata.* A unit carries the TOP session's metadata (`Engine._metadata_key` looks the unit id up
+among the manifest's pairs, never splitting it on `+`); per-animal metadata matches by label, or by
+the top session's index through `PreprocessedSession.source_animal_index`. *Pre-flight.* In 3-D the
+consistency report reads the top session of each pair with fusion settings, and session calibration
+checks both sessions of such pairs; skipped sessions are not checked.
 *IL-15.* Reads `psess.depth`: mean, median and SD (ddof 1) of the depth fraction, `mean_depth_cm` =
-mean x tank height, `frac_outside_extent` from the new per-animal `depth_outside` counts,
+mean x tank height, `frac_outside_extent` from `depth_outside_mask` (the per-frame flags of side
+positions outside the column, sliced with the depth so a time bin counts its own; the per-animal
+`depth_outside` counts are its sum over the whole session and feed the run records),
 `depth_extent_source` = "fusion". `Metric.uses_depth` (IL-15 only) makes it available for a session
 with depth whatever the camera view; a fused session is top-view for every other metric
 (`camera_view_for_psess`, and the manifest-level helper `manifest_view`). *Exports.* Per-frame
@@ -1020,9 +1033,8 @@ sessions" section of `PROJECT_SUMMARY.md`, written only when something was skipp
 was added beside `depth_outside`. *UI.* `ProjectStore.run_plan` (`RunPlanWatcher`) builds the plan on
 the store's worker pool and drops stale results; Processing, Export and Preview read it; stage status
 blocks only when no pair has fusion settings (a cheap manifest check). *Limits.* Zones are one set
-applied to the top view; no 3-D speed, path length or neighbour distance (B2); session-level metadata
-is keyed by manifest session ids, so it does not attach to pair units; all fused data of a plan is
-recomputed on every run; `csv_wide` has no per-frame table.
+applied to the top view; no 3-D speed, path length or neighbour distance (B2); all fused data of a
+plan is recomputed on every run; `csv_wide` has no per-frame table.
 
 **Rationale:** The fusion already yields an ordinary top-view session with a depth, so the 2-D
 pipeline runs on it unchanged and only IL-15 and the exporters had to learn the depth. Running pairs,
