@@ -197,3 +197,32 @@ def test_engine_hands_the_pipeline_kinematics_config_to_the_metric() -> None:
     assert cfg["kinematics"]["method"] == "forward_difference"
     assert cfg["kinematics"]["window"] == 7
     assert "kinematics" not in Engine(manifest)._effective_cfg(Speed, _fused(_ramp(10)))
+
+
+def _engine_vz(method: str) -> float:
+    from tests.test_api import _make_manifest
+    from track2data.api import Engine
+    from track2data.core.models import ProjectMode
+
+    manifest = _make_manifest()
+    manifest.mode = ProjectMode(dimension="3d", layout="two_videos")
+    manifest.preprocess.kinematics = KinematicsCfg(method=method)  # type: ignore[arg-type]
+    manifest.metrics.individual = ["IL-17"]
+    manifest.metrics.group = []
+    manifest.metrics.zone = []
+    manifest.metrics.diagnostic = []
+    z = (np.arange(20, dtype=float) ** 2) * 0.1  # cm, quadratic: estimators disagree
+    pos = np.zeros((20, 1, 3))
+    pos[..., 2] = z[:, None]
+    psess = _fused(pos)
+    out = Engine(manifest).compute_metrics(psess, identity_free=False)
+    return float(out["IL-17"].loc[0, "max_speed_3d_cm_s"])
+
+
+def test_kinematics_config_reaches_the_metric_through_compute_metrics() -> None:
+    fwd = _engine_vz("forward_difference")
+    sg = _engine_vz("savgol")
+    z = (np.arange(20, dtype=float) ** 2) * 0.1
+    # forward difference: (z[t+1] - z[t]) * fps, last frame NaN -> max at t = 18
+    assert fwd == pytest.approx((z[19] - z[18]) * FPS)
+    assert sg != pytest.approx(fwd)

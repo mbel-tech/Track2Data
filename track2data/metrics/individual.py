@@ -1989,7 +1989,7 @@ class Speed3D(Metric):
 
         speed_3d: np.ndarray | None = None
         height, scale = session.depth_height_cm, session.px_per_cm
-        if positions_cm(session) is not None and height is not None and scale is not None:
+        if session.depth is not None and height is not None and scale is not None:
             kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
             z = np.asarray(session.depth, dtype=np.float64) * float(height)
             # compute_kinematics differentiates an (n, animals, 2) array; [Z, 0] makes its

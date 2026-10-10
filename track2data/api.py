@@ -786,6 +786,9 @@ class Engine:
           3. This session's own derived values (metrics/derived.py) --
              never user-settable, so they always win, even against a
              stale/hand-edited manifest that tries to set one.
+          4. For metrics with ``uses_kinematics_cfg`` (IL-17), the project's
+             KinematicsCfg under ``cfg["kinematics"]``: the estimator the
+             pipeline used, not user-settable per metric.
 
         Metric.compute(session, cfg) has accepted this dict since it
         was written, but nothing ever called it with one -- every
