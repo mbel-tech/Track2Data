@@ -579,7 +579,7 @@ Results are written to `<project>/exports/<timestamp>/<session>/`.
 In a 3-D project the run works on *fused pairs*, not on single sessions. Each top/side pair that has
 fusion settings and fuses without an error becomes one **run unit**, named `<top>+<side>` (for example
 `t1+s1`), and is processed like an ordinary session: its top-view tracks give the usual metrics, and
-the fusion's depth gives vertical position (IL-15). Results go to `<run>/<top>+<side>/`.
+the fusion's depth gives vertical position (IL-15) and the 3-D metrics (see [3-D metrics](#3-d-metrics)). Results go to `<run>/<top>+<side>/`.
 
 - **Processing** shows one more check, a status dot followed by `Will run: t1+s1, t2+s2`, then one
   `Skipped: <session> — <reason>` line per session that will be left out. A skipped session is a
@@ -651,7 +651,7 @@ keep measuring in the top-view plane.
 |---|---|---|
 | **IL-16** 3-D Distance Travelled | `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` | cm, body lengths, count |
 | **IL-17** 3-D Speed (mean / median / max) | `mean_speed_3d_cm_s`, `median_speed_3d_cm_s`, `max_speed_3d_cm_s`, `mean_speed_3d_bl_s` | cm/s, body lengths/s |
-| **GL-16** 3-D Nearest-Neighbour Distance | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames` | cm, body lengths, count |
+| **GL-16** 3-D Nearest-Neighbour Distance | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames_3d` | cm, body lengths, frames |
 
 - **Positions in cm.** x and y are the top view's pixels divided by its scale; the depth is the
   depth fraction times the **tank height** of the pair's fusion settings. Distances are straight
@@ -661,16 +661,19 @@ keep measuring in the top-view plane.
   **session** calibration on the Calibration screen. Under **body-length** calibration there is no
   top-view scale, so the three rows are greyed out ("needs a cm scale for the top view (use scalar
   or session calibration)"). In a 2-D project they are greyed out too ("needs a fused 3-D session").
-  If a unit still has no scale at run time (for example session calibration where the sessions carry
-  no length unit), the metrics are skipped for that unit with "needs a cm scale for the top view",
-  listed under **Metrics skipped** in its README; the other metrics still run. Track2Data does not
+  Scalar calibration with no pixels-per-cm value set greys them out as well. If a run starts anyway
+  (for example `track2data run`, which warns "Scalar calibration selected but px_per_cm is not set"
+  and carries on), the metrics are skipped for every unit with "needs a cm scale for the top view",
+  listed under **Metrics skipped** in its README; the other metrics still run. Session calibration
+  where the sessions carry no length unit is different: it blocks the whole 3-D run (CAL-SESSION-MISSING),
+  as for any metric. Track2Data does not
   estimate the scale from the fusion, because that would add an error the outputs would not show.
 - **Depth comes from the fusion settings:** the surface and floor rows and the tank height you set
   for the pair. A wrong tank height scales every vertical distance and speed.
 - **Gaps give empty values, never 0.** A step (IL-16) needs a valid x, y and depth at both of its
   frames; `n_valid_steps` says how many were used. IL-17 uses the frames where the horizontal and the
   vertical speed both exist. GL-16 skips a frame where any fish lacks x, y or depth and counts it in
-  `n_skipped_frames`. An animal (or a group) with nothing valid is empty. IL-16 and IL-17 need
+  `n_skipped_frames_3d`. An animal (or a group) with nothing valid is empty. IL-16 and IL-17 need
   identities, as IL-1 and IL-2 do; GL-16 does not.
 - **IL-17** takes the horizontal speed from the same speed as IL-2 and the vertical speed from the
   depth with the same speed estimator as the rest of the run. Over the

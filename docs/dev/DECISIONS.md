@@ -1070,7 +1070,7 @@ when unknown. *Guarantees.* IL-16 is at least IL-1 only over the steps where dep
 IL-17 is at least IL-2's cm/s only over frames where the vertical speed is finite (the estimator
 may give none, for example the last frame of the forward difference); GL-16 is at least GL-1 only
 per frame where both are valid. *Presets.* A preset leaves greyed-out rows unticked, so *All metrics*
-never selects a metric the project cannot run.
+never selects a metric the project cannot run (this covers every greyed-out row, so with all sessions identity-free *Standard locomotor* ticks nothing). *Outputs.* GL-16's skip count is `n_skipped_frames_3d` so that it cannot collide with GL-1's in the merged group tables. `codebook.csv` lists the whole registry, so 2-D runs gain its three metrics' rows; every other 2-D output is unchanged.
 
 **Rationale:** An error hidden in a derived scale is worse than a refusal that says what to set.
 Reusing the one availability function and the existing skip list keeps the Metrics screen, `validate`,

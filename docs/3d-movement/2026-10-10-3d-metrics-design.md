@@ -52,7 +52,7 @@ keep running on the top view.
 3. **GL-16, 3-D nearest-neighbour distance** (`track2data/metrics/group.py`). As GL-1 with 3-D
    points: per frame the kd-tree nearest-neighbour distance of every fish, the mean over fish; frames
    where any fish lacks x, y or depth are skipped and counted. Columns: `session_id, metric_id,
-   mean_nnd_3d_cm, median_nnd_3d_cm, mean_nnd_3d_bl, n_skipped_frames`. `_bl` uses the same body
+   mean_nnd_3d_cm, median_nnd_3d_cm, mean_nnd_3d_bl, n_skipped_frames_3d`. `_bl` uses the same body
    length convention as GL-1's `mean_nnd_bl`, converted to cm. One fish gives NaN.
 4. **Availability** (`track2data/metrics/base.py`, `availability.py`, the Engine and the Metrics
    screen). A new class flag `requires_depth_scale: ClassVar[bool] = False`, True for the three.
@@ -62,8 +62,8 @@ keep running on the top view.
      (use scalar or session calibration)"; otherwise available. Reuse the `manifest_view` helper
      style of B1.
    - Run time, per fused unit: skipped, with the reason in the run README, when the unit's
-     `px_per_cm` is None or `depth_height_cm` is None (for example session calibration without a
-     length unit). `compute()` called directly on such a session returns NaN columns.
+     `px_per_cm` is None or `depth_height_cm` is None (in practice scalar calibration with no
+     `px_per_cm`; session calibration without a length unit blocks the whole run instead). `compute()` called directly on such a session returns NaN columns.
 5. **Outputs and docs.** The new columns reach the metric tables, `all_sessions`, the README metric
    list, and `docs/METRICS_SPEC.md` (a section per metric with definition, formula, inputs,
    assumptions and warnings: depth comes from a side camera at right angles, no refraction or
@@ -72,7 +72,7 @@ keep running on the top view.
    `docs/METRIC_REFERENCES.csv` and the reference-consistency tests are updated as the existing
    metrics require. The user guide and CHANGELOG describe them.
 6. **2-D and old projects unchanged.** The metrics are not selectable in 2-D, no existing output
-   changes, and a 2-D run is byte-identical.
+   changes, and a 2-D run is byte-identical, except that `codebook.csv` lists the whole registry and so gains rows for IL-16, IL-17 and GL-16.
 
 ## Testing
 
@@ -111,11 +111,19 @@ Where the build differs from the text above, the build is right.
   inequality holds only per frame where both are valid, not for the two means.
 - **Skip reasons.** The three reasons are constants in `availability.py` (`NEEDS_FUSED_REASON`,
   `NEEDS_CM_MODE_REASON`, `NEEDS_CM_SCALE_REASON`). The manifest-level answer is optimistic (it
-  catches a 2-D project and body-length calibration; a scalar project without `px_per_cm` and a
-  session calibration without a length unit are caught per unit at run time). A unit always has a tank
+  catches a 2-D project, body-length calibration and, in scalar mode, a missing `px_per_cm`; a unit
+  whose scale is missing anyway, as when `track2data run` carries on after its warning, is caught per
+  unit at run time. Session calibration without a length unit never reaches the metrics: it raises
+  CAL-SESSION-MISSING and the 3-D run refuses). A unit always has a tank
   height (`FusionSettings.tank_height_cm > 0`), so in practice the run-time skip is a missing
   `px_per_cm`. `validate`, the log and the Metrics screen name the cause that fired.
 - **The Metrics screen refreshes** when the calibration or the mode changes, and its presets leave
   greyed-out rows unticked (a 2-D project's *All metrics* no longer ticks the 3-D metrics).
+- **GL-16's skip count is `n_skipped_frames_3d`** (not `n_skipped_frames`): the merged group tables
+  join GL-1 and GL-16 in one row, and a shared name would have been suffixed `_x`/`_y` when the counts
+  differ. The codebook maps it to "frames".
+- **`list-metrics`** prints "fused 3-D + cm scale" in the VIEW column of IL-16, IL-17 and GL-16.
+- **Presets** leave every greyed-out row unticked, not only the 3-D ones: in a project whose sessions
+  are all identity-free, *Standard locomotor* ticks nothing.
 - **Metric counts** in the README and ROADMAP now say 54.
 
