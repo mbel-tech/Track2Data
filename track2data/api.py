@@ -813,6 +813,9 @@ class Engine:
                 cfg[key] = value
 
         cfg.update(derive_metric_params(metric_cls.id, psess, self._manifest.zones))
+        if metric_cls.uses_kinematics_cfg:
+            # The estimator the pipeline used for ``psess.kinematics`` (not user-settable here).
+            cfg["kinematics"] = self._manifest.preprocess.kinematics.model_dump()
         return cfg
 
     def identity_free_for(

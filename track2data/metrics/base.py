@@ -143,6 +143,10 @@ class Metric(ABC):
     # True for a metric that needs the fused session's 3-D positions in cm (depth plus a cm scale
     # for the top view). Availability goes through metrics/availability.py: depth_scale_reason.
     requires_depth_scale: ClassVar[bool] = False
+    # True for a metric that differentiates a series itself and so must use the estimator the
+    # pipeline used for ``kinematics``: the Engine then puts the manifest's KinematicsCfg
+    # (as a dict) under ``cfg["kinematics"]``.
+    uses_kinematics_cfg: ClassVar[bool] = False
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False
@@ -152,7 +156,7 @@ class Metric(ABC):
     window_safe: ClassVar[bool] = True
     output_columns: ClassVar[list[str]]
     documentation: ClassVar[MetricDocumentation]
-    # Most metrics (31 of 52 today) take no configuration at all --
+    # Most metrics (32 of 53 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.

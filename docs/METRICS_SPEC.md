@@ -129,7 +129,7 @@ Individual        Locomotion               IL-1, IL-2, IL-6
                   Activity / freezing      IL-4, IL-7
                   Space use                IL-3, IL-9, IL-10, IL-14
                   Vertical position        IL-15
-                  3-D movement             IL-16
+                  3-D movement             IL-16, IL-17
                   Path geometry            IL-5, IL-8, IL-11
 Group             Social spacing           GL-1, GL-2, GL-13
                   Cohesion                 GL-4, GL-6, GL-10, GL-15
@@ -426,6 +426,23 @@ info-button modal (§6).
 | **Warnings** | Under-smoothed data inflates the length, as for IL-1 (and depth noise adds to it). No refraction or parallax correction. A wrong tank height scales every vertical distance. Over the steps where depth is also finite (see `n_valid_steps`) it is at least IL-1. Without depth or a cm scale all columns are NaN |
 | **Reference** | Standard kinematics |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
+
+#### IL-17 — 3-D speed (mean / median / max)
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Locomotor speed in 3-D |
+| **Level** | Individual; trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.kinematics.speed_px_s`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session; the pipeline's `KinematicsCfg` |
+| **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
+| **Formula** | `v3[t, k] = sqrt(vh² + vz²)` with `vh = speed_px_s[t, k] / px_per_cm` (identical to the horizontal part of IL-2 in cm/s) and `vz` the vertical speed in cm/s of `Z = depth · tank_height_cm`, from the same estimator and window as the pipeline's kinematics (Savitzky-Golay by default, forward difference when the project selects it); mean/median/max over frames where both `vh` and `vz` are finite |
+| **Output columns** | `individual_id`, `mean_speed_3d_cm_s`, `median_speed_3d_cm_s`, `max_speed_3d_cm_s`, `mean_speed_3d_bl_s` |
+| **Units** | cm/s / BL/s |
+| **Assumptions** | The depth comes from a side camera at right angles to the top camera. A frame needs both speeds finite: where the estimator gives no vertical speed (the last frame of the forward-difference estimator, a depth segment shorter than the window needs) the frame is left out of the 3-D speed, never counted as 0. An animal with no such frame is NaN. In a binned run `vz` is estimated inside each bin, so the estimator's edge frames differ slightly from the whole-session values |
+| **Warnings** | Max speed is sensitive to jump artefacts and to depth noise. No refraction or parallax correction. A wrong tank height scales every vertical speed. Over the frames where the vertical speed is finite, the 3-D speed is at least IL-2's cm/s (not an unconditional inequality: frames without a vertical speed are in IL-2 but not here). Without depth or a cm scale all columns are NaN |
+| **Reference** | Standard kinematics |
+| **Supporting references** | Bjorneraas et al. 2010, J. Wildl. Manage. 74(6):1361-1366 (screening GPS location data for errors using animal movement characteristics) (DOI: 10.2193/2009-405) |
 
 ### 4.2 Zone metrics
 
@@ -844,6 +861,7 @@ three together.
 | IL-14 Wall-Distance Thigmotaxis | ❌ | Per-animal time series |
 | IL-15 Vertical Position (Depth) | ❌ | Per-animal time series |
 | IL-16 3-D Distance Travelled | ❌ | Per-animal time series |
+| IL-17 3-D Speed | ❌ | Per-animal time series |
 | GL-1 Nearest-Neighbour Distance | ✅ | Unordered point set per frame |
 | GL-2 Inter-Individual Distance | ✅ | Unordered point set per frame |
 | GL-3 Polarisation | ❌ | Heading requires per-individual tracklets |
@@ -1172,6 +1190,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | IL-14 | `metrics/individual.py` | `WallDistanceThigmotaxis` | `shapely` -- the only IL-* metric with that dependency |
 | IL-15 | `metrics/individual.py` | `VerticalPosition` | np-only; the water column comes from `zones/extent.py`, derived in `metrics/derived.py`; gated by `Metric.valid_camera_views` (`metrics/availability.py`) |
 | IL-16 | `metrics/individual.py` | `PathLength3D` | np-only; positions from `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` (`metrics/availability.py`) |
+| IL-17 | `metrics/individual.py` | `Speed3D` | np-only; positions from `metrics/geometry3d.py`; vertical speed from `compute_kinematics` with the pipeline's `KinematicsCfg` (handed over by the Engine through `Metric.uses_kinematics_cfg`); gated by `Metric.requires_depth_scale` |
 
 ### 5.1 Shared computations (no duplicated work)
 
@@ -1402,7 +1421,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 16 of the 36
+   it is disabled with an explanatory tooltip for the 17 of the 37
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by
