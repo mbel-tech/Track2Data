@@ -864,7 +864,29 @@ def test_social_preset_selects_group_metrics_and_everything_selects_all(qtbot) -
     screen.apply_preset("All metrics")
     screen.flush()
     m = store.manifest.metrics
-    assert len(m.individual) == 15 and len(m.group) == 14 and len(m.zone) == 9
+    # IL-15, IL-16, IL-17 and GL-16 are greyed out in a 2-D project, so the preset skips them
+    assert len(m.individual) == 12 and len(m.group) == 13 and len(m.zone) == 9
+    assert {"IL-15", "IL-16", "IL-17"}.isdisjoint(m.individual) and "GL-16" not in m.group
+
+
+def test_all_metrics_preset_includes_the_3d_metrics_in_a_3d_scalar_project(qtbot) -> None:
+    from track2data.core.models import CalibrationConfig, ProjectMode
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "mode": ProjectMode(dimension="3d", layout="two_videos"),
+            "calibration": CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    screen.apply_preset("All metrics")
+    screen.flush()
+    m = store.manifest.metrics
+    assert {"IL-16", "IL-17"} <= set(m.individual) and "GL-16" in m.group
+    assert screen.current_preset_name() == "All metrics"
 
 
 def test_all_presets_only_name_registered_metrics() -> None:

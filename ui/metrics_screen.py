@@ -261,12 +261,17 @@ class MetricsScreen(QWidget):
         self._preset_combo.setCurrentIndex(0)
 
     def apply_preset(self, name: str) -> None:
-        """Tick exactly the metrics of preset *name* (all others unticked)."""
+        """Tick exactly the metrics of preset *name* (all others unticked).
+
+        A row the project cannot run (greyed out, for example a 3-D metric in a 2-D project) is
+        left unticked, so a preset never selects a metric the engine would only skip.
+        """
         ids = PRESETS[name]
         for _tab, table in self._tables():
             for row in range(table.rowCount()):
                 item = table.item(row, _COL_INCLUDE)
-                wanted = ids is None or item.data(_ROLE_METRIC_ID) in ids
+                enabled = bool(item.flags() & Qt.ItemFlag.ItemIsEnabled)
+                wanted = enabled and (ids is None or item.data(_ROLE_METRIC_ID) in ids)
                 item.setCheckState(Qt.CheckState.Checked if wanted else Qt.CheckState.Unchecked)
 
     def _update_counter(self) -> None:
@@ -291,13 +296,15 @@ class MetricsScreen(QWidget):
         }
         if not selected:
             return "None"
+        # Greyed-out rows are never part of a preset (see apply_preset).
         everything = {
             table.item(row, _COL_INCLUDE).data(_ROLE_METRIC_ID)
             for _n, table in self._tables()
             for row in range(table.rowCount())
+            if table.item(row, _COL_INCLUDE).flags() & Qt.ItemFlag.ItemIsEnabled
         }
         for name, ids in PRESETS.items():
-            if selected == (everything if ids is None else set(ids)):
+            if selected == (everything if ids is None else set(ids) & everything):
                 return name
         return "Custom"
 
