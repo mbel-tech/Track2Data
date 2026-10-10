@@ -142,6 +142,7 @@ def fuse(
         depth=depth,
         depth_height_cm=fs.tank_height_cm,
         depth_outside=outside.sum(axis=0).astype(int),
+        depth_outside_mask=outside,
     )
     rms: float | None = None
     per_fish: dict[str, float | None] = {}

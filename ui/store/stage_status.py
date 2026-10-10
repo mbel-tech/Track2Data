@@ -32,8 +32,8 @@ def _missing_water_column(manifest: ProjectManifest) -> list[str]:
     Empty unless the project declared a side view, something selected is only meaningful for
     one, and no main-level zone outlines the water.
     """
-    if manifest.scene.camera_view != "side":
-        return []
+    if manifest.mode.dimension == "3d" or manifest.scene.camera_view != "side":
+        return []  # a 3-D project takes its depth from the fusion, not from zones
     sel = manifest.metrics
     needing = view_dependent_metrics(
         [*sel.individual, *sel.group, *sel.zone], "side", _get_metric

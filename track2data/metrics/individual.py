@@ -1637,7 +1637,8 @@ class VerticalPosition(Metric):
     Depth is a fraction: 0 at the water surface, 1 at the tank floor. The surface and floor are
     the top and bottom edges of the project's main zones (see ``zones.extent``). Only a project
     that declared a side camera view is offered this metric: on a top-down recording the y axis
-    is not depth.
+    is not depth. On a fused 3-D session the depth comes from the fusion's water column instead
+    (the surface and floor rows of the pair's fusion settings), whatever the camera view.
     """
 
     id = "IL-15"
@@ -1715,7 +1716,8 @@ class VerticalPosition(Metric):
             derived=True,
             help=(
                 "Derived from the project's main zones: the top edge is the water surface, "
-                "the bottom edge the tank floor."
+                "the bottom edge the tank floor. On a fused session the depth comes from the "
+                "fusion's water column and this is not used."
             ),
         ),
     ]
@@ -1728,14 +1730,16 @@ class VerticalPosition(Metric):
     def _compute_fused(self, session: PreprocessedSession) -> pd.DataFrame:
         """Depth from the fused depth array (already a 0-1 fraction; NaN where missing or outside
         the water column). Outside samples were dropped by the fusion and are counted in
-        ``depth_outside``, so the share outside is that count over all valid samples."""
+        ``depth_outside_mask`` (sliced with the depth, so a time window counts its own), so the
+        share outside is that count over all valid samples."""
         assert session.depth is not None
         height = session.depth_height_cm
         records: list[dict] = []
         for k in range(session.n_animals):
             d = session.depth[:, k]
             d = d[np.isfinite(d)]
-            n_out = int(session.depth_outside[k]) if session.depth_outside is not None else 0
+            mask = session.depth_outside_mask
+            n_out = int(mask[:, k].sum()) if mask is not None else None
             row: dict = {
                 "session_id": session.session_id,
                 "metric_id": self.id,
@@ -1747,8 +1751,9 @@ class VerticalPosition(Metric):
                 "frac_outside_extent": np.nan,
                 "depth_extent_source": "fusion",
             }
-            total = n_out + d.size
-            if total:
+            # without the mask the outside share is unknown (NaN), never 0
+            total = n_out + d.size if n_out is not None else 0
+            if total and n_out is not None:
                 row["frac_outside_extent"] = float(n_out / total)
             if d.size:
                 mean = float(d.mean())
@@ -1758,7 +1763,7 @@ class VerticalPosition(Metric):
                     row["sd_depth_fraction"] = float(d.std(ddof=1))
                 if height is not None:
                     row["mean_depth_cm"] = mean * float(height)
-            if total and n_out / total > _OUTSIDE_EXTENT_WARN:
+            if total and n_out is not None and n_out / total > _OUTSIDE_EXTENT_WARN:
                 logger.warning(
                     "IL-15: %.0f%% of animal %d's fused samples in session %s fall outside the "
                     "water column; check the fusion settings.",

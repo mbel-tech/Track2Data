@@ -122,3 +122,15 @@ def test_slice_psess_keeps_depth_metadata() -> None:
     s = slice_psess(p, 10, 30)
     assert s.depth_height_cm == 25.0
     assert s.depth_outside.tolist() == [3, 1]
+
+
+def test_slice_psess_slices_the_outside_mask() -> None:
+    p = _psess()
+    p.depth = np.zeros((100, 2))
+    mask = np.zeros((100, 2), dtype=bool)
+    mask[15, 0] = mask[50, 1] = True
+    p.depth_outside_mask = mask
+    s = slice_psess(p, 10, 30)
+    assert s.depth_outside_mask.shape == (20, 2)
+    assert s.depth_outside_mask[5, 0] and int(s.depth_outside_mask.sum()) == 1
+    assert slice_psess(_psess(), 0, 5).depth_outside_mask is None

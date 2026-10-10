@@ -20,6 +20,17 @@ def view_label(camera_view: str) -> str:
     return _VIEW_WORDS.get(camera_view, camera_view)
 
 
+def manifest_view(manifest: Any) -> tuple[str, bool]:
+    """``(camera_view, has_depth)`` for availability decided from the manifest alone.
+
+    A 3-D project runs fused sessions only, and a fused session is top-view with a depth;
+    otherwise the project's declared view and no depth.
+    """
+    if manifest.mode.dimension == "3d":
+        return "top", True
+    return manifest.scene.camera_view, False
+
+
 def view_unavailable_reason(
     metric_cls: Any, camera_view: str, *, has_depth: bool = False
 ) -> str | None:

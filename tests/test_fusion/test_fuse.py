@@ -256,3 +256,31 @@ def test_per_row_arrays_trimmed_together():
     np.testing.assert_allclose(f.raw_xy_rows[4], top.xy[4] + 0.5)
     assert f.id_probabilities_rows.shape == (95, 3)
     assert f.id_probabilities_rows[12, 1] == pytest.approx(0.12)
+
+
+def test_outside_mask_matches_counts_and_shape():
+    top, side, pair = make_pair()
+    side.xy[0, 0, 1] = 50.0
+    side.xy[3, 0, 1] = 301.0
+    side.xy[1, 2, 1] = 350.0
+    fused = fuse(top, side, pair, same_video=False)
+    mask = fused.psess.depth_outside_mask
+    assert mask.dtype == bool and mask.shape == fused.psess.depth.shape
+    np.testing.assert_array_equal(mask.sum(axis=0), fused.psess.depth_outside)
+    assert mask[0, 0] and mask[3, 0] and mask[1, 2] and int(mask.sum()) == 3
+    assert np.isnan(fused.psess.depth[mask]).all()
+
+
+def test_outside_mask_is_all_false_not_none_when_all_inside():
+    top, side, pair = make_pair()
+    mask = fuse(top, side, pair, same_video=False).psess.depth_outside_mask
+    assert mask is not None and not mask.any()
+
+
+def test_outside_counted_per_animal_on_side_y_alone_with_top_nan():
+    top, side, pair = make_pair()
+    top.xy[0, 1] = np.nan  # top view lacks fish 1 on frame 0
+    side.xy[0, 1, 1] = 50.0
+    fused = fuse(top, side, pair, same_video=False)
+    assert fused.psess.depth_outside.tolist() == [0, 1, 0]
+    assert fused.psess.depth_outside_mask[0, 1]

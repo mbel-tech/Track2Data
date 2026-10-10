@@ -855,6 +855,10 @@ class PreprocessedSession:
     # side positions that fell outside the water column. Whole-session facts set by fusion.
     depth_height_cm: float | None = None
     depth_outside: np.ndarray | None = None
+    # (n_frames, n_animals) bool, True where a valid side position was outside the column. Same
+    # shape as ``depth`` and sliced with it, so a window can count its own outside samples;
+    # ``depth_outside`` equals its sum over frames.
+    depth_outside_mask: np.ndarray | None = None
 
     @property
     def raw_xy_aligned(self) -> np.ndarray:

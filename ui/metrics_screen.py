@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
-from track2data.metrics.availability import view_unavailable_reason
+from track2data.metrics.availability import manifest_view, view_unavailable_reason
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 from ui.widgets.autocommit import AutoCommit
@@ -484,7 +484,7 @@ class MetricsScreen(QWidget):
         free_ids = [s.session_id for s in sessions if s.is_identity_free()]
         all_identity_free = bool(sessions) and len(free_ids) == len(sessions)
         some_identity_free = bool(free_ids) and not all_identity_free
-        camera_view = self._store.manifest.scene.camera_view
+        camera_view, has_depth = manifest_view(self._store.manifest)
 
         if all_identity_free:
             identity_note = (
@@ -506,7 +506,9 @@ class MetricsScreen(QWidget):
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
                 view_reason = view_unavailable_reason(
-                    metrics.get(include_item.data(_ROLE_METRIC_ID)), camera_view
+                    metrics.get(include_item.data(_ROLE_METRIC_ID)),
+                    camera_view,
+                    has_depth=has_depth,
                 )
 
                 notes: list[str] = []

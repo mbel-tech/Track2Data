@@ -449,3 +449,13 @@ def test_3d_sessions_summary_counts_pairs() -> None:
     )
     assert stage_summaries(m, has_run_results=False)[1] == "2 sessions · 1 pair"
     assert stage_summaries(_manifest(sessions=[_ref()]), has_run_results=False)[1] == "1 session"
+
+
+def test_a_3d_project_never_needs_a_zone_water_column() -> None:
+    from track2data.core.models import SceneConfig
+
+    m = _manifest_3d(
+        scene=SceneConfig(camera_view="side"), metrics=MetricSelection(individual=["IL-15"])
+    )
+    info = compute_stage_statuses(m, has_run_results=False)[ZONES]
+    assert "waterline" not in info.message and "IL-15" not in info.message

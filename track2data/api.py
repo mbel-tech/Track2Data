@@ -925,6 +925,11 @@ class Engine:
             *self._manifest.metrics.zone,
         ]
         if psess is None:
+            if session is None:
+                from track2data.metrics.availability import manifest_view
+
+                view, has_depth = manifest_view(self._manifest)
+                return view_skipped_metrics(selected, view, get, has_depth=has_depth)
             return view_skipped_metrics(selected, self.camera_view_for(session), get)
         return view_skipped_metrics(
             selected, self.camera_view_for_psess(psess), get, has_depth=psess.depth is not None
@@ -1058,11 +1063,12 @@ class Engine:
             )
         if view_skipped:
             logger.warning(
-                "Skipping metrics (%s) for session %s: the project's camera view is %s, "
+                "Skipping metrics (%s) for session %s: its camera view is %s%s, "
                 "which they are not meaningful for.",
                 ", ".join(sorted(view_skipped)),
                 psess.session_id,
                 self.camera_view_for_psess(psess),
+                " (a fused session)" if psess.depth is not None else "",
             )
 
         bin_seconds = self._bin_seconds()
@@ -1336,12 +1342,13 @@ class Engine:
         # display name and whether it was ever tested on real output; the manifest entry knows
         # who chose it and with which options. A reader that is no longer registered has neither.
         reader_cls = find_reader(session.reader)
-        camera_view = self.camera_view_for(session)
+        camera_view = self.camera_view_for_psess(psess)
         water_column = None
         from track2data.metrics import get as _get_metric
         from track2data.metrics.availability import view_dependent_metrics
 
-        if view_dependent_metrics(metric_results, "side", _get_metric):
+        # a fused depth does not come from zones, so there is no zone water column to record
+        if psess.depth is None and view_dependent_metrics(metric_results, "side", _get_metric):
             from track2data.metrics.derived import derive_metric_params
 
             water_column = derive_metric_params("IL-15", psess, self._manifest.zones)[
