@@ -423,7 +423,7 @@ info-button modal (§6).
 | **Output columns** | `individual_id`, `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` |
 | **Units** | cm / BL / count |
 | **Assumptions** | The depth comes from a side camera at right angles to the top camera. A step needs three finite coordinates (x, y, depth) at both of its frames; an animal with no such step has **no measured distance**, reported as NaN (cm and BL) with `n_valid_steps` 0, never as 0. Interpolated frames contribute a straight line |
-| **Warnings** | Under-smoothed data inflates the length, as for IL-1 (and depth noise adds to it). No refraction or parallax correction. A wrong tank height scales every vertical distance. Always at least IL-1 for the same frames. Without depth or a cm scale all columns are NaN |
+| **Warnings** | Under-smoothed data inflates the length, as for IL-1 (and depth noise adds to it). No refraction or parallax correction. A wrong tank height scales every vertical distance. Over the steps where depth is also finite (see `n_valid_steps`) it is at least IL-1. Without depth or a cm scale all columns are NaN |
 | **Reference** | Standard kinematics |
 | **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
