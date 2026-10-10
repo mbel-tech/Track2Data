@@ -65,6 +65,9 @@ class FusionRunInfo:
     fusion_agreement_rms_cm: float | None
     fusion_agreement_warning: bool
     fusion_agreement_skipped: str | None
+    #: SHA-256 of the side session's trajectory file ("" when it could not be hashed). The
+    #: session checksum and the staleness check describe the top session only.
+    side_trajectory_sha256: str = ""
 
     @classmethod
     def from_fused(

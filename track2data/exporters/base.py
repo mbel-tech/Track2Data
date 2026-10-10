@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from track2data.core.models import PreprocessReport
+from track2data.core.runplan import FusionRunInfo
 
 
 @dataclass
@@ -137,6 +138,8 @@ class ExportPayload:
     # computed, or a Methods section written from it silently overstates
     # what the analysis covered.
     skipped_metrics: dict[str, str] = field(default_factory=dict)
+    # How a 3-D pair unit was fused; None for a 2-D session (the README then has no fusion section).
+    fusion: FusionRunInfo | None = None
 
 
 class Exporter(ABC):

@@ -28,7 +28,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    import numpy as np
     import pandas as pd
+
+    from track2data.core.models import PreprocessedSession
+
+def depth_columns(psess: PreprocessedSession) -> dict[str, np.ndarray]:
+    """``{column: flat values}`` for the per-frame table of *psess*, empty without a depth.
+
+    The one place that decides whether, and which, depth columns the per-frame table has; every
+    exporter writes that table as built, so the formats cannot disagree.
+
+    Row order is the table's (frame-major, animal-minor). A depth is NaN where the depth itself
+    or the animal's position is NaN; ``depth_cm`` is NaN as well when the tank height is unknown.
+    """
+    import numpy as np
+
+    if psess.depth is None:
+        return {}
+    fraction = np.asarray(psess.depth, dtype=float).reshape(-1).copy()
+    fraction[~np.isfinite(psess.xy.reshape(-1, 2)).all(axis=1)] = np.nan
+    height = psess.depth_height_cm
+    cm = fraction * height if height is not None else np.full_like(fraction, np.nan)
+    return {"depth_fraction": fraction, "depth_cm": cm}
 
 #: Columns identifying a row rather than measuring anything. Excluded from the
 #: long table's value rows, and marked as identifiers in the codebook.
@@ -98,6 +120,7 @@ _EXPLICIT_UNITS: dict[str, str] = {
     "n_frames_used": "frames",
     "n_classified_frames": "frames",
     "n_skipped_frames": "frames",
+    "n_skipped_frames_3d": "frames",
     "nan_frames_count": "frames",
     "number_of_error_frames": "frames",
     "n_interpolated": "frames",

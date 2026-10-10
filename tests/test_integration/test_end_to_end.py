@@ -319,8 +319,11 @@ def test_compute_metrics_every_registered_metric_runs_without_crashing(
     psess = engine.preprocess(session)
     results = engine.compute_metrics(psess)
 
-    missing = [mid for mid in all_ids if mid not in results]
+    # A 3-D metric (needs a fused session and a cm scale) is never offered in a 2-D project.
+    expected = [mid for mid in all_ids if not metrics_registry.get(mid).requires_depth_scale]
+    missing = [mid for mid in expected if mid not in results]
     assert not missing, f"metrics absent from compute_metrics() output: {missing}"
+    assert not any(metrics_registry.get(mid).requires_depth_scale for mid in results)
 
     new_metric_ids = {
         "IL-9", "IL-10", "IL-11", "IL-14",
@@ -1081,3 +1084,15 @@ def test_cli_list_metrics_shows_which_view_a_metric_needs() -> None:
     assert "VIEW" in result.output.splitlines()[0]
     assert "side view" in rows["IL-15"]
     assert "side view" not in rows["IL-1"]
+
+
+def test_cli_list_metrics_names_the_requirement_of_the_3d_metrics() -> None:
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+
+    out = CliRunner().invoke(cli, ["list-metrics"]).output
+    rows = {line.split()[0]: line for line in out.splitlines() if line[:3] in {"IL-", "GL-"}}
+    for mid in ("IL-16", "IL-17", "GL-16"):
+        assert "fused 3-D + cm scale" in rows[mid]
+    assert "fused 3-D" not in rows["IL-1"]

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBox
 from track2data.core.models import ViewPair
 from track2data.fusion.align import FusionError
 from ui.dialogs.fusion_dialog import FusionDialog
+from ui.store.run_plan import fusion_settings_key
 from ui.widgets.weak_slot import weak_slot
 
 NO_PAIR_TEXT = "Select a pair."
@@ -122,17 +123,7 @@ class FusionSection(QGroupBox):
         )
         facts = tuple(self._store.session_facts(sid) for sid in ids)
         # Engine.fuse_pair also depends on these project settings (see Engine._cache_key).
-        settings = (
-            m.preprocess.model_dump_json(),
-            m.calibration.model_dump_json(),
-            m.zones.model_dump_json(),
-            m.security.allow_pickle_trajectories,
-            m.blob_diagnostics,
-            tuple(str(m.video_overrides.get(sid)) for sid in ids),
-            tuple(
-                m.video_overrides[sid].exists() if sid in m.video_overrides else None for sid in ids
-            ),
-        )
+        settings = fusion_settings_key(m, ids)
         return (pair.model_dump_json(), refs, facts, m.mode.layout, settings)
 
     # ── selection and rebuild (never writes) ───────────────────────────────

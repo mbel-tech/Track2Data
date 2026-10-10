@@ -302,3 +302,156 @@ def test_the_payload_of_a_fused_session_records_top_and_no_water_column(view) ->
     payload = engine.build_payload(fused, engine.compute_metrics(fused))
     assert payload.provenance.camera_view == "top"
     assert payload.provenance.water_column is None
+
+
+# ── depth-scale metrics (requires_depth_scale) ───────────────────────────────
+
+
+def _register_depth_scale_metric(monkeypatch, metric_id: str = "IL-DS") -> None:
+    class NeedsScale(Metric):
+        id = metric_id
+        name = "needs scale"
+        label = "Needs scale"
+        level = "individual"
+        priority = "optional"
+        requires_identity = False
+        requires_depth_scale = True
+        output_columns = ["session_id"]
+        documentation = MetricDocumentation(
+            definition="test-only", formula_plain="n/a", inputs=[], assumptions=[], warnings=[],
+        )
+
+        def compute(self, session, cfg=None):
+            return pd.DataFrame({"session_id": [session.session_id]})
+
+    monkeypatch.setitem(metrics_module._registry, metric_id, NeedsScale)
+
+
+def _manifest_3d_cal(mode: str, individual: list[str]):
+    from track2data.core.models import CalibrationConfig
+
+    cal = (
+        CalibrationConfig(mode="bodylength")
+        if mode == "bodylength"
+        else CalibrationConfig(mode=mode, px_per_cm=10.0)
+    )
+    return _manifest_3d("top", individual).model_copy(update={"calibration": cal})
+
+
+def test_a_2d_project_skips_a_depth_scale_metric_with_the_fused_reason(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("top", ["IL-DS"]))
+    results = engine.compute_metrics(psess)
+    assert "IL-DS" not in results
+    assert engine.build_payload(psess, results).skipped_metrics == {
+        "IL-DS": "needs a fused 3-D session"
+    }
+    assert engine.view_skipped_metrics() == {"IL-DS": "needs a fused 3-D session"}
+
+
+def test_a_3d_bodylength_project_skips_it_at_manifest_level_and_run_time(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("bodylength", ["IL-DS"]))
+    expected = "needs a cm scale for the top view (use scalar or session calibration)"
+    assert engine.view_skipped_metrics() == {"IL-DS": expected}
+    assert engine._view_selection_notes() == []  # all selected skipped: validate() blocks
+    engine = Engine(
+        engine.manifest.model_copy(update={"sessions": [_identity_free_ref()]})
+    )
+    issues = " ".join(engine._gate_selection_issues())
+    assert "IL-DS" in issues
+    assert expected in issues
+    assert "camera view" not in issues.lower()
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    fused.px_per_cm = 8.0
+    assert engine.view_skipped_metrics(psess=fused) == {"IL-DS": expected}
+    assert "IL-DS" not in engine.compute_metrics(fused)
+
+
+def test_a_3d_scalar_project_is_available_at_manifest_level(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS"]))
+    assert engine.view_skipped_metrics() == {}
+    assert engine._gate_selection_issues() == []
+
+
+def test_a_fused_unit_without_px_per_cm_skips_it_with_the_run_time_reason(
+    monkeypatch, caplog
+) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS", "IL-1"]))
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    fused.px_per_cm = None
+    with caplog.at_level(logging.WARNING, logger="track2data.api"):
+        results = engine.compute_metrics(fused)
+    assert "IL-DS" not in results
+    assert "IL-1" in results
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "IL-DS" in text
+    assert "needs a cm scale for the top view" in text
+    assert "camera view" not in text
+    payload = engine.build_payload(fused, results)
+    assert payload.skipped_metrics == {"IL-DS": "needs a cm scale for the top view"}
+
+    fused.px_per_cm = 8.0
+    assert "IL-DS" in engine.compute_metrics(fused)
+    fused.depth_height_cm = None
+    assert "IL-DS" not in engine.compute_metrics(fused)
+
+
+def test_validate_names_the_real_cause_for_depth_scale_metrics_in_a_2d_project(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    manifest = _manifest("top", ["IL-DS"], sessions=[_identity_free_ref()])
+    issues = " ".join(Engine(manifest).validate())
+    assert "needs a fused 3-D session" in issues
+    assert "camera view" not in issues.lower()
+
+
+def test_validate_mixed_ruled_out_branch_has_no_camera_view_cause_for_depth_scale(
+    monkeypatch,
+) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    ref = _identity_free_ref(track_wo_identities=True)
+    manifest = _manifest_3d_cal("bodylength", ["IL-1", "IL-DS"]).model_copy(
+        update={"sessions": [ref]}
+    )
+    issues = " ".join(Engine(manifest).validate())
+    assert "diagnostics only" in issues
+    assert "IL-DS" in issues
+    assert "camera view" not in issues.lower()
+
+
+def test_validate_partial_depth_scale_branch_text(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    _register_side_metric(monkeypatch)
+    manifest = _manifest("top", ["IL-SIDE", "IL-DS"], sessions=[_identity_free_ref()])
+    [text] = Engine(manifest)._gate_selection_issues()
+    assert text == (
+        "Every selected metric (IL-DS, IL-SIDE) is ruled out, so the run would produce "
+        "diagnostics only. IL-DS: needs a fused 3-D session. Set the camera view on the "
+        "Calibration screen for the others, or select metrics that apply to this project."
+    )
+
+
+def test_validate_mixed_identity_view_and_depth_scale_branch_text(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    _register_side_metric(monkeypatch)
+    ref = _identity_free_ref(track_wo_identities=True)
+    manifest = _manifest("top", ["IL-1", "IL-SIDE", "IL-DS"], sessions=[ref])
+    [text] = Engine(manifest)._gate_selection_issues()
+    assert text == (
+        "Every selected metric (IL-1, IL-DS, IL-SIDE) is ruled out, by the identity-free "
+        "sessions, the camera view or the 3-D requirements, so the run would produce "
+        "diagnostics only. IL-DS: needs a fused 3-D session. Untick 'Identity-free' where "
+        "identities were preserved, set the camera view on the Calibration screen, or select "
+        "other metrics."
+    )
+
+
+def test_a_view_reason_is_not_classified_as_a_depth_scale_one(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest("top", []))
+    assert engine._depth_scale_ids(
+        {"IL-DS": "needs a fused 3-D session", "IL-SIDE": "needs a side view recording"}
+    ) == {"IL-DS"}

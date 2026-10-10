@@ -1,6 +1,6 @@
 # Running a 3-D project (sub-project B1)
 
-**Status:** draft 2026-10-10, awaiting review
+**Status:** implemented 2026-10-10 (see "Changes made during the build" at the end)
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). Builds on the mode switch (E), [panel split](2026-10-09-panel-split-design.md) (F), [ID correspondence](2026-10-09-id-correspondence-design.md) (G) and [fusion](2026-10-09-fusion-design.md) (D). Supersedes the "no 3-D compute" part of D-037.
 
 ## Why
@@ -112,3 +112,66 @@ path length, neighbour distance) are B2.
 3-D speed, path length and neighbour distance (B2), depth-band zones and per-view zones, several
 offsets per pair, a camera-view setting per session, reading 3-D tracker files (A), and
 `sensitivity` for 3-D projects.
+
+## Changes made during the build
+
+Where the build differs from the text above, the build is right.
+
+- **Skipped sessions are not rows of `sessions.csv`.** They go to a new `skipped.csv`
+  (`session_id,reason`) and a "Skipped sessions" section of `PROJECT_SUMMARY.md`, both written only
+  when something was skipped. `sessions.csv` has one row per run unit, and for a 3-D run the 18
+  `FusionRunInfo` fields (`unit_kind`, `top_session_id`, `side_session_id`, the fusion settings, the
+  report counts, the agreement fields and `side_trajectory_sha256`, the checksum of the side
+  session's trajectory file). The per-unit README has a "## 3-D fusion" section and `manifest.json` has
+  `run_metadata.fusion`.
+- **The GUI's plan keeps `fused=None`; a serial run fuses again.** `RunPlanWatcher`
+  (`ui/store/run_plan.py`, `ProjectStore.run_plan`) builds the plan on the store's worker pool and drops
+  the fusion arrays so the GUI does not hold them; `Engine.run(plan=...)` then fuses each unit itself.
+  A plan that still carries its fusion results (the CLI) is reused.
+- **The plan is built on the worker pool** (like the Fusion section), never on the GUI thread; stale
+  results are ignored, and `TaskRunner.closed` stops resubmission while the window closes.
+- **Workers fuse their own pair by index.** A parallel worker receives the manifest JSON, the unit
+  kind and the unit's index into `manifest.view_pairs` (a pair unit) or `manifest.sessions` (a
+  session unit), builds that one `RunUnit` and fuses the pair; it does not rebuild the plan, and no
+  array is pickled.
+- **Skip reason and view helper names.** An unpaired session's reason is "not in a fusable pair" and a
+  pair without settings gives "pair t+s: no fusion settings for this pair" (not "not in a pair" /
+  "pair has no fusion settings"). The fused session's view comes from `Engine.camera_view_for_psess`
+  (`"top"` when the session has a depth), not from `camera_view_for(session)`, which still takes a
+  plain `Session`.
+- **`frac_outside_extent` reads `depth_outside_mask`,** so a time bin counts its own outside samples;
+  `depth_outside` is that mask's sum over the session.
+- **Frame jumps get a separator row.** `fuse` inserts one NaN separator row (with `separator_mask` and
+  `tracked_mask` set, the 2-D convention of `preprocess/timeline_expand.py`) on every per-row array
+  where the kept frames jump, so path length and the other frame-to-frame metrics never bridge a gap;
+  separator rows are never exported. A fusion without jumps is unchanged.
+- **Metadata.** A unit carries the TOP session's metadata (looked up by the unit id among the
+  manifest's pairs, never by splitting it on `+`); per-animal metadata matches by the top session's
+  label, or by its index through `PreprocessedSession.source_animal_index`.
+- **Pre-flight checks read the sessions that run.** In 3-D the consistency report summarises the top
+  session of each pair with fusion settings, and session calibration checks both sessions of such pairs.
+- **Run records.** `PROJECT_SUMMARY.md` says "Units processed (fused pairs): N of M; K sessions
+  skipped" in 3-D; the pooled `all_sessions/manifest.json` carries each unit's `run_metadata.fusion`;
+  the unit README says its preprocessing steps are the top session's.
+- **`depth_outside_mask` was added** (per frame and animal) beside `depth_outside`, so IL-15 counts the
+  outside positions of a time window, not only of the whole session.
+- **`validate()` stays blocking-only.** The notes about unfusable pairs and unpaired sessions come from
+  `Engine.validation_issues()` (`(blocking, notes)`); `track2data validate` prints both.
+- **`manifest_view`** (`track2data/metrics/availability.py`) is the manifest-level availability helper:
+  the view and whether the project can carry depth, so the screens that have no session in hand
+  (metric lists, the setup check) agree with the run.
+- **`export()` uses a cheap check** (at least one pair has fusion settings) before it runs the
+  plan, rather than fusing every pair twice.
+- **`side_trajectory_sha256`** was added to the provenance: the session checksum and the staleness
+  check describe the top session only.
+- **Block text.** `MODE_3D_BLOCK_REASON` is "Pair and fuse a top and a side session first", used when
+  nothing can be run and no pair has settings. `SENSITIVITY_3D_REFUSAL` is "sensitivity is not supported
+  for 3-D projects yet".
+
+### Known limits
+
+- All fused data of a plan is recomputed on every run (the plan, the Preview of a unit, a serial run
+  from the GUI); nothing fused is cached.
+- `csv_wide` has no per-frame table, so it carries no depth columns.
+- Zones are one set applied to the top view; no 3-D speed, path length or neighbour distance (B2);
+  `sensitivity` refuses 3-D projects.

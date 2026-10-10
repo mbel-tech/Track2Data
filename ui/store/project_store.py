@@ -185,6 +185,7 @@ class ProjectStore(QObject):
         # Derived cache, never persisted -- see ui/store/session_facts.py's
         # module docstring for why this lives here and not on SessionRef.
         self._session_facts: dict[str, SessionFacts] = {}
+        self._run_plan = None  # RunPlanWatcher, created on first use (derived, never persisted)
 
         self._tasks = TaskRunner(self)
         self._tasks.taskProgress.connect(self.taskProgress)
@@ -235,6 +236,15 @@ class ProjectStore(QObject):
         taskProgress/taskFinished signals for routine listening; use this
         directly for submit()/submit_with_progress()/cancel()/cancel_all()."""
         return self._tasks
+
+    @property
+    def run_plan(self):
+        """The shared background run plan of a 3-D project (``ui/store/run_plan.py``)."""
+        if self._run_plan is None:
+            from ui.store.run_plan import RunPlanWatcher
+
+            self._run_plan = RunPlanWatcher(self)
+        return self._run_plan
 
     @property
     def run_results(self) -> RunResult | None:

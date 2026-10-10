@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from track2data.core.models import CameraView, ViewPair
-    from track2data.core.runplan import RunPlan, RunUnit
+    from track2data.core.runplan import RunPlan, RunUnit, SkippedSession
     from track2data.core.session_consistency import SessionSummary
     from track2data.fusion.fuse import FusedSession
     from track2data.metrics.base import Metric
@@ -77,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 
 _BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
+
 
 
 def _with_bin_columns(df: Any, window: Any | None) -> Any:
@@ -243,6 +244,20 @@ class Engine:
         fields = join.matched.get(session_id, {})
         return {k: v for k, v in fields.items() if k not in ("session_id", "individual_id")}
 
+    def _metadata_key(self, psess: PreprocessedSession) -> str:
+        """The session id *psess*'s metadata is filed under.
+
+        A fused pair unit (``"{top}+{side}"``) takes its TOP session's metadata. The id is looked
+        up among the manifest's pairs, never split on ``+`` (a session id may contain one).
+        """
+        if psess.depth is None:
+            return psess.session_id
+        tops = {
+            f"{p.top_session_id}+{p.side_session_id}": p.top_session_id
+            for p in self._manifest.view_pairs
+        }
+        return tops.get(psess.session_id, psess.session_id)
+
     def _metadata_individual_fields_for(
         self, psess: PreprocessedSession, identity_free: bool
     ) -> dict[int, dict[str, Any]]:
@@ -269,7 +284,8 @@ class Engine:
 
         join = self._metadata_join
         rule = self._manifest.mapping
-        keyed = join.matched_individuals.get(psess.session_id) if join is not None else None
+        key_id = self._metadata_key(psess)
+        keyed = join.matched_individuals.get(key_id) if join is not None else None
         if not keyed or rule is None:
             return {}
         if identity_free:
@@ -281,9 +297,22 @@ class Engine:
             return {}
         n_animals = psess.n_animals
         labels = [str(x).strip().lower() for x in (psess.session.identities_labels or [])]
+        # A fused unit keeps only the mapped fish: a metadata index names the TOP session's
+        # animal, which sits at fused position source.index(top index) (absent when left out).
+        source = psess.source_animal_index
+        by_position = rule.individual_match == "index" or not labels
         out: dict[int, dict[str, Any]] = {}
         for key, fields in keyed.items():
-            idx = resolve_animal(key, labels, rule.individual_match, n_animals)
+            if source is not None and by_position:
+                top_idx = resolve_animal(key, [], "index", int(source.max(initial=-1)) + 1)
+                found: np.ndarray = (
+                    np.flatnonzero(source == top_idx)
+                    if top_idx is not None
+                    else np.empty(0, dtype=np.int64)
+                )
+                idx = int(found[0]) if found.size else None
+            else:
+                idx = resolve_animal(key, labels, rule.individual_match, n_animals)
             if idx is None:
                 logger.warning(
                     "Session %s: metadata individual '%s' matches no animal (%s); ignored.",
@@ -312,13 +341,24 @@ class Engine:
         if df is None or len(df.columns) == 0:
             return
         attached: set[str] = set()
-        for col, val in self._metadata_fields_for(psess.session_id).items():
+        session_fields = self._metadata_fields_for(self._metadata_key(psess))
+        for col, val in session_fields.items():
             if col not in df.columns:
                 df[col] = val
                 attached.add(col)
         if "individual_id" not in df.columns:
             return
         per_animal = self._metadata_individual_fields_for(psess, identity_free)
+        rule = self._manifest.mapping
+        if psess.depth is not None and rule is not None:
+            carried = {c.strip().lower() for c in (*rule.rules, *rule.extra_columns)}
+            for col in ("depth_fraction", "depth_cm"):
+                if col in carried and col in df.columns:
+                    logger.warning(
+                        "metadata column '%s' is ignored in the per-frame table: "
+                        "the fused depth is used",
+                        col,
+                    )
         if not per_animal:
             return
         columns = list(dict.fromkeys(c for f in per_animal.values() for c in f))
@@ -746,6 +786,9 @@ class Engine:
           3. This session's own derived values (metrics/derived.py) --
              never user-settable, so they always win, even against a
              stale/hand-edited manifest that tries to set one.
+          4. For metrics with ``uses_kinematics_cfg`` (IL-17), the project's
+             KinematicsCfg under ``cfg["kinematics"]``: the estimator the
+             pipeline used, not user-settable per metric.
 
         Metric.compute(session, cfg) has accepted this dict since it
         was written, but nothing ever called it with one -- every
@@ -773,6 +816,9 @@ class Engine:
                 cfg[key] = value
 
         cfg.update(derive_metric_params(metric_cls.id, psess, self._manifest.zones))
+        if metric_cls.uses_kinematics_cfg:
+            # The estimator the pipeline used for ``psess.kinematics`` (not user-settable here).
+            cfg["kinematics"] = self._manifest.preprocess.kinematics.model_dump()
         return cfg
 
     def identity_free_for(
@@ -929,22 +975,38 @@ class Engine:
         view is that session's (a fused one is top-view) and a depth metric is allowed when it
         has depth."""
         from track2data.metrics import get
-        from track2data.metrics.availability import view_skipped_metrics
+        from track2data.metrics.availability import (
+            manifest_depth_scale,
+            manifest_view,
+            view_skipped_metrics,
+        )
 
         selected = [
             *self._manifest.metrics.individual,
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
         ]
+        scale = manifest_depth_scale(self._manifest)
         if psess is None:
             if session is None:
-                from track2data.metrics.availability import manifest_view
-
                 view, has_depth = manifest_view(self._manifest)
-                return view_skipped_metrics(selected, view, get, has_depth=has_depth)
-            return view_skipped_metrics(selected, self.camera_view_for(session), get)
+                return view_skipped_metrics(
+                    selected, view, get, has_depth=has_depth, depth_scale=scale
+                )
+            return view_skipped_metrics(
+                selected, self.camera_view_for(session), get, depth_scale=scale
+            )
+        scale.update(
+            has_depth=psess.depth is not None,
+            px_per_cm=psess.px_per_cm,
+            depth_height_cm=psess.depth_height_cm,
+        )
         return view_skipped_metrics(
-            selected, self.camera_view_for_psess(psess), get, has_depth=psess.depth is not None
+            selected,
+            self.camera_view_for_psess(psess),
+            get,
+            has_depth=psess.depth is not None,
+            depth_scale=scale,
         )
 
     def skipped_metrics(
@@ -1078,14 +1140,24 @@ class Engine:
                 psess.session_id,
             )
         if view_skipped:
-            logger.warning(
-                "Skipping metrics (%s) for session %s: its camera view is %s%s, "
-                "which they are not meaningful for.",
-                ", ".join(sorted(view_skipped)),
-                psess.session_id,
-                self.camera_view_for_psess(psess),
-                " (a fused session)" if psess.depth is not None else "",
-            )
+            depth_ids = self._depth_scale_ids(view_skipped)
+            view_only = {m: r for m, r in view_skipped.items() if m not in depth_ids}
+            if view_only:
+                logger.warning(
+                    "Skipping metrics (%s) for session %s: its camera view is %s%s, "
+                    "which they are not meaningful for.",
+                    ", ".join(sorted(view_only)),
+                    psess.session_id,
+                    self.camera_view_for_psess(psess),
+                    " (a fused session)" if psess.depth is not None else "",
+                )
+            for mid in sorted(depth_ids):
+                logger.warning(
+                    "Skipping metric %s for session %s: %s.",
+                    mid,
+                    psess.session_id,
+                    view_skipped[mid],
+                )
 
         bin_seconds = self._bin_seconds()
         windows = None
@@ -1243,6 +1315,12 @@ class Engine:
             df["y_cm"] = df["y_px"] / psess.px_per_cm
             df["speed_cm_s"] = df["speed_px_s"] / psess.px_per_cm
 
+        # a fused session's depth sits beside the position columns (see exporters.schema)
+        from track2data.exporters.schema import depth_columns
+
+        for name, values in depth_columns(psess).items():
+            df[name] = values
+
         if psess.main_zone is not None:
             df["main_zone"] = psess.main_zone.reshape(-1)
         if psess.sec_zone is not None:
@@ -1284,7 +1362,7 @@ class Engine:
         if threshold > 0 and id_prob is not None:
             below = df["id_probability"] < threshold
             masked_cols = [
-                c for c in ("x_px", "y_px", "x_cm", "y_cm",
+                c for c in ("x_px", "y_px", "x_cm", "y_cm", "depth_fraction", "depth_cm",
                             "speed_px_s", "speed_cm_s", "heading_rad")
                 if c in df.columns
             ]
@@ -1715,7 +1793,7 @@ class Engine:
                     ),
                 )
 
-        self._write_project_summary(Path(out_dir), results)
+        self._write_project_summary(Path(out_dir), results, plan.skipped)
         pooled = self._write_all_sessions(Path(out_dir), results)
 
         emit(
@@ -1771,8 +1849,30 @@ class Engine:
             )
         return digest
 
+    def _side_trajectory_sha256(self, pair: ViewPair) -> str:
+        """SHA-256 of the side session's trajectory file, computed as for the top session
+        (:meth:`_hash_and_check_input`, staleness warning included); "" when the session cannot
+        be read. The top session's checksum and staleness check do not cover this file."""
+        ref = next(
+            (r for r in self._manifest.sessions if r.session_id == pair.side_session_id), None
+        )
+        if ref is None:
+            return ""
+        try:
+            return self._hash_and_check_input(self.import_ref(ref), ref)
+        except Exception:
+            logger.warning(
+                "Could not read side session %s to hash its trajectory.",
+                pair.side_session_id,
+                exc_info=True,
+            )
+            return ""
+
     def _write_project_summary(
-        self, out_dir: Path, results: list[SessionRunResult]
+        self,
+        out_dir: Path,
+        results: list[SessionRunResult],
+        skipped: Sequence[SkippedSession] = (),
     ) -> list[Path]:
         """Write the run-root ``sessions.csv`` and ``PROJECT_SUMMARY.md``.
 
@@ -1788,6 +1888,8 @@ class Engine:
         Never fatal. A run whose numbers are all computed must not be
         reported as failed because a bookkeeping file could not be written.
         """
+        import pandas as pd
+
         from track2data.core.session_consistency import (
             calibration_spread_warnings,
             heterogeneity_warnings,
@@ -1816,14 +1918,24 @@ class Engine:
             out_dir.mkdir(parents=True, exist_ok=True)
 
             table_path = out_dir / "sessions.csv"
-            sessions_table(summaries, errors=errors).to_csv(
+            fusion = {r.session_id: r.fusion for r in results if r.fusion is not None}
+            sessions_table(summaries, errors=errors, fusion=fusion).to_csv(
                 table_path, index=False, encoding="utf-8", lineterminator="\n"
             )
             written.append(table_path)
 
+            if skipped:
+                skipped_path = out_dir / "skipped.csv"
+                pd.DataFrame(
+                    [(s.session_id, s.reason) for s in skipped],
+                    columns=["session_id", "reason"],
+                ).to_csv(skipped_path, index=False, encoding="utf-8", lineterminator="\n")
+                written.append(skipped_path)
+
             readme_path = out_dir / "PROJECT_SUMMARY.md"
             readme_path.write_text(
-                self._project_readme_text(results, warnings, advisories), encoding="utf-8"
+                self._project_readme_text(results, warnings, advisories, skipped),
+                encoding="utf-8",
             )
             written.append(readme_path)
 
@@ -1869,6 +1981,7 @@ class Engine:
         results: list[SessionRunResult],
         warnings: list[str],
         advisories: Sequence[str] = (),
+        skipped: Sequence[SkippedSession] = (),
     ) -> str:
         """Run-root project summary: what ran, what failed, what not to pool.
 
@@ -1881,6 +1994,8 @@ class Engine:
         before writing a Methods section needs to know they have a
         mixed-frame-rate project before they need the session count.
         """
+        from track2data.exporters.readme import table_cell
+
         ok = [r for r in results if not r.error]
         failed = [r for r in results if r.error]
 
@@ -1888,7 +2003,7 @@ class Engine:
             f"# Track2Data Run — {self._manifest.project_name}",
             "",
             f"- Project hash: `{self._manifest.project_hash()}`",
-            f"- Sessions processed: {len(ok)} of {len(results)}",
+            self._processed_line(len(ok), len(results), len(skipped)),
             *self._camera_view_summary(),
             "",
             "Per-session outputs are in the subdirectory named after each "
@@ -1937,6 +2052,20 @@ class Engine:
             lines += [f"{i}. {a}" for i, a in enumerate(advisories, start=1)]
             lines.append("")
 
+        if skipped:
+            lines += [
+                "## Skipped sessions",
+                "",
+                "These sessions were left out of the run, so they have no output folder:",
+                "",
+                "| Session | Reason |",
+                "|---------|--------|",
+                *[f"| {table_cell(s.session_id)} | {table_cell(s.reason)} |" for s in skipped],
+                "",
+                "They are also listed in `skipped.csv`.",
+                "",
+            ]
+
         if failed:
             lines += ["## Sessions that failed", ""]
             lines += [f"- `{r.session_id}` — {r.error}" for r in failed]
@@ -1949,6 +2078,16 @@ class Engine:
             ]
 
         return "\n".join(lines)
+
+    def _processed_line(self, n_ok: int, n_units: int, n_skipped: int) -> str:
+        """The summary's count line: sessions in 2-D, fused-pair units (and skipped sessions)
+        in 3-D."""
+        if self._manifest.mode.dimension != "3d":
+            return f"- Sessions processed: {n_ok} of {n_units}"
+        line = f"- Units processed (fused pairs): {n_ok} of {n_units}"
+        if n_skipped:
+            line += f"; {n_skipped} session{'s' if n_skipped != 1 else ''} skipped"
+        return line
 
     def _run_parallel(
         self,
@@ -2106,7 +2245,10 @@ class Engine:
                 applied = pair.fusion
                 if self._manifest.mode.layout == "single_video_two_panels":
                     applied = applied.model_copy(update={"frame_offset": 0})  # as fuse applies it
-                fusion = FusionRunInfo.from_fused(pair, applied, fused)
+                fusion = dataclasses.replace(
+                    FusionRunInfo.from_fused(pair, applied, fused),
+                    side_trajectory_sha256=self._side_trajectory_sha256(pair),
+                )
                 cached = False
             else:
                 assert unit.ref is not None
@@ -2147,6 +2289,7 @@ class Engine:
             payload = self.build_payload(
                 psess, metric_results, identity_free=identity_free
             )
+            payload.fusion = fusion
             emit(
                 progress,
                 ProgressEvent(
@@ -2312,7 +2455,8 @@ class Engine:
         ]
 
     def _session_summaries(self) -> list[SessionSummary]:
-        """Read every session in the manifest and summarise it.
+        """Read every session that takes part in the run and summarise it (see
+        :meth:`_checked_refs`: in 3-D, the top session of each pair with fusion settings).
 
         Best-effort: a session that cannot be read contributes nothing rather
         than aborting the report, because the whole point is to describe the
@@ -2322,7 +2466,7 @@ class Engine:
 
         mode = self._manifest.calibration.mode
         summaries: list[SessionSummary] = []
-        for ref in self._manifest.sessions:
+        for ref in self._checked_refs(sides=False):
             try:
                 session = self.import_ref(ref)
             except Exception:
@@ -2336,6 +2480,21 @@ class Engine:
                 )
             )
         return summaries
+
+    def _checked_refs(self, *, sides: bool) -> list[SessionRef]:
+        """The sessions a pre-flight check reads: every session in 2-D. In 3-D only the sessions
+        of pairs with fusion settings (the others never run): the top sessions, which become the
+        units, plus the side sessions when *sides* (they are preprocessed before fusing too)."""
+        refs = self._manifest.sessions
+        if self._manifest.mode.dimension != "3d":
+            return list(refs)
+        wanted: set[str] = set()
+        for pair in self._manifest.view_pairs:
+            if pair.fusion is not None:
+                wanted.add(pair.top_session_id)
+                if sides:
+                    wanted.add(pair.side_session_id)
+        return [ref for ref in refs if ref.session_id in wanted]
 
     def _resolve_px_per_cm(self, session: Session) -> float | None:
         """The px-to-cm ratio this session would be calibrated with, if any.
@@ -2403,7 +2562,21 @@ class Engine:
                 "metrics, or untick 'Identity-free' for the sessions that do "
                 "preserve identities."
             ]
+        depth_ids = self._depth_scale_ids(view)
+        reasons = " ".join(f"{mid}: {view[mid]}." for mid in sorted(depth_ids))
         if not identity:
+            if depth_ids:
+                if len(depth_ids) < len(view):
+                    hint = (
+                        "Set the camera view on the Calibration screen for the others, or "
+                        "select metrics that apply to this project."
+                    )
+                else:
+                    hint = "Select metrics that apply to this project."
+                return [
+                    f"Every selected metric ({', '.join(sorted(view))}) is ruled out, so the "
+                    f"run would produce diagnostics only. {reasons} {hint}"
+                ]
             fix = (
                 "Set the camera view on the Calibration screen, or select metrics "
                 "that apply to this recording."
@@ -2413,13 +2586,26 @@ class Engine:
                 "camera view than the project's, so the run would produce diagnostics "
                 f"only. {fix}"
             ]
+        causes = "the identity-free sessions or the project's camera view"
+        fix = "set the camera view on the Calibration screen"
+        if depth_ids:
+            causes = "the identity-free sessions or the 3-D requirements"
+            fix = "fix the 3-D requirements above"
+            if len(depth_ids) < len(view):
+                causes = "the identity-free sessions, the camera view or the 3-D requirements"
+                fix = "set the camera view on the Calibration screen"
         return [
-            f"Every selected metric ({', '.join(sorted(selected))}) is ruled out, by the "
-            "identity-free sessions or by the project's camera view, so the run would "
-            "produce diagnostics only. Untick 'Identity-free' where identities were "
-            "preserved, set the camera view on the Calibration screen, or select other "
+            f"Every selected metric ({', '.join(sorted(selected))}) is ruled out, by "
+            f"{causes}, so the run would produce diagnostics only. {reasons} Untick "
+            f"'Identity-free' where identities were preserved, {fix}, or select other "
             "metrics."
         ]
+
+    def _depth_scale_ids(self, skipped: dict[str, str]) -> set[str]:
+        """The ids in *skipped* whose reason is a depth-scale one (not a camera-view one)."""
+        from track2data.metrics.availability import DEPTH_SCALE_REASONS
+
+        return {mid for mid in skipped if skipped[mid] in DEPTH_SCALE_REASONS}
 
     def _view_selection_notes(self) -> list[str]:
         """Say which selected metrics the camera view will skip, when others still run.
@@ -2441,7 +2627,8 @@ class Engine:
 
     def _session_calibration_issues(self) -> list[str]:
         """Fail loudly, name the sessions: for 'session' calibration
-        mode, every imported session must carry its own length_unit, or
+        mode, every session the run preprocesses (see _checked_refs: in
+        3-D, both sessions of each pair with fusion settings) must carry its own length_unit, or
         the run should be blocked here rather than each affected
         session silently failing calibration one at a time inside
         Engine.run() (see apply_session_calibration's CAL-SESSION-MISSING).
@@ -2453,7 +2640,7 @@ class Engine:
 
         missing: list[str] = []
         unreadable: list[str] = []
-        for ref in self._manifest.sessions:
+        for ref in self._checked_refs(sides=True):
             try:
                 session = self.import_ref(ref)
             except Exception:

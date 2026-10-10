@@ -121,9 +121,10 @@ from the command line.
 - **2D or 3D.** The **Analysis type** choice sets whether the project is a 2-D analysis (the default) or
   a 3-D one. 3D also asks how the recording was made: **One video, two panels** (top and side views in
   one frame) or **Two videos** (top and side tracked separately). The choice locks after the first
-  session is added; remove all sessions to change it. A 3-D project can be set up and saved, but it
-  cannot be run yet: Processing, Preview and Export say "3-D fusion is not available yet", and
-  Calibration, Zones and Metrics apply to the 2-D tracks only.
+  session is added; remove all sessions to change it. A 3-D project runs once at least one top/side
+  pair is set up for fusion (see [Running a 3-D project](#running-a-3-d-project)); until then
+  Processing, Preview and Export say "Pair and fuse a top and a side session first". Calibration,
+  Zones and Metrics apply to the top-view tracks of each fused pair.
 
 ## 2. Sessions
 
@@ -232,8 +233,8 @@ Calibration. In 2-D projects it does not exist.
   identities). The sidebar checks the saved roles and pairs only; the page checks the fish maps
   against the fish labels. None of this stops you from continuing.
 
-This only records the correspondence. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project
-still cannot be run: Processing, Preview and Export stay blocked.
+This only records the correspondence. To run the project, set each pair up for fusion (next sections);
+see [Running a 3-D project](#running-a-3-d-project).
 
 ### Panels (one video, two views)
 
@@ -263,7 +264,7 @@ as a different session. Changing or clearing a panel resets the fish matching of
 stays).
 
 Zones are still one set per project, and per-view pixel scale calibration is not part of this
-version. 3-D projects still cannot be run.
+version.
 
 ### Fusion (top and side views)
 
@@ -295,8 +296,8 @@ top-view range; it needs a calibrated top view, and says so when it cannot run.
 Fusion needs both views' fish to be matched, and the two recordings' frame rates must match (within
 0.1%). Frames missing from either view are left out, and fish that are not matched are not fused. Until
 a pair is set up, the Views step in the sidebar shows a warning "Fusion setup needed for ..."; it does
-not block Next. 3-D projects still cannot be run: Processing, Preview and Export stay blocked until the
-3-D metrics step exists.
+not block Next. A pair with fusion settings that fuses without error is run as one fused session; see
+[Running a 3-D project](#running-a-3-d-project).
 
 ## 3. Calibration
 
@@ -541,7 +542,9 @@ Choose what to compute. Metrics are grouped on three tabs: **Individual** (per a
   animal with empty bin columns; diagnostics are always whole-session. Thresholds such as the
   freezing speed threshold are fixed from the whole session, so bins are comparable.
 - Rows are greyed out for sessions without stable identities; see
-  [Sessions](#2-sessions).
+  [Sessions](#2-sessions). The 3-D metrics (IL-16, IL-17, GL-16) are greyed out in a 2-D project and
+  under body-length calibration; see [3-D metrics](#3-d-metrics). A preset never ticks a greyed-out
+  row.
 
 **Diagnostics** (coverage, tracking accuracy, identity stability, …) are always computed and are not
 listed here; they appear in [Preview ▸ Diagnostics](#diagnostics).
@@ -570,6 +573,124 @@ zone assignment, metrics, export.
   skips the slow parts.
 
 Results are written to `<project>/exports/<timestamp>/<session>/`.
+
+### Running a 3-D project
+
+In a 3-D project the run works on *fused pairs*, not on single sessions. Each top/side pair that has
+fusion settings and fuses without an error becomes one **run unit**, named `<top>+<side>` (for example
+`t1+s1`), and is processed like an ordinary session: its top-view tracks give the usual metrics, and
+the fusion's depth gives vertical position (IL-15) and the 3-D metrics (see [3-D metrics](#3-d-metrics)). Results go to `<run>/<top>+<side>/`.
+
+- **Processing** shows one more check, a status dot followed by `Will run: t1+s1, t2+s2`, then one
+  `Skipped: <session> — <reason>` line per session that will be left out. A skipped session is a
+  warning, not a problem: the other units still run. The line says *Checking which pairs can run…*
+  for a moment, because every pair is fused to check it. If no pair can run, **Run pipeline** is off
+  and the line says why ("Nothing will run: ..."). The page's **Validate pipeline** button reports the same
+  outcome ("✓ 2 unit(s) will run" or "✗ Nothing will run: ...").
+- **Skip reasons** are "not in a fusable pair" (the session has no pair), "pair t+s: no fusion
+  settings for this pair", or the fusion error with the prefix "pair t+s: " (for example, the frame
+  rates differ). Both sessions of a skipped pair are listed.
+- **Blocked** means: Processing, Preview and Export stay off, with "Pair and fuse a top and a side
+  session first", while no pair has fusion settings. A pair that has settings but does not fuse
+  is reported by the Processing check and at run time, and does not stop the other pairs.
+- **Preview ▸ Trajectories** lists the run units; loading one fuses the pair and shows the top-view
+  tracks under the unit's name.
+- **Validate** (and `track2data validate`) looks only at the sessions that run: the consistency
+  checks (frame rate, resolution, calibration spread) read the top session of each pair with fusion
+  settings, so a side camera with another resolution is not reported, and session calibration needs a
+  scale on both sessions of such pairs (the side view is preprocessed before fusing), not on the
+  sessions that are skipped.
+- **Export** runs the same units. `track2data run` does the same from the command line and prints the
+  skipped sessions; `track2data validate` lists unfusable pairs and unpaired sessions as notes, and fails
+  only when no pair can run.
+
+What the files contain, for a fused unit:
+
+- The per-frame table (`master_fish_by_frame.csv`, the Feather file and the Excel sheet) has two more
+  columns, `depth_fraction` (0 = water surface, 1 = tank floor) and `depth_cm` (the fraction times the
+  tank height; empty when the height is unknown). A frame where the position or the depth is missing
+  has both empty. The wide CSV has no per-frame table. Where the fused frames jump (a frame one of
+  the views lacks), the track keeps a break, as for a 2-D session tracked in separate intervals: no
+  row is written for the missing frames, and path length and the other frame-to-frame metrics do not
+  bridge the gap.
+- **Fish numbering.** `individual_id` numbers the fused fish 0, 1, 2, … in the top view's order.
+  When the fish map leaves a top fish out, the ones after it move up (top fish 0 and 2 become fused
+  fish 0 and 1); `individual_label` keeps the top view's identity (`0` and `2`).
+- **Metadata.** A unit carries the TOP session's metadata: the row you mapped for `t1` gives the
+  `group_id`, treatment and other columns of `t1+s1` (the side session's row is not used).
+  Per-animal metadata matches the fused fish by the top session's label, or, with matching by index,
+  by the top session's animal index (so in the example above the row for animal 2 goes to fused
+  fish 1).
+- **IL-15** takes the depth from the fusion: mean, median and SD of the depth fraction,
+  `mean_depth_cm`, and `frac_outside_extent`, the share of the fish's side-view positions that fell
+  outside the water column (they are left empty in the depth, not clipped). `depth_extent_source` is
+  `fusion`. IL-15 runs whatever the project's camera view is; the other metrics use the top view.
+- The unit's `README.md` has a **3-D fusion** section (settings, frames in common, fish fused and left
+  out, positions outside the water column, agreement), and `manifest.json` repeats it under
+  `run_metadata.fusion`.
+- `PROJECT_SUMMARY.md` says "Units processed (fused pairs): 2 of 2; 1 session skipped".
+- `sessions.csv` has one row per unit, with extra columns for the fusion: `unit_kind`,
+  `top_session_id`, `side_session_id`, the offset, axis, flip, surface and floor rows and tank height,
+  the overlap, fish fused and left out, positions outside the column, the agreement and its warning or
+  reason it was skipped, and `side_trajectory_sha256` (the checksum of the side view's trajectory
+  file; the usual `trajectory_sha256` is the top view's). A unit that fails after fusing keeps
+  these columns next to its error.
+- The unit's README lists the top session's preprocessing steps; the side session went through the
+  same preprocessing settings. The pooled `all_sessions/manifest.json` repeats each unit's fusion
+  under `run_metadata.fusion`.
+- If anything was skipped, `skipped.csv` (`session_id`, `reason`) and a **Skipped sessions** table in
+  `PROJECT_SUMMARY.md` list it. Without skips, neither exists. A 2-D project's output is unchanged.
+
+### 3-D metrics
+
+A fused unit has x and y from the top view and a depth from the side view, so three more metrics can
+measure in all three directions. The 2-D metrics (IL-1, IL-2, GL-1 and the rest) are unchanged and
+keep measuring in the top-view plane.
+
+| Metric | Columns | Units |
+|---|---|---|
+| **IL-16** 3-D Distance Travelled | `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` | cm, body lengths, count |
+| **IL-17** 3-D Speed (mean / median / max) | `mean_speed_3d_cm_s`, `median_speed_3d_cm_s`, `max_speed_3d_cm_s`, `mean_speed_3d_bl_s` | cm/s, body lengths/s |
+| **GL-16** 3-D Nearest-Neighbour Distance | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames_3d` | cm, body lengths, frames |
+
+- **Positions in cm.** x and y are the top view's pixels divided by its scale; the depth is the
+  depth fraction times the **tank height** of the pair's fusion settings. Distances are straight
+  lines in (x, y, depth). Body lengths use the animal's body length converted to cm with the same
+  scale (empty when the body length is unknown).
+- **Needs a cm scale for the top view.** Use **scalar** calibration (a pixels-per-cm value) or
+  **session** calibration on the Calibration screen. Under **body-length** calibration there is no
+  top-view scale, so the three rows are greyed out ("needs a cm scale for the top view (use scalar
+  or session calibration)"). In a 2-D project they are greyed out too ("needs a fused 3-D session").
+  Scalar calibration with no pixels-per-cm value set greys them out as well. If a run starts anyway
+  (for example `track2data run`, which warns "Scalar calibration selected but px_per_cm is not set"
+  and carries on), the metrics are skipped for every unit with "needs a cm scale for the top view",
+  listed under **Metrics skipped** in its README; the other metrics still run. Session calibration
+  where the sessions carry no length unit is different: it blocks the whole 3-D run (CAL-SESSION-MISSING),
+  as for any metric. Track2Data does not
+  estimate the scale from the fusion, because that would add an error the outputs would not show.
+- **Depth comes from the fusion settings:** the surface and floor rows and the tank height you set
+  for the pair. A wrong tank height scales every vertical distance and speed.
+- **Gaps give empty values, never 0.** A step (IL-16) needs a valid x, y and depth at both of its
+  frames; `n_valid_steps` says how many were used. IL-17 uses the frames where the horizontal and the
+  vertical speed both exist. GL-16 skips a frame where any fish lacks x, y or depth and counts it in
+  `n_skipped_frames_3d`. An animal (or a group) with nothing valid is empty. IL-16 and IL-17 need
+  identities, as IL-1 and IL-2 do; GL-16 does not.
+- **IL-17** takes the horizontal speed from the same speed as IL-2 and the vertical speed from the
+  depth with the same speed estimator as the rest of the run. Over the
+  frames where the vertical speed exists it is at least IL-2's cm/s; IL-16 is at least IL-1 over the
+  steps where the depth is also valid; GL-16 is at least GL-1 for a frame where both exist. Over
+  whole sessions these do not have to hold, because the 3-D metrics leave out frames the 2-D ones keep.
+- **Time bins** work as for the 2-D metrics (each bin has its own value). In a binned run the vertical
+  speed is estimated inside each bin.
+- **Limits.** Depth comes from a side camera at right angles to the top camera; there is no
+  correction for refraction or parallax. Vertical speed as its own metric, 3-D inter-individual
+  distance and cohesion are not included.
+
+Limits of this version:
+
+- Zones are one set, applied to the top view. There are no per-view or depth-band zones.
+- `sensitivity` refuses 3-D projects ("sensitivity is not supported for 3-D projects yet").
+- Every run fuses the pairs again; nothing fused is cached.
 
 ## 9. Preview
 

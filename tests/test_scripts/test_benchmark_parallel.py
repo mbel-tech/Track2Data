@@ -61,7 +61,7 @@ def test_jitter_varies_session_lengths_and_sessions_are_reused(bench, tmp_path) 
 def test_manifest_selects_every_individual_and_group_metric(bench, tmp_path) -> None:
     folder = bench.write_session(tmp_path / "s", 100, 2, 0)
     m = bench.build_manifest([folder], identity_switch=False, zones=True)
-    assert len(m.metrics.individual) == 13 and len(m.metrics.group) == 13
+    assert len(m.metrics.individual) == 15 and len(m.metrics.group) == 14
     assert len(m.metrics.zone) == 9 and len(m.zones.rois) == 2
     switched = bench.build_manifest([folder], identity_switch=True, zones=False)
     assert switched.preprocess.identity_switch.enabled

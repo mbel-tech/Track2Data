@@ -144,11 +144,17 @@ def compute_stage_statuses(
         if manifest.export_targets
         else StageInfo("empty")
     )
-    if mode.dimension == "3d":
-        # Fusion is not available yet, so nothing can be computed or shown.
+    if mode.dimension == "3d" and not has_fusion_settings(manifest):
+        # Nothing can run until a pair is set up for fusion. This is the cheap manifest-only
+        # check; whether the pairs really fuse is the Processing setup check's job.
         out[_PROC] = out[_PREVIEW] = out[_EXPORT] = StageInfo("blocked", MODE_3D_BLOCK_REASON)
     out[_VIEWS] = _views_status(manifest)
     return out
+
+
+def has_fusion_settings(manifest: ProjectManifest) -> bool:
+    """At least one pair of the 3-D project has fusion settings (it may still fail to fuse)."""
+    return any(p.fusion is not None for p in manifest.view_pairs)
 
 
 def _views_status(manifest: ProjectManifest) -> StageInfo:
@@ -217,8 +223,12 @@ def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
     return None
 
 
-def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) -> list[str]:
-    """One short live line per sidebar stage (Project … Preview & Export)."""
+def stage_summaries(
+    manifest: ProjectManifest | None, *, has_run_results: bool, n_run_units: int | None = None
+) -> list[str]:
+    """One short live line per sidebar stage (Project … Preview & Export).
+
+    *n_run_units* is how many units the shown results ran (a 3-D run counts its pairs)."""
     if manifest is None:
         return ["Unnamed", "No sessions", "", "", "", "", "", "Not run", "Needs a run"]
     cal = manifest.calibration
@@ -244,8 +254,16 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
         meta = "Map columns"
     else:
         meta = f"{len(manifest.mapping.rules)} columns mapped"
-    if manifest.mode.dimension == "3d":
-        run_text, preview_text = "Not available yet", "Not available yet"
+    if manifest.mode.dimension == "3d" and not has_fusion_settings(manifest):
+        run_text, preview_text = "Fuse a pair first", "Fuse a pair first"
+    elif manifest.mode.dimension == "3d":
+        if not has_run_results:
+            run_text = "Not run"
+        elif n_run_units is None:
+            run_text = "Ran"
+        else:
+            run_text = f"Ran · {n_run_units} pair{'s' if n_run_units != 1 else ''}"
+        preview_text = "Results ready" if has_run_results else "Needs a run"
     else:
         run_text = f"Ran · {n_sessions} sessions" if has_run_results else "Not run"
         preview_text = "Results ready" if has_run_results else "Needs a run"

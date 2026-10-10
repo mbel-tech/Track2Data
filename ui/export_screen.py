@@ -20,6 +20,11 @@ Widgets:
   • receipt_table -- File | Size (bytes) | SHA-256, one row per path
     written by the last successful run, plus "Open folder" and
     "Copy CLI equivalent" actions.
+
+In a 3-D project Export follows the run plan built in the background
+(ProjectStore.run_plan, ui/store/run_plan.py): it stays off while the plan
+is being built or has no unit, with the reason in the status line, and the
+export run is handed that plan so the pairs are not fused again.
 """
 
 from __future__ import annotations
@@ -52,8 +57,9 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.hashing import file_sha256
-from track2data.core.models import MODE_3D_BLOCK_REASON, ExportTarget, RunResult
+from track2data.core.models import ExportTarget, RunResult
 from track2data.exporters import list_exporters
+from ui.store.run_plan import PlanState
 from ui.widgets.labels import label_for
 
 #: registry name -> pretty label. Anything not listed here falls back
@@ -96,7 +102,13 @@ class ExportScreen(QWidget):
         self._last_out_dir: Path | None = None
         self._last_selected_exporters: list[str] = []
         self._checks: dict[str, QCheckBox] = {}
+        self._shown_reason: str | None = None  # a 3-D block reason the status label shows
+        # The shared run plan is created before this page's own store connections, so it
+        # hears every change first.
+        plan = None if store is None else store.run_plan
         self._build_ui()
+        if plan is not None:
+            plan.changed.connect(self._update_export_enabled)
         if store is not None:
             store.projectChanged.connect(self._on_project_changed)
             store.modeChanged.connect(self._update_export_enabled)
@@ -310,20 +322,29 @@ class ExportScreen(QWidget):
 
     # ── export / cancel ──────────────────────────────────────────────────────
 
+    def _plan_state(self) -> PlanState:
+        if self._store is None:
+            return PlanState(applies=False)
+        return self._store.run_plan.snapshot()
+
     def _update_export_enabled(self, _state: int | None = None) -> None:
         has_project = self._store is not None and self._store.has_project
-        blocked = has_project and self._store.manifest.mode.dimension == "3d"
+        reason = self._plan_state().blocked_reason if has_project else None
         running = self._current_task_id is not None
         needs_overwrite_ack = (
             self._overwrite_checkbox.isVisible() and not self._overwrite_checkbox.isChecked()
         )
         self._export_btn.setEnabled(
-            has_project and not blocked and not running and not needs_overwrite_ack
+            has_project and not reason and not running and not needs_overwrite_ack
         )
-        if blocked:
-            self._status_label.setText(MODE_3D_BLOCK_REASON)
-        elif self._status_label.text() == MODE_3D_BLOCK_REASON:
-            self._status_label.setText("")
+        if reason:
+            if not running:
+                self._status_label.setText(reason)
+                self._shown_reason = reason
+        elif self._shown_reason is not None:
+            if self._status_label.text() == self._shown_reason:
+                self._status_label.setText("")
+            self._shown_reason = None
         self._cancel_btn.setEnabled(running)
 
     def _run_export(self) -> None:
@@ -332,6 +353,14 @@ class ExportScreen(QWidget):
             return
 
         from track2data.api import Engine
+
+        plan = None
+        if self._store.manifest.mode.dimension == "3d":
+            state = self._plan_state()
+            if not state.runnable:
+                self._update_export_enabled()
+                return
+            plan = state.plan
 
         selected = [name for name, cb in self._checks.items() if cb.isChecked()]
         out_dir = self._resolved_out_dir()
@@ -352,7 +381,10 @@ class ExportScreen(QWidget):
         engine = Engine(self._store.manifest, cache_dir=self._store.cache_dir)
         self._run_analysis_hash = self._store.analysis_hash()
         self._run_project_revision = self._store.project_revision
-        run_fn = functools.partial(engine.run, out_dir, exporters=selected)
+        if plan is None:
+            run_fn = functools.partial(engine.run, out_dir, exporters=selected)
+        else:
+            run_fn = functools.partial(engine.run, out_dir, exporters=selected, plan=plan)
 
         self._last_out_dir = out_dir
         self._last_selected_exporters = selected

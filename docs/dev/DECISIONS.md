@@ -846,6 +846,8 @@ on it, and if they differ, the recorded size would hide the discrepancy.
 
 ### D-037 · Project mode (2D or 3D) is a project setting, locked once sessions exist, and 3-D does not compute yet
 
+Superseded in part by D-041 (a 3-D project computes fused pairs; the mode setting and its lock stand).
+
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-mode-switch-design.md`
 (sub-project E of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It does not change D-031 or D-036.
 
@@ -870,6 +872,8 @@ recording layout first, and need it fixed before sessions exist. Running the 2-D
 hiding buttons.
 
 ### D-038 · ID correspondence between views: G owns the pair record, pairing is by regex, and the Views page never blocks
+
+Superseded in part by D-041 (3-D projects now compute fused pairs, so "3-D cannot compute anyway" no longer holds; pairs still never block Next).
 
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-id-correspondence-design.md`
 (sub-project G of `docs/3d-movement/2026-10-08-3d-roadmap.md`). Replaces the reserved `id_map` of D-037.
@@ -938,6 +942,8 @@ later stages (fusion D, 3-D metrics B) two ordinary sessions with their own vide
 
 ### D-040 · Fusion of top and side views: two cameras at right angles, computed on demand, depth beside the top-view session
 
+Superseded in part by D-041 (a 3-D project now runs its fused pairs and `Engine.require_computable()` gates on the run plan; the fusion itself stands, and since D-041 a frame jump in the fused rows gets a NaN separator row).
+
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-fusion-design.md`
 (sub-project D of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-038 (the pair record
 gains the fusion settings) and D-039 (the fused session is built from the two panel sessions) and
@@ -983,3 +989,92 @@ top-view y, so B must read `psess.depth`. Counting out-of-column positions inste
 clipping them keeps a wrong water column visible. Computing on demand from cached inputs avoids a
 second cache whose key would have to track every setting of both sessions.
 
+---
+
+### D-041 · A 3-D project runs fused pairs: one run unit per pair, nothing else computes
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-10-3d-run-design.md`
+(sub-project B1 of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It supersedes the "No 3-D compute"
+part of D-037 and extends D-040; the mode setting and its lock stand.
+
+**Decision:** *Run units.* `Engine.run_units()` returns a `RunPlan` (`track2data/core/runplan.py`):
+2-D, one `RunUnit` per session; 3-D, one per pair that has fusion settings and fuses without a
+`FusionError` (id `<top>+<side>`, output folder `out_dir/<id>/`). Every other session is a
+`SkippedSession` with a reason: "not in a fusable pair", "pair t+s: no fusion settings for this
+pair", or the `FusionError` text prefixed "pair t+s: ". *Gate.* `Engine.require_computable()`
+returns the checked plan and raises when a 3-D plan has no unit ("no pair is ready to fuse: ..."
+with at most three reasons, or `MODE_3D_BLOCK_REASON` = "Pair and fuse a top and a side session
+first" when there is no session or pair at all). In a 3-D project `compute_metrics` accepts a fused
+session only ("3-D projects compute fused sessions only"), `run_session` is 2-D only, and
+`sensitivity` refuses (`SENSITIVITY_3D_REFUSAL`). `validate()` stays blocking-only; notes about
+unfusable pairs come from `Engine.validation_issues()`. *Running.* A pair unit takes its
+`PreprocessedSession` from `fuse_pair`; everything after is the 2-D code. A serial run reuses the
+plan's fusion; a parallel worker receives the unit index and the manifest (no arrays) and fuses its
+own pair, so serial and parallel runs write identical files. Fused sessions are not cached. Where
+the fused frames jump, `fuse` inserts one NaN separator row on every per-row array (the 2-D
+convention of `preprocess/timeline_expand.py`), so no metric that diffs rows bridges a gap.
+*Metadata.* A unit carries the TOP session's metadata (`Engine._metadata_key` looks the unit id up
+among the manifest's pairs, never splitting it on `+`); per-animal metadata matches by label, or by
+the top session's index through `PreprocessedSession.source_animal_index`. *Pre-flight.* In 3-D the
+consistency report reads the top session of each pair with fusion settings, and session calibration
+checks both sessions of such pairs; skipped sessions are not checked.
+*IL-15.* Reads `psess.depth`: mean, median and SD (ddof 1) of the depth fraction, `mean_depth_cm` =
+mean x tank height, `frac_outside_extent` from `depth_outside_mask` (the per-frame flags of side
+positions outside the column, sliced with the depth so a time bin counts its own; the per-animal
+`depth_outside` counts are its sum over the whole session and feed the run records),
+`depth_extent_source` = "fusion". `Metric.uses_depth` (IL-15 only) makes it available for a session
+with depth whatever the camera view; a fused session is top-view for every other metric
+(`camera_view_for_psess`, and the manifest-level helper `manifest_view`). *Exports.* Per-frame
+tables gain `depth_fraction` and `depth_cm` only for fused sessions (one helper, so formats agree);
+`sessions.csv` gains the 18 `FusionRunInfo` fields (the provenance of a pair, including
+`side_trajectory_sha256`) for pair units; the unit README has a "3-D fusion" section and
+`manifest.json` has `run_metadata.fusion`; skipped sessions go to `skipped.csv` and a "Skipped
+sessions" section of `PROJECT_SUMMARY.md`, written only when something was skipped. `depth_outside_mask`
+was added beside `depth_outside`. *UI.* `ProjectStore.run_plan` (`RunPlanWatcher`) builds the plan on
+the store's worker pool and drops stale results; Processing, Export and Preview read it; stage status
+blocks only when no pair has fusion settings (a cheap manifest check). *Limits.* Zones are one set
+applied to the top view; no 3-D speed, path length or neighbour distance (B2); all fused data of a
+plan is recomputed on every run; `csv_wide` has no per-frame table.
+
+**Rationale:** The fusion already yields an ordinary top-view session with a depth, so the 2-D
+pipeline runs on it unchanged and only IL-15 and the exporters had to learn the depth. Running pairs,
+and nothing else, keeps D-037's rule that a 3-D project never produces plausible-but-wrong 2-D
+numbers. Skipping a bad pair with its reason, instead of aborting, lets a long batch finish; refusing
+only when nothing can run keeps the failure clean. Passing the unit index to workers avoids pickling
+large arrays and keeps results independent of the worker count.
+
+### D-042 · 3-D metrics need the top view's cm scale and never estimate it
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-10-3d-metrics-design.md`
+(sub-project B2 of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-041 (a fused session is
+what runs) and amends D-031 for the fused case only.
+
+**Decision:** *Metrics.* IL-16 (3-D distance travelled), IL-17 (3-D speed) and GL-16 (3-D
+nearest-neighbour distance), beside IL-1, IL-2 and GL-1, which are unchanged. Positions are
+`(x_px, y_px) / px_per_cm` and `depth * depth_height_cm` (`metrics/geometry3d.py`); a step, frame or
+speed needs all three coordinates finite, otherwise the value is NaN (never 0) and the count of
+valid steps or skipped frames says how much was used. IL-17's horizontal speed is the pipeline's
+own `kinematics.speed_px_s`, and its vertical speed uses `compute_kinematics` with the project's
+`KinematicsCfg`, which the Engine hands over through `cfg["kinematics"]` for metrics with the class
+flag `uses_kinematics_cfg`. *The cm-scale rule.* The class flag `requires_depth_scale` makes a metric
+available only for a fused session with a top-view cm scale. One function
+(`availability.depth_scale_reason`) answers for every caller, in the order 2-D ("needs a fused 3-D
+session"), calibration mode `bodylength` ("needs a cm scale for the top view (use scalar or session
+calibration)"), run-time unit without `px_per_cm` ("needs a cm scale for the top view"). The
+manifest-level answer is optimistic (it cannot know a unit's scale); the run skips per unit and
+records the reason in the README. *No estimate.* The fusion could suggest a scale (it compares the two
+views' horizontal positions in cm), but that comparison already assumes the top view's scale, and a
+scale taken from it would add an error that no output would show. Without a scale the metric is
+unavailable and a number is never produced. Body length in cm is `body_length_px / px_per_cm`, NaN
+when unknown. *Guarantees.* IL-16 is at least IL-1 only over the steps where depth is finite;
+IL-17 is at least IL-2's cm/s only over frames where the vertical speed is finite (the estimator
+may give none, for example the last frame of the forward difference); GL-16 is at least GL-1 only
+per frame where both are valid. *Presets.* A preset leaves greyed-out rows unticked, so *All metrics*
+never selects a metric the project cannot run (this covers every greyed-out row, so with all sessions identity-free *Standard locomotor* ticks nothing). *Outputs.* GL-16's skip count is `n_skipped_frames_3d` so that it cannot collide with GL-1's in the merged group tables. `codebook.csv` lists the whole registry, so 2-D runs gain its three metrics' rows; every other 2-D output is unchanged.
+
+**Rationale:** An error hidden in a derived scale is worse than a refusal that says what to set.
+Reusing the one availability function and the existing skip list keeps the Metrics screen, `validate`,
+the CLI and the README in agreement. Stating the inequalities as conditional keeps the documentation
+true for gappy tracks. *Limits.* Depth comes from a side camera at right angles (no refraction or
+parallax correction); a wrong tank height scales every vertical distance; no vertical speed metric,
+3-D inter-individual distance or cohesion.

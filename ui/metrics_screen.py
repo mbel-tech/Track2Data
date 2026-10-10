@@ -37,7 +37,11 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
-from track2data.metrics.availability import manifest_view, view_unavailable_reason
+from track2data.metrics.availability import (
+    manifest_depth_scale,
+    manifest_view,
+    unavailable_reason,
+)
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 from ui.widgets.autocommit import AutoCommit
@@ -104,6 +108,8 @@ class MetricsScreen(QWidget):
             store.projectChanged.connect(self._load_from_store)
             store.sessionsChanged.connect(self._update_availability)
             store.sceneChanged.connect(self._update_availability)
+            store.calibrationChanged.connect(self._update_availability)
+            store.modeChanged.connect(self._update_availability)
             store.zonesChanged.connect(self._update_zone_tab_enabled)
             self._load_from_store()
             self._update_availability()
@@ -255,12 +261,17 @@ class MetricsScreen(QWidget):
         self._preset_combo.setCurrentIndex(0)
 
     def apply_preset(self, name: str) -> None:
-        """Tick exactly the metrics of preset *name* (all others unticked)."""
+        """Tick exactly the metrics of preset *name* (all others unticked).
+
+        A row the project cannot run (greyed out, for example a 3-D metric in a 2-D project) is
+        left unticked, so a preset never selects a metric the engine would only skip.
+        """
         ids = PRESETS[name]
         for _tab, table in self._tables():
             for row in range(table.rowCount()):
                 item = table.item(row, _COL_INCLUDE)
-                wanted = ids is None or item.data(_ROLE_METRIC_ID) in ids
+                enabled = bool(item.flags() & Qt.ItemFlag.ItemIsEnabled)
+                wanted = enabled and (ids is None or item.data(_ROLE_METRIC_ID) in ids)
                 item.setCheckState(Qt.CheckState.Checked if wanted else Qt.CheckState.Unchecked)
 
     def _update_counter(self) -> None:
@@ -285,13 +296,15 @@ class MetricsScreen(QWidget):
         }
         if not selected:
             return "None"
+        # Greyed-out rows are never part of a preset (see apply_preset).
         everything = {
             table.item(row, _COL_INCLUDE).data(_ROLE_METRIC_ID)
             for _n, table in self._tables()
             for row in range(table.rowCount())
+            if table.item(row, _COL_INCLUDE).flags() & Qt.ItemFlag.ItemIsEnabled
         }
         for name, ids in PRESETS.items():
-            if selected == (everything if ids is None else set(ids)):
+            if selected == (everything if ids is None else set(ids) & everything):
                 return name
         return "Custom"
 
@@ -485,6 +498,7 @@ class MetricsScreen(QWidget):
         all_identity_free = bool(sessions) and len(free_ids) == len(sessions)
         some_identity_free = bool(free_ids) and not all_identity_free
         camera_view, has_depth = manifest_view(self._store.manifest)
+        depth_scale = manifest_depth_scale(self._store.manifest)
 
         if all_identity_free:
             identity_note = (
@@ -505,10 +519,9 @@ class MetricsScreen(QWidget):
                 if include_item is None or name_item is None:
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
-                view_reason = view_unavailable_reason(
-                    metrics.get(include_item.data(_ROLE_METRIC_ID)),
-                    camera_view,
-                    has_depth=has_depth,
+                metric_cls = metrics.get(include_item.data(_ROLE_METRIC_ID))
+                view_reason = unavailable_reason(
+                    metric_cls, camera_view, has_depth=has_depth, depth_scale=depth_scale
                 )
 
                 notes: list[str] = []

@@ -158,6 +158,9 @@ class TaskRunner(QObject):
         # reproduced during this module's own test development. Cleared
         # only once a task reaches a terminal state (see _forget).
         self._active: dict[str, tuple[_WorkerSignals, _EngineTask]] = {}
+        # Set by shutdown(): a submit after it (a late slot while the window closes) gets an id
+        # but never starts, so nothing runs on a drained pool or emits into a dying widget tree.
+        self._closed = False
 
     def submit(self, fn: Callable[[], Any], *, lane: str = "run") -> str:
         """Submit a plain callable that takes no arguments -- e.g.
@@ -189,6 +192,8 @@ class TaskRunner(QObject):
         if lane not in self._pools:
             raise ValueError(f"unknown lane {lane!r}; expected one of {LANES}")
         task_id = uuid.uuid4().hex
+        if self._closed:
+            return task_id
         token = CancellationToken()
         self._tokens[task_id] = token
         self._lane_of[task_id] = lane
@@ -252,6 +257,11 @@ class TaskRunner(QObject):
 
         return _cleanup
 
+    @property
+    def closed(self) -> bool:
+        """``shutdown()`` was called: a submit now returns an id but never starts a task."""
+        return self._closed
+
     def cancel(self, task_id: str) -> None:
         """Request cancellation of one in-flight task. Cooperative: the
         task only actually stops the next time its callable checks in
@@ -278,6 +288,7 @@ class TaskRunner(QObject):
         already-destroyed widget tree is a hard crash with no Python
         traceback.
         """
+        self._closed = True
         self.cancel_all()
         deadline = time.monotonic() + msecs / 1000
         drained = True

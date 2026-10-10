@@ -1,5 +1,5 @@
 """
-Individual-level metrics: IL-1 to IL-11, IL-14 and IL-15.
+Individual-level metrics: IL-1 to IL-11 and IL-14 to IL-17.
 
 Each class implements :class:`track2data.metrics.base.Metric` and returns
 a :class:`pandas.DataFrame` with at least the columns ``session_id``,
@@ -17,6 +17,7 @@ import pandas as pd
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
+from track2data.metrics.geometry3d import body_length_cm, positions_cm
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -1825,6 +1826,203 @@ class VerticalPosition(Metric):
         return pd.DataFrame(records, columns=self.output_columns)
 
 
+# ── IL-16: PathLength3D ───────────────────────────────────────────────────────
+
+
+class PathLength3D(Metric):
+    """IL-16 — Distance travelled in 3-D (cm) on a fused top + side session."""
+
+    id = "IL-16"
+    name = "path_length_3d"
+    label = "3-D Distance Travelled"
+    level = "individual"
+    priority = "optional"
+    requires_identity = True
+    requires_depth_scale = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        # Emitted unconditionally: NaN when the session has no depth or no cm scale.
+        "path_length_3d_cm",
+        "path_length_3d_bl",
+        "n_valid_steps",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Total distance travelled by each individual through the water, in cm, from the "
+            "top view's horizontal position and the side view's depth of a fused 3-D session."
+        ),
+        formula_plain=(
+            "sum of ||P[t+1,k] - P[t,k]|| over frame pairs where both positions are finite, "
+            "with P = (x_px / px_per_cm, y_px / px_per_cm, depth * tank_height_cm)"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.depth",
+            "PreprocessedSession.px_per_cm",
+            "PreprocessedSession.depth_height_cm",
+        ],
+        assumptions=[
+            "The depth comes from a side camera at right angles to the top camera, and the "
+            "fusion's water column and tank height give the vertical scale",
+            "A step counts only when all three coordinates (x, y, depth) are finite at both "
+            "of its frames; an animal with no such step reports NaN (cm and BL), never 0, and "
+            "n_valid_steps says how many steps the length rests on",
+            "Interpolated frames contribute a straight line, which understates the real path "
+            "across a gap -- see D-11's frac_interpolated",
+        ],
+        warnings=[
+            "Under-smoothed data inflates the length, exactly as for IL-1: summing step "
+            "lengths sums |dx| rather than dx, so positional noise always adds length and the "
+            "inflation grows with frame rate. Depth noise adds to it as well.",
+            "No refraction or parallax correction: a fish near the front glass looks larger "
+            "and sits at a different apparent depth than one at the back.",
+            "A wrong tank height scales every vertical distance, and so the 3-D length, by the "
+            "same factor.",
+            "Needs a cm scale for the top view; without it (or without depth) every column "
+            "is NaN.",
+        ],
+        citation="Standard kinematics",
+        supporting_references=[MARTIN_BATESON_2007],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """3-D path length for every individual; NaN columns without depth or a cm scale."""
+        pos = positions_cm(session)
+        records: list[dict] = []
+        for k in range(session.n_animals):
+            n_steps = 0
+            path_cm = float("nan")
+            if pos is not None:
+                diff = pos[1:, k, :] - pos[:-1, k, :]
+                valid = np.isfinite(diff).all(axis=1)
+                n_steps = int(valid.sum())
+                if n_steps > 0:
+                    path_cm = float(np.sqrt((diff[valid] ** 2).sum(axis=1)).sum())
+            bl_cm = body_length_cm(session, k)
+            records.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "individual_id": k,
+                    "path_length_3d_cm": path_cm,
+                    "path_length_3d_bl": path_cm / bl_cm if bl_cm > 0 else float("nan"),
+                    "n_valid_steps": n_steps,
+                }
+            )
+        return pd.DataFrame(records, columns=self.output_columns)
+
+
+# ── IL-17: Speed3D ────────────────────────────────────────────────────────────
+
+
+class Speed3D(Metric):
+    """IL-17 — Speed in 3-D (cm/s) on a fused top + side session."""
+
+    id = "IL-17"
+    name = "speed_3d"
+    label = "3-D Speed (mean / median / max)"
+    level = "individual"
+    priority = "optional"
+    requires_identity = True
+    requires_depth_scale = True
+    uses_kinematics_cfg = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        # Emitted unconditionally: NaN when the session has no depth or no cm scale.
+        "mean_speed_3d_cm_s",
+        "median_speed_3d_cm_s",
+        "max_speed_3d_cm_s",
+        "mean_speed_3d_bl_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Mean, median and maximum speed of each individual through the water, in cm/s, "
+            "combining the top view's horizontal speed with the vertical speed of the side "
+            "view's depth in a fused 3-D session."
+        ),
+        formula_plain=(
+            "per frame sqrt(vh^2 + vz^2), vh = kinematics.speed_px_s / px_per_cm, "
+            "vz = vertical speed of depth * tank_height_cm from the same estimator as the "
+            "pipeline's kinematics; mean/median/max over frames where both are finite"
+        ),
+        inputs=[
+            "PreprocessedSession.kinematics.speed_px_s",
+            "PreprocessedSession.depth",
+            "PreprocessedSession.px_per_cm",
+            "PreprocessedSession.depth_height_cm",
+            "KinematicsCfg (the pipeline's estimator and window)",
+        ],
+        assumptions=[
+            "The horizontal part is exactly IL-2's speed in cm/s; the vertical part is the "
+            "speed of the depth series in cm/s from the same estimator and window the "
+            "pipeline used for the horizontal speed",
+            "A frame counts only where both the horizontal and the vertical speed are finite; "
+            "where the estimator returns NaN for the vertical speed (the last frame of the "
+            "forward-difference estimator, a depth segment too short for the window) the "
+            "frame is left out, never counted as zero",
+            "The depth comes from a side camera at right angles to the top camera",
+        ],
+        warnings=[
+            "Max speed is sensitive to remaining jump artefacts, and to depth noise, which "
+            "adds to the speed as the positional noise does for IL-2.",
+            "No refraction or parallax correction. A wrong tank height scales every vertical "
+            "speed by the same factor.",
+            "Needs a cm scale for the top view; without it (or without depth) every column "
+            "is NaN.",
+        ],
+        citation="Standard kinematics",
+        supporting_references=[BJORNERAAS_2010],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """3-D speed statistics per individual; NaN columns without depth or a cm scale.
+
+        ``cfg["kinematics"]`` (a ``KinematicsCfg`` or its dict) is the estimator the pipeline
+        used; the Engine supplies it, and the default ``KinematicsCfg()`` applies without it.
+        """
+        from track2data.core.models import KinematicsCfg
+        from track2data.preprocess.kinematics import compute_kinematics
+
+        speed_3d: np.ndarray | None = None
+        height, scale = session.depth_height_cm, session.px_per_cm
+        if session.depth is not None and height is not None and scale is not None:
+            kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
+            z = np.asarray(session.depth, dtype=np.float64) * float(height)
+            # compute_kinematics differentiates an (n, animals, 2) array; [Z, 0] makes its
+            # speed |vz|, with the second component NaN wherever Z is.
+            zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
+            vz = compute_kinematics(zz, session.fps, kcfg).speed_px_s
+            vh = session.kinematics.speed_px_s / float(scale)
+            speed_3d = np.sqrt(vh**2 + vz**2)  # NaN where either is NaN
+
+        records: list[dict] = []
+        for k in range(session.n_animals):
+            mean_s = median_s = max_s = float("nan")
+            if speed_3d is not None:
+                valid = speed_3d[:, k][np.isfinite(speed_3d[:, k])]
+                if len(valid) > 0:
+                    mean_s = float(np.mean(valid))
+                    median_s = float(np.median(valid))
+                    max_s = float(np.max(valid))
+            bl_cm = body_length_cm(session, k)
+            records.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "individual_id": k,
+                    "mean_speed_3d_cm_s": mean_s,
+                    "median_speed_3d_cm_s": median_s,
+                    "max_speed_3d_cm_s": max_s,
+                    "mean_speed_3d_bl_s": mean_s / bl_cm if bl_cm > 0 else float("nan"),
+                }
+            )
+        return pd.DataFrame(records, columns=self.output_columns)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -1842,3 +2040,5 @@ _register(RoamingEntropy)
 _register(CircularHeadingStats)
 _register(WallDistanceThigmotaxis)
 _register(VerticalPosition)
+_register(PathLength3D)
+_register(Speed3D)

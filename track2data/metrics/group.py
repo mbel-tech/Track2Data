@@ -1,5 +1,5 @@
 """
-Group-level metrics: GL-1, GL-3, GL-5, GL-7.
+Group-level metrics: GL-1, GL-3, GL-5, GL-7, GL-16.
 
 Each class implements :class:`track2data.metrics.base.Metric` and returns
 a :class:`pandas.DataFrame` with at least the columns ``session_id`` and
@@ -18,6 +18,7 @@ from scipy.spatial.distance import pdist
 
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
+from track2data.metrics.geometry3d import body_length_cm, positions_cm
 from track2data.metrics.references import (
     BALLERINI_2008,
     BERNARDIN_STIEFELHAGEN_2008,
@@ -160,6 +161,120 @@ class NearestNeighbourDistance(Metric):
         )
 
         return pd.DataFrame([row])
+
+
+# ── GL-16: 3-D nearest-neighbour distance ─────────────────────────────────────
+
+
+class NearestNeighbourDistance3D(Metric):
+    """GL-16 — Mean nearest-neighbour distance (NND) in 3-D (cm) on a fused session."""
+
+    id = "GL-16"
+    name = "nearest_neighbour_distance_3d"
+    label = "3-D Nearest-Neighbour Distance"
+    level = "group"
+    priority = "optional"
+    # Like GL-1: an unordered point set per frame, so slot identity is irrelevant.
+    requires_identity = False
+    requires_depth_scale = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "mean_nnd_3d_cm",
+        "median_nnd_3d_cm",
+        "mean_nnd_3d_bl",
+        "n_skipped_frames_3d",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "GL-1 in three dimensions. For each frame the nearest-neighbour distance of "
+            "every animal is the minimum Euclidean distance, in cm, to any other animal in "
+            "(X, Y, Z) space (X, Y from the top view, Z from the side-view depth times the "
+            "tank height). The group NND per frame is the mean across animals; the metric "
+            "reports the mean and median of the frame-level values."
+        ),
+        formula_plain=(
+            "P[t,k] = (x/px_per_cm, y/px_per_cm, depth*tank_height_cm); "
+            "per-frame per-animal: min_j≠k ||P[t,k] - P[t,j]||; "
+            "group_nnd[t] = mean_k; metric = mean/median over frames"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.depth",
+            "PreprocessedSession.px_per_cm",
+            "PreprocessedSession.depth_height_cm",
+        ],
+        assumptions=[
+            "The depth comes from a side camera at right angles to the top camera",
+            "A frame needs finite X, Y and Z for every animal; other frames are skipped "
+            "and counted (a frame GL-1 keeps can be skipped here for missing depth)",
+            "Body length for the BL column is the mean over animals, as for GL-1",
+        ],
+        warnings=[
+            "Skipped-frame count is reported; high counts may bias the metric",
+            "Over the frames where both are valid the 3-D distance is at least GL-1's "
+            "(in cm); not an unconditional inequality, because the frame sets differ",
+            "No refraction or parallax correction; a wrong tank height scales every "
+            "vertical distance",
+            "Without depth or a cm scale all statistics are NaN",
+        ],
+        primary_reference=CLARK_EVANS_1954,
+        supporting_references=[PITCHER_1973, KRAUSE_RUXTON_2002],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """Compute 3-D nearest-neighbour distance statistics for *session*.
+
+        Parameters
+        ----------
+        session:
+            A fused, fully preprocessed session.
+        cfg:
+            Optional configuration dict (unused for this metric).
+
+        Returns
+        -------
+        pd.DataFrame
+            One row with the group 3-D NND statistics (all NaN without depth or a cm scale).
+        """
+        pos = positions_cm(session)  # (n_frames, n_animals, 3) or None
+        n_frames, n_animals = session.xy.shape[0], session.xy.shape[1]
+        frame_nnds: list[float] = []
+        n_skipped = n_frames
+        if pos is not None and n_animals >= 2:
+            n_skipped = 0
+            for t in range(n_frames):
+                points = pos[t]
+                if np.isnan(points).any():
+                    n_skipped += 1
+                    continue
+                dists, _ = cKDTree(points).query(points, k=2)
+                frame_nnds.append(float(dists[:, 1].mean()))
+
+        if frame_nnds:
+            arr = np.array(frame_nnds)
+            mean_nnd = float(arr.mean())
+            median_nnd = float(np.median(arr))
+        else:
+            mean_nnd = median_nnd = np.nan
+
+        # Same convention as GL-1's mean_nnd_bl: mean body length over the animals.
+        bl_cm = np.array([body_length_cm(session, k) for k in range(n_animals)], dtype=float)
+        mean_bl = float(np.nanmean(bl_cm)) if np.isfinite(bl_cm).any() else np.nan
+        mean_nnd_bl = mean_nnd / mean_bl if mean_bl > 0 and not np.isnan(mean_nnd) else np.nan
+
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "mean_nnd_3d_cm": mean_nnd,
+                    "median_nnd_3d_cm": median_nnd,
+                    "mean_nnd_3d_bl": mean_nnd_bl,
+                    "n_skipped_frames_3d": n_skipped,
+                }
+            ]
+        )
 
 
 # ── GL-3: Polarisation ────────────────────────────────────────────────────────
@@ -1589,3 +1704,4 @@ _register(GroupSpread)
 _register(OrderStateClassification)
 _register(TopologicalNeighbourCounts)
 _register(GroupElongation)
+_register(NearestNeighbourDistance3D)

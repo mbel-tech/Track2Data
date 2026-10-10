@@ -66,6 +66,25 @@ def _take(arr: np.ndarray | None, rows: np.ndarray, cols: list[int]) -> np.ndarr
     return None if arr is None else arr[rows][:, cols]
 
 
+def _separate(arr: np.ndarray, at: np.ndarray) -> np.ndarray:
+    """*arr* with one separator row inserted before each row index in *at*: NaN for floats,
+    False for flags, "" (no zone) for zone names."""
+    if at.size == 0:
+        return arr
+    if arr.dtype == bool:
+        fill = np.array(False)
+    elif arr.dtype == object:
+        fill = np.array("", dtype=object)
+    else:
+        arr = arr.astype(float, copy=False)
+        fill = np.array(np.nan)
+    return np.insert(arr, at, fill, axis=0)
+
+
+def _separate_optional(arr: np.ndarray | None, at: np.ndarray) -> np.ndarray | None:
+    return None if arr is None else _separate(arr, at)
+
+
 def fuse(
     top: PreprocessedSession,
     side: PreprocessedSession,
@@ -76,9 +95,11 @@ def fuse(
     """Fuse ``side`` into ``top`` as described in the module docstring.
 
     ``top_frames`` / ``side_frames`` in the report count the eligible rows (tracked, not
-    separators). Dropped rows leave gaps in ``frame_index`` and no separator rows are inserted, so
-    a consumer that relies on adjacency must read ``frame_index``. ``psess.session`` keeps its
-    full-length per-frame data, filtered by animal only.
+    separators). Wherever the kept frames jump (a frame either view lacks), one NaN separator row
+    is inserted on every per-row array, as for a 2-D session tracked in separate intervals
+    (``preprocess/timeline_expand.py``), so nothing that diffs rows bridges the gap. A fusion
+    without jumps has no separator and leaves ``separator_mask`` / ``tracked_mask`` None.
+    ``psess.session`` keeps its full-length per-frame data, filtered by animal only.
 
     Raises ``FusionError`` for missing settings, differing frame rates, an invalid fish map, no
     matched fish, or no frames the two views share. ``same_video`` forces the offset to 0.
@@ -118,31 +139,47 @@ def fuse(
     def per_animal(a: np.ndarray | None) -> np.ndarray | None:
         return a[keep] if a is not None and np.shape(a)[:1] == (n,) else None
 
+    frames = top_frames[np.searchsorted(top_rows, rows)]
+    # one separator row before each kept row that does not follow its predecessor's frame
+    at = np.flatnonzero(np.diff(frames) > 1) + 1
+    separator: np.ndarray | None = None
+    if at.size:
+        separator = np.insert(np.zeros(frames.size, dtype=bool), at, True)
+        # a separator's frame is the one after the frame before it (the 2-D convention)
+        frames = np.insert(frames, at, frames[at - 1] + 1)
+
+    def per_row(a: np.ndarray) -> np.ndarray:
+        return _separate(a[rows][:, keep], at)
+
+    def per_row_optional(a: np.ndarray | None) -> np.ndarray | None:
+        return _separate_optional(_take(a, rows, keep), at)
+
     psess = dataclasses.replace(
         top,
         session=session,
-        xy=top.xy[rows][:, keep],
+        xy=per_row(top.xy),
         kinematics=KinematicsArrays(
-            speed_px_s=kin.speed_px_s[rows][:, keep],
-            accel_px_s2=kin.accel_px_s2[rows][:, keep],
-            heading_rad=kin.heading_rad[rows][:, keep],
+            speed_px_s=per_row(kin.speed_px_s),
+            accel_px_s2=per_row(kin.accel_px_s2),
+            heading_rad=per_row(kin.heading_rad),
         ),
         body_length_cm=per_animal(top.body_length_cm),
         body_length_px=per_animal(top.body_length_px),
-        main_zone=_take(top.main_zone, rows, keep),
-        sec_zone=_take(top.sec_zone, rows, keep),
-        jump_replaced=_take(top.jump_replaced, rows, keep),
+        main_zone=per_row_optional(top.main_zone),
+        sec_zone=per_row_optional(top.sec_zone),
+        jump_replaced=per_row_optional(top.jump_replaced),
         timeline_valid=top_valid and side_valid,
-        frame_index=top_frames[np.searchsorted(top_rows, rows)],
-        tracked_mask=None,
-        separator_mask=None,
+        frame_index=frames,
+        tracked_mask=None if separator is None else ~separator,
+        separator_mask=separator,
         # the tracker's own positions, laid out on the fused rows
-        raw_xy_rows=_take(top.raw_xy_aligned, rows, keep),
-        id_probabilities_rows=_take(top.id_probabilities_aligned, rows, keep),
-        depth=depth,
+        raw_xy_rows=per_row(top.raw_xy_aligned),
+        id_probabilities_rows=per_row_optional(top.id_probabilities_aligned),
+        depth=_separate(depth, at),
         depth_height_cm=fs.tank_height_cm,
         depth_outside=outside.sum(axis=0).astype(int),
-        depth_outside_mask=outside,
+        depth_outside_mask=_separate(outside, at),
+        source_animal_index=np.asarray(keep, dtype=np.int64),
     )
     rms: float | None = None
     per_fish: dict[str, float | None] = {}

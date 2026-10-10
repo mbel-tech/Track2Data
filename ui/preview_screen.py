@@ -30,6 +30,10 @@ Diagnostics tab, per selected session (store.run_results.sessions):
 Metrics tab: a session selector + a metric-ID selector (populated from
 the selected session's SessionRunResult.metric_previews keys) showing
 that metric's preview table.
+
+Trajectories tab in a 3-D project: the selector lists the run units of the plan
+built in the background (ProjectStore.run_plan); loading a pair unit fuses it on the
+worker pool (Engine.fuse_pair) and shows its top-view tracks under the unit id.
 """
 
 from __future__ import annotations
@@ -77,6 +81,7 @@ class TrajectoryData:
     background: Path | None
     size: tuple[float, float]
     crop: PanelRect | None = None
+    title: str | None = None  # the run unit's id, for a fused pair
 
 
 def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> TrajectoryData:
@@ -95,6 +100,38 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
         size=(float(video.width_px), float(video.height_px)),
         crop=ref.panel,
     )
+
+
+def load_fused_trajectory_data(
+    manifest, top_id: str, side_id: str, cache_dir: Path | None
+) -> TrajectoryData:
+    """Fuse one pair and return its top-view tracks, titled with the unit id. Runs on a worker
+    thread; raises when the pair or one of its sessions left the project, or fusion fails."""
+    from track2data.api import Engine
+
+    unit_id = f"{top_id}+{side_id}"
+    refs = {r.session_id: r for r in manifest.sessions}
+    pair = next(
+        (
+            p for p in manifest.view_pairs
+            if (p.top_session_id, p.side_session_id) == (top_id, side_id)
+        ),
+        None,
+    )
+    if pair is None or top_id not in refs or side_id not in refs:
+        raise ValueError(f"{unit_id} is no longer in the project.")
+    psess = Engine(manifest, cache_dir=cache_dir).fuse_pair(pair).psess
+    video = psess.session.video
+    return TrajectoryData(
+        raw_xy=psess.raw_xy_aligned,
+        xy=psess.xy,
+        fps=video.fps,
+        background=psess.session.background_image_path,
+        size=(float(video.width_px), float(video.height_px)),
+        crop=refs[top_id].panel,
+        title=unit_id,
+    )
+
 
 #: Diagnostic metric IDs shown in the Diagnostics tab's per-individual table.
 _PER_INDIVIDUAL_DIAGNOSTIC_IDS = ["D-1", "D-3"]
@@ -115,7 +152,12 @@ class PreviewScreen(QWidget):
         self._traj_timer = QTimer(self)
         self._traj_timer.setInterval(40)
         self._traj_timer.timeout.connect(self._traj_advance)
+        # The shared run plan is created before this page's own store connections, so it
+        # hears every change first.
+        plan = None if store is None else store.run_plan
         self._build_ui()
+        if plan is not None:
+            plan.changed.connect(self._refresh_traj_sessions)
         if store is not None:
             store.taskFinished.connect(self._on_traj_task_finished)
             store.sessionsChanged.connect(self._refresh_traj_sessions)
@@ -177,6 +219,11 @@ class PreviewScreen(QWidget):
         top.addWidget(self._traj_load_btn)
         lay.addLayout(top)
 
+        self._traj_title = QLabel()  # the fused unit's id (3-D only)
+        self._traj_title.setObjectName("CardTitle")
+        self._traj_title.hide()
+        lay.addWidget(self._traj_title)
+
         self._traj_status = QLabel(
             "Load a session to inspect its tracked paths, what preprocessing "
             "changed, and where the animals spent their time."
@@ -231,10 +278,23 @@ class PreviewScreen(QWidget):
 
     # ── slots: Trajectories ───────────────────────────────────────────────
 
+    def _is_3d(self) -> bool:
+        m = self._store.manifest if self._store is not None else None
+        return m is not None and m.mode.dimension == "3d"
+
     def _refresh_traj_sessions(self) -> None:
+        """List the sessions (2-D) or the run units of the plan (3-D). Never writes."""
         current = self._traj_session_combo.currentText()
         self._traj_session_combo.clear()
-        if self._store is not None and self._store.manifest is not None:
+        if self._is_3d():
+            plan = self._store.run_plan.snapshot().plan
+            for unit in plan.units if plan is not None else []:
+                if unit.pair is not None:
+                    ids = (unit.pair.top_session_id, unit.pair.side_session_id)
+                    self._traj_session_combo.addItem(unit.unit_id, userData=ids)
+            if self._traj_session_combo.findText(current) >= 0:
+                self._traj_session_combo.setCurrentText(current)
+        elif self._store is not None and self._store.manifest is not None:
             ids = [r.session_id for r in self._store.manifest.sessions]
             self._traj_session_combo.addItems(ids)
             if current in ids:
@@ -249,9 +309,16 @@ class PreviewScreen(QWidget):
             return
         self._traj_status.setText(f"Loading {session_id}…")
         self._traj_load_btn.setEnabled(False)
-        fn = functools.partial(
-            load_trajectory_data, self._store.manifest, session_id, self._store.cache_dir
-        )
+        pair_ids = self._traj_session_combo.currentData() if self._is_3d() else None
+        if pair_ids:
+            fn = functools.partial(
+                load_fused_trajectory_data, self._store.manifest, *pair_ids,
+                self._store.cache_dir,
+            )
+        else:
+            fn = functools.partial(
+                load_trajectory_data, self._store.manifest, session_id, self._store.cache_dir
+            )
         self._traj_task_id = self._store.tasks.submit(fn)
 
     def _on_traj_task_finished(self, task_id: str, result: object) -> None:
@@ -269,6 +336,8 @@ class PreviewScreen(QWidget):
         )
         self._traj_slider.setRange(0, max(0, self._traj_view.n_frames - 1))
         self._traj_slider.setValue(0)
+        self._traj_title.setText(result.title or "")
+        self._traj_title.setVisible(bool(result.title))
         self._traj_status.setText(
             f"{self._traj_view.n_frames} frames at {result.fps:g} fps · "
             f"{result.xy.shape[1]} animal(s). Wheel zooms."

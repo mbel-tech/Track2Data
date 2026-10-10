@@ -221,6 +221,41 @@ def test_3d_processing_preview_export_blocked() -> None:
         assert MODE_3D_BLOCK_REASON == "Pair and fuse a top and a side session first"
 
 
+def _paired_3d(fusion=None) -> ProjectManifest:
+    return _manifest_3d(
+        sessions=[_ref("t1", view_role="top"), _ref("s1", view_role="side")],
+        view_pairs=[ViewPair(top_session_id="t1", side_session_id="s1", fusion=fusion)],
+    )
+
+
+def test_3d_pair_without_fusion_settings_still_blocks() -> None:
+    infos = compute_stage_statuses(_paired_3d(), has_run_results=True)
+    for page in (PROC, PREVIEW, EXPORT):
+        assert (infos[page].status, infos[page].message) == ("blocked", MODE_3D_BLOCK_REASON)
+
+
+def test_3d_pair_with_fusion_settings_unblocks_the_result_pages() -> None:
+    fusion = FusionSettings(surface_row=10, floor_row=110, tank_height_cm=20)
+    st = _status(_paired_3d(fusion))
+    assert st[PROC] == st[PREVIEW] == st[EXPORT] == "empty"
+    st = _status(_paired_3d(fusion), has_run=True)
+    assert st[PROC] == st[PREVIEW] == "valid"
+
+
+def test_3d_summaries_follow_the_cheap_check() -> None:
+    from ui.store.stage_status import stage_summaries
+
+    fusion = FusionSettings(surface_row=10, floor_row=110, tank_height_cm=20)
+    blocked = stage_summaries(_paired_3d(), has_run_results=False)
+    assert blocked[7] == blocked[8] == "Fuse a pair first"
+    ready = stage_summaries(_paired_3d(fusion), has_run_results=False)
+    assert (ready[7], ready[8]) == ("Not run", "Needs a run")
+    ran = stage_summaries(_paired_3d(fusion), has_run_results=True, n_run_units=2)
+    assert (ran[7], ran[8]) == ("Ran · 2 pairs", "Results ready")
+    one = stage_summaries(_paired_3d(fusion), has_run_results=True, n_run_units=1)
+    assert one[7] == "Ran · 1 pair"
+
+
 def test_2d_stage_statuses_unchanged() -> None:
     st = _status(_manifest())
     assert st[PROC] == st[PREVIEW] == st[EXPORT] == "empty"
@@ -239,11 +274,11 @@ def test_blocked_sessions_message_constant() -> None:
     assert (info.status, info.message) == ("blocked", SESSIONS_NEEDS_LAYOUT)
 
 
-def test_3d_stage_summaries_say_not_available() -> None:
+def test_3d_stage_summaries_ask_for_a_fused_pair() -> None:
     from ui.store.stage_status import stage_summaries
 
     out = stage_summaries(_manifest_3d(), has_run_results=False)
-    assert out[-2:] == ["Not available yet", "Not available yet"]
+    assert out[-2:] == ["Fuse a pair first", "Fuse a pair first"]
 
 
 # ── Views page ───────────────────────────────────────────────────────────────

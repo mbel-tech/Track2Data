@@ -29,7 +29,7 @@ can filter or covary on them directly.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from track2data.core.models import Session
+    from track2data.core.runplan import FusionRunInfo
 
 
 @dataclass(frozen=True)
@@ -299,6 +300,7 @@ def _identification_key(s: SessionSummary) -> str:
 def sessions_table(
     summaries: Sequence[SessionSummary],
     errors: dict[str, str] | None = None,
+    fusion: Mapping[str, FusionRunInfo] | None = None,
 ) -> pd.DataFrame:
     """One row per session: the facts a downstream analyst needs to filter on.
 
@@ -317,6 +319,10 @@ def sessions_table(
         carrying its id and the error and nothing else -- otherwise a reader
         cannot tell "excluded because it broke" from "never in the project",
         and a silently shorter table reads as a smaller study.
+    fusion:
+        ``unit_id -> FusionRunInfo`` for the pair units of a 3-D run. When given and not empty,
+        the provenance columns are appended (blank for a row that is not a pair unit); without
+        it the table is exactly the 2-D one.
     """
     import pandas as pd
 
@@ -350,13 +356,27 @@ def sessions_table(
         for session_id, message in errors.items()
         if session_id not in summarised
     )
-    return pd.DataFrame(
-        rows,
-        columns=[
-            "session_id", "reader", "fps", "n_frames", "duration_s", "n_animals",
-            "width_px", "height_px", "calibration_mode", "length_unit",
-            "px_per_cm", "is_calibrated", "is_identity_free",
-            "trajectory_source", "trajectory_sha256", "error",
-            "length_calibration_n", "length_calibration_rel_sd",
-        ],
-    )
+    columns = [
+        "session_id", "reader", "fps", "n_frames", "duration_s", "n_animals",
+        "width_px", "height_px", "calibration_mode", "length_unit",
+        "px_per_cm", "is_calibrated", "is_identity_free",
+        "trajectory_source", "trajectory_sha256", "error",
+        "length_calibration_n", "length_calibration_rel_sd",
+    ]
+    if fusion:
+        fusion_columns = list(next(iter(fusion.values())).as_row())
+        for row in rows:
+            info = fusion.get(str(row["session_id"]))
+            if info is not None:
+                row.update(info.as_row())
+                row["side_trajectory_sha256"] = row["side_trajectory_sha256"] or None
+        columns += fusion_columns
+    table = pd.DataFrame(rows, columns=columns)
+    if fusion:
+        # nullable dtypes so a session row's blanks do not turn the counts into floats
+        for name in ("fusion_frame_offset", "fusion_overlap_frames", "fusion_fused_fish",
+                     "fusion_outside_column"):
+            table[name] = table[name].astype("Int64")
+        for name in ("fusion_flip", "fusion_agreement_warning"):
+            table[name] = table[name].astype("boolean")
+    return table

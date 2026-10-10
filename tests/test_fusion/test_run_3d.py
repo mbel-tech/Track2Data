@@ -85,7 +85,7 @@ def test_pair_units_carry_the_fusion_provenance(tmp_path: Path) -> None:
         "fusion_flip", "fusion_surface_row", "fusion_floor_row", "fusion_tank_height_cm",
         "fusion_overlap_frames", "fusion_fused_fish", "fusion_unmatched_top",
         "fusion_unmatched_side", "fusion_outside_column", "fusion_agreement_rms_cm",
-        "fusion_agreement_warning", "fusion_agreement_skipped",
+        "fusion_agreement_warning", "fusion_agreement_skipped", "side_trajectory_sha256",
     ]
 
 
@@ -286,3 +286,265 @@ def test_validate_blocks_when_no_pair_fuses(tmp_path: Path) -> None:
     assert len(blocking) == 1 and blocking[0].startswith("no pair is ready to fuse: ")
     assert notes[0].startswith("pair t1+s1: ")
     assert engine.validate() == blocking
+
+
+def test_a_plan_without_fusion_results_fuses_in_the_serial_run(tmp_path: Path) -> None:
+    """The GUI keeps its plan with ``fused=None`` (memory): a serial run then fuses each unit
+    itself and writes the same files as with the plan's fusion results."""
+    import dataclasses
+
+    manifest = build_scene(tmp_path / "data")
+    plan = Engine(manifest).require_computable()
+    stripped = dataclasses.replace(
+        plan, units=[dataclasses.replace(u, fused=None) for u in plan.units]
+    )
+    a = Engine(manifest).run(tmp_path / "with", exporters=EXPORTERS, plan=plan)
+    b = Engine(manifest).run(tmp_path / "without", exporters=EXPORTERS, plan=stripped)
+    assert [r.error for r in b.sessions] == [None, None]
+    assert _skips(a) == _skips(b)
+    assert _files(tmp_path / "with") == _files(tmp_path / "without")
+
+
+# ── frame gaps in a fused unit ───────────────────────────────────────────────
+
+
+def _gap_engine(tmp_path: Path, monkeypatch, *, bins: float | None = None) -> Engine:
+    """The scene with zig-zagging fish and the side view of t1+s1 untracked on frames 30-69."""
+    import dataclasses
+
+    from . import scene
+
+    def zigzag(shift: float = 0.0) -> np.ndarray:
+        t = np.arange(scene.N_FRAMES, dtype=float)
+        out = np.empty((scene.N_FRAMES, 3, 2))
+        for k in range(3):
+            out[:, k, 0] = 100 + 30 * np.sin(t / 3) + 10 * k + shift
+            out[:, k, 1] = 50 + 20 * k
+        return out
+
+    def zigzag_side(shift: float = 0.0) -> np.ndarray:
+        out = zigzag(shift)
+        for k in range(3):
+            out[:, k, 1] = scene.SIDE_ROWS[k]
+        return out
+
+    monkeypatch.setattr(scene, "top_xy", zigzag)
+    monkeypatch.setattr(scene, "side_xy", zigzag_side)
+    manifest = build_scene(tmp_path / "data")
+    if bins is not None:
+        metrics = manifest.metrics.model_copy(update={"timepoint_minutes": bins})
+        manifest = manifest.model_copy(update={"metrics": metrics})
+    engine = Engine(manifest)
+    original = engine.preprocess_ref
+    tracked = np.ones(scene.N_FRAMES, dtype=bool)
+    tracked[30:70] = False
+
+    def preprocess(ref):  # type: ignore[no-untyped-def]
+        psess = original(ref)
+        return dataclasses.replace(psess, tracked_mask=tracked) if ref.session_id == "s1" else psess
+
+    monkeypatch.setattr(engine, "preprocess_ref", preprocess)
+    return engine
+
+
+def test_a_fused_gap_is_not_bridged_and_never_exported(tmp_path: Path, monkeypatch) -> None:
+    engine = _gap_engine(tmp_path, monkeypatch)
+    out = tmp_path / "out"
+    result = engine.run(out, exporters=["csv_long", "feather"])
+    assert [r.error for r in result.sessions] == [None, None]
+    top = engine.preprocess_ref(engine.manifest.sessions[0])
+    halves = [
+        float(np.linalg.norm(np.diff(top.xy[a:b, k], axis=0), axis=1).sum())
+        for k in range(3)
+        for a, b in ((0, 30), (70, 100))
+    ]
+    il1 = result.sessions[0].metric_previews["IL-1"].sort_values("individual_id")
+    np.testing.assert_allclose(il1["path_length_px"], [sum(halves[0:2]), sum(halves[2:4]),
+                                                      sum(halves[4:6])])
+    frames = pd.read_csv(out / "t1+s1" / "master_fish_by_frame.csv")
+    assert sorted(set(frames["frame"])) == [*range(30), *range(70, 100)]
+    assert len(frames) == 60 * 3 and frames["x_px"].notna().all()
+    assert frames["depth_fraction"].notna().all()
+    feather = pd.read_feather(out / "t1+s1" / "master_fish_by_frame.feather")
+    assert len(feather) == 60 * 3
+    il15 = result.sessions[0].metric_previews["IL-15"]
+    np.testing.assert_allclose(il15["mean_depth_fraction"], DEPTHS)
+    assert set(il15["frac_outside_extent"]) == {0.0}
+    # the contiguous pair has no separator at all
+    other = pd.read_csv(out / "t2+s2" / "master_fish_by_frame.csv")
+    assert len(other) == 100 * 3
+
+
+def test_a_binned_run_with_a_fused_gap(tmp_path: Path, monkeypatch) -> None:
+    engine = _gap_engine(tmp_path, monkeypatch, bins=1 / 60)  # 1 s = 25 frames
+    out = tmp_path / "out"
+    result = engine.run(out, exporters=["csv_long"])
+    assert [r.error for r in result.sessions] == [None, None]
+    il1 = result.sessions[0].metric_previews["IL-1"]
+    assert sorted(set(il1["bin_index"])) == [0, 1, 2, 3]
+    frames = pd.read_csv(out / "t1+s1" / "master_fish_by_frame.csv")
+    assert len(frames) == 60 * 3 and 30 not in set(frames["frame"])
+
+
+# ── pre-flight checks look at the sessions that run ──────────────────────────
+
+
+def _side_camera_is_wider(base: Path) -> None:
+    """Give the side views another camera's resolution (1280 x 720), as a real rig would."""
+    import json
+
+    for sid in ("s1", "s2"):
+        progress = base / sid / "session_progress.json"
+        data = json.loads(progress.read_text(encoding="utf-8"))
+        data.update(video_width=1280, video_height=720)
+        progress.write_text(json.dumps(data), encoding="utf-8")
+        video = np.load(base / sid / "video_object.npy", allow_pickle=True).item()
+        video.update(width=1280, height=720)
+        np.save(base / sid / "video_object.npy", video)
+
+
+def test_consistency_ignores_side_and_skipped_sessions_in_3d(tmp_path: Path) -> None:
+    manifest = build_scene(tmp_path / "data")
+    _side_camera_is_wider(tmp_path / "data")
+    warnings = Engine(manifest).consistency_warnings()
+    assert not any("resolution" in w for w in warnings), warnings
+    flat = manifest.model_copy(update={"mode": ProjectMode(), "view_pairs": []})
+    assert any("resolution" in w for w in Engine(flat).consistency_warnings())
+
+
+def test_consistency_summarises_the_top_of_every_pair_with_settings(tmp_path: Path) -> None:
+    import json
+
+    manifest = build_scene(tmp_path / "data")
+    progress = tmp_path / "data" / "t2" / "session_progress.json"
+    data = json.loads(progress.read_text(encoding="utf-8"))
+    data.update(video_width=640, video_height=480)
+    progress.write_text(json.dumps(data), encoding="utf-8")
+    video = np.load(tmp_path / "data" / "t2" / "video_object.npy", allow_pickle=True).item()
+    video.update(width=640, height=480)
+    np.save(tmp_path / "data" / "t2" / "video_object.npy", video)
+    assert any("resolution" in w for w in Engine(manifest).consistency_warnings())
+    no_settings = [pair("t1", "s1"), pair("t2", "s2").model_copy(update={"fusion": None})]
+    quiet = manifest.model_copy(update={"view_pairs": no_settings})
+    assert not any("resolution" in w for w in Engine(quiet).consistency_warnings())
+
+
+def _session_calibrated(engine: Engine, monkeypatch, calibrated: set[str]) -> None:
+    from track2data.core.models import CalibrationConfig
+
+    engine._manifest = engine.manifest.model_copy(
+        update={"calibration": CalibrationConfig(mode="session")}
+    )
+    original = engine.import_ref
+
+    def import_ref(ref):  # type: ignore[no-untyped-def]
+        session = original(ref)
+        unit = 10.0 if ref.session_id in calibrated else None
+        return session.model_copy(update={"length_unit": unit})
+
+    monkeypatch.setattr(engine, "import_ref", import_ref)
+
+
+def test_session_calibration_checks_only_fusable_pairs_in_3d(tmp_path: Path, monkeypatch) -> None:
+    engine = Engine(build_scene(tmp_path / "data"))
+    _session_calibrated(engine, monkeypatch, {"t1", "s1", "t2", "s2"})
+    assert engine._session_calibration_issues() == []  # lone is skipped: not checked
+    _session_calibrated(engine, monkeypatch, {"t1", "t2", "s2"})
+    issues = engine._session_calibration_issues()
+    # the side view is preprocessed (and calibrated) before fusion too
+    assert len(issues) == 1 and issues[0].endswith(
+        "no length_unit: s1. Calibrate them in the idtracker.ai validator, give a scale "
+        "(pixels per cm) when importing other trackers' files, or switch calibration mode."
+    )
+
+
+def test_session_calibration_still_checks_every_session_in_2d(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manifest = build_scene(tmp_path / "data").model_copy(
+        update={"mode": ProjectMode(), "view_pairs": []}
+    )
+    engine = Engine(manifest)
+    _session_calibrated(engine, monkeypatch, {"t1", "s1", "t2", "s2"})
+    issues = engine._session_calibration_issues()
+    assert len(issues) == 1 and "no length_unit: lone." in issues[0]
+
+
+# ── run-level records ────────────────────────────────────────────────────────
+
+
+def test_a_pair_failing_after_fusion_keeps_its_fusion_columns(tmp_path: Path) -> None:
+    engine = Engine(build_scene(tmp_path / "data"))
+    original = engine.compute_metrics
+
+    def boom(psess, **kw):  # type: ignore[no-untyped-def]
+        if psess.session_id == "t1+s1":
+            raise RuntimeError("boom")
+        return original(psess, **kw)
+
+    engine.compute_metrics = boom  # type: ignore[method-assign]
+    out = tmp_path / "out"
+    result = engine.run(out, exporters=EXPORTERS)
+    assert [(r.session_id, r.error) for r in result.sessions] == [
+        ("t1+s1", "boom"), ("t2+s2", None)
+    ]
+    assert result.sessions[0].fusion is not None
+    table = pd.read_csv(out / "sessions.csv").set_index("session_id")
+    failed = table.loc["t1+s1"]
+    assert failed["error"] == "boom"
+    assert failed["unit_kind"] == "pair"
+    assert (failed["top_session_id"], failed["side_session_id"]) == ("t1", "s1")
+    assert failed["fusion_tank_height_cm"] == TANK_CM
+    assert failed["fusion_overlap_frames"] == 100 and failed["fusion_fused_fish"] == 3
+    assert not (out / "t1+s1").exists()
+
+
+def test_the_project_summary_counts_units_in_3d(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    Engine(build_scene(tmp_path / "data")).run(out, exporters=EXPORTERS)
+    summary = (out / "PROJECT_SUMMARY.md").read_text(encoding="utf-8")
+    assert "- Units processed (fused pairs): 2 of 2; 1 session skipped\n" in summary
+    assert "Sessions processed" not in summary
+    flat = build_scene(tmp_path / "flat").model_copy(
+        update={"mode": ProjectMode(), "view_pairs": []}
+    )
+    Engine(flat).run(tmp_path / "out2d", exporters=EXPORTERS)
+    text = (tmp_path / "out2d" / "PROJECT_SUMMARY.md").read_text(encoding="utf-8")
+    assert "- Sessions processed: 5 of 5\n" in text and "Units processed" not in text
+
+
+def test_the_pooled_manifest_records_each_units_fusion(tmp_path: Path) -> None:
+    import json
+
+    out = tmp_path / "out"
+    Engine(build_scene(tmp_path / "data")).run(out, exporters=EXPORTERS)
+    pooled = json.loads((out / "all_sessions" / "manifest.json").read_text(encoding="utf-8"))
+    fusion = pooled["run_metadata"]["fusion"]
+    assert set(fusion) == {"t1+s1", "t2+s2"}
+    unit = json.loads((out / "t1+s1" / "manifest.json").read_text(encoding="utf-8"))
+    assert fusion["t1+s1"] == unit["run_metadata"]["fusion"]
+    flat = build_scene(tmp_path / "flat").model_copy(
+        update={"mode": ProjectMode(), "view_pairs": []}
+    )
+    Engine(flat).run(tmp_path / "out2d", exporters=EXPORTERS)
+    plain = json.loads(
+        (tmp_path / "out2d" / "all_sessions" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert "fusion" not in plain["run_metadata"]
+
+
+def test_the_unit_readme_says_whose_preprocessing_steps_it_lists(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    Engine(build_scene(tmp_path / "data")).run(out, exporters=EXPORTERS)
+    readme = (out / "t1+s1" / "README.md").read_text(encoding="utf-8")
+    steps = readme.split("## Preprocessing steps", 1)[1]
+    assert (
+        "The steps of the top session (`t1`); the side session (`s1`) went through the same "
+        "preprocessing settings before fusion." in steps
+    )
+    flat = build_scene(tmp_path / "flat").model_copy(
+        update={"mode": ProjectMode(), "view_pairs": []}
+    )
+    Engine(flat).run(tmp_path / "out2d", exporters=EXPORTERS)
+    plain = (tmp_path / "out2d" / "t1" / "README.md").read_text(encoding="utf-8")
+    assert "top session" not in plain

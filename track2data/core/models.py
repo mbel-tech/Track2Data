@@ -867,6 +867,9 @@ class PreprocessedSession:
     # shape as ``depth`` and sliced with it, so a window can count its own outside samples;
     # ``depth_outside`` equals its sum over frames.
     depth_outside_mask: np.ndarray | None = None
+    # (n_animals,) int: the top session's animal index of each fused animal (fusion keeps only
+    # the fish in the pair's fish map, so fused position k is not top animal k). None otherwise.
+    source_animal_index: np.ndarray | None = None
 
     @property
     def raw_xy_aligned(self) -> np.ndarray:

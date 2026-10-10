@@ -97,6 +97,10 @@ def _write_manifest_and_readme(
         "metrics_computed": metrics,
         "session_provenance": {sid: r.get("session_provenance") for sid, r in runs.items()},
     }
+    # 3-D pair units: how each was fused (with the side session's checksum); absent in 2-D
+    fusion = {sid: r["fusion"] for sid, r in runs.items() if r.get("fusion")}
+    if fusion:
+        base["run_metadata"]["fusion"] = fusion
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(base, indent=2, default=str), encoding="utf-8")
 

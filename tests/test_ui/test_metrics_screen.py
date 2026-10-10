@@ -864,7 +864,29 @@ def test_social_preset_selects_group_metrics_and_everything_selects_all(qtbot) -
     screen.apply_preset("All metrics")
     screen.flush()
     m = store.manifest.metrics
-    assert len(m.individual) == 13 and len(m.group) == 13 and len(m.zone) == 9
+    # IL-15, IL-16, IL-17 and GL-16 are greyed out in a 2-D project, so the preset skips them
+    assert len(m.individual) == 12 and len(m.group) == 13 and len(m.zone) == 9
+    assert {"IL-15", "IL-16", "IL-17"}.isdisjoint(m.individual) and "GL-16" not in m.group
+
+
+def test_all_metrics_preset_includes_the_3d_metrics_in_a_3d_scalar_project(qtbot) -> None:
+    from track2data.core.models import CalibrationConfig, ProjectMode
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={
+            "mode": ProjectMode(dimension="3d", layout="two_videos"),
+            "calibration": CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        }
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    screen.apply_preset("All metrics")
+    screen.flush()
+    m = store.manifest.metrics
+    assert {"IL-16", "IL-17"} <= set(m.individual) and "GL-16" in m.group
+    assert screen.current_preset_name() == "All metrics"
 
 
 def test_all_presets_only_name_registered_metrics() -> None:
@@ -882,11 +904,11 @@ def test_counter_shows_selected_of_total_by_level(qtbot) -> None:
 
     screen = MetricsScreen(store=_make_store())
     qtbot.addWidget(screen)
-    assert "0 / 35" in screen._counter.text()
+    assert "0 / 38" in screen._counter.text()
     screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0).setCheckState(
         Qt.CheckState.Checked
     )
-    assert "1 / 35" in screen._counter.text()
+    assert "1 / 38" in screen._counter.text()
     assert "1 individual" in screen._counter.text()
 
 
@@ -1138,3 +1160,99 @@ def test_il15_stays_enabled_in_a_3d_project_and_disabled_in_2d_top(qtbot) -> Non
     )
     screen._update_availability()
     assert _is_enabled(_il15_item(screen))
+
+
+def _register_depth_scale_metric(monkeypatch) -> None:
+    import pandas as pd
+
+    import track2data.metrics as metrics_module
+    from track2data.metrics.base import Metric, MetricDocumentation
+
+    class NeedsScale(Metric):
+        id = "IL-DS"
+        name = "needs_scale"
+        label = "Needs scale"
+        level = "individual"
+        priority = "optional"
+        requires_identity = False
+        requires_depth_scale = True
+        output_columns = ["session_id"]
+        documentation = MetricDocumentation(
+            definition="test-only", formula_plain="n/a", inputs=[], assumptions=[], warnings=[],
+        )
+
+        def compute(self, session, cfg=None):
+            return pd.DataFrame({"session_id": [session.session_id]})
+
+    monkeypatch.setitem(metrics_module._registry, "IL-DS", NeedsScale)
+
+
+def test_depth_scale_metric_row_follows_dimension_and_calibration(qtbot, monkeypatch) -> None:
+    from track2data.core.models import CalibrationConfig, ProjectMode
+    from ui.metrics_screen import MetricsScreen
+
+    _register_depth_scale_metric(monkeypatch)
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    def item():
+        return screen._ind_table.item(_row_for_id(screen._ind_table, "IL-DS"), 0)
+
+    screen._update_availability()
+    assert not _is_enabled(item())
+    assert "Needs a fused 3-D session." in item().toolTip()
+
+    three_d = ProjectMode(dimension="3d", layout="two_videos")
+    store._manifest = store._manifest.model_copy(
+        update={"mode": three_d, "calibration": CalibrationConfig(mode="bodylength")}
+    )
+    screen._update_availability()
+    assert not _is_enabled(item())
+    assert "use scalar or session calibration" in item().toolTip()
+
+    store._manifest = store._manifest.model_copy(
+        update={"calibration": CalibrationConfig(mode="scalar", px_per_cm=10.0)}
+    )
+    screen._update_availability()
+    assert _is_enabled(item())
+
+
+def test_depth_scale_row_refreshes_when_the_store_signals_calibration_or_mode(
+    qtbot, monkeypatch
+) -> None:
+    from track2data.core.models import CalibrationConfig, ProjectMode
+    from ui.metrics_screen import MetricsScreen
+
+    _register_depth_scale_metric(monkeypatch)
+    store = _make_store()
+    store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    store.update_calibration(CalibrationConfig(mode="bodylength"))
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    def item():
+        return screen._ind_table.item(_row_for_id(screen._ind_table, "IL-DS"), 0)
+
+    assert not _is_enabled(item())
+    store.update_calibration(CalibrationConfig(mode="scalar", px_per_cm=10.0))
+    assert _is_enabled(item())
+    store.update_mode(ProjectMode(dimension="2d"))
+    assert not _is_enabled(item())
+
+
+def test_preset_leaves_identity_needing_rows_unticked_when_every_session_is_identity_free(
+    qtbot,
+) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    store._manifest = store._manifest.model_copy(
+        update={"sessions": _sessions(("a", True, None), ("b", True, None))}
+    )
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    screen.apply_preset("Standard locomotor")  # IL-1, IL-2, IL-4 all need identities
+    screen.flush()
+    assert store.manifest.metrics.individual == []
+    assert screen.current_preset_name() == "None"

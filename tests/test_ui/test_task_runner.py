@@ -476,3 +476,17 @@ def test_cancel_all_for_the_run_lane_leaves_a_scan_alone(qtbot, runner) -> None:
         gate.set()
     assert blocker.args == [scan_id, "scan-ok"]
 
+
+
+def test_submit_after_shutdown_never_runs(qtbot, runner) -> None:
+    """A late submit (e.g. from a slot that fires while the window closes) must not start work
+    on a drained pool."""
+    ran: list[int] = []
+    assert runner.shutdown(1000) is True
+    task_id = runner.submit(lambda: ran.append(1))
+    progress_id = runner.submit_with_progress(lambda progress: ran.append(2))
+    assert task_id and progress_id
+    assert runner._active == {}
+    assert all(p.activeThreadCount() == 0 for p in runner._pools.values())
+    assert runner.shutdown(1000) is True
+    assert ran == []
