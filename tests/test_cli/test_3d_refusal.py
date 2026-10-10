@@ -41,6 +41,6 @@ def test_sensitivity_refuses_3d_project_without_making_the_out_dir(
     out = tmp_path / "sens"
     result = CliRunner().invoke(cli, ["sensitivity", str(project_3d), "-o", str(out)])
     assert result.exit_code == 2
-    assert f"[error] {MODE_3D_BLOCK_REASON}" in result.output
+    assert "[error] sensitivity is not supported for 3-D projects yet" in result.output
     assert "Sweeping" not in result.output
     assert not out.exists()

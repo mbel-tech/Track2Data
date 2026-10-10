@@ -89,11 +89,13 @@ def test_suggest_offset(monkeypatch):
     assert engine.suggest_offset(gone) is None
 
 
-def test_require_computable_still_blocks_3d(monkeypatch):
+def test_require_computable_allows_a_fusable_pair(monkeypatch):
     top, side, pair = make_pair()
     engine = _engine(monkeypatch, [pair], {"t": top, "s": side})
-    with pytest.raises(ValueError, match=MODE_3D_BLOCK_REASON[:20]):
-        engine.require_computable()
+    engine.require_computable()
+    nopair = _engine(monkeypatch, [], {"t": top, "s": side})
+    with pytest.raises(ValueError, match=MODE_3D_BLOCK_REASON):
+        nopair.require_computable()
 
 
 def _unreadable(engine, bad_id):

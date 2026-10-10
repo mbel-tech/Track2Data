@@ -418,7 +418,7 @@ class ProcessingScreen(QWidget):
         self._rebuild_status_table()
 
     def _compute_allowed(self) -> bool:
-        """A project is open and is not a 3-D project (fusion is not available yet)."""
+        """A project is open and is not a 3-D project (it has no fusable pair yet)."""
         if self._store is None or not self._store.has_project:
             return False
         return self._store.manifest.mode.dimension != "3d"

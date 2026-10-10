@@ -217,7 +217,8 @@ def test_3d_processing_preview_export_blocked() -> None:
     infos = compute_stage_statuses(_manifest_3d(), has_run_results=True)
     for page in (PROC, PREVIEW, EXPORT):
         assert infos[page].status == "blocked"
-        assert infos[page].message == MODE_3D_BLOCK_REASON == "3-D fusion is not available yet"
+        assert infos[page].message == MODE_3D_BLOCK_REASON
+        assert MODE_3D_BLOCK_REASON == "Pair and fuse a top and a side session first"
 
 
 def test_2d_stage_statuses_unchanged() -> None:

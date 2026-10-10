@@ -1,4 +1,4 @@
-"""The engine refuses to compute 3-D projects until fusion exists."""
+"""The engine refuses to compute a 3-D project that has no fusable pair."""
 
 from __future__ import annotations
 
@@ -51,34 +51,34 @@ def test_2d_validate_has_no_mode_issue() -> None:
 
 
 def test_run_refuses_3d(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+    with pytest.raises(ValueError, match=MODE_3D_BLOCK_REASON):
         _engine().run(tmp_path)
 
 
 def test_run_all_refuses_3d(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+    with pytest.raises(ValueError, match=MODE_3D_BLOCK_REASON):
         _engine().run_all(tmp_path)
 
 
 def test_run_session_refuses_3d(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+    with pytest.raises(ValueError, match=r"use run\(\) for a 3-D project"):
         _engine().run_session(object(), tmp_path)  # type: ignore[arg-type]
 
 
 def test_export_refuses_3d(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+    with pytest.raises(ValueError, match=MODE_3D_BLOCK_REASON):
         _engine().export(object(), out)
     assert not out.exists()
 
 
 def test_compute_metrics_refuses_3d() -> None:
-    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+    with pytest.raises(ValueError, match="3-D projects compute fused sessions only"):
         _engine().compute_metrics(object())  # type: ignore[arg-type]
 
 
 def test_run_sensitivity_refuses_3d() -> None:
     from track2data.sensitivity import run_sensitivity
 
-    with pytest.raises(ValueError, match="3-D fusion is not available yet"):
+    with pytest.raises(ValueError, match="sensitivity is not supported for 3-D projects yet"):
         run_sensitivity(_engine(), object())  # type: ignore[arg-type]

@@ -23,6 +23,8 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
+    from track2data.core.runplan import SkippedSession
+
     # Type-only: session_consistency imports Session from here, so a runtime
     # import would close the cycle. SessionRunResult is a plain dataclass, not
     # a pydantic model, so its annotations are never evaluated.
@@ -413,7 +415,8 @@ class SceneConfig(BaseModel):
     camera_view: CameraView = "unknown"
 
 
-MODE_3D_BLOCK_REASON = "3-D fusion is not available yet"
+MODE_3D_BLOCK_REASON = "Pair and fuse a top and a side session first"
+SENSITIVITY_3D_REFUSAL = "sensitivity is not supported for 3-D projects yet"
 VIEWS_3D_ONLY = "Views apply to 3-D projects only"
 PANELS_ONLY_FOR_SINGLE_VIDEO = "Panels apply to the 'One video, two panels' layout only"
 
@@ -773,6 +776,8 @@ class RunResult:
     sessions: list[SessionRunResult] = field(default_factory=list)
     #: Files of the run-root ``all_sessions/`` folder (empty for fewer than two sessions).
     pooled: list[Path] = field(default_factory=list)
+    #: Sessions a 3-D run left out (not in a fusable pair, or in a pair that did not fuse).
+    skipped: list[SkippedSession] = field(default_factory=list)
 
     @property
     def written(self) -> list[Path]:

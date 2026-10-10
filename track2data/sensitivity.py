@@ -109,9 +109,11 @@ def run_sensitivity(
     """
     import pandas as pd
 
+    from track2data.core.models import SENSITIVITY_3D_REFUSAL
     from track2data.exporters.schema import unit_for_column
 
-    engine.require_computable()  # raised, not recorded per grid point
+    if engine.manifest.mode.dimension == "3d":  # raised, not recorded per grid point
+        raise ValueError(SENSITIVITY_3D_REFUSAL)
     grid = grid or SensitivityGrid()
     base_config = engine.manifest.preprocess
 

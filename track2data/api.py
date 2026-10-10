@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from track2data.core.models import CameraView, ViewPair
+    from track2data.core.runplan import RunPlan
     from track2data.core.session_consistency import SessionSummary
     from track2data.fusion.fuse import FusedSession
     from track2data.metrics.base import Metric
@@ -1029,8 +1030,12 @@ class Engine:
         During ``run()`` the run's *cancel_check* is called before each
         selected metric, so a cancellation request is noticed between
         metrics; ``OperationCancelled`` propagates out of this method.
+
+        A 3-D project computes fused sessions only (``psess.depth`` is set); the plan itself is
+        not rebuilt here, ``run()`` checks it once.
         """
-        self.require_computable()
+        if self._manifest.mode.dimension == "3d" and getattr(psess, "depth", None) is None:
+            raise ValueError("3-D projects compute fused sessions only")
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
 
@@ -1423,8 +1428,11 @@ class Engine:
         exporters: list[str] | None = None,
     ) -> list[Path]:
         """Write *payload* to *out_dir* via the requested (or configured
-        default) exporters. Returns the list of written paths."""
-        self.require_computable()
+        default) exporters. Returns the list of written paths.
+
+        Called once per unit inside a run, so it uses the cheap :meth:`_require_not_blocked`
+        rather than :meth:`require_computable` (which would fuse every pair again)."""
+        self._require_not_blocked()
         from track2data.exporters import get_exporter
 
         out_dir = Path(out_dir)
@@ -1447,11 +1455,79 @@ class Engine:
 
         return written
 
-    def require_computable(self) -> None:
-        """Refuse to compute while the project is 3-D (the 3-D metrics, sub-project B, do not exist
-        yet; fusion itself works)."""
-        if self._manifest.mode.dimension == "3d":
+    def run_units(self) -> RunPlan:
+        """What a run processes (see ``track2data.core.runplan``).
+
+        2-D: one ``session`` unit per ref in manifest order, nothing skipped. 3-D: one ``pair``
+        unit per fusable pair in ``manifest.view_pairs`` order; a pair is fusable when it has
+        fusion settings and :meth:`fuse_pair` returns (each pair is fused once, and the result is
+        kept on the unit). Every session outside a fusable pair is skipped, once, in session
+        order, with the reason of the first pair that could not use it ("not in a fusable pair"
+        when it is in no pair).
+        """
+        from track2data.core.runplan import RunPlan, RunUnit, SkippedSession
+        from track2data.fusion.fuse import FusionError
+
+        if self._manifest.mode.dimension != "3d":
+            refs = self._manifest.sessions
+            return RunPlan(units=[RunUnit(ref.session_id, "session", ref=ref) for ref in refs])
+
+        plan = RunPlan()
+        in_unit: set[str] = set()
+        reasons: dict[str, str] = {}
+        for pair in self._manifest.view_pairs:
+            pair_id = f"{pair.top_session_id}+{pair.side_session_id}"
+            fused: FusedSession | None = None
+            if pair.fusion is None:
+                reason = f"pair {pair_id}: no fusion settings for this pair"
+            else:
+                try:
+                    fused = self.fuse_pair(pair)
+                except FusionError as exc:
+                    reason = f"pair {pair_id}: {exc}"
+                except Exception as exc:  # one bad pair must not hide the others
+                    reason = f"pair {pair_id}: {type(exc).__name__}: {exc}"
+            if fused is not None:
+                plan.units.append(RunUnit(pair_id, "pair", pair=pair, fused=fused))
+                in_unit.update((pair.top_session_id, pair.side_session_id))
+            else:
+                for sid in (pair.top_session_id, pair.side_session_id):
+                    reasons.setdefault(sid, reason)
+        for ref in self._manifest.sessions:
+            if ref.session_id not in in_unit:
+                plan.skipped.append(
+                    SkippedSession(
+                        ref.session_id, reasons.get(ref.session_id, "not in a fusable pair")
+                    )
+                )
+        return plan
+
+    def _require_not_blocked(self) -> None:
+        """The cheap half of :meth:`require_computable`, for calls made once per session inside a
+        run (``export``): in a 3-D project it only checks that some pair has fusion settings and
+        never fuses. ``run()`` has already built the plan by then, so repeating the full check
+        per session would fuse every pair again."""
+        if self._manifest.mode.dimension == "3d" and not any(
+            p.fusion is not None for p in self._manifest.view_pairs
+        ):
             raise ValueError(MODE_3D_BLOCK_REASON)
+
+    def require_computable(self) -> None:
+        """Refuse to run a 3-D project that has nothing to run.
+
+        Call once at an entry point (``run``, the CLI, the UI): in 3-D it builds the plan, which
+        fuses every pair. A project with no pairs raises ``MODE_3D_BLOCK_REASON``; one whose
+        pairs all fail raises ``"no pair is ready to fuse: ..."`` with the first three reasons.
+        2-D projects never refuse.
+        """
+        if self._manifest.mode.dimension != "3d":
+            return
+        if not self._manifest.view_pairs:
+            raise ValueError(MODE_3D_BLOCK_REASON)
+        plan = self.run_units()
+        if not plan.units:
+            distinct = list(dict.fromkeys(s.reason for s in plan.skipped))
+            raise ValueError("no pair is ready to fuse: " + "; ".join(distinct[:3]))
 
     # ── full run ───────────────────────────────────────────────────────────
 
@@ -1468,7 +1544,8 @@ class Engine:
 
         Returns list of written output paths.
         """
-        self.require_computable()
+        if self._manifest.mode.dimension == "3d":
+            raise ValueError("use run() for a 3-D project")
         psess = self.preprocess(session)
         emit(
             progress,
@@ -2042,8 +2119,7 @@ class Engine:
         written paths, not the full ``RunResult`` (diagnostics, metric
         previews, per-session timing/errors).
         """
-        self.require_computable()
-        return self.run(out_dir, exporters, progress=progress).written
+        return self.run(out_dir, exporters, progress=progress).written  # run() gates
 
     # ── preview ────────────────────────────────────────────────────────────
 
