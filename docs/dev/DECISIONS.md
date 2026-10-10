@@ -1042,3 +1042,39 @@ and nothing else, keeps D-037's rule that a 3-D project never produces plausible
 numbers. Skipping a bad pair with its reason, instead of aborting, lets a long batch finish; refusing
 only when nothing can run keeps the failure clean. Passing the unit index to workers avoids pickling
 large arrays and keeps results independent of the worker count.
+
+### D-042 · 3-D metrics need the top view's cm scale and never estimate it
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-10-3d-metrics-design.md`
+(sub-project B2 of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-041 (a fused session is
+what runs) and amends D-031 for the fused case only.
+
+**Decision:** *Metrics.* IL-16 (3-D distance travelled), IL-17 (3-D speed) and GL-16 (3-D
+nearest-neighbour distance), beside IL-1, IL-2 and GL-1, which are unchanged. Positions are
+`(x_px, y_px) / px_per_cm` and `depth * depth_height_cm` (`metrics/geometry3d.py`); a step, frame or
+speed needs all three coordinates finite, otherwise the value is NaN (never 0) and the count of
+valid steps or skipped frames says how much was used. IL-17's horizontal speed is the pipeline's
+own `kinematics.speed_px_s`, and its vertical speed uses `compute_kinematics` with the project's
+`KinematicsCfg`, which the Engine hands over through `cfg["kinematics"]` for metrics with the class
+flag `uses_kinematics_cfg`. *The cm-scale rule.* The class flag `requires_depth_scale` makes a metric
+available only for a fused session with a top-view cm scale. One function
+(`availability.depth_scale_reason`) answers for every caller, in the order 2-D ("needs a fused 3-D
+session"), calibration mode `bodylength` ("needs a cm scale for the top view (use scalar or session
+calibration)"), run-time unit without `px_per_cm` ("needs a cm scale for the top view"). The
+manifest-level answer is optimistic (it cannot know a unit's scale); the run skips per unit and
+records the reason in the README. *No estimate.* The fusion could suggest a scale (it compares the two
+views' horizontal positions in cm), but that comparison already assumes the top view's scale, and a
+scale taken from it would add an error that no output would show. Without a scale the metric is
+unavailable and a number is never produced. Body length in cm is `body_length_px / px_per_cm`, NaN
+when unknown. *Guarantees.* IL-16 is at least IL-1 only over the steps where depth is finite;
+IL-17 is at least IL-2's cm/s only over frames where the vertical speed is finite (the estimator
+may give none, for example the last frame of the forward difference); GL-16 is at least GL-1 only
+per frame where both are valid. *Presets.* A preset leaves greyed-out rows unticked, so *All metrics*
+never selects a metric the project cannot run.
+
+**Rationale:** An error hidden in a derived scale is worse than a refusal that says what to set.
+Reusing the one availability function and the existing skip list keeps the Metrics screen, `validate`,
+the CLI and the README in agreement. Stating the inequalities as conditional keeps the documentation
+true for gappy tracks. *Limits.* Depth comes from a side camera at right angles (no refraction or
+parallax correction); a wrong tank height scales every vertical distance; no vertical speed metric,
+3-D inter-individual distance or cohesion.

@@ -1,6 +1,6 @@
 # 3-D metrics (sub-project B2)
 
-**Status:** draft 2026-10-10, awaiting review
+**Status:** implemented 2026-10-10 (decision D-042); see "Changes made during the build" at the end
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). Builds on [fusion](2026-10-09-fusion-design.md) (D) and [running a 3-D project](2026-10-10-3d-run-design.md) (B1).
 
 ## Why
@@ -93,3 +93,29 @@ keep running on the top view.
 
 Vertical speed as its own metric, 3-D inter-individual distance and cohesion, estimating the top
 view's scale from the fusion, a per-view scale, and depth-band zones.
+
+## Changes made during the build
+
+Where the build differs from the text above, the build is right.
+
+- **Kinematics config route.** `PreprocessedSession` does not carry the `KinematicsCfg`. A new class
+  flag `Metric.uses_kinematics_cfg` (True for IL-17) makes `Engine._effective_cfg` put the project's
+  config under `cfg["kinematics"]`; IL-17 defaults to `KinematicsCfg()` without it.
+- **IL-17 and the inequality.** `3-D speed >= IL-2` holds only over the frames where the vertical
+  speed is finite (the forward-difference estimator gives none for the last frame; a depth segment
+  shorter than the Savitzky-Golay window gives none). Frames without a vertical speed are left out of
+  IL-17, never counted as 0. In a binned run `vz` is estimated inside each bin, so the estimator's edge
+  frames can differ slightly from a whole-session run.
+- **IL-16 and IL-1.** `IL-16 >= IL-1` holds over the steps where depth is also finite (`n_valid_steps`).
+- **GL-16 and GL-1.** GL-16 skips frames where any fish lacks depth that GL-1 keeps, so the
+  inequality holds only per frame where both are valid, not for the two means.
+- **Skip reasons.** The three reasons are constants in `availability.py` (`NEEDS_FUSED_REASON`,
+  `NEEDS_CM_MODE_REASON`, `NEEDS_CM_SCALE_REASON`). The manifest-level answer is optimistic (it
+  catches a 2-D project and body-length calibration; a scalar project without `px_per_cm` and a
+  session calibration without a length unit are caught per unit at run time). A unit always has a tank
+  height (`FusionSettings.tank_height_cm > 0`), so in practice the run-time skip is a missing
+  `px_per_cm`. `validate`, the log and the Metrics screen name the cause that fired.
+- **The Metrics screen refreshes** when the calibration or the mode changes, and its presets leave
+  greyed-out rows unticked (a 2-D project's *All metrics* no longer ticks the 3-D metrics).
+- **Metric counts** in the README and ROADMAP now say 54.
+

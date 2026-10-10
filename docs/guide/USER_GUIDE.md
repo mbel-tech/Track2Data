@@ -542,7 +542,9 @@ Choose what to compute. Metrics are grouped on three tabs: **Individual** (per a
   animal with empty bin columns; diagnostics are always whole-session. Thresholds such as the
   freezing speed threshold are fixed from the whole session, so bins are comparable.
 - Rows are greyed out for sessions without stable identities; see
-  [Sessions](#2-sessions).
+  [Sessions](#2-sessions). The 3-D metrics (IL-16, IL-17, GL-16) are greyed out in a 2-D project and
+  under body-length calibration; see [3-D metrics](#3-d-metrics). A preset never ticks a greyed-out
+  row.
 
 **Diagnostics** (coverage, tracking accuracy, identity stability, …) are always computed and are not
 listed here; they appear in [Preview ▸ Diagnostics](#diagnostics).
@@ -639,11 +641,51 @@ What the files contain, for a fused unit:
 - If anything was skipped, `skipped.csv` (`session_id`, `reason`) and a **Skipped sessions** table in
   `PROJECT_SUMMARY.md` list it. Without skips, neither exists. A 2-D project's output is unchanged.
 
+### 3-D metrics
+
+A fused unit has x and y from the top view and a depth from the side view, so three more metrics can
+measure in all three directions. The 2-D metrics (IL-1, IL-2, GL-1 and the rest) are unchanged and
+keep measuring in the top-view plane.
+
+| Metric | Columns | Units |
+|---|---|---|
+| **IL-16** 3-D Distance Travelled | `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` | cm, body lengths, count |
+| **IL-17** 3-D Speed (mean / median / max) | `mean_speed_3d_cm_s`, `median_speed_3d_cm_s`, `max_speed_3d_cm_s`, `mean_speed_3d_bl_s` | cm/s, body lengths/s |
+| **GL-16** 3-D Nearest-Neighbour Distance | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames` | cm, body lengths, count |
+
+- **Positions in cm.** x and y are the top view's pixels divided by its scale; the depth is the
+  depth fraction times the **tank height** of the pair's fusion settings. Distances are straight
+  lines in (x, y, depth). Body lengths use the animal's body length converted to cm with the same
+  scale (empty when the body length is unknown).
+- **Needs a cm scale for the top view.** Use **scalar** calibration (a pixels-per-cm value) or
+  **session** calibration on the Calibration screen. Under **body-length** calibration there is no
+  top-view scale, so the three rows are greyed out ("needs a cm scale for the top view (use scalar
+  or session calibration)"). In a 2-D project they are greyed out too ("needs a fused 3-D session").
+  If a unit still has no scale at run time (for example session calibration where the sessions carry
+  no length unit), the metrics are skipped for that unit with "needs a cm scale for the top view",
+  listed under **Metrics skipped** in its README; the other metrics still run. Track2Data does not
+  estimate the scale from the fusion, because that would add an error the outputs would not show.
+- **Depth comes from the fusion settings:** the surface and floor rows and the tank height you set
+  for the pair. A wrong tank height scales every vertical distance and speed.
+- **Gaps give empty values, never 0.** A step (IL-16) needs a valid x, y and depth at both of its
+  frames; `n_valid_steps` says how many were used. IL-17 uses the frames where the horizontal and the
+  vertical speed both exist. GL-16 skips a frame where any fish lacks x, y or depth and counts it in
+  `n_skipped_frames`. An animal (or a group) with nothing valid is empty. IL-16 and IL-17 need
+  identities, as IL-1 and IL-2 do; GL-16 does not.
+- **IL-17** takes the horizontal speed from the same speed as IL-2 and the vertical speed from the
+  depth with the same speed estimator as the rest of the run. Over the
+  frames where the vertical speed exists it is at least IL-2's cm/s; IL-16 is at least IL-1 over the
+  steps where the depth is also valid; GL-16 is at least GL-1 for a frame where both exist. Over
+  whole sessions these do not have to hold, because the 3-D metrics leave out frames the 2-D ones keep.
+- **Time bins** work as for the 2-D metrics (each bin has its own value). In a binned run the vertical
+  speed is estimated inside each bin.
+- **Limits.** Depth comes from a side camera at right angles to the top camera; there is no
+  correction for refraction or parallax. Vertical speed as its own metric, 3-D inter-individual
+  distance and cohesion are not included.
+
 Limits of this version:
 
 - Zones are one set, applied to the top view. There are no per-view or depth-band zones.
-- There is no 3-D speed, path length or neighbour distance yet: speed, distances and the like are
-  measured in the top-view plane. The 3-D versions are the next step (sub-project B2).
 - `sensitivity` refuses 3-D projects ("sensitivity is not supported for 3-D projects yet").
 - Every run fuses the pairs again; nothing fused is cached.
 
