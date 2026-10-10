@@ -140,6 +140,9 @@ class Metric(ABC):
     # True for a metric that reads the fused depth array (PreprocessedSession.depth): it is then
     # available for any session that has depth, whatever its camera view says.
     uses_depth: ClassVar[bool] = False
+    # True for a metric that needs the fused session's 3-D positions in cm (depth plus a cm scale
+    # for the top view). Availability goes through metrics/availability.py: depth_scale_reason.
+    requires_depth_scale: ClassVar[bool] = False
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False

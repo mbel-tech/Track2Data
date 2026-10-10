@@ -37,7 +37,12 @@ from PySide6.QtWidgets import (
 )
 
 from track2data import metrics
-from track2data.metrics.availability import manifest_view, view_unavailable_reason
+from track2data.metrics.availability import (
+    depth_scale_reason,
+    manifest_depth_scale,
+    manifest_view,
+    view_unavailable_reason,
+)
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
 from ui.widgets.autocommit import AutoCommit
@@ -485,6 +490,7 @@ class MetricsScreen(QWidget):
         all_identity_free = bool(sessions) and len(free_ids) == len(sessions)
         some_identity_free = bool(free_ids) and not all_identity_free
         camera_view, has_depth = manifest_view(self._store.manifest)
+        depth_scale = manifest_depth_scale(self._store.manifest)
 
         if all_identity_free:
             identity_note = (
@@ -505,11 +511,12 @@ class MetricsScreen(QWidget):
                 if include_item is None or name_item is None:
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
+                metric_cls = metrics.get(include_item.data(_ROLE_METRIC_ID))
                 view_reason = view_unavailable_reason(
-                    metrics.get(include_item.data(_ROLE_METRIC_ID)),
-                    camera_view,
-                    has_depth=has_depth,
+                    metric_cls, camera_view, has_depth=has_depth
                 )
+                if view_reason is None:
+                    view_reason = depth_scale_reason(metric_cls, **depth_scale)
 
                 notes: list[str] = []
                 if requires_identity and (all_identity_free or some_identity_free):

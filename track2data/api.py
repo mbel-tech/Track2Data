@@ -976,15 +976,29 @@ class Engine:
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
         ]
+        from track2data.metrics.availability import manifest_depth_scale, manifest_view
+
+        scale = manifest_depth_scale(self._manifest)
         if psess is None:
             if session is None:
-                from track2data.metrics.availability import manifest_view
-
                 view, has_depth = manifest_view(self._manifest)
-                return view_skipped_metrics(selected, view, get, has_depth=has_depth)
-            return view_skipped_metrics(selected, self.camera_view_for(session), get)
+                return view_skipped_metrics(
+                    selected, view, get, has_depth=has_depth, depth_scale=scale
+                )
+            return view_skipped_metrics(
+                selected, self.camera_view_for(session), get, depth_scale=scale
+            )
+        scale.update(
+            has_depth=psess.depth is not None,
+            px_per_cm=psess.px_per_cm,
+            depth_height_cm=psess.depth_height_cm,
+        )
         return view_skipped_metrics(
-            selected, self.camera_view_for_psess(psess), get, has_depth=psess.depth is not None
+            selected,
+            self.camera_view_for_psess(psess),
+            get,
+            has_depth=psess.depth is not None,
+            depth_scale=scale,
         )
 
     def skipped_metrics(

@@ -302,3 +302,88 @@ def test_the_payload_of_a_fused_session_records_top_and_no_water_column(view) ->
     payload = engine.build_payload(fused, engine.compute_metrics(fused))
     assert payload.provenance.camera_view == "top"
     assert payload.provenance.water_column is None
+
+
+# ── depth-scale metrics (requires_depth_scale) ───────────────────────────────
+
+
+def _register_depth_scale_metric(monkeypatch, metric_id: str = "IL-DS") -> None:
+    class NeedsScale(Metric):
+        id = metric_id
+        name = "needs scale"
+        label = "Needs scale"
+        level = "individual"
+        priority = "optional"
+        requires_identity = False
+        requires_depth_scale = True
+        output_columns = ["session_id"]
+        documentation = MetricDocumentation(
+            definition="test-only", formula_plain="n/a", inputs=[], assumptions=[], warnings=[],
+        )
+
+        def compute(self, session, cfg=None):
+            return pd.DataFrame({"session_id": [session.session_id]})
+
+    monkeypatch.setitem(metrics_module._registry, metric_id, NeedsScale)
+
+
+def _manifest_3d_cal(mode: str, individual: list[str]):
+    from track2data.core.models import CalibrationConfig
+
+    cal = (
+        CalibrationConfig(mode="bodylength")
+        if mode == "bodylength"
+        else CalibrationConfig(mode=mode, px_per_cm=10.0)
+    )
+    return _manifest_3d("top", individual).model_copy(update={"calibration": cal})
+
+
+def test_a_2d_project_skips_a_depth_scale_metric_with_the_fused_reason(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("top", ["IL-DS"]))
+    results = engine.compute_metrics(psess)
+    assert "IL-DS" not in results
+    assert engine.build_payload(psess, results).skipped_metrics == {
+        "IL-DS": "needs a fused 3-D session"
+    }
+    assert engine.view_skipped_metrics() == {"IL-DS": "needs a fused 3-D session"}
+
+
+def test_a_3d_bodylength_project_skips_it_at_manifest_level_and_run_time(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("bodylength", ["IL-DS"]))
+    expected = "needs a cm scale for the top view (use scalar or session calibration)"
+    assert engine.view_skipped_metrics() == {"IL-DS": expected}
+    assert engine._view_selection_notes() == []  # all selected skipped: validate() blocks
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    fused.px_per_cm = 8.0
+    assert engine.view_skipped_metrics(psess=fused) == {"IL-DS": expected}
+    assert "IL-DS" not in engine.compute_metrics(fused)
+
+
+def test_a_3d_scalar_project_is_available_at_manifest_level(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS"]))
+    assert engine.view_skipped_metrics() == {}
+    assert engine.validate() is not None  # no view/skip block raised
+
+
+def test_a_fused_unit_without_px_per_cm_skips_it_with_the_run_time_reason(
+    monkeypatch, caplog
+) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS", "IL-1"]))
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    fused.px_per_cm = None
+    with caplog.at_level(logging.WARNING, logger="track2data.api"):
+        results = engine.compute_metrics(fused)
+    assert "IL-DS" not in results
+    assert "IL-1" in results
+    payload = engine.build_payload(fused, results)
+    assert payload.skipped_metrics == {"IL-DS": "needs a cm scale for the top view"}
+
+    fused.px_per_cm = 8.0
+    assert "IL-DS" in engine.compute_metrics(fused)
+    fused.depth_height_cm = None
+    assert "IL-DS" not in engine.compute_metrics(fused)

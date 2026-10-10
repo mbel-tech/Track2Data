@@ -100,3 +100,24 @@ def test_has_depth_does_not_widen_other_metrics() -> None:
     registry = {"IL-SIDE": _SideOnly, "IL-DEPTH": _DepthMetric}
     skipped = view_skipped_metrics(["IL-SIDE", "IL-DEPTH"], "top", registry.get, has_depth=True)
     assert set(skipped) == {"IL-SIDE"}
+
+
+def test_view_skipped_metrics_adds_the_depth_scale_reason() -> None:
+    class _Flagged:
+        id = "IL-FLAG"
+        requires_depth_scale = True
+
+    scale = {
+        "dimension": "2d",
+        "calibration_mode": "scalar",
+        "has_depth": False,
+        "px_per_cm": 1.0,
+        "depth_height_cm": 1.0,
+    }
+    lookup = {"IL-FLAG": _Flagged, "IL-ANY": _AnyView}.get
+    ids = ["IL-FLAG", "IL-ANY"]
+    assert view_skipped_metrics(ids, "top", lookup, depth_scale=scale) == {
+        "IL-FLAG": "needs a fused 3-D session"
+    }
+    # without the depth-scale arguments the answer is the camera-view one only
+    assert view_skipped_metrics(ids, "top", lookup) == {}
