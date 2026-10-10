@@ -133,6 +133,7 @@ Individual        Locomotion               IL-1, IL-2, IL-6
                   Path geometry            IL-5, IL-8, IL-11
 Group             Social spacing           GL-1, GL-2, GL-13
                   Cohesion                 GL-4, GL-6, GL-10, GL-15
+                  3-D spacing              GL-16
                   Collective motion        GL-3, GL-5, GL-8, GL-9, GL-11
                   Identity-free fallback   GL-7
 Zone              Occupancy                Z-1, Z-2, Z-8
@@ -824,6 +825,23 @@ info-button modal (§6).
 | **Reference** | Tunstrom et al. 2013, PLoS Comput. Biol. 9(2):e1002915 (collective states, multistability and transitional behavior in schooling fish) — DOI [10.1371/journal.pcbi.1002915](https://doi.org/10.1371/journal.pcbi.1002915) |
 | **Supporting references** | Mohr 1947, Am. Midl. Nat. 37(1):223-249 (table of equivalent populations of North American small mammals -- origin of the minimum convex polygon) (DOI: 10.2307/2421652) |
 
+#### GL-16 — 3-D nearest-neighbour distance
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Nearest-neighbour distance in 3-D |
+| **Level** | Group (per frame averaged across individuals); trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session |
+| **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
+| **Formula** | `P[t, k] = (x/px_per_cm, y/px_per_cm, depth · tank_height_cm)`; `nnd[t] = mean_k min_{j≠k} ‖P[t, k] − P[t, j]‖`, computed via `scipy.spatial.cKDTree` as for GL-1; mean and median over frames |
+| **Output columns** | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames` |
+| **Units** | cm / BL |
+| **Assumptions** | The depth comes from a side camera at right angles to the top camera. A frame needs finite X, Y and Z for every animal; other frames are skipped and counted in `n_skipped_frames`. Needs no identities (an unordered point set per frame, like GL-1). `mean_nnd_3d_bl` uses GL-1's convention: the mean body length over the animals. One animal, or no valid frame, gives NaN (never 0) and `n_skipped_frames` is the number of frames in the first case |
+| **Warnings** | GL-1 may keep frames GL-16 skips (missing depth), so "3-D NND ≥ GL-1" holds only over the frames where both are valid (and then only per frame, not for the two means). No refraction or parallax correction. A wrong tank height scales every vertical distance. With a constant depth GL-16 equals GL-1 in cm. Without depth or a cm scale all statistics are NaN |
+| **Reference** | Clark & Evans 1954, Ecology 35(4):445-453 (distance to nearest neighbor as a measure of spatial relationships in populations) — DOI [10.2307/1931034](https://doi.org/10.2307/1931034) |
+| **Supporting references** | Pitcher 1973, Anim. Behav. 21(4):673-686 (the three-dimensional structure of schools in the minnow, Phoxinus phoxinus) (DOI: 10.1016/S0003-3472(73)80091-0); Krause & Ruxton 2002, Living in Groups (Oxford University Press) (DOI: 10.1093/oso/9780198508175.001.0001) |
+
 ### 4.5 Identity-free variants
 
 `Metric.requires_identity` is not documentation: `Engine.compute_metrics`
@@ -875,6 +893,7 @@ three together.
 | GL-11 Order-State Classification | ❌ | Thresholds GL-3 against GL-8; inherits both |
 | GL-13 Topological k-NN Counts | ✅ | Per-frame k-nearest-neighbour counts |
 | GL-15 Group Elongation / Anisotropy | ✅ | Per-frame covariance of the point set |
+| GL-16 3-D Nearest-Neighbour Distance | ✅ | Unordered 3-D point set per frame |
 | Z-1 Time in zone | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
 | Z-2 Area-Corrected Occupancy | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
 | Z-3 Zone visit count | ❌ | Follows one slot across frames (visits / events / sequences) \|
@@ -1179,6 +1198,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | GL-11 | `metrics/group.py` | `OrderStateClassification` | Reuses GL-3/GL-8's own per-frame formulas |
 | GL-13 | `metrics/group.py` | `TopologicalNeighbourCounts` | `scipy.spatial.cKDTree`, same tree GL-1 builds |
 | GL-15 | `metrics/group.py` | `GroupElongation` | `np.linalg.eigh` on the per-frame position covariance |
+| GL-16 | `metrics/group.py` | `NearestNeighbourDistance3D` | `scipy.spatial.cKDTree` on the 3-D positions of `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` |
 | Z-1..Z-6 | `metrics/zone.py` | `TimeInZone`, `AreaCorrectedOccupancy`, `ZoneVisitCount`, `ZoneTransitions`, `Z5EntryExitEvents`, `Z6LatencyToFirstEntry` | `shapely` for point-in-polygon |
 | Z-7 | `metrics/zone.py` | `ZoneTransitionMatrix` | Reuses Z-4's debounced zone sequence |
 | Z-8 | `metrics/zone.py` | `ZonePreferenceIndex` | Reuses Z-2's `roi_areas`/`total_arena_area` derivation |
@@ -1421,7 +1441,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 17 of the 37
+   it is disabled with an explanatory tooltip for the 18 of the 38
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by
