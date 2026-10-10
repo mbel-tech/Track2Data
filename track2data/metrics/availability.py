@@ -55,6 +55,7 @@ def view_unavailable_reason(
 NEEDS_FUSED_REASON = "needs a fused 3-D session"
 NEEDS_CM_MODE_REASON = "needs a cm scale for the top view (use scalar or session calibration)"
 NEEDS_CM_SCALE_REASON = "needs a cm scale for the top view"
+DEPTH_SCALE_REASONS = frozenset({NEEDS_FUSED_REASON, NEEDS_CM_MODE_REASON, NEEDS_CM_SCALE_REASON})
 
 # Manifest-level answers cannot know a unit's scale yet; they pass these stand-ins and leave the
 # per-unit check to the run. The manifest answer is therefore optimistic: it only catches a 2-D

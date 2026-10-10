@@ -2560,15 +2560,16 @@ class Engine:
         reasons = " ".join(f"{mid}: {view[mid]}." for mid in sorted(depth_ids))
         if not identity:
             if depth_ids:
-                hint = (
-                    " Set the camera view on the Calibration screen for the others, or"
-                    if len(depth_ids) < len(view)
-                    else ""
-                )
+                if len(depth_ids) < len(view):
+                    hint = (
+                        "Set the camera view on the Calibration screen for the others, or "
+                        "select metrics that apply to this project."
+                    )
+                else:
+                    hint = "Select metrics that apply to this project."
                 return [
                     f"Every selected metric ({', '.join(sorted(view))}) is ruled out, so the "
-                    f"run would produce diagnostics only. {reasons}{hint} Select metrics that "
-                    "apply to this project."
+                    f"run would produce diagnostics only. {reasons} {hint}"
                 ]
             fix = (
                 "Set the camera view on the Calibration screen, or select metrics "
@@ -2595,12 +2596,10 @@ class Engine:
         ]
 
     def _depth_scale_ids(self, skipped: dict[str, str]) -> set[str]:
-        """The ids in *skipped* that are ruled out as depth-scale metrics (not by view)."""
-        from track2data.metrics import get
+        """The ids in *skipped* whose reason is a depth-scale one (not a camera-view one)."""
+        from track2data.metrics.availability import DEPTH_SCALE_REASONS
 
-        return {
-            mid for mid in skipped if getattr(get(mid), "requires_depth_scale", False)
-        }
+        return {mid for mid in skipped if skipped[mid] in DEPTH_SCALE_REASONS}
 
     def _view_selection_notes(self) -> list[str]:
         """Say which selected metrics the camera view will skip, when others still run.

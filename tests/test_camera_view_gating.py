@@ -420,3 +420,38 @@ def test_validate_mixed_ruled_out_branch_has_no_camera_view_cause_for_depth_scal
     assert "diagnostics only" in issues
     assert "IL-DS" in issues
     assert "camera view" not in issues.lower()
+
+
+def test_validate_partial_depth_scale_branch_text(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    _register_side_metric(monkeypatch)
+    manifest = _manifest("top", ["IL-SIDE", "IL-DS"], sessions=[_identity_free_ref()])
+    [text] = Engine(manifest)._gate_selection_issues()
+    assert text == (
+        "Every selected metric (IL-DS, IL-SIDE) is ruled out, so the run would produce "
+        "diagnostics only. IL-DS: needs a fused 3-D session. Set the camera view on the "
+        "Calibration screen for the others, or select metrics that apply to this project."
+    )
+
+
+def test_validate_mixed_identity_view_and_depth_scale_branch_text(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    _register_side_metric(monkeypatch)
+    ref = _identity_free_ref(track_wo_identities=True)
+    manifest = _manifest("top", ["IL-1", "IL-SIDE", "IL-DS"], sessions=[ref])
+    [text] = Engine(manifest)._gate_selection_issues()
+    assert text == (
+        "Every selected metric (IL-1, IL-DS, IL-SIDE) is ruled out, by the identity-free "
+        "sessions, the camera view or the 3-D requirements, so the run would produce "
+        "diagnostics only. IL-DS: needs a fused 3-D session. Untick 'Identity-free' where "
+        "identities were preserved, set the camera view on the Calibration screen, or select "
+        "other metrics."
+    )
+
+
+def test_a_view_reason_is_not_classified_as_a_depth_scale_one(monkeypatch) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest("top", []))
+    assert engine._depth_scale_ids(
+        {"IL-DS": "needs a fused 3-D session", "IL-SIDE": "needs a side view recording"}
+    ) == {"IL-DS"}
