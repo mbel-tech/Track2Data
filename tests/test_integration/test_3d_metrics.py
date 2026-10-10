@@ -165,7 +165,9 @@ def test_changing_depth_end_to_end(sinking_runs: tuple[Path, Path]) -> None:
     assert _value(long, "GL-1", "n_skipped_frames") == 0
 
 
-def test_merged_group_table_keeps_gl1_and_gl16_skip_counts_apart(sinking_runs: tuple[Path, Path]) -> None:
+def test_merged_group_table_keeps_gl1_and_gl16_skip_counts_apart(
+    sinking_runs: tuple[Path, Path],
+) -> None:
     table = pd.read_csv(sinking_runs[0] / "t1+s1" / "group_dynamics_summary.csv")
     assert not [c for c in table.columns if c.endswith(("_x", "_y"))]
     assert table["n_skipped_frames"].iloc[0] == 0
