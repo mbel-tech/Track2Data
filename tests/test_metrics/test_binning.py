@@ -112,3 +112,13 @@ def test_slice_psess_slices_depth() -> None:
     assert s.depth.shape == (20, 2)
     assert s.depth[0, 0] == 10.0
     assert _psess().depth is None and slice_psess(_psess(), 0, 5).depth is None
+
+
+def test_slice_psess_keeps_depth_metadata() -> None:
+    p = _psess()
+    p.depth = np.zeros((100, 2))
+    p.depth_height_cm = 25.0
+    p.depth_outside = np.array([3, 1])
+    s = slice_psess(p, 10, 30)
+    assert s.depth_height_cm == 25.0
+    assert s.depth_outside.tolist() == [3, 1]

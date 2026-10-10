@@ -140,6 +140,8 @@ def fuse(
         raw_xy_rows=_take(top.raw_xy_aligned, rows, keep),
         id_probabilities_rows=_take(top.id_probabilities_aligned, rows, keep),
         depth=depth,
+        depth_height_cm=fs.tank_height_cm,
+        depth_outside=outside.sum(axis=0).astype(int),
     )
     rms: float | None = None
     per_fish: dict[str, float | None] = {}

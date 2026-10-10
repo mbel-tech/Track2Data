@@ -938,3 +938,5 @@ def test_preprocessed_session_depth_defaults_to_none() -> None:
 
     psess = PreprocessedSession(session=None, xy=np.zeros((2, 1, 2)), kinematics=None)
     assert psess.depth is None
+    assert psess.depth_height_cm is None
+    assert psess.depth_outside is None

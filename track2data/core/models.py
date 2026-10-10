@@ -851,6 +851,10 @@ class PreprocessedSession:
     # where missing or outside the column. From fusing the side view into a 3-D track; None for a
     # 2-D session or one that has not been fused.
     depth: np.ndarray | None = None
+    # Tank height in cm (cm per unit depth fraction) and, per fused animal, the count of valid
+    # side positions that fell outside the water column. Whole-session facts set by fusion.
+    depth_height_cm: float | None = None
+    depth_outside: np.ndarray | None = None
 
     @property
     def raw_xy_aligned(self) -> np.ndarray:

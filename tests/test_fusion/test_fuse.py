@@ -45,6 +45,26 @@ def test_outside_column_is_nan_and_counted():
     assert int(np.isnan(fused.psess.depth).sum()) == 4
 
 
+def test_depth_metadata_per_animal_outside_counts():
+    top, side, pair = make_pair()
+    side.xy[0, 0, 1] = 50.0
+    side.xy[3, 0, 1] = 301.0
+    side.xy[1, 2, 1] = 350.0
+    fused = fuse(top, side, pair, same_video=False)
+    assert fused.psess.depth_height_cm == settings().tank_height_cm
+    out = fused.psess.depth_outside
+    assert out.shape == (3,) and out.dtype.kind == "i"
+    assert out.tolist() == [2, 0, 1]
+    assert int(out.sum()) == fused.report.n_outside_column == 3
+
+
+def test_depth_outside_is_zeros_not_none_when_all_inside():
+    top, side, pair = make_pair()
+    fused = fuse(top, side, pair, same_video=False)
+    assert fused.psess.depth_outside.tolist() == [0, 0, 0]
+    assert fused.psess.depth_height_cm == settings().tank_height_cm
+
+
 def test_boundary_values_kept():
     top, side, pair = make_pair()
     side.xy[0, 0, 1] = 100.0
