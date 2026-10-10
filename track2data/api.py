@@ -79,10 +79,6 @@ logger = logging.getLogger(__name__)
 _BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
 
 
-def _table_cell(text: str) -> str:
-    """*text* safe inside a Markdown table cell."""
-    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
-
 
 def _with_bin_columns(df: Any, window: Any | None) -> Any:
     """*df* with bin_index/bin_start_s/bin_end_s placed after its key columns.
@@ -317,13 +313,24 @@ class Engine:
         if df is None or len(df.columns) == 0:
             return
         attached: set[str] = set()
-        for col, val in self._metadata_fields_for(psess.session_id).items():
+        session_fields = self._metadata_fields_for(psess.session_id)
+        for col, val in session_fields.items():
             if col not in df.columns:
                 df[col] = val
                 attached.add(col)
         if "individual_id" not in df.columns:
             return
         per_animal = self._metadata_individual_fields_for(psess, identity_free)
+        rule = self._manifest.mapping
+        if psess.depth is not None and rule is not None:
+            carried = {c.strip().lower() for c in (*rule.rules, *rule.extra_columns)}
+            for col in ("depth_fraction", "depth_cm"):
+                if col in carried and col in df.columns:
+                    logger.warning(
+                        "metadata column '%s' is ignored in the per-frame table: "
+                        "the fused depth is used",
+                        col,
+                    )
         if not per_animal:
             return
         columns = list(dict.fromkeys(c for f in per_animal.values() for c in f))
@@ -1795,7 +1802,9 @@ class Engine:
             return self._hash_and_check_input(self.import_ref(ref), ref)
         except Exception:
             logger.warning(
-                "Could not read side session %s to hash its trajectory.", pair.side_session_id
+                "Could not read side session %s to hash its trajectory.",
+                pair.side_session_id,
+                exc_info=True,
             )
             return ""
 
@@ -1925,6 +1934,8 @@ class Engine:
         before writing a Methods section needs to know they have a
         mixed-frame-rate project before they need the session count.
         """
+        from track2data.exporters.readme import table_cell
+
         ok = [r for r in results if not r.error]
         failed = [r for r in results if r.error]
 
@@ -1989,7 +2000,7 @@ class Engine:
                 "",
                 "| Session | Reason |",
                 "|---------|--------|",
-                *[f"| {_table_cell(s.session_id)} | {_table_cell(s.reason)} |" for s in skipped],
+                *[f"| {table_cell(s.session_id)} | {table_cell(s.reason)} |" for s in skipped],
                 "",
                 "They are also listed in `skipped.csv`.",
                 "",

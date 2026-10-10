@@ -176,7 +176,7 @@ class ReadmeExporter(Exporter):
                 agreement += " (**above the warning threshold**)"
         else:
             why = f.fusion_agreement_skipped or "no reason recorded"
-            agreement = f"*(not computed: {_cell(why)})*"
+            agreement = f"*(not computed: {table_cell(why)})*"
         return [
             "## 3-D fusion",
             "",
@@ -192,8 +192,8 @@ class ReadmeExporter(Exporter):
             f"| Tank height | {f.fusion_tank_height_cm:g} cm |",
             f"| Overlapping frames | {f.fusion_overlap_frames} |",
             f"| Fish fused | {f.fusion_fused_fish} |",
-            f"| Top fish left out | {_cell(f.fusion_unmatched_top) or '*(none)*'} |",
-            f"| Side fish left out | {_cell(f.fusion_unmatched_side) or '*(none)*'} |",
+            f"| Top fish left out | {table_cell(f.fusion_unmatched_top) or '*(none)*'} |",
+            f"| Side fish left out | {table_cell(f.fusion_unmatched_side) or '*(none)*'} |",
             f"| Positions outside the water column | {f.fusion_outside_column} |",
             f"| Agreement RMS | {agreement} |",
             "",
@@ -321,8 +321,8 @@ class ReadmeExporter(Exporter):
             "",
             "| Field | Value |",
             "|-------|-------|",
-            f"| Software | {_cell(p.source_software or p.reader or '*(unknown)*')} |",
-            f"| Reader | {_cell(p.reader or '*(unknown)*')} |",
+            f"| Software | {table_cell(p.source_software or p.reader or '*(unknown)*')} |",
+            f"| Reader | {table_cell(p.reader or '*(unknown)*')} |",
             f"| Reader verification | {_verification_cell(p.reader_verification)} |",
             f"| Reader chosen | {_chosen_cell(p.reader_chosen_by, p.detection_confidence)} |",
             f"| Reader options | {_options_cell(p.reader_options)} |",
@@ -372,7 +372,7 @@ def _tri(v: bool | None) -> str:
     return "*(not reported)*" if v is None else str(v)
 
 
-def _cell(text: str) -> str:
+def table_cell(text: str) -> str:
     """Make *text* safe inside a Markdown table cell."""
     return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
@@ -380,20 +380,20 @@ def _cell(text: str) -> str:
 def _verification_cell(verification: str | None) -> str:
     if verification is None:
         return "*(not recorded)*"
-    return _VERIFICATION.get(verification, _cell(verification))
+    return _VERIFICATION.get(verification, table_cell(verification))
 
 
 def _chosen_cell(chosen_by: str | None, confidence: str | None) -> str:
     if not chosen_by:
         return "*(not recorded)*"
     who = _CHOSEN_BY.get(chosen_by, chosen_by)
-    return _cell(f"{who} (detection confidence {confidence})" if confidence else who)
+    return table_cell(f"{who} (detection confidence {confidence})" if confidence else who)
 
 
 def _options_cell(options: dict[str, object]) -> str:
     if not options:
         return "*(none)*"
-    return _cell(", ".join(f"{name}={value}" for name, value in sorted(options.items())))
+    return table_cell(", ".join(f"{name}={value}" for name, value in sorted(options.items())))
 
 
 def _position_rows(p: SessionProvenance) -> list[str]:
@@ -411,7 +411,7 @@ def _position_rows(p: SessionProvenance) -> list[str]:
         f"of frames and animals; plane {plane}). The file has {n} keypoints; the others are "
         "stored but no metric uses them"
     )
-    return [f"| Animal position | {_cell(text)} |"]
+    return [f"| Animal position | {table_cell(text)} |"]
 
 
 def _files_cell(files: tuple[str, ...]) -> str:
@@ -420,7 +420,7 @@ def _files_cell(files: tuple[str, ...]) -> str:
     names = [f"`{Path(f).name or f}`" for f in files[:_MAX_FILES_SHOWN]]
     if len(files) > _MAX_FILES_SHOWN:
         names.append(f"+{len(files) - _MAX_FILES_SHOWN} more")
-    return _cell(", ".join(names))
+    return table_cell(", ".join(names))
 
 
 def _calibration_row(p: SessionProvenance, *, unconfirmed: str) -> str:

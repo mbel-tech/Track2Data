@@ -89,13 +89,114 @@ def test_the_four_formats_carry_the_same_depth_columns(tmp_path: Path) -> None:
             np.testing.assert_allclose(got[col].to_numpy(float), df[col].to_numpy(float))
 
 
-def test_2d_payload_bytes_unchanged(tmp_path: Path) -> None:
-    df = pd.DataFrame({"session_id": ["s"] * 2, "individual_id": [0, 0], "frame": [0, 1],
-                       "x_px": [1.0, 2.0], "y_px": [3.0, 4.0]})
-    CsvLongExporter().write(_payload(df), tmp_path / "a")
-    expected = df.to_csv(index=False, lineterminator="\n").encode()
-    assert (tmp_path / "a" / "master_fish_by_frame.csv").read_bytes() == expected
-    assert not (tmp_path / "a" / "skipped.csv").exists()
+def test_2d_run_has_no_new_columns_rows_or_files(tmp_path: Path, tiny_real_session: Path) -> None:
+    from datetime import UTC, datetime
+
+    from track2data.core.models import (
+        CalibrationConfig,
+        MetricSelection,
+        ProjectManifest,
+        SessionRef,
+    )
+
+    now = datetime.now(tz=UTC)
+    manifest = ProjectManifest(
+        project_name="p2d", created_at=now, updated_at=now,
+        sessions=[
+            SessionRef(session_id=tiny_real_session.name, folder=tiny_real_session, sha256="")
+        ],
+        calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        metrics=MetricSelection(individual=["IL-1"], group=[], zone=[], diagnostic=[]),
+    )
+    engine = Engine(manifest)
+    out = tmp_path / "out"
+    engine.run(out, exporters=["csv_long", "readme"])
+
+    header = (out / "sessions.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert header.split(",") == [
+        "session_id", "reader", "fps", "n_frames", "duration_s", "n_animals", "width_px",
+        "height_px", "calibration_mode", "length_unit", "px_per_cm", "is_calibrated",
+        "is_identity_free", "trajectory_source", "trajectory_sha256", "error",
+        "length_calibration_n", "length_calibration_rel_sd",
+    ]
+    assert not list(out.rglob("skipped.csv"))
+    for readme in (out / "PROJECT_SUMMARY.md", out / tiny_real_session.name / "README.md"):
+        text = readme.read_text(encoding="utf-8")
+        assert "3-D fusion" not in text and "Skipped sessions" not in text
+    frame = pd.read_csv(out / tiny_real_session.name / "master_fish_by_frame.csv")
+    assert not [c for c in frame.columns if c.startswith("depth_")]
+    meta = json.loads((out / tiny_real_session.name / "manifest.json").read_text())
+    assert "fusion" not in meta["run_metadata"]
+
+
+def test_quality_threshold_masks_the_depth_columns(tmp_path: Path) -> None:
+    manifest = build_scene(tmp_path / "data")
+    manifest.metrics.quality_threshold = 0.5
+    engine = Engine(manifest)
+    psess = engine.fuse_pair(manifest.view_pairs[0]).psess
+    prob = np.ones((psess.n_frames, psess.n_animals))
+    prob[30, 0] = 0.1
+    psess.id_probabilities_rows = prob
+    df = engine.build_fish_by_frame(psess)
+    low = df[(df.individual_id == 0) & (df.frame == 30)].iloc[0]
+    assert np.isnan(low.x_px) and np.isnan(low.depth_fraction) and np.isnan(low.depth_cm)
+    assert df.depth_fraction.isna().sum() == 1
+
+
+def _metadata_manifest(manifest, csv: Path, session_id: str):
+    from track2data.core.models import MappingRule, MetadataSource
+
+    pd.DataFrame({"session_id": [session_id], "depth_cm": [99.0]}).to_csv(csv, index=False)
+    return manifest.model_copy(
+        update={
+            "metadata_source": MetadataSource(path=csv, sha256="unused"),
+            "mapping": MappingRule(rules={}, extra_columns=["depth_cm"]),
+        }
+    )
+
+
+def test_2d_metadata_column_named_depth_cm_is_kept(tmp_path: Path, tiny_real_session: Path) -> None:
+    from datetime import UTC, datetime
+
+    from track2data.core.models import (
+        CalibrationConfig,
+        MetricSelection,
+        ProjectManifest,
+        SessionRef,
+    )
+
+    now = datetime.now(tz=UTC)
+    base = ProjectManifest(
+        project_name="p2d", created_at=now, updated_at=now,
+        sessions=[
+            SessionRef(session_id=tiny_real_session.name, folder=tiny_real_session, sha256="")
+        ],
+        calibration=CalibrationConfig(mode="scalar", px_per_cm=10.0),
+        metrics=MetricSelection(individual=["IL-1"], group=[], zone=[], diagnostic=[]),
+    )
+    manifest = _metadata_manifest(base, tmp_path / "meta.csv", tiny_real_session.name)
+    engine = Engine(manifest)
+    psess = engine.preprocess(engine.import_session(tiny_real_session))
+    frame = engine.build_fish_by_frame(psess)
+    assert (frame["depth_cm"] == 99.0).all()
+    metrics = engine.compute_metrics(psess)
+    assert (metrics["IL-1"]["depth_cm"] == 99.0).all()
+
+
+def test_3d_metadata_depth_column_warns_and_the_fused_depth_wins(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    base = build_scene(tmp_path / "data")
+    manifest = _metadata_manifest(base, tmp_path / "meta.csv", "t1+s1")
+    engine = Engine(manifest)
+    psess = engine.fuse_pair(manifest.view_pairs[0]).psess
+    with caplog.at_level(logging.WARNING):
+        frame = engine.build_fish_by_frame(psess)
+    assert "metadata column 'depth_cm' is ignored in the per-frame table" in caplog.text
+    assert not (frame["depth_cm"] == 99.0).any()
+    assert set(frame["depth_cm"].dropna().round(6)) == {d * TANK_CM for d in DEPTHS}
 
 
 # ── provenance ───────────────────────────────────────────────────────────────
@@ -209,3 +310,26 @@ def test_sessions_table_blanks_provenance_for_session_units() -> None:
     csv = both.to_csv(index=False, lineterminator="\n").splitlines()
     assert csv[1].endswith("," * len(info.as_row()))  # the session row is blank there
     assert ",pair,t,s,2,x,False," in csv[2]
+
+
+def test_single_video_layout_records_offset_zero(tmp_path: Path) -> None:
+    base = build_scene(tmp_path / "data", with_lone=False)
+    pairs = [
+        p.model_copy(update={"fusion": p.fusion.model_copy(update={"frame_offset": 5})})
+        for p in base.view_pairs
+    ]
+    manifest = base.model_copy(
+        update={
+            "mode": base.mode.model_copy(update={"layout": "single_video_two_panels"}),
+            "view_pairs": pairs,
+        }
+    )
+    out = tmp_path / "out"
+    result = Engine(manifest).run(out, exporters=["csv_long", "readme"])
+    assert [r.error for r in result.sessions] == [None, None]
+    assert result.sessions[0].fusion.fusion_frame_offset == 0
+    assert "| Frame offset | 0 |" in (out / "t1+s1" / "README.md").read_text(encoding="utf-8")
+    meta = json.loads((out / "t1+s1" / "manifest.json").read_text())
+    assert meta["run_metadata"]["fusion"]["fusion_frame_offset"] == 0
+    sessions = pd.read_csv(out / "sessions.csv")
+    assert set(sessions.fusion_frame_offset) == {0}
