@@ -305,8 +305,12 @@ class Engine:
         for key, fields in keyed.items():
             if source is not None and by_position:
                 top_idx = resolve_animal(key, [], "index", int(source.max(initial=-1)) + 1)
-                found = np.flatnonzero(source == top_idx) if top_idx is not None else []
-                idx = int(found[0]) if len(found) else None
+                found: np.ndarray = (
+                    np.flatnonzero(source == top_idx)
+                    if top_idx is not None
+                    else np.empty(0, dtype=np.int64)
+                )
+                idx = int(found[0]) if found.size else None
             else:
                 idx = resolve_animal(key, labels, rule.individual_match, n_animals)
             if idx is None:
