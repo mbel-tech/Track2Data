@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from track2data.core.runplan import FusionRunInfo
 from track2data.exporters.base import Exporter, ExportPayload, SessionProvenance
 from track2data.metrics.availability import view_label
 
@@ -71,6 +72,8 @@ class ReadmeExporter(Exporter):
 
         readme_lines += self._provenance_lines(p.provenance)
         readme_lines += self._camera_view_lines(p.provenance)
+        if p.fusion is not None:
+            readme_lines += self._fusion_lines(p.fusion)
 
         readme_lines += [
             "## Metrics computed",
@@ -132,6 +135,8 @@ class ReadmeExporter(Exporter):
             "metrics_computed": all_metric_ids,
             "session_provenance": asdict(p.provenance),
         }
+        if p.fusion is not None:
+            manifest_data["run_metadata"]["fusion"] = p.fusion.as_row()
 
         manifest_path = out_dir / "manifest.json"
         manifest_path.write_text(
@@ -160,6 +165,42 @@ class ReadmeExporter(Exporter):
                 lines.append(f"| Water column | rows {top:g} to {bottom:g} px ({source}) |")
         lines.append("")
         return lines
+
+    @staticmethod
+    def _fusion_lines(f: FusionRunInfo) -> list[str]:
+        """How a pair unit was fused: the settings, what was fused and left out, and how well
+        the two views agreed. Written for pair units only."""
+        if f.fusion_agreement_rms_cm is not None:
+            agreement = f"{f.fusion_agreement_rms_cm:.4g} cm"
+            if f.fusion_agreement_warning:
+                agreement += " (**above the warning threshold**)"
+        else:
+            why = f.fusion_agreement_skipped or "no reason recorded"
+            agreement = f"*(not computed: {_cell(why)})*"
+        return [
+            "## 3-D fusion",
+            "",
+            "| Field | Value |",
+            "|-------|-------|",
+            f"| Unit | pair of top `{f.top_session_id}` and side `{f.side_session_id}` |",
+            f"| Side trajectory SHA-256 | `{f.side_trajectory_sha256 or '(not computed)'}` |",
+            f"| Frame offset | {f.fusion_frame_offset} |",
+            f"| Horizontal axis | {f.fusion_axis} |",
+            f"| Flipped | {f.fusion_flip} |",
+            f"| Surface row | {f.fusion_surface_row:g} px |",
+            f"| Floor row | {f.fusion_floor_row:g} px |",
+            f"| Tank height | {f.fusion_tank_height_cm:g} cm |",
+            f"| Overlapping frames | {f.fusion_overlap_frames} |",
+            f"| Fish fused | {f.fusion_fused_fish} |",
+            f"| Top fish left out | {_cell(f.fusion_unmatched_top) or '*(none)*'} |",
+            f"| Side fish left out | {_cell(f.fusion_unmatched_side) or '*(none)*'} |",
+            f"| Positions outside the water column | {f.fusion_outside_column} |",
+            f"| Agreement RMS | {agreement} |",
+            "",
+            "The trajectory checksum in `sessions.csv` is the top session's; "
+            "`side_trajectory_sha256` is the side session's.",
+            "",
+        ]
 
     @staticmethod
     def _provenance_lines(prov: object) -> list[str]:

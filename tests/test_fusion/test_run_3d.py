@@ -85,7 +85,7 @@ def test_pair_units_carry_the_fusion_provenance(tmp_path: Path) -> None:
         "fusion_flip", "fusion_surface_row", "fusion_floor_row", "fusion_tank_height_cm",
         "fusion_overlap_frames", "fusion_fused_fish", "fusion_unmatched_top",
         "fusion_unmatched_side", "fusion_outside_column", "fusion_agreement_rms_cm",
-        "fusion_agreement_warning", "fusion_agreement_skipped",
+        "fusion_agreement_warning", "fusion_agreement_skipped", "side_trajectory_sha256",
     ]
 
 

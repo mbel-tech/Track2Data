@@ -21,7 +21,7 @@ RESERVED_COLUMNS = frozenset(
         "metric_id", "frame", "time_s", "in_tracking_interval", "x_px", "y_px", "x_cm", "y_cm",
         "was_interpolated", "speed_px_s", "speed_cm_s", "heading_rad", "main_zone", "sec_zone",
         "individual_label", "individual_color", "bin_index", "bin_start_s", "bin_end_s",
-        "zone_name",
+        "zone_name", "depth_fraction", "depth_cm",
     }
 )
 

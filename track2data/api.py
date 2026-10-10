@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from track2data.core.models import CameraView, ViewPair
-    from track2data.core.runplan import RunPlan, RunUnit
+    from track2data.core.runplan import RunPlan, RunUnit, SkippedSession
     from track2data.core.session_consistency import SessionSummary
     from track2data.fusion.fuse import FusedSession
     from track2data.metrics.base import Metric
@@ -77,6 +77,11 @@ logger = logging.getLogger(__name__)
 
 
 _BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
+
+
+def _table_cell(text: str) -> str:
+    """*text* safe inside a Markdown table cell."""
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def _with_bin_columns(df: Any, window: Any | None) -> Any:
@@ -1243,6 +1248,12 @@ class Engine:
             df["y_cm"] = df["y_px"] / psess.px_per_cm
             df["speed_cm_s"] = df["speed_px_s"] / psess.px_per_cm
 
+        # a fused session's depth sits beside the position columns (see exporters.schema)
+        from track2data.exporters.schema import depth_columns
+
+        for name, values in depth_columns(psess).items():
+            df[name] = values
+
         if psess.main_zone is not None:
             df["main_zone"] = psess.main_zone.reshape(-1)
         if psess.sec_zone is not None:
@@ -1284,7 +1295,7 @@ class Engine:
         if threshold > 0 and id_prob is not None:
             below = df["id_probability"] < threshold
             masked_cols = [
-                c for c in ("x_px", "y_px", "x_cm", "y_cm",
+                c for c in ("x_px", "y_px", "x_cm", "y_cm", "depth_fraction", "depth_cm",
                             "speed_px_s", "speed_cm_s", "heading_rad")
                 if c in df.columns
             ]
@@ -1715,7 +1726,7 @@ class Engine:
                     ),
                 )
 
-        self._write_project_summary(Path(out_dir), results)
+        self._write_project_summary(Path(out_dir), results, plan.skipped)
         pooled = self._write_all_sessions(Path(out_dir), results)
 
         emit(
@@ -1771,8 +1782,28 @@ class Engine:
             )
         return digest
 
+    def _side_trajectory_sha256(self, pair: ViewPair) -> str:
+        """SHA-256 of the side session's trajectory file, computed as for the top session
+        (:meth:`_hash_and_check_input`, staleness warning included); "" when the session cannot
+        be read. The top session's checksum and staleness check do not cover this file."""
+        ref = next(
+            (r for r in self._manifest.sessions if r.session_id == pair.side_session_id), None
+        )
+        if ref is None:
+            return ""
+        try:
+            return self._hash_and_check_input(self.import_ref(ref), ref)
+        except Exception:
+            logger.warning(
+                "Could not read side session %s to hash its trajectory.", pair.side_session_id
+            )
+            return ""
+
     def _write_project_summary(
-        self, out_dir: Path, results: list[SessionRunResult]
+        self,
+        out_dir: Path,
+        results: list[SessionRunResult],
+        skipped: Sequence[SkippedSession] = (),
     ) -> list[Path]:
         """Write the run-root ``sessions.csv`` and ``PROJECT_SUMMARY.md``.
 
@@ -1788,6 +1819,8 @@ class Engine:
         Never fatal. A run whose numbers are all computed must not be
         reported as failed because a bookkeeping file could not be written.
         """
+        import pandas as pd
+
         from track2data.core.session_consistency import (
             calibration_spread_warnings,
             heterogeneity_warnings,
@@ -1816,14 +1849,24 @@ class Engine:
             out_dir.mkdir(parents=True, exist_ok=True)
 
             table_path = out_dir / "sessions.csv"
-            sessions_table(summaries, errors=errors).to_csv(
+            fusion = {r.session_id: r.fusion for r in results if r.fusion is not None}
+            sessions_table(summaries, errors=errors, fusion=fusion).to_csv(
                 table_path, index=False, encoding="utf-8", lineterminator="\n"
             )
             written.append(table_path)
 
+            if skipped:
+                skipped_path = out_dir / "skipped.csv"
+                pd.DataFrame(
+                    [(s.session_id, s.reason) for s in skipped],
+                    columns=["session_id", "reason"],
+                ).to_csv(skipped_path, index=False, encoding="utf-8", lineterminator="\n")
+                written.append(skipped_path)
+
             readme_path = out_dir / "PROJECT_SUMMARY.md"
             readme_path.write_text(
-                self._project_readme_text(results, warnings, advisories), encoding="utf-8"
+                self._project_readme_text(results, warnings, advisories, skipped),
+                encoding="utf-8",
             )
             written.append(readme_path)
 
@@ -1869,6 +1912,7 @@ class Engine:
         results: list[SessionRunResult],
         warnings: list[str],
         advisories: Sequence[str] = (),
+        skipped: Sequence[SkippedSession] = (),
     ) -> str:
         """Run-root project summary: what ran, what failed, what not to pool.
 
@@ -1936,6 +1980,20 @@ class Engine:
             ]
             lines += [f"{i}. {a}" for i, a in enumerate(advisories, start=1)]
             lines.append("")
+
+        if skipped:
+            lines += [
+                "## Skipped sessions",
+                "",
+                "These sessions were left out of the run, so they have no output folder:",
+                "",
+                "| Session | Reason |",
+                "|---------|--------|",
+                *[f"| {_table_cell(s.session_id)} | {_table_cell(s.reason)} |" for s in skipped],
+                "",
+                "They are also listed in `skipped.csv`.",
+                "",
+            ]
 
         if failed:
             lines += ["## Sessions that failed", ""]
@@ -2106,7 +2164,10 @@ class Engine:
                 applied = pair.fusion
                 if self._manifest.mode.layout == "single_video_two_panels":
                     applied = applied.model_copy(update={"frame_offset": 0})  # as fuse applies it
-                fusion = FusionRunInfo.from_fused(pair, applied, fused)
+                fusion = dataclasses.replace(
+                    FusionRunInfo.from_fused(pair, applied, fused),
+                    side_trajectory_sha256=self._side_trajectory_sha256(pair),
+                )
                 cached = False
             else:
                 assert unit.ref is not None
@@ -2147,6 +2208,7 @@ class Engine:
             payload = self.build_payload(
                 psess, metric_results, identity_free=identity_free
             )
+            payload.fusion = fusion
             emit(
                 progress,
                 ProgressEvent(
