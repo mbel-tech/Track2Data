@@ -57,7 +57,9 @@ NEEDS_CM_MODE_REASON = "needs a cm scale for the top view (use scalar or session
 NEEDS_CM_SCALE_REASON = "needs a cm scale for the top view"
 
 # Manifest-level answers cannot know a unit's scale yet; they pass these stand-ins and leave the
-# per-unit check to the run.
+# per-unit check to the run. The manifest answer is therefore optimistic: it only catches a 2-D
+# project and a bodylength calibration, and a scalar project with no px_per_cm passes it. A
+# caller deciding for a run unit must overwrite both values from the unit.
 _SCALE_ASSUMED = 1.0
 
 
@@ -87,7 +89,12 @@ def depth_scale_reason(
 
 
 def manifest_depth_scale(manifest: Any) -> dict[str, Any]:
-    """Keyword arguments of :func:`depth_scale_reason` decided from the manifest alone."""
+    """Keyword arguments of :func:`depth_scale_reason` decided from the manifest alone.
+
+    Optimistic about the scale: ``px_per_cm`` / ``depth_height_cm`` are placeholders (1.0), so
+    only the dimension and the calibration mode can rule a metric out here. Replace both from
+    the run unit before asking about a unit.
+    """
     is_3d = manifest.mode.dimension == "3d"
     return {
         "dimension": manifest.mode.dimension,
@@ -96,6 +103,20 @@ def manifest_depth_scale(manifest: Any) -> dict[str, Any]:
         "px_per_cm": _SCALE_ASSUMED,
         "depth_height_cm": _SCALE_ASSUMED,
     }
+
+
+def unavailable_reason(
+    metric_cls: Any,
+    camera_view: str,
+    *,
+    has_depth: bool = False,
+    depth_scale: dict[str, Any] | None = None,
+) -> str | None:
+    """The one answer: the camera-view reason, else the depth-scale reason, else None."""
+    reason = view_unavailable_reason(metric_cls, camera_view, has_depth=has_depth)
+    if reason is None and depth_scale is not None:
+        reason = depth_scale_reason(metric_cls, **depth_scale)
+    return reason
 
 
 def required_views_text(metric_cls: Any) -> str | None:
@@ -129,9 +150,9 @@ def view_skipped_metrics(
         cls = lookup(mid)
         if cls is None:
             continue
-        reason = view_unavailable_reason(cls, camera_view, has_depth=has_depth)
-        if reason is None and depth_scale is not None:
-            reason = depth_scale_reason(cls, **depth_scale)
+        reason = unavailable_reason(
+            cls, camera_view, has_depth=has_depth, depth_scale=depth_scale
+        )
         if reason is not None:
             skipped[mid] = reason
     return skipped

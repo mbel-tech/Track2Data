@@ -38,10 +38,9 @@ from PySide6.QtWidgets import (
 
 from track2data import metrics
 from track2data.metrics.availability import (
-    depth_scale_reason,
     manifest_depth_scale,
     manifest_view,
-    view_unavailable_reason,
+    unavailable_reason,
 )
 from ui.dialogs.metric_config_dialog import MetricConfigDialog
 from ui.dialogs.metric_info_dialog import MetricInfoDialog
@@ -109,6 +108,8 @@ class MetricsScreen(QWidget):
             store.projectChanged.connect(self._load_from_store)
             store.sessionsChanged.connect(self._update_availability)
             store.sceneChanged.connect(self._update_availability)
+            store.calibrationChanged.connect(self._update_availability)
+            store.modeChanged.connect(self._update_availability)
             store.zonesChanged.connect(self._update_zone_tab_enabled)
             self._load_from_store()
             self._update_availability()
@@ -512,11 +513,9 @@ class MetricsScreen(QWidget):
                     continue
                 requires_identity = bool(include_item.data(_ROLE_REQUIRES_IDENTITY))
                 metric_cls = metrics.get(include_item.data(_ROLE_METRIC_ID))
-                view_reason = view_unavailable_reason(
-                    metric_cls, camera_view, has_depth=has_depth
+                view_reason = unavailable_reason(
+                    metric_cls, camera_view, has_depth=has_depth, depth_scale=depth_scale
                 )
-                if view_reason is None:
-                    view_reason = depth_scale_reason(metric_cls, **depth_scale)
 
                 notes: list[str] = []
                 if requires_identity and (all_identity_free or some_identity_free):

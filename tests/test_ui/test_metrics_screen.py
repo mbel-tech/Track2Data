@@ -1194,3 +1194,26 @@ def test_depth_scale_metric_row_follows_dimension_and_calibration(qtbot, monkeyp
     )
     screen._update_availability()
     assert _is_enabled(item())
+
+
+def test_depth_scale_row_refreshes_when_the_store_signals_calibration_or_mode(
+    qtbot, monkeypatch
+) -> None:
+    from track2data.core.models import CalibrationConfig, ProjectMode
+    from ui.metrics_screen import MetricsScreen
+
+    _register_depth_scale_metric(monkeypatch)
+    store = _make_store()
+    store.update_mode(ProjectMode(dimension="3d", layout="two_videos"))
+    store.update_calibration(CalibrationConfig(mode="bodylength"))
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    def item():
+        return screen._ind_table.item(_row_for_id(screen._ind_table, "IL-DS"), 0)
+
+    assert not _is_enabled(item())
+    store.update_calibration(CalibrationConfig(mode="scalar", px_per_cm=10.0))
+    assert _is_enabled(item())
+    store.update_mode(ProjectMode(dimension="2d"))
+    assert not _is_enabled(item())

@@ -969,15 +969,17 @@ class Engine:
         view is that session's (a fused one is top-view) and a depth metric is allowed when it
         has depth."""
         from track2data.metrics import get
-        from track2data.metrics.availability import view_skipped_metrics
+        from track2data.metrics.availability import (
+            manifest_depth_scale,
+            manifest_view,
+            view_skipped_metrics,
+        )
 
         selected = [
             *self._manifest.metrics.individual,
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
         ]
-        from track2data.metrics.availability import manifest_depth_scale, manifest_view
-
         scale = manifest_depth_scale(self._manifest)
         if psess is None:
             if session is None:
@@ -1132,14 +1134,24 @@ class Engine:
                 psess.session_id,
             )
         if view_skipped:
-            logger.warning(
-                "Skipping metrics (%s) for session %s: its camera view is %s%s, "
-                "which they are not meaningful for.",
-                ", ".join(sorted(view_skipped)),
-                psess.session_id,
-                self.camera_view_for_psess(psess),
-                " (a fused session)" if psess.depth is not None else "",
-            )
+            depth_ids = self._depth_scale_ids(view_skipped)
+            view_only = {m: r for m, r in view_skipped.items() if m not in depth_ids}
+            if view_only:
+                logger.warning(
+                    "Skipping metrics (%s) for session %s: its camera view is %s%s, "
+                    "which they are not meaningful for.",
+                    ", ".join(sorted(view_only)),
+                    psess.session_id,
+                    self.camera_view_for_psess(psess),
+                    " (a fused session)" if psess.depth is not None else "",
+                )
+            for mid in sorted(depth_ids):
+                logger.warning(
+                    "Skipping metric %s for session %s: %s.",
+                    mid,
+                    psess.session_id,
+                    view_skipped[mid],
+                )
 
         bin_seconds = self._bin_seconds()
         windows = None
@@ -2544,7 +2556,20 @@ class Engine:
                 "metrics, or untick 'Identity-free' for the sessions that do "
                 "preserve identities."
             ]
+        depth_ids = self._depth_scale_ids(view)
+        reasons = " ".join(f"{mid}: {view[mid]}." for mid in sorted(depth_ids))
         if not identity:
+            if depth_ids:
+                hint = (
+                    " Set the camera view on the Calibration screen for the others, or"
+                    if len(depth_ids) < len(view)
+                    else ""
+                )
+                return [
+                    f"Every selected metric ({', '.join(sorted(view))}) is ruled out, so the "
+                    f"run would produce diagnostics only. {reasons}{hint} Select metrics that "
+                    "apply to this project."
+                ]
             fix = (
                 "Set the camera view on the Calibration screen, or select metrics "
                 "that apply to this recording."
@@ -2554,13 +2579,28 @@ class Engine:
                 "camera view than the project's, so the run would produce diagnostics "
                 f"only. {fix}"
             ]
+        causes = "the identity-free sessions or the project's camera view"
+        fix = "set the camera view on the Calibration screen"
+        if depth_ids:
+            causes = "the identity-free sessions or the 3-D requirements"
+            fix = "fix the 3-D requirements above"
+            if len(depth_ids) < len(view):
+                causes = "the identity-free sessions, the camera view or the 3-D requirements"
+                fix = "set the camera view on the Calibration screen"
         return [
-            f"Every selected metric ({', '.join(sorted(selected))}) is ruled out, by the "
-            "identity-free sessions or by the project's camera view, so the run would "
-            "produce diagnostics only. Untick 'Identity-free' where identities were "
-            "preserved, set the camera view on the Calibration screen, or select other "
+            f"Every selected metric ({', '.join(sorted(selected))}) is ruled out, by "
+            f"{causes}, so the run would produce diagnostics only. {reasons} Untick "
+            f"'Identity-free' where identities were preserved, {fix}, or select other "
             "metrics."
         ]
+
+    def _depth_scale_ids(self, skipped: dict[str, str]) -> set[str]:
+        """The ids in *skipped* that are ruled out as depth-scale metrics (not by view)."""
+        from track2data.metrics import get
+
+        return {
+            mid for mid in skipped if getattr(get(mid), "requires_depth_scale", False)
+        }
 
     def _view_selection_notes(self) -> list[str]:
         """Say which selected metrics the camera view will skip, when others still run.
