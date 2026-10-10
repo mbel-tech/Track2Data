@@ -57,19 +57,13 @@ def _load_manifest(project: str) -> ProjectManifest:
         sys.exit(1)
 
 
-def _refuse_3d(engine: Engine, *, sensitivity: bool = False) -> None:
-    """Exit 2 before any output is made when the project cannot be computed (a 3-D project with
-    no fusable pair; a sensitivity sweep refuses every 3-D project)."""
+def _refuse_3d_sensitivity(engine: Engine) -> None:
+    """Exit 2 before any output is made: a sensitivity sweep refuses every 3-D project. (``run``
+    gates on the run plan itself; see :func:`run`.)"""
     from track2data.core.models import SENSITIVITY_3D_REFUSAL
 
-    try:
-        if sensitivity:
-            if engine.manifest.mode.dimension == "3d":
-                raise ValueError(SENSITIVITY_3D_REFUSAL)
-        else:
-            engine.require_computable()
-    except ValueError as exc:
-        click.echo(f"[error] {exc}", err=True)
+    if engine.manifest.mode.dimension == "3d":
+        click.echo(f"[error] {SENSITIVITY_3D_REFUSAL}", err=True)
         sys.exit(2)
 
 
@@ -118,23 +112,33 @@ def run(
     else:
         out_path = Path(out_dir)
 
-    # Validate before running.
+    # Validate before running. The run plan is built once, here (in a 3-D project that fuses
+    # every pair), and handed to engine.run(); a 3-D project with nothing to run exits 2
+    # before anything is written.
     engine = Engine(manifest, cache_dir=Path(cache_dir) if cache_dir else None)
-    _refuse_3d(engine)
-    issues = engine.validate()
+    try:
+        plan = engine.require_computable()
+    except ValueError as exc:
+        click.echo(f"[error] {exc}", err=True)
+        sys.exit(2)
+    issues, _notes = engine.validation_issues(plan)
     if issues:
         for issue in issues:
             click.echo(f"[warn] {issue}", err=True)
+    # Left out of a 3-D run: in no pair, or in a pair that does not fuse.
+    for skip in plan.skipped:
+        click.echo(f"[skipped] {skip.session_id}: {skip.reason}", err=True)
 
     exporter_list = list(exporters) if exporters else None
 
-    click.echo(
-        f"Running project '{manifest.project_name}' "
-        f"({len(manifest.sessions)} session(s))…"
-    )
+    if manifest.mode.dimension == "3d":
+        size = f"{len(plan.units)} fused pair(s), {len(plan.skipped)} session(s) skipped"
+    else:
+        size = f"{len(manifest.sessions)} session(s)"
+    click.echo(f"Running project '{manifest.project_name}' ({size})…")
 
     try:
-        result = engine.run(out_path, exporters=exporter_list)
+        result = engine.run(out_path, exporters=exporter_list, plan=plan)
     except Exception as exc:
         click.echo(f"[error] Pipeline failed: {exc}", err=True)
         logger.exception("Pipeline failed")
@@ -168,19 +172,23 @@ def run(
 def validate(project: str) -> None:
     """Validate schema and reachability without running the pipeline.
 
-    Exits with code 0 when the manifest is valid, 1 otherwise.
+    Exits with code 0 when the manifest is valid, 1 otherwise. In a 3-D project a pair that does
+    not fuse, or a session in no pair, is listed but does not fail validation: the run leaves it
+    out. Only a 3-D project with no fusable pair at all fails.
     """
     from track2data.api import Engine
 
     manifest = _load_manifest(project)
     engine = Engine(manifest)
-    issues = engine.validate()
+    issues, notes = engine.validation_issues()
 
     # Non-blocking, and printed whether or not there are blocking issues:
     # a mixed-frame-rate project is a legitimate design, but silently
     # pooling it is the mistake this exists to prevent.
     for warning in engine.consistency_warnings():
         click.echo(f"[consistency] {warning}", err=True)
+    for note in notes:
+        click.echo(f"[issue] {note}", err=True)
 
     if not issues:
         click.echo(f"OK — '{manifest.project_name}' is ready to run.")
@@ -651,7 +659,7 @@ def sensitivity(
 
     manifest = _load_manifest(project)
     engine = Engine(manifest)
-    _refuse_3d(engine, sensitivity=True)
+    _refuse_3d_sensitivity(engine)
 
     def _ints(raw: str | None, default: tuple[int, ...]) -> tuple[int, ...]:
         if raw is None:

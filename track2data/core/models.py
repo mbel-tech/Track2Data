@@ -23,7 +23,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
-    from track2data.core.runplan import SkippedSession
+    from track2data.core.runplan import FusionRunInfo, SkippedSession
 
     # Type-only: session_consistency imports Session from here, so a runtime
     # import would close the cycle. SessionRunResult is a plain dataclass, not
@@ -746,7 +746,8 @@ class PreprocessReport:
 @dataclass
 class SessionRunResult:
     """
-    Outcome of running one session through ``Engine.run()``.
+    Outcome of running one run unit through ``Engine.run()``: a session, or in a 3-D project a
+    fused top/side pair (``session_id`` is then the unit id ``"{top}+{side}"``).
 
     Deliberately small and picklable (a prerequisite for any future
     parallel execution across processes): metric previews are capped at
@@ -767,6 +768,8 @@ class SessionRunResult:
     # without re-reading 70 session folders. Small and frozen, so it does not
     # compromise this class's picklability. None when import itself failed.
     summary: SessionSummary | None = None
+    #: How a 3-D pair unit was fused (settings and report); None for a 2-D session unit.
+    fusion: FusionRunInfo | None = None
 
 
 @dataclass

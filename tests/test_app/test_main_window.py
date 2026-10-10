@@ -249,7 +249,7 @@ def test_task_failure_shows_a_dialog_with_message_and_traceback(
 ) -> None:
     """Engine.run is patched directly, not a sub-step: a session-level
     exception from import/preprocess/metrics/export is caught by
-    Engine._run_one_session into SessionRunResult.error and still yields
+    Engine._run_one_unit into SessionRunResult.error and still yields
     a *successful* RunResult, never a taskFinished(..., Exception) --
     that's the whole point of #7's fix, extending the same per-session
     resilience that already covered preprocess/metrics/export to import
