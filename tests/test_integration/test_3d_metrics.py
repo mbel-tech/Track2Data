@@ -145,7 +145,7 @@ def sinking_runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     return base / "serial", base / "parallel"
 
 
-def test_changing_depth_end_to_end(sinking_runs: Path) -> None:
+def test_changing_depth_end_to_end(sinking_runs: tuple[Path, Path]) -> None:
     long = _long(sinking_runs[0])
     step = math.hypot(0.1, 0.1)
     for fish in (0, 1):
@@ -165,7 +165,7 @@ def test_changing_depth_end_to_end(sinking_runs: Path) -> None:
     assert _value(long, "GL-1", "n_skipped_frames") == 0
 
 
-def test_merged_group_table_keeps_gl1_and_gl16_skip_counts_apart(sinking_runs: Path) -> None:
+def test_merged_group_table_keeps_gl1_and_gl16_skip_counts_apart(sinking_runs: tuple[Path, Path]) -> None:
     table = pd.read_csv(sinking_runs[0] / "t1+s1" / "group_dynamics_summary.csv")
     assert not [c for c in table.columns if c.endswith(("_x", "_y"))]
     assert table["n_skipped_frames"].iloc[0] == 0
@@ -175,7 +175,7 @@ def test_merged_group_table_keeps_gl1_and_gl16_skip_counts_apart(sinking_runs: P
     assert unit_for_column("n_skipped_frames_3d") == unit_for_column("n_skipped_frames") == "frames"
 
 
-def test_serial_and_parallel_runs_agree_for_the_3d_metrics(sinking_runs: Path) -> None:
+def test_serial_and_parallel_runs_agree_for_the_3d_metrics(sinking_runs: tuple[Path, Path]) -> None:
     serial, parallel = (_files(r) for r in sinking_runs)
     assert serial.keys() == parallel.keys()
     assert [n for n in serial if serial[n] != parallel[n]] == []
