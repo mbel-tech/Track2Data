@@ -77,6 +77,7 @@ class ProcessingScreen(QWidget):
         self._session_rows: dict[str, int] = {}  # session_id -> table row
         self._parallel_run = False
         self._shown_reason: str | None = None  # a 3-D block reason the status label shows
+        self._results_shown = False  # the table shows a finished run's rows
         # The shared run plan is created before this page's own store connections, so it
         # hears every change first.
         plan = None if store is None else store.run_plan
@@ -526,7 +527,8 @@ class ProcessingScreen(QWidget):
         """The 3-D plan started building or arrived: refresh what depends on it."""
         if self._current_task_id is None:
             self._run_btn.setEnabled(self._compute_allowed())
-            self._rebuild_status_table()
+            if not self._results_shown:  # a finished run's rows stay until the next run
+                self._rebuild_status_table()
         self._show_block_reason()
         self._refresh_setup_check()
 
@@ -539,6 +541,7 @@ class ProcessingScreen(QWidget):
         return [] if plan is None else [u.unit_id for u in plan.units]
 
     def _rebuild_status_table(self, plan=None) -> None:
+        self._results_shown = False
         self._session_rows.clear()
         if self._store is None or self._store.manifest is None:
             self._status_table.setRowCount(0)
@@ -591,6 +594,7 @@ class ProcessingScreen(QWidget):
             if not accepted:
                 self._status_label.setText("Finished for a previous project.")
                 return
+            self._results_shown = True
             for session_result in result.sessions:
                 row = self._session_rows.get(session_result.session_id)
                 if row is None:
@@ -612,6 +616,7 @@ class ProcessingScreen(QWidget):
         elif isinstance(result, Exception):
             self._status_label.setText("Failed — see log for details.")
             self._store.append_log(f"### Run failed\n```\n{result}\n```\n")
+        self._show_block_reason()  # e.g. a plan queued behind the run is still being checked
 
     def _on_task_cancelled(self, task_id: str) -> None:
         if task_id != self._current_task_id:
@@ -626,3 +631,4 @@ class ProcessingScreen(QWidget):
                 self._status_table.setItem(row, 1, QTableWidgetItem("Cancelled"))
         if self._store is not None:
             self._store.append_log("### Run cancelled\n")
+        self._show_block_reason()

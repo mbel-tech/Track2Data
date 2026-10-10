@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QLabel
 
-BANNER_TEXT = "3-D mode: this screen applies to the 2-D tracks only until fusion is available"
+BANNER_TEXT = (
+    "3-D mode: calibration, zones and metrics apply to the top-view tracks of each fused pair"
+)
 
 
 class ModeBanner(QLabel):

@@ -618,11 +618,12 @@ def test_3d_rebuild_writes_nothing(qtbot, tmp_path, monkeypatch) -> None:
         "calibrationChanged", "exportChanged", "persistenceChanged",
     ):
         getattr(store, name).connect(lambda *_, n=name: emitted.append(n))
+    pending = dict(store.run_plan._pending)
     for _ in range(3):
         screen._on_project_changed()
         screen._refresh_setup_check()
         store.run_plan.refresh()
-    qtbot.wait(50)
+    assert store.run_plan._pending == pending  # nothing resubmitted (submission is synchronous)
     assert store.manifest is before and store.manifest.model_dump_json() == dump
     assert emitted == []
 
@@ -634,7 +635,92 @@ def test_2d_never_builds_a_plan(qtbot, tmp_path, monkeypatch, tiny_real_session)
     store = _make_ready_store(tmp_path, tiny_real_session)
     screen = ProcessingScreen(store)
     qtbot.addWidget(screen)
-    qtbot.wait(50)
+    assert store.run_plan._key is None and store.run_plan._pending == {}
     assert fake.calls == []
     assert screen._plan_label.isHidden()
     assert screen._run_btn.isEnabled()
+
+
+# ── fix round 1 ──────────────────────────────────────────────────────────────
+
+
+def test_a_superseded_plan_build_is_cancelled(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    fake.hold = threading.Event()
+    cancelled: list[str] = []
+    orig_cancel = store.tasks.cancel
+    monkeypatch.setattr(
+        store.tasks, "cancel", lambda tid: (cancelled.append(tid), orig_cancel(tid))
+    )
+    watcher = store.run_plan
+    store.update_fusion("t1", "s1", OTHER)  # build A starts and is held
+    qtbot.waitUntil(lambda: len(fake.calls) == 2, timeout=3000)
+    first = next(iter(watcher._pending))
+    store.update_fusion("t2", "s2", OTHER)  # build B queued behind A
+    second = next(iter(watcher._pending))
+    store.update_fusion("t2", "s2", OTHER.model_copy(update={"flip": True}))  # B superseded: C
+    assert cancelled == [first, second]
+    fake.hold.set()
+    qtbot.waitUntil(lambda: watcher.snapshot().plan is not None, timeout=3000)
+    assert len(fake.calls) == 3  # the first build, A and C: B never ran
+
+
+def test_a_late_cancel_does_not_resubmit(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    watcher = store.run_plan
+    fake.hold = threading.Event()
+    store.update_fusion("t1", "s1", OTHER)  # A held on the worker
+    qtbot.waitUntil(lambda: len(fake.calls) == 2, timeout=3000)
+    store.update_fusion("t2", "s2", OTHER)  # B queued
+    queued = next(iter(watcher._pending))
+    with qtbot.waitSignal(store.tasks.taskCancelled, timeout=3000) as blocker:
+        store.tasks.cancel_all()  # what shutdown() does
+        fake.hold.set()
+    assert blocker.args == [queued]
+    assert watcher._pending == {} and watcher._key is None
+    qtbot.waitUntil(lambda: store.tasks._active == {}, timeout=3000)
+    assert len(fake.calls) == 2  # nothing was submitted from the cancelled slot
+    assert watcher.snapshot().checking  # rebuilt lazily when asked
+    qtbot.waitUntil(lambda: watcher.snapshot().plan is not None, timeout=3000)
+    assert len(fake.calls) == 3
+
+
+def test_compute_plan_keeps_no_fusion_results(tmp_path) -> None:
+    from tests.test_fusion.scene import build_scene
+    from ui.store.run_plan import compute_plan
+
+    outcome = compute_plan(build_scene(tmp_path / "data"), None)
+    assert outcome.gate is None
+    assert [u.unit_id for u in outcome.plan.units] == ["t1+s1", "t2+s2"]
+    assert all(u.fused is None for u in outcome.plan.units)
+
+
+def test_finished_run_rows_survive_a_plan_change_and_checking_is_shown(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    from track2data.api import Engine
+    from track2data.core.models import RunResult, SessionRunResult
+    from ui.store.run_plan import CHECKING_TEXT
+
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    release = threading.Event()
+
+    def fake_run(self, out_dir, exporters=None, **kw):
+        release.wait(5)
+        return RunResult(sessions=[SessionRunResult(session_id="t1+s1", duration_s=1.0)])
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    screen.start_run()
+    store.update_fusion("t1", "s1", OTHER)  # the new plan queues behind the run
+    fake.hold = threading.Event()
+    with qtbot.waitSignal(store.taskFinished, timeout=5000):
+        release.set()
+    assert screen._status_table.item(0, 1).text() == "Done"
+    assert not screen._run_btn.isEnabled()
+    assert screen._status_label.text() == CHECKING_TEXT
+    fake.hold.set()
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    assert screen._status_table.item(0, 1).text() == "Done"  # the results stay

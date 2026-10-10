@@ -10,7 +10,7 @@ pytest.importorskip("PySide6")
 
 from track2data.core.models import ProjectMode
 
-BANNER = "3-D mode: this screen applies to the 2-D tracks only until fusion is available"
+BANNER = "3-D mode: calibration, zones and metrics apply to the top-view tracks of each fused pair"
 
 
 def _store(tmp_path: Path):

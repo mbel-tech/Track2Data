@@ -250,8 +250,10 @@ def test_3d_summaries_follow_the_cheap_check() -> None:
     assert blocked[7] == blocked[8] == "Fuse a pair first"
     ready = stage_summaries(_paired_3d(fusion), has_run_results=False)
     assert (ready[7], ready[8]) == ("Not run", "Needs a run")
-    ran = stage_summaries(_paired_3d(fusion), has_run_results=True)
-    assert (ran[7], ran[8]) == ("Ran · 1 pair", "Results ready")
+    ran = stage_summaries(_paired_3d(fusion), has_run_results=True, n_run_units=2)
+    assert (ran[7], ran[8]) == ("Ran · 2 pairs", "Results ready")
+    one = stage_summaries(_paired_3d(fusion), has_run_results=True, n_run_units=1)
+    assert one[7] == "Ran · 1 pair"
 
 
 def test_2d_stage_statuses_unchanged() -> None:

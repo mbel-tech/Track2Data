@@ -533,7 +533,10 @@ class MainWindow(QMainWindow):
             and not has_fusion_settings(manifest)
         )
         has_run = self._store.run_results is not None and not blocked_3d
-        summaries = stage_summaries(self._store.manifest, has_run_results=has_run)
+        n_run = len(self._store.run_results.sessions) if has_run else None
+        summaries = stage_summaries(
+            self._store.manifest, has_run_results=has_run, n_run_units=n_run
+        )
         if has_run and self._store.results_stale:
             summaries[7] = summaries[8] = "Settings changed · re-run"
         elif has_run:

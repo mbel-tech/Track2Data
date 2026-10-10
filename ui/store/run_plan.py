@@ -13,6 +13,7 @@ their own synchronous path).
 
 from __future__ import annotations
 
+import dataclasses
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +77,8 @@ def compute_plan(manifest: ProjectManifest, cache_dir: Path | None) -> PlanOutco
     try:
         engine = Engine(manifest, cache_dir=cache_dir)
         plan = engine.run_units()
+        # Keep no fusion arrays for the GUI's lifetime: a serial run fuses each unit again.
+        plan.units = [dataclasses.replace(u, fused=None) for u in plan.units]
         gate = None
         if not plan.units:
             # In 3-D the gate's refusal is the first blocking issue (see validation_issues).
@@ -158,9 +161,14 @@ class RunPlanWatcher(QObject):
             return
         self._key = key
         self._outcome = None
-        self._pending = {}  # a newer request supersedes an in-flight one
-        if key is not None:
-            store = self._store()
+        store = self._store()
+        if store is not None:
+            # A newer request supersedes the older ones: a queued build never starts (one
+            # already running finishes, and its result is ignored).
+            for task_id in self._pending:
+                store.tasks.cancel(task_id)
+        self._pending = {}
+        if key is not None and store is not None:
             manifest = store.manifest.model_copy(deep=True)
             cache_dir = store.cache_dir
             self._pending[store.tasks.submit(lambda: compute_plan(manifest, cache_dir))] = key
@@ -198,7 +206,8 @@ class RunPlanWatcher(QObject):
     def _on_task_cancelled(self, task_id: str) -> None:
         if self._pending.pop(task_id, None) is None:
             return
-        # A Cancel of the run lane dropped the plan task: build it again.
+        # A Cancel of the run lane (or shutdown) dropped the plan task. Never resubmit from
+        # here (the window may be closing): forget it, and build again the next time a page
+        # asks (snapshot) or an input changes.
         self._key = None
         self._outcome = None
-        self.refresh()

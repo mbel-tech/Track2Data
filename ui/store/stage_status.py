@@ -223,8 +223,12 @@ def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
     return None
 
 
-def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) -> list[str]:
-    """One short live line per sidebar stage (Project … Preview & Export)."""
+def stage_summaries(
+    manifest: ProjectManifest | None, *, has_run_results: bool, n_run_units: int | None = None
+) -> list[str]:
+    """One short live line per sidebar stage (Project … Preview & Export).
+
+    *n_run_units* is how many units the shown results ran (a 3-D run counts its pairs)."""
     if manifest is None:
         return ["Unnamed", "No sessions", "", "", "", "", "", "Not run", "Needs a run"]
     cal = manifest.calibration
@@ -253,9 +257,12 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
     if manifest.mode.dimension == "3d" and not has_fusion_settings(manifest):
         run_text, preview_text = "Fuse a pair first", "Fuse a pair first"
     elif manifest.mode.dimension == "3d":
-        n_fusable = sum(p.fusion is not None for p in manifest.view_pairs)
-        noun = "pair" if n_fusable == 1 else "pairs"
-        run_text = f"Ran · {n_fusable} {noun}" if has_run_results else "Not run"
+        if not has_run_results:
+            run_text = "Not run"
+        elif n_run_units is None:
+            run_text = "Ran"
+        else:
+            run_text = f"Ran · {n_run_units} pair{'s' if n_run_units != 1 else ''}"
         preview_text = "Results ready" if has_run_results else "Needs a run"
     else:
         run_text = f"Ran · {n_sessions} sessions" if has_run_results else "Not run"

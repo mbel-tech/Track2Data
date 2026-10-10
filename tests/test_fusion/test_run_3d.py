@@ -286,3 +286,20 @@ def test_validate_blocks_when_no_pair_fuses(tmp_path: Path) -> None:
     assert len(blocking) == 1 and blocking[0].startswith("no pair is ready to fuse: ")
     assert notes[0].startswith("pair t1+s1: ")
     assert engine.validate() == blocking
+
+
+def test_a_plan_without_fusion_results_fuses_in_the_serial_run(tmp_path: Path) -> None:
+    """The GUI keeps its plan with ``fused=None`` (memory): a serial run then fuses each unit
+    itself and writes the same files as with the plan's fusion results."""
+    import dataclasses
+
+    manifest = build_scene(tmp_path / "data")
+    plan = Engine(manifest).require_computable()
+    stripped = dataclasses.replace(
+        plan, units=[dataclasses.replace(u, fused=None) for u in plan.units]
+    )
+    a = Engine(manifest).run(tmp_path / "with", exporters=EXPORTERS, plan=plan)
+    b = Engine(manifest).run(tmp_path / "without", exporters=EXPORTERS, plan=stripped)
+    assert [r.error for r in b.sessions] == [None, None]
+    assert _skips(a) == _skips(b)
+    assert _files(tmp_path / "with") == _files(tmp_path / "without")
