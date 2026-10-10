@@ -367,7 +367,9 @@ def test_run_button_disabled_in_3d(qtbot, tmp_path: Path, tiny_real_session: Pat
     _set_3d(store)
     store.modeChanged.emit()
     assert screen._run_btn.isEnabled() is False
-    assert screen._status_label.text() == MODE_3D_BLOCK_REASON
+    # the plan is built in the background; with no pair it refuses with the block reason
+    qtbot.waitUntil(lambda: screen._status_label.text() == MODE_3D_BLOCK_REASON, timeout=5000)
+    assert screen._run_btn.isEnabled() is False
 
     # A finishing task must not re-enable Run in a 3-D project.
     screen._current_task_id = "t"
@@ -399,6 +401,7 @@ def test_start_run_refuses_3d(
     _set_3d(store)
     screen = ProcessingScreen(store)
     qtbot.addWidget(screen)
+    qtbot.waitUntil(lambda: screen._status_label.text() == MODE_3D_BLOCK_REASON, timeout=5000)
     started: list[object] = []
     store.tasks.taskStarted.connect(started.append)
 
@@ -407,3 +410,231 @@ def test_start_run_refuses_3d(
     assert len(warnings) == 1
     assert MODE_3D_BLOCK_REASON in warnings[0]
     assert started == []
+
+
+# ── 3-D: the run plan built in the background ────────────────────────────────
+
+import threading  # noqa: E402
+
+import track2data.api  # noqa: E402,F401  (preloaded: see tests/test_ui/test_fusion_section.py)
+from tests.test_ui.plan3d import (  # noqa: E402
+    GATE,
+    OTHER,
+    install_planner,
+    make_plan,
+    store_3d,
+)
+
+
+def _screen_3d(qtbot, tmp_path, monkeypatch, outcome=None, **kw):
+    from ui.processing_screen import ProcessingScreen
+
+    fake = install_planner(monkeypatch)
+    if outcome is not None:
+        fake.outcome = outcome
+    store = store_3d(tmp_path, **kw)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    return store, screen, fake
+
+
+def _plan_ready(screen) -> bool:
+    return "Will run" in screen._plan_label.text() or "Nothing" in screen._plan_label.text()
+
+
+def test_3d_setup_check_lists_will_run_and_skipped(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import PlanOutcome
+
+    outcome = PlanOutcome(make_plan(("t1+s1", "t2+s2"), (("x", "not in a fusable pair"),)))
+    _store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch, outcome)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    text = screen._plan_label.text()
+    assert "Will run: t1+s1, t2+s2" in text
+    assert "Skipped: x — not in a fusable pair" in text
+    assert not screen._plan_label.isHidden()
+    assert screen._plan_dot.property("check") == "warn"  # a skip is a warning, not a problem
+    assert screen._run_btn.isEnabled()
+    assert screen._check_title.text() == "Ready to run"
+    assert all(t is not threading.main_thread() for t in fake.threads)
+
+
+def test_3d_start_disabled_while_checking(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.processing_screen import ProcessingScreen
+    from ui.store.run_plan import CHECKING_TEXT
+
+    fake = install_planner(monkeypatch)
+    fake.hold = threading.Event()
+    store = store_3d(tmp_path)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    assert not screen._run_btn.isEnabled()
+    assert screen._status_label.text() == CHECKING_TEXT
+    fake.hold.set()
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    assert screen._status_label.text() == "Ready"
+
+
+def test_3d_empty_plan_disables_start_with_the_gate(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import PlanOutcome
+
+    fake = install_planner(monkeypatch)
+    fake.outcome = PlanOutcome(make_plan((), (("t1", "pair t1+s1: x"),)), gate=GATE)
+    from ui.processing_screen import ProcessingScreen
+
+    store = store_3d(tmp_path)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    qtbot.waitUntil(lambda: screen._status_label.text() == GATE, timeout=3000)
+    assert not screen._run_btn.isEnabled()
+    assert "Nothing will run" in screen._plan_label.text()
+    assert "Skipped: t1 — pair t1+s1: x" in screen._plan_label.text()
+    assert screen._plan_dot.property("check") == "err"
+
+
+def test_3d_stale_plan_result_is_ignored(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import CHECKING_TEXT, PlanOutcome
+
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+
+    def answer(manifest):
+        offset = manifest.view_pairs[0].fusion.frame_offset
+        return PlanOutcome(make_plan(("t1+s1",) if offset == 0 else ("t2+s2",)))
+
+    fake.outcome = answer
+    fake.hold = threading.Event()
+    store.update_fusion("t1", "s1", OTHER.model_copy(update={"frame_offset": 0, "flip": True}))
+    qtbot.waitUntil(lambda: len(fake.calls) == 2, timeout=3000)  # the stale one is running
+    store.update_fusion("t1", "s1", OTHER)  # inputs change again while it runs
+    seen: list[str] = []
+    store.taskFinished.connect(lambda *_: seen.append(screen._plan_label.text()))
+    fake.hold.set()
+    qtbot.waitUntil(lambda: len(seen) == 2, timeout=3000)
+    assert CHECKING_TEXT in seen[0]  # the stale result left the page checking
+    assert "Will run: t2+s2" in screen._plan_label.text()
+
+
+def test_3d_start_submits_the_plan_and_never_fuses_on_the_gui_thread(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    from track2data.api import Engine
+    from track2data.core.models import RunResult
+
+    store, screen, _fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    plan = store.run_plan.current_plan()
+    assert plan is not None
+
+    gui_calls: list[str] = []
+    for name in ("run_units", "validate", "fuse_pair", "require_computable"):
+        orig = getattr(Engine, name)
+
+        def spy(self, *a, _orig=orig, _name=name, **k):
+            if threading.current_thread() is threading.main_thread():
+                gui_calls.append(_name)
+            return _orig(self, *a, **k)
+
+        monkeypatch.setattr(Engine, name, spy)
+    runs: list[dict] = []
+
+    def fake_run(self, out_dir, exporters=None, **kw):
+        runs.append(kw)
+        return RunResult(sessions=[])
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    with qtbot.waitSignal(store.taskFinished, timeout=5000):
+        screen.start_run()
+    assert gui_calls == []
+    assert len(runs) == 1 and runs[0]["plan"] is plan
+    table = screen._status_table
+    assert [table.item(r, 0).text() for r in range(table.rowCount())] == ["t1+s1"]
+
+
+def test_3d_start_refuses_while_the_plan_is_unknown(qtbot, tmp_path, monkeypatch) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "ui.processing_screen.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warnings.append(a[2]) or None),
+    )
+    fake = install_planner(monkeypatch)
+    fake.hold = threading.Event()
+    from ui.processing_screen import ProcessingScreen
+
+    store = store_3d(tmp_path)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    started: list[object] = []
+    store.tasks.taskStarted.connect(started.append)
+    screen.start_run()
+    assert len(warnings) == 1 and "Checking" in warnings[0]
+    fake.hold.set()
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+
+
+def test_3d_session_removed_while_the_plan_runs(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import PlanOutcome
+
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    fake.hold = threading.Event()
+    fake.outcome = lambda m: PlanOutcome(
+        make_plan(("t1+s1",) if any(r.session_id == "x" for r in m.sessions) else ("t2+s2",))
+    )
+    store.update_fusion("t1", "s1", OTHER)
+    qtbot.waitUntil(lambda: len(fake.calls) == 2, timeout=3000)
+    store.update_sessions([r for r in store.manifest.sessions if r.session_id != "x"])
+    fake.hold.set()
+    qtbot.waitUntil(lambda: "t2+s2" in screen._plan_label.text(), timeout=3000)
+    screen._refresh_setup_check()
+
+
+def test_compute_plan_with_a_dangling_pair_does_not_raise(tmp_path) -> None:
+    from track2data.core.models import ViewPair
+    from ui.store.run_plan import compute_plan
+
+    store = store_3d(tmp_path)
+    m = store.manifest
+    m = m.model_copy(
+        update={
+            "sessions": [r for r in m.sessions if r.session_id != "t1"],
+            "view_pairs": [
+                ViewPair(top_session_id="t1", side_session_id="s1", fusion=OTHER),
+            ],
+        }
+    )
+    outcome = compute_plan(m, None)
+    assert outcome.plan is not None and outcome.plan.units == []
+    assert outcome.gate and outcome.gate.startswith("no pair is ready to fuse")
+
+
+def test_3d_rebuild_writes_nothing(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, _fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    before = store.manifest
+    dump = before.model_dump_json()
+    emitted: list[str] = []
+    for name in (
+        "projectChanged", "sessionsChanged", "viewsChanged", "metricsChanged", "modeChanged",
+        "calibrationChanged", "exportChanged", "persistenceChanged",
+    ):
+        getattr(store, name).connect(lambda *_, n=name: emitted.append(n))
+    for _ in range(3):
+        screen._on_project_changed()
+        screen._refresh_setup_check()
+        store.run_plan.refresh()
+    qtbot.wait(50)
+    assert store.manifest is before and store.manifest.model_dump_json() == dump
+    assert emitted == []
+
+
+def test_2d_never_builds_a_plan(qtbot, tmp_path, monkeypatch, tiny_real_session) -> None:
+    from ui.processing_screen import ProcessingScreen
+
+    fake = install_planner(monkeypatch)
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    qtbot.wait(50)
+    assert fake.calls == []
+    assert screen._plan_label.isHidden()
+    assert screen._run_btn.isEnabled()

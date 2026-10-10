@@ -201,6 +201,7 @@ class MainWindow(QMainWindow):
         self._store.projectChanged.connect(self._update_statusbar)
         self._store.sessionsChanged.connect(self._update_statusbar)
         self._store.modeChanged.connect(self._update_statusbar)
+        self._store.viewsChanged.connect(self._update_statusbar)
         self._store.projectChanged.connect(self._on_project_opened)
         for sig in (
             self._store.projectChanged,
@@ -480,8 +481,13 @@ class MainWindow(QMainWindow):
             name = info["name"]
             n = info["n_sessions"]
             self._status_project.setText(f"Project: {name}  |  Sessions: {n}")
-            three_d = self._store.manifest.mode.dimension == "3d"
-            self._run_action.setEnabled(n > 0 and not three_d)
+            from ui.store.stage_status import has_fusion_settings
+
+            # In 3-D, Run needs a pair set up for fusion (the cheap check of the stage status;
+            # the Processing page refuses with the plan's reason when no pair fuses).
+            manifest = self._store.manifest
+            three_d = manifest.mode.dimension == "3d"
+            self._run_action.setEnabled(n > 0 and (not three_d or has_fusion_settings(manifest)))
 
     # ── navigation ──────────────────────────────────────────────────────────
 
@@ -508,15 +514,25 @@ class MainWindow(QMainWindow):
 
     def _refresh_stage_status(self) -> None:
         from app.navigation import STAGES
-        from ui.store.stage_status import compute_stage_statuses, sessions_row, stage_summaries
+        from ui.store.stage_status import (
+            compute_stage_statuses,
+            has_fusion_settings,
+            sessions_row,
+            stage_summaries,
+        )
 
         self._page_statuses = compute_stage_statuses(
             self._store.manifest, has_run_results=self._store.run_results is not None
         )
         manifest = self._store.manifest
-        # In 3-D nothing can be computed, so stages 7/8 stay blocked whatever results exist.
-        three_d = manifest is not None and manifest.mode.dimension == "3d"
-        has_run = self._store.run_results is not None and not three_d
+        # A 3-D project with no pair set up for fusion cannot run, so stages 7/8 stay blocked
+        # whatever results exist.
+        blocked_3d = (
+            manifest is not None
+            and manifest.mode.dimension == "3d"
+            and not has_fusion_settings(manifest)
+        )
+        has_run = self._store.run_results is not None and not blocked_3d
         summaries = stage_summaries(self._store.manifest, has_run_results=has_run)
         if has_run and self._store.results_stale:
             summaries[7] = summaries[8] = "Settings changed · re-run"
@@ -736,7 +752,33 @@ class MainWindow(QMainWindow):
         from track2data.api import Engine
 
         engine = Engine(self._store.manifest)
-        issues = engine.validate()
+        plan_lines: list[str] = []
+        if self._store.manifest.mode.dimension == "3d":
+            # Engine.validate() would fuse every pair here, on the GUI thread: use the plan the
+            # store builds in the background instead (validation_issues(plan) does not fuse).
+            from track2data.core.models import MODE_3D_BLOCK_REASON
+            from ui.store.run_plan import CHECKING_TEXT, skipped_lines, will_run_line
+
+            state = self._store.run_plan.snapshot()
+            if state.checking:
+                QMessageBox.information(
+                    self, "Pipeline validation", f"{CHECKING_TEXT} Validate again in a moment."
+                )
+                return
+            if state.plan is None:
+                issues = [state.gate or MODE_3D_BLOCK_REASON]
+            else:
+                issues, _notes = engine.validation_issues(state.plan)
+                if state.plan.units:
+                    plan_lines.append(will_run_line(state.plan))
+                plan_lines += skipped_lines(state.plan)
+        else:
+            issues = engine.validate()
+        plan_text = "\n\n" + "\n".join(plan_lines) if plan_lines else ""
+        if plan_lines:
+            self._store.append_log(
+                "### Run plan\n" + "\n".join(f"- {line}" for line in plan_lines) + "\n"
+            )
         # Non-blocking by design: pooling 30 fps and 60 fps sessions is a
         # legitimate deliberate choice and a serious accident, and only the
         # user can tell those apart. Reported either way -- a project can be
@@ -756,7 +798,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Pipeline validation",
-                "Fix these issues first:\n\n" + "\n".join(issues),
+                "Fix these issues first:\n\n" + "\n".join(issues) + plan_text,
             )
         else:
             self._store.append_log("### Validation passed\nReady to run.\n")
@@ -766,10 +808,13 @@ class MainWindow(QMainWindow):
                     "Pipeline validation",
                     "Ready to run, but these sessions are not interchangeable:\n\n"
                     + "\n\n".join(warnings)
-                    + "\n\nThe run will proceed and record this in the export.",
+                    + "\n\nThe run will proceed and record this in the export."
+                    + plan_text,
                 )
             else:
-                QMessageBox.information(self, "Pipeline validation", "Ready to run.")
+                QMessageBox.information(
+                    self, "Pipeline validation", "Ready to run." + plan_text
+                )
         self._run_action.setEnabled(not issues)
 
     def _action_run(self) -> None:

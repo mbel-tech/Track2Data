@@ -639,3 +639,128 @@ def test_load_trajectory_data_fills_crop_from_the_refs_panel(
     store.manifest.sessions[0] = ref.model_copy(update={"panel": panel})
     data = load_trajectory_data(store.manifest, tiny_real_session.name, None)
     assert data.crop == panel
+
+
+# ── 3-D: run units and the fused top-view tracks ─────────────────────────────
+
+
+def _fused_data(title="t1+s1"):
+    import numpy as np
+
+    from ui.preview_screen import TrajectoryData
+
+    xy = np.zeros((10, 2, 2))
+    return TrajectoryData(
+        raw_xy=xy, xy=xy, fps=10.0, background=None, size=(100.0, 80.0), title=title
+    )
+
+
+def test_3d_trajectories_list_run_units_and_load_a_fused_unit(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    import threading
+
+    import track2data.api  # noqa: F401  (preloaded: see test_fusion_section.py)
+    from tests.test_ui.plan3d import install_planner, make_plan, store_3d
+    from ui import preview_screen
+    from ui.preview_screen import PreviewScreen
+    from ui.store.run_plan import PlanOutcome
+
+    fake = install_planner(monkeypatch)
+    fake.outcome = PlanOutcome(make_plan(("t1+s1", "t2+s2")))
+    loads: list[tuple] = []
+
+    def fake_load(manifest, top, side, cache_dir):
+        loads.append((top, side, threading.current_thread() is threading.main_thread()))
+        return _fused_data(f"{top}+{side}")
+
+    monkeypatch.setattr(preview_screen, "load_fused_trajectory_data", fake_load)
+    store = store_3d(tmp_path)
+    screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
+    combo = screen._traj_session_combo
+    qtbot.waitUntil(lambda: combo.count() == 2, timeout=3000)
+    assert [combo.itemText(i) for i in range(2)] == ["t1+s1", "t2+s2"]
+    combo.setCurrentIndex(1)
+    screen._traj_load_btn.click()
+    qtbot.waitUntil(lambda: screen._traj_view.n_frames == 10, timeout=3000)
+    assert loads == [("t2", "s2", False)]
+    assert screen._traj_title.text() == "t2+s2"
+    assert not screen._traj_title.isHidden()
+
+
+def test_3d_trajectories_wait_for_the_plan(qtbot, tmp_path: Path, monkeypatch) -> None:
+    import threading
+
+    import track2data.api  # noqa: F401
+    from tests.test_ui.plan3d import install_planner, store_3d
+    from ui.preview_screen import PreviewScreen
+
+    fake = install_planner(monkeypatch)
+    fake.hold = threading.Event()
+    store = store_3d(tmp_path)
+    screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._traj_session_combo.count() == 0
+    assert not screen._traj_load_btn.isEnabled()
+    fake.hold.set()
+    qtbot.waitUntil(lambda: screen._traj_session_combo.count() == 1, timeout=3000)
+    assert screen._traj_load_btn.isEnabled()
+
+
+def test_load_fused_trajectory_data_uses_fuse_pair(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    import track2data.api
+    from tests.test_ui.plan3d import store_3d
+    from track2data.core.models import PanelRect
+    from ui.preview_screen import load_fused_trajectory_data
+
+    store = store_3d(tmp_path)
+    panel = PanelRect(x=0, y=0, width=10, height=10)
+    m = store.manifest
+    sessions = [r.model_copy(update={"panel": panel}) if r.session_id == "t1" else r
+                for r in m.sessions]
+    m = m.model_copy(update={"sessions": sessions})
+    xy = np.ones((5, 1, 2))
+    psess = SimpleNamespace(
+        raw_xy_aligned=xy * 2, xy=xy,
+        session=SimpleNamespace(
+            video=SimpleNamespace(fps=25.0, width_px=640, height_px=480),
+            background_image_path=None,
+        ),
+    )
+    pairs: list = []
+    monkeypatch.setattr(
+        track2data.api.Engine, "fuse_pair",
+        lambda self, pair: pairs.append(pair) or SimpleNamespace(psess=psess),
+    )
+    data = load_fused_trajectory_data(m, "t1", "s1", None)
+    assert pairs[0].top_session_id == "t1" and pairs[0].fusion is not None
+    assert data.title == "t1+s1"
+    assert data.crop == panel and data.size == (640.0, 480.0) and data.fps == 25.0
+    assert (data.raw_xy == 2).all() and (data.xy == 1).all()
+    with pytest.raises(ValueError, match="no longer in the project"):
+        load_fused_trajectory_data(m, "t9", "s9", None)
+
+
+def test_3d_load_of_a_unit_removed_meanwhile_reports_it(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    import track2data.api  # noqa: F401
+    from tests.test_ui.plan3d import install_planner, store_3d
+    from ui.preview_screen import PreviewScreen
+
+    install_planner(monkeypatch)
+    store = store_3d(tmp_path)
+    screen = PreviewScreen(store)
+    qtbot.addWidget(screen)
+    qtbot.waitUntil(lambda: screen._traj_session_combo.count() == 1, timeout=3000)
+    # the pair goes away (its session is removed) while the stale unit is still listed
+    store.update_sessions([r for r in store.manifest.sessions if r.session_id != "t1"])
+    qtbot.waitUntil(lambda: screen._traj_session_combo.count() == 1, timeout=3000)
+    screen._load_trajectories()
+    qtbot.waitUntil(lambda: "no longer in the project" in screen._traj_status.text(), timeout=5000)
+    assert screen._traj_load_btn.isEnabled()

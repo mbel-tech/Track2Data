@@ -9,9 +9,15 @@ Widgets:
   • cancel_btn     QPushButton — cancels the in-flight run
   • progress_bar   QProgressBar — driven by ProjectStore.taskProgress
   • status_table   QTableWidget — Session | Status | Frames | Duration,
-                    one row per manifest.sessions, updated live from
+                    one row per manifest.sessions (per run unit of the plan
+                    in a 3-D project), updated live from
                     ProjectStore.tasks.taskEvent's ProgressEvent.stage
   • status_label   QLabel  ("Ready" / …)
+
+In a 3-D project the run plan (which pairs fuse) is built on the store's worker pool
+(``ProjectStore.run_plan``, ui/store/run_plan.py): the setup check lists the units that will
+run and the sessions that will be skipped, Run stays off while the plan is being built or when
+it has no unit, and start_run() hands the plan to Engine.run so nothing fuses on the GUI thread.
 """
 
 from __future__ import annotations
@@ -41,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from track2data.core.models import MODE_3D_BLOCK_REASON
 from track2data.core.parallel import worker_count
+from ui.store.run_plan import CHECKING_TEXT, PlanState, skipped_lines, will_run_line
 from ui.widgets.weak_slot import weak_slot
 
 #: ProgressEvent.stage -> friendly per-session status label. Stages not
@@ -69,7 +76,13 @@ class ProcessingScreen(QWidget):
         self._run_project_revision: int | None = None
         self._session_rows: dict[str, int] = {}  # session_id -> table row
         self._parallel_run = False
+        self._shown_reason: str | None = None  # a 3-D block reason the status label shows
+        # The shared run plan is created before this page's own store connections, so it
+        # hears every change first.
+        plan = None if store is None else store.run_plan
         self._build_ui()
+        if plan is not None:
+            plan.changed.connect(self._on_plan_changed)
         if store is not None:
             store.projectChanged.connect(self._on_project_changed)
             store.modeChanged.connect(self._on_project_changed)
@@ -242,6 +255,21 @@ class ProcessingScreen(QWidget):
             grid.addWidget(button, i // 3, i % 3)
             self._check_labels[name] = (dot, text)
         col.addLayout(grid)
+        # 3-D only: which run units the plan will run and which sessions it skips.
+        plan_row = QHBoxLayout()
+        plan_row.setContentsMargins(6, 0, 6, 0)
+        plan_row.setSpacing(10)
+        self._plan_dot = QLabel()
+        self._plan_dot.setFixedSize(18, 18)
+        self._plan_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._plan_label = QLabel()
+        self._plan_label.setWordWrap(True)
+        self._plan_label.setTextFormat(Qt.TextFormat.PlainText)
+        plan_row.addWidget(self._plan_dot, 0, Qt.AlignmentFlag.AlignTop)
+        plan_row.addWidget(self._plan_label, 1)
+        col.addLayout(plan_row)
+        self._plan_dot.hide()
+        self._plan_label.hide()
         if self._store is not None:
             for sig in (
                 self._store.projectChanged,
@@ -275,19 +303,59 @@ class ProcessingScreen(QWidget):
                 kind, glyph = "err", "!"
                 problems += 1
             dot, text = self._check_labels[name]
-            dot.setText(glyph)
-            dot.setProperty("check", kind)
-            dot.style().unpolish(dot)
-            dot.style().polish(dot)
+            self._set_dot(dot, kind, glyph)
             text.setText(f"<b>{name}</b><br>{summaries[page]}")
             text.setToolTip(info.message)
+        state = self._plan_state()
+        problems += self._render_plan(state)
         if manifest is None:
             self._check_title.setText("Setup check")
         elif problems:
             noun = "issue" if problems == 1 else "issues"
             self._check_title.setText(f"{problems} {noun} to fix before running")
+        elif state.checking:
+            self._check_title.setText("Setup check")
         else:
             self._check_title.setText("Ready to run")
+
+    @staticmethod
+    def _set_dot(dot: QLabel, kind: str, glyph: str) -> None:
+        dot.setText(glyph)
+        dot.setProperty("check", kind)
+        dot.style().unpolish(dot)
+        dot.style().polish(dot)
+
+    def _plan_state(self) -> PlanState:
+        """The 3-D run plan for the current project (never builds it on this thread)."""
+        if self._store is None:
+            return PlanState(applies=False)
+        return self._store.run_plan.snapshot()
+
+    def _render_plan(self, state: PlanState) -> int:
+        """Show the 3-D plan lines; returns 1 when nothing can run (a problem), else 0.
+
+        Skipped sessions are a warning: the other units still run."""
+        self._plan_dot.setVisible(state.applies)
+        self._plan_label.setVisible(state.applies)
+        if not state.applies:
+            return 0
+        if state.checking:
+            self._set_dot(self._plan_dot, "warn", "…")
+            self._plan_label.setText(CHECKING_TEXT)
+            return 0
+        plan = state.plan
+        lines = [will_run_line(plan) if state.runnable else f"Nothing will run: {state.gate}"]
+        if plan is not None:
+            lines += skipped_lines(plan)
+        self._plan_label.setText("\n".join(lines))
+        if not state.runnable:
+            self._set_dot(self._plan_dot, "err", "!")
+            return 1
+        if plan is not None and plan.skipped:
+            self._set_dot(self._plan_dot, "warn", "!")
+        else:
+            self._set_dot(self._plan_dot, "ok", "✓")
+        return 0
 
     def _build_cli_box(self) -> QFrame:
         card = QFrame()
@@ -332,6 +400,10 @@ class ProcessingScreen(QWidget):
         the full pipeline run in the background. Public so both this
         screen's own Run button and MainWindow._action_run share the
         one code path.
+
+        A 3-D project uses the run plan built in the background instead: it refuses while the
+        plan is unknown or empty, checks the rest with ``validation_issues(plan)`` (which does
+        not fuse) and passes the plan to ``Engine.run`` so the pairs are not fused again.
         """
         if self._store is None or self._store.manifest is None:
             QMessageBox.warning(self, "Run pipeline", "No project is open.")
@@ -346,7 +418,17 @@ class ProcessingScreen(QWidget):
         self._run_analysis_hash = self._store.analysis_hash()
         self._run_project_revision = self._store.project_revision
         engine = Engine(manifest, cache_dir=self._store.cache_dir)
-        issues = engine.validate()
+        plan = None
+        if manifest.mode.dimension == "3d":
+            state = self._plan_state()
+            if not state.runnable:
+                reason = state.blocked_reason or MODE_3D_BLOCK_REASON
+                QMessageBox.warning(self, "Cannot run pipeline", reason)
+                return
+            plan = state.plan
+            issues, _notes = engine.validation_issues(plan)
+        else:
+            issues = engine.validate()
         if issues:
             QMessageBox.warning(
                 self, "Cannot run pipeline", "Fix these issues first:\n\n" + "\n".join(issues)
@@ -354,7 +436,7 @@ class ProcessingScreen(QWidget):
             return
 
         out_dir = self._default_out_dir()
-        self._rebuild_status_table()
+        self._rebuild_status_table(plan)
         self._progress.setValue(0)
         self._status_label.setText(f"Running… writing to {out_dir}")
         self._run_btn.setEnabled(False)
@@ -363,7 +445,10 @@ class ProcessingScreen(QWidget):
 
         n_workers = self._workers.value()
         self._parallel_run = n_workers > 1
-        run_fn = functools.partial(engine.run, out_dir, n_workers=n_workers)
+        if plan is None:
+            run_fn = functools.partial(engine.run, out_dir, n_workers=n_workers)
+        else:
+            run_fn = functools.partial(engine.run, out_dir, n_workers=n_workers, plan=plan)
         self._current_task_id = self._store.tasks.submit_with_progress(
             run_fn, cancel_check=True
         )
@@ -418,33 +503,51 @@ class ProcessingScreen(QWidget):
         self._rebuild_status_table()
 
     def _compute_allowed(self) -> bool:
-        """A project is open and is not a 3-D project (it has no fusable pair yet)."""
+        """A project is open, and in 3-D its run plan is known and has a unit."""
         if self._store is None or not self._store.has_project:
             return False
-        return self._store.manifest.mode.dimension != "3d"
+        if self._store.manifest.mode.dimension != "3d":
+            return True
+        return self._plan_state().runnable
 
     def _show_block_reason(self) -> None:
-        """Show why Run is off while a 3-D project is open; clear it again afterwards."""
-        blocked = (
-            self._store is not None
-            and self._store.has_project
-            and self._store.manifest.mode.dimension == "3d"
-        )
-        if blocked:
-            self._status_label.setText(MODE_3D_BLOCK_REASON)
-        elif self._status_label.text() == MODE_3D_BLOCK_REASON:
-            self._status_label.setText("Ready")
+        """Show why Run is off in a 3-D project (checking, or the gate); clear it afterwards."""
+        reason = self._plan_state().blocked_reason
+        if reason:
+            if self._current_task_id is None:
+                self._status_label.setText(reason)
+                self._shown_reason = reason
+        elif self._shown_reason is not None:
+            if self._status_label.text() == self._shown_reason:
+                self._status_label.setText("Ready")
+            self._shown_reason = None
 
-    def _rebuild_status_table(self) -> None:
+    def _on_plan_changed(self) -> None:
+        """The 3-D plan started building or arrived: refresh what depends on it."""
+        if self._current_task_id is None:
+            self._run_btn.setEnabled(self._compute_allowed())
+            self._rebuild_status_table()
+        self._show_block_reason()
+        self._refresh_setup_check()
+
+    def _row_ids(self) -> list[str]:
+        """One row per session (2-D), per unit of the known plan (3-D)."""
+        manifest = self._store.manifest
+        if manifest.mode.dimension != "3d":
+            return [ref.session_id for ref in manifest.sessions]
+        plan = self._plan_state().plan
+        return [] if plan is None else [u.unit_id for u in plan.units]
+
+    def _rebuild_status_table(self, plan=None) -> None:
         self._session_rows.clear()
         if self._store is None or self._store.manifest is None:
             self._status_table.setRowCount(0)
             return
-        sessions = self._store.manifest.sessions
-        self._status_table.setRowCount(len(sessions))
-        for row, ref in enumerate(sessions):
-            self._session_rows[ref.session_id] = row
-            self._status_table.setItem(row, 0, QTableWidgetItem(ref.session_id))
+        ids = [u.unit_id for u in plan.units] if plan is not None else self._row_ids()
+        self._status_table.setRowCount(len(ids))
+        for row, unit_id in enumerate(ids):
+            self._session_rows[unit_id] = row
+            self._status_table.setItem(row, 0, QTableWidgetItem(unit_id))
             self._status_table.setItem(row, 1, QTableWidgetItem("Queued"))
             # No frame count is available before a session finishes preprocessing
             # (neither ProgressEvent nor SessionRunResult carries it today).

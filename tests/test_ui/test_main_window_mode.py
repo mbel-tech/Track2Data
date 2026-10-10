@@ -209,3 +209,94 @@ def test_2d_sessions_row_ignores_views(qtbot, tmp_path) -> None:
     assert win._sidebar.status(1) == "valid"
     assert win._sidebar.item(1).toolTip() == "2 session(s)."
     assert win._sidebar.item(1).data(SUMMARY_ROLE) == "2 sessions"
+
+
+# ── 3-D with a pair set up for fusion ────────────────────────────────────────
+
+
+def _fused_window(qtbot, tmp_path, monkeypatch, outcome=None):
+    import track2data.api  # noqa: F401  (preloaded: see test_fusion_section.py)
+    from tests.test_ui.plan3d import SETTINGS, install_planner
+
+    fake = install_planner(monkeypatch)
+    if outcome is not None:
+        fake.outcome = outcome
+    win = _window(qtbot, tmp_path)
+    store = win._store
+    store.update_mode(THREE_D)
+    store.update_sessions(_two_view_refs(tmp_path))
+    store.update_view_role("t1_top", "top")
+    store.update_view_role("t1_side", "side")
+    from track2data.core.models import ViewPair
+
+    store.update_view_pair(ViewPair(top_session_id="t1_top", side_session_id="t1_side"))
+    store.update_fusion("t1_top", "t1_side", SETTINGS)
+    return win, fake
+
+
+def test_3d_with_fusion_settings_unblocks_run_and_results(qtbot, tmp_path, monkeypatch) -> None:
+    win, _ = _fused_window(qtbot, tmp_path, monkeypatch)
+    store = win._store
+    for stage in (7, 8):
+        assert win._sidebar.status(stage) != "blocked"
+    assert win._run_action.isEnabled()
+    from track2data.core.models import SessionRunResult
+
+    store.set_run_results(RunResult(sessions=[SessionRunResult(session_id="t1_top+t1_side")]))
+    assert 8 not in win._sidebar._locked
+    assert win._sidebar.status(7) == "valid"
+
+
+def test_3d_validate_uses_the_plan_off_the_gui_thread(qtbot, tmp_path, monkeypatch) -> None:
+    import threading
+
+    from tests.test_ui.plan3d import make_plan
+    from track2data.api import Engine
+    from ui.store.run_plan import PlanOutcome
+
+    outcome = PlanOutcome(make_plan(("t1_top+t1_side",), (("x", "not in a fusable pair"),)))
+    win, _fake = _fused_window(qtbot, tmp_path, monkeypatch, outcome)
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "app.main_window.QMessageBox.information",
+        staticmethod(lambda *a, **k: shown.append(("info", a[2]))),
+    )
+    monkeypatch.setattr(
+        "app.main_window.QMessageBox.warning",
+        staticmethod(lambda *a, **k: shown.append(("warn", a[2]))),
+    )
+    gui_calls: list[str] = []
+    for name in ("run_units", "validate", "fuse_pair", "require_computable"):
+        orig = getattr(Engine, name)
+
+        def spy(self, *a, _orig=orig, _name=name, **k):
+            if threading.current_thread() is threading.main_thread():
+                gui_calls.append(_name)
+            return _orig(self, *a, **k)
+
+        monkeypatch.setattr(Engine, name, spy)
+    qtbot.waitUntil(lambda: win._store.run_plan.current_plan() is not None, timeout=3000)
+    win._action_validate()
+    assert gui_calls == []
+    assert len(shown) == 1
+    assert "Will run: t1_top+t1_side" in shown[0][1]
+    assert "Skipped: x — not in a fusable pair" in shown[0][1]
+
+
+def test_3d_validate_while_checking_says_so(qtbot, tmp_path, monkeypatch) -> None:
+    import threading
+
+    win, fake = _fused_window(qtbot, tmp_path, monkeypatch)
+    fake.hold = threading.Event()
+    from tests.test_ui.plan3d import OTHER
+
+    win._store.update_fusion("t1_top", "t1_side", OTHER)
+    shown: list[str] = []
+    for kind in ("information", "warning"):
+        monkeypatch.setattr(
+            f"app.main_window.QMessageBox.{kind}",
+            staticmethod(lambda *a, **k: shown.append(a[2])),
+        )
+    win._action_validate()
+    fake.hold.set()
+    assert len(shown) == 1 and "Checking" in shown[0]

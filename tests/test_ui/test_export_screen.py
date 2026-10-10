@@ -463,9 +463,64 @@ def test_export_button_disabled_in_3d(qtbot, tmp_path: Path, tiny_real_session: 
     )
     store.modeChanged.emit()
     assert screen._export_btn.isEnabled() is False
-    assert screen._status_label.text() == MODE_3D_BLOCK_REASON
+    # the plan is built in the background; with no pair it refuses with the block reason
+    qtbot.waitUntil(lambda: screen._status_label.text() == MODE_3D_BLOCK_REASON, timeout=5000)
+    assert screen._export_btn.isEnabled() is False
 
     store._manifest = store._manifest.model_copy(update={"mode": ProjectMode()})
     store.modeChanged.emit()
     assert screen._export_btn.isEnabled() is True
     assert screen._status_label.text() == ""
+
+
+# ── 3-D: the status follows the run plan ─────────────────────────────────────
+
+import threading  # noqa: E402
+
+import track2data.api  # noqa: E402,F401  (preloaded: see tests/test_ui/test_fusion_section.py)
+from tests.test_ui.plan3d import GATE, install_planner, make_plan, store_3d  # noqa: E402
+
+
+def test_3d_export_status_follows_the_plan(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from ui.export_screen import ExportScreen
+    from ui.store.run_plan import CHECKING_TEXT, PlanOutcome
+
+    fake = install_planner(monkeypatch)
+    fake.hold = threading.Event()
+    store = store_3d(tmp_path)
+    screen = ExportScreen(store)
+    qtbot.addWidget(screen)
+    assert not screen._export_btn.isEnabled()
+    assert screen._status_label.text() == CHECKING_TEXT
+    fake.hold.set()
+    qtbot.waitUntil(screen._export_btn.isEnabled, timeout=3000)
+    assert screen._status_label.text() == ""
+
+    fake.hold = None
+    fake.outcome = PlanOutcome(make_plan(()), gate=GATE)
+    store.update_fusion("t2", "s2", store.manifest.view_pairs[0].fusion)
+    qtbot.waitUntil(lambda: screen._status_label.text() == GATE, timeout=3000)
+    assert not screen._export_btn.isEnabled()
+
+
+def test_3d_export_passes_the_plan_to_run(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from track2data.api import Engine
+    from track2data.core.models import RunResult
+    from ui.export_screen import ExportScreen
+
+    install_planner(monkeypatch)
+    store = store_3d(tmp_path)
+    screen = ExportScreen(store)
+    qtbot.addWidget(screen)
+    qtbot.waitUntil(screen._export_btn.isEnabled, timeout=3000)
+    plan = store.run_plan.current_plan()
+    runs: list[dict] = []
+
+    def fake_run(self, out_dir, exporters=None, **kw):
+        runs.append(kw)
+        return RunResult(sessions=[])
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    with qtbot.waitSignal(store.taskFinished, timeout=5000):
+        screen._run_export()
+    assert runs and runs[0]["plan"] is plan
