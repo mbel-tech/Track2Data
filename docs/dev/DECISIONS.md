@@ -846,6 +846,8 @@ on it, and if they differ, the recorded size would hide the discrepancy.
 
 ### D-037 · Project mode (2D or 3D) is a project setting, locked once sessions exist, and 3-D does not compute yet
 
+Superseded in part by D-041 (a 3-D project computes fused pairs; the mode setting and its lock stand).
+
 **Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-mode-switch-design.md`
 (sub-project E of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It does not change D-031 or D-036.
 
@@ -983,3 +985,48 @@ top-view y, so B must read `psess.depth`. Counting out-of-column positions inste
 clipping them keeps a wrong water column visible. Computing on demand from cached inputs avoids a
 second cache whose key would have to track every setting of both sessions.
 
+---
+
+### D-041 · A 3-D project runs fused pairs: one run unit per pair, nothing else computes
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-10-3d-run-design.md`
+(sub-project B1 of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It supersedes the "No 3-D compute"
+part of D-037 and extends D-040; the mode setting and its lock stand.
+
+**Decision:** *Run units.* `Engine.run_units()` returns a `RunPlan` (`track2data/core/runplan.py`):
+2-D, one `RunUnit` per session; 3-D, one per pair that has fusion settings and fuses without a
+`FusionError` (id `<top>+<side>`, output folder `out_dir/<id>/`). Every other session is a
+`SkippedSession` with a reason: "not in a fusable pair", "pair t+s: no fusion settings for this
+pair", or the `FusionError` text prefixed "pair t+s: ". *Gate.* `Engine.require_computable()`
+returns the checked plan and raises when a 3-D plan has no unit ("no pair is ready to fuse: ..."
+with at most three reasons, or `MODE_3D_BLOCK_REASON` = "Pair and fuse a top and a side session
+first" when there is no session or pair at all). In a 3-D project `compute_metrics` accepts a fused
+session only ("3-D projects compute fused sessions only"), `run_session` is 2-D only, and
+`sensitivity` refuses (`SENSITIVITY_3D_REFUSAL`). `validate()` stays blocking-only; notes about
+unfusable pairs come from `Engine.validation_issues()`. *Running.* A pair unit takes its
+`PreprocessedSession` from `fuse_pair`; everything after is the 2-D code. A serial run reuses the
+plan's fusion; a parallel worker receives the unit index and the manifest (no arrays) and fuses its
+own pair, so serial and parallel runs write identical files. Fused sessions are not cached.
+*IL-15.* Reads `psess.depth`: mean, median and SD (ddof 1) of the depth fraction, `mean_depth_cm` =
+mean x tank height, `frac_outside_extent` from the new per-animal `depth_outside` counts,
+`depth_extent_source` = "fusion". `Metric.uses_depth` (IL-15 only) makes it available for a session
+with depth whatever the camera view; a fused session is top-view for every other metric
+(`camera_view_for_psess`, and the manifest-level helper `manifest_view`). *Exports.* Per-frame
+tables gain `depth_fraction` and `depth_cm` only for fused sessions (one helper, so formats agree);
+`sessions.csv` gains the 18 `FusionRunInfo` fields (the provenance of a pair, including
+`side_trajectory_sha256`) for pair units; the unit README has a "3-D fusion" section and
+`manifest.json` has `run_metadata.fusion`; skipped sessions go to `skipped.csv` and a "Skipped
+sessions" section of `PROJECT_SUMMARY.md`, written only when something was skipped. `depth_outside_mask`
+was added beside `depth_outside`. *UI.* `ProjectStore.run_plan` (`RunPlanWatcher`) builds the plan on
+the store's worker pool and drops stale results; Processing, Export and Preview read it; stage status
+blocks only when no pair has fusion settings (a cheap manifest check). *Limits.* Zones are one set
+applied to the top view; no 3-D speed, path length or neighbour distance (B2); session-level metadata
+is keyed by manifest session ids, so it does not attach to pair units; all fused data of a plan is
+recomputed on every run; `csv_wide` has no per-frame table.
+
+**Rationale:** The fusion already yields an ordinary top-view session with a depth, so the 2-D
+pipeline runs on it unchanged and only IL-15 and the exporters had to learn the depth. Running pairs,
+and nothing else, keeps D-037's rule that a 3-D project never produces plausible-but-wrong 2-D
+numbers. Skipping a bad pair with its reason, instead of aborting, lets a long batch finish; refusing
+only when nothing can run keeps the failure clean. Passing the unit index to workers avoids pickling
+large arrays and keeps results independent of the worker count.
