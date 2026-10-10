@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,7 @@ def _make(qtbot, tmp_path: Path, names=("t1_top", "t1_side", "t2_top", "t2_side"
     screen.show()
     store.new_project("p", tmp_path, mode=ProjectMode(dimension="3d", layout="two_videos"))
     store.update_sessions(_refs(tmp_path, names))
+    screen.refresh_now()
     return store, screen
 
 
@@ -42,6 +44,7 @@ def test_role_combos_reflect_and_set_roles(qtbot, tmp_path) -> None:
     _combo(screen, 0).setCurrentIndex(1)
     assert store.manifest.sessions[0].view_role == "top"
     store.update_view_role("t1_side", "side")
+    screen.refresh_now()
     assert _combo(screen, 1).currentText() == "Side"
 
 
@@ -72,6 +75,7 @@ def test_apply_creates_pairs_and_roles(qtbot, tmp_path) -> None:
     screen._top_regex_edit.setText(TOP)
     screen._side_regex_edit.setText(SIDE)
     screen._apply_btn.click()
+    screen.refresh_now()
     assert len(store.manifest.view_pairs) == 2
     assert [s.view_role for s in store.manifest.sessions] == ["top", "side", "top", "side"]
     assert _combo(screen, 0).currentText() == "Top"
@@ -101,6 +105,7 @@ def test_refresh_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
     store, screen = _make(qtbot, tmp_path)
     store.update_view_role("t1_top", "top")
     store.update_pairing(PairingPatterns(top_regex=TOP, side_regex=SIDE))
+    screen.refresh_now()
     assert screen._top_regex_edit.text() == TOP
     assert _combo(screen, 0).currentText() == "Top"
     # Change the store behind the page's back, then let the page rebuild.
@@ -114,6 +119,7 @@ def test_refresh_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(store, "update_pairing", lambda *a: calls.append(a))
     store.sessionsChanged.emit()
     store.projectChanged.emit()
+    screen.refresh_now()
     assert screen._top_regex_edit.text() == "(?P<key>a)"
     assert screen._side_regex_edit.text() == "(?P<key>b)"
     assert _combo(screen, 0).currentText() == "(not set)"
@@ -130,6 +136,27 @@ def test_apply_right_after_typing_uses_typed_patterns(qtbot, tmp_path) -> None:
     screen._apply_btn.click()
     assert store.manifest.mode.pairing == PairingPatterns(top_regex=TOP, side_regex=SIDE)
     assert len(store.manifest.view_pairs) == 2
+
+
+@pytest.mark.parametrize(
+    ("top", "side", "names", "pair"),
+    [
+        (r"(?P<key>.+)_top$", r"(?P<key>.+)_side$", ("trial01_top", "trial01_side"),
+         ("trial01_top", "trial01_side")),
+        (r"^dorsal_(?P<key>\d+)$", r"^lateral_(?P<key>\d+)$", ("dorsal_01", "lateral_01"),
+         ("dorsal_01", "lateral_01")),
+        (r"^top_(?P<key>.+)$", r"^side_(?P<key>.+)$", ("top_fish3_day2", "side_fish3_day2"),
+         ("top_fish3_day2", "side_fish3_day2")),
+    ],
+)
+def test_help_text_has_three_worked_examples(top, side, names, pair) -> None:
+    from track2data.views.pairing import pair_by_regex
+    from ui.widgets.regex_help import REGEX_HELP_TEXT
+
+    assert REGEX_HELP_TEXT.count("Example") == 3
+    for part in (top, side, *names):
+        assert part in REGEX_HELP_TEXT
+    assert pair_by_regex(list(names), top, side).pairs == [pair]
 
 
 def test_side_help_button_shows_popover(qtbot, tmp_path) -> None:
@@ -198,6 +225,7 @@ def _paired(qtbot, tmp_path, top_labels=None, side_labels=None, names=("t1_top",
         store._session_facts["t1_top"] = _facts("t1_top", top_labels, len(top_labels))
         store._session_facts["t1_side"] = _facts("t1_side", side_labels, len(side_labels))
         store.sessionFactsChanged.emit()
+    screen.refresh_now()
     return store, screen
 
 
@@ -221,6 +249,7 @@ def test_same_ids_tick_fills_identity_map(qtbot, tmp_path) -> None:
     store, screen = _paired(qtbot, tmp_path, ["a", "b"], ["a", "b"])
     assert _status(screen).text() == "Needs matching"
     _tick(screen).setChecked(True)
+    screen.refresh_now()
     pair = store.manifest.view_pairs[0]
     assert pair.same_ids and pair.fish_map == {"a": "a", "b": "b"}
     assert _status(screen).text() == "Matched"
@@ -232,6 +261,7 @@ def test_same_ids_tick_fills_identity_map(qtbot, tmp_path) -> None:
 def test_partial_overlap_maps_shared_and_lists_unmatched(qtbot, tmp_path) -> None:
     store, screen = _paired(qtbot, tmp_path, ["a", "b"], ["b", "c"])
     _tick(screen).setChecked(True)
+    screen.refresh_now()
     assert store.manifest.view_pairs[0].fish_map == {"b": "b"}
     assert _status(screen).text() == "Matched"
     tip = _status(screen).toolTip()
@@ -245,6 +275,7 @@ def test_identity_free_session_cannot_match(qtbot, tmp_path) -> None:
         for s in store.manifest.sessions
     ]
     store.update_sessions(refs)
+    screen.refresh_now()
     assert _status(screen).text() == "cannot match fish: this session has no stable identities"
     assert not _tick(screen).isEnabled()
     _tick(screen).setChecked(True)
@@ -254,6 +285,7 @@ def test_identity_free_session_cannot_match(qtbot, tmp_path) -> None:
 def test_remove_button_deletes_pair(qtbot, tmp_path) -> None:
     store, screen = _paired(qtbot, tmp_path)
     screen._pairs_table.cellWidget(0, 4).click()
+    screen.refresh_now()
     assert store.manifest.view_pairs == []
     assert screen._pairs_table.rowCount() == 0
 
@@ -263,13 +295,16 @@ def test_manual_add_excludes_paired_sessions(qtbot, tmp_path) -> None:
         qtbot, tmp_path, names=("t1_top", "t1_side", "t2_top", "t2_side")
     )
     store.update_view_role("t2_top", "top")
+    screen.refresh_now()
     assert not screen._manual_add_btn.isEnabled()
     top_combo = screen._manual_top_combo
     assert [top_combo.itemText(i) for i in range(top_combo.count())] == ["t2_top"]
     assert screen._manual_side_combo.count() == 0
     store.update_view_role("t2_side", "side")
+    screen.refresh_now()
     assert screen._manual_add_btn.isEnabled()
     screen._manual_add_btn.click()
+    screen.refresh_now()
     assert [(p.top_session_id, p.side_session_id) for p in store.manifest.view_pairs] == [
         ("t1_top", "t1_side"),
         ("t2_top", "t2_side"),
@@ -284,7 +319,9 @@ def test_selection_emits_and_survives_rebuild(qtbot, tmp_path) -> None:
     )
     store.update_view_role("t2_top", "top")
     store.update_view_role("t2_side", "side")
+    screen.refresh_now()
     screen._manual_add_btn.click()
+    screen.refresh_now()
     assert screen._current_pair is None
     with qtbot.waitSignal(screen.pairSelected) as sig:
         screen._pairs_table.selectRow(1)
@@ -292,16 +329,18 @@ def test_selection_emits_and_survives_rebuild(qtbot, tmp_path) -> None:
     with qtbot.assertNotEmitted(screen.pairSelected):
         store.sessionFactsChanged.emit()
         store.update_view_pair(store.manifest.view_pairs[1].model_copy(update={"same_ids": True}))
+        screen.refresh_now()
     assert screen._current_pair == ("t2_top", "t2_side")
     with qtbot.waitSignal(screen.pairSelected) as sig:
         store.remove_view_pair("t2_top", "t2_side")
+        screen.refresh_now()
     assert sig.args == [None]
 
 
 def test_pair_rebuild_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
     from track2data.core.models import ViewPair
 
-    store, _screen = _paired(qtbot, tmp_path, ["a"], ["a"])
+    store, screen = _paired(qtbot, tmp_path, ["a"], ["a"])
     store.update_view_pair(
         ViewPair(top_session_id="t1_top", side_session_id="t1_side", same_ids=True)
     )
@@ -311,6 +350,7 @@ def test_pair_rebuild_does_not_write_back(qtbot, tmp_path, monkeypatch) -> None:
     store.sessionsChanged.emit()
     store.viewsChanged.emit()
     store.sessionFactsChanged.emit()
+    screen.refresh_now()
     assert calls == []
 
 
@@ -363,8 +403,41 @@ def _matched(qtbot, tmp_path, monkeypatch, fish_map=None, **kw):
         store.update_view_pair(
             ViewPair(top_session_id="t1_top", side_session_id="t1_side", fish_map=fish_map)
         )
+        screen.refresh_now()
     _select(qtbot, screen)
     return store, screen
+
+
+def test_panelled_session_plot_gets_cropped_backdrop(qtbot, tmp_path, monkeypatch) -> None:
+    import numpy as np
+    from PySide6.QtGui import QImage
+
+    from track2data.core.models import PanelRect
+    from ui import views_screen
+    from ui.preview_screen import TrajectoryData
+
+    bg = tmp_path / "bg.png"
+    img = QImage(100, 60, QImage.Format.Format_RGB32)
+    img.fill(0xFF808080)
+    assert img.save(str(bg))
+
+    def fake(_manifest, session_id, _cache):
+        xy = np.zeros((5, 3, 2))
+        return TrajectoryData(
+            raw_xy=xy,
+            xy=xy,
+            fps=30.0,
+            background=bg,
+            size=(40.0, 30.0),
+            crop=PanelRect(x=10, y=5, width=40, height=30),
+        )
+
+    monkeypatch.setattr(views_screen, "load_trajectory_data", fake)
+    _store, screen = _paired(qtbot, tmp_path, ["a", "b", "c"], ["x", "y", "z"])
+    screen._pairs_table.selectRow(0)
+    qtbot.waitUntil(lambda: screen._top_plot.n_frames == 5 and screen._side_plot.n_frames == 5)
+    assert screen._top_plot._size == (40.0, 30.0)
+    assert screen._side_plot._size == (40.0, 30.0)
 
 
 def test_selecting_pair_fills_match_table(qtbot, tmp_path, monkeypatch) -> None:
@@ -381,6 +454,7 @@ def test_selecting_pair_fills_match_table(qtbot, tmp_path, monkeypatch) -> None:
 def test_combo_choice_writes_and_clears_map(qtbot, tmp_path, monkeypatch) -> None:
     store, screen = _matched(qtbot, tmp_path, monkeypatch)
     _match_combo(screen, 1).setCurrentIndex(3)
+    screen.refresh_now()
     assert store.manifest.view_pairs[0].fish_map == {"b": "z"}
     assert _match_combo(screen, 1).currentData() == "z"
     _match_combo(screen, 1).setCurrentIndex(0)
@@ -398,6 +472,7 @@ def test_choosing_used_item_writes_bare_label_and_keeps_selection(
     real = store.update_view_pair
     monkeypatch.setattr(store, "update_view_pair", lambda p: (calls.append(p), real(p))[1])
     combo.setCurrentIndex(1)
+    screen.refresh_now()
     assert len(calls) == 1 and calls[0].fish_map == {"a": "x", "c": "x"}
     assert store.manifest.view_pairs[0].fish_map["c"] == "x"
     assert screen._match_table.selectionModel().selectedRows()[0].row() == 2
@@ -432,12 +507,14 @@ def test_identity_free_pair_disables_table(qtbot, tmp_path, monkeypatch) -> None
         for s in store.manifest.sessions
     ]
     store.update_sessions(refs)
+    screen.refresh_now()
     screen._pairs_table.selectRow(0)
     msg = "cannot match fish: this session has no stable identities"
     assert screen._match_issues.text() == msg
     assert not screen._match_table.isEnabled()
     screen._match_table.selectRow(0)
     store.sessionFactsChanged.emit()
+    screen.refresh_now()
     assert screen._match_table.selectionModel().selectedRows() == []
 
 
@@ -492,6 +569,7 @@ def _two_pairs(qtbot, tmp_path, monkeypatch):
     store.update_view_pair(ViewPair(top_session_id="t2_top", side_session_id="t2_side"))
     store._session_facts["t2_top"] = _facts("t2_top", ["a"], 1)
     store._session_facts["t2_side"] = _facts("t2_side", ["a"], 1)
+    screen.refresh_now()
     return store, screen, _ManualTasks(store, monkeypatch)
 
 
@@ -537,6 +615,7 @@ def test_project_change_with_same_ids_drops_old_loads_and_reloads(
     screen._pairs_table.selectRow(0)
     old = list(tasks.submitted)
     store.projectChanged.emit()
+    screen.refresh_now()
     assert screen._current_pair == ("t1_top", "t1_side")
     assert len(tasks.submitted) == 4
     tasks.finish(old[0])
@@ -549,9 +628,11 @@ def test_facts_change_reloads_selected_pair(qtbot, tmp_path, monkeypatch) -> Non
     store, screen, tasks = _two_pairs(qtbot, tmp_path, monkeypatch)
     screen._pairs_table.selectRow(0)
     store.sessionFactsChanged.emit()
+    screen.refresh_now()
     assert len(tasks.submitted) == 2  # unchanged facts: no reload
     store._session_facts["t1_top"] = _facts("t1_top", ["a", "b"], 2)
     store.sessionFactsChanged.emit()
+    screen.refresh_now()
     assert len(tasks.submitted) == 4
     assert screen._match_table.rowCount() == 2
 
@@ -563,4 +644,296 @@ def test_cleared_selection_never_writes(qtbot, tmp_path, monkeypatch) -> None:
     screen._pairs_table.clearSelection()
     screen._on_pair_selected(None)
     store.sessionFactsChanged.emit()
+    screen.refresh_now()
     assert calls == [] and screen._match_table.rowCount() == 0
+
+
+# ── who owns a pair; Same IDs vs the fish map ──────────────────────────────
+
+
+def _auto_paired(qtbot, tmp_path, monkeypatch):
+    _fake_loader(monkeypatch)
+    store, screen = _make(qtbot, tmp_path, names=("t1_top", "t1_side"))
+    screen._top_regex_edit.setText(TOP)
+    screen._side_regex_edit.setText(SIDE)
+    screen._apply_btn.click()
+    assert store.manifest.view_pairs[0].auto
+    store._session_facts["t1_top"] = _facts("t1_top", ["a", "b"], 2)
+    store._session_facts["t1_side"] = _facts("t1_side", ["a", "b"], 2)
+    store.sessionFactsChanged.emit()
+    screen.refresh_now()
+    return store, screen
+
+
+def test_ticking_or_unticking_makes_the_pair_hand_made(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _auto_paired(qtbot, tmp_path, monkeypatch)
+    _tick(screen).setChecked(True)
+    assert not store.manifest.view_pairs[0].auto
+    store.update_view_pair(store.manifest.view_pairs[0].model_copy(update={"auto": True}))
+    screen.refresh_now()
+    _tick(screen).setChecked(False)
+    pair = store.manifest.view_pairs[0]
+    assert not pair.auto and not pair.same_ids
+
+
+def test_combo_change_makes_pair_hand_made_and_clears_same_ids(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    store, screen = _auto_paired(qtbot, tmp_path, monkeypatch)
+    _tick(screen).setChecked(True)
+    store.update_view_pair(store.manifest.view_pairs[0].model_copy(update={"auto": True}))
+    screen.refresh_now()
+    _select(qtbot, screen)
+    _match_combo(screen, 0).setCurrentIndex(2)  # a -> b
+    screen.refresh_now()
+    pair = store.manifest.view_pairs[0]
+    assert pair.fish_map == {"a": "b", "b": "b"}
+    assert not pair.same_ids and not pair.auto
+    assert not _tick(screen).isChecked()
+
+
+def test_reapplying_a_broken_pattern_keeps_hand_matched_pair(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen = _auto_paired(qtbot, tmp_path, monkeypatch)
+    _select(qtbot, screen)
+    _match_combo(screen, 0).setCurrentIndex(2)  # a -> b, by hand
+    screen._side_regex_edit.setText("(?P<key>.+)_sdie$")  # typo
+    screen._apply_btn.click()
+    pairs = store.manifest.view_pairs
+    assert [(p.top_session_id, p.side_session_id) for p in pairs] == [("t1_top", "t1_side")]
+    assert pairs[0].fish_map == {"a": "b"}
+
+
+def test_same_ids_tick_disabled_until_both_labels_known(qtbot, tmp_path) -> None:
+    store, screen = _paired(qtbot, tmp_path)
+    assert not _tick(screen).isEnabled()
+    assert "labels" in _tick(screen).toolTip()
+    store._session_facts["t1_top"] = _facts("t1_top", ["a"], 1)
+    store.sessionFactsChanged.emit()
+    screen.refresh_now()
+    assert not _tick(screen).isEnabled()
+    store._session_facts["t1_side"] = _facts("t1_side", ["a"], 1)
+    store.sessionFactsChanged.emit()
+    screen.refresh_now()
+    assert _tick(screen).isEnabled()
+    assert _tick(screen).toolTip() == ""
+
+
+# ── coalesced, visibility-aware refresh ────────────────────────────────────
+
+
+def _count_rebuilds(screen, monkeypatch) -> list[int]:
+    calls: list[int] = []
+    real = screen._fill_roles
+    monkeypatch.setattr(screen, "_fill_roles", lambda s: (calls.append(1), real(s))[1])
+    return calls
+
+
+def test_many_signals_in_one_turn_rebuild_once(qtbot, tmp_path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    store, screen = _make(qtbot, tmp_path)
+    QApplication.processEvents()
+    calls = _count_rebuilds(screen, monkeypatch)
+    for sid in ("t1_top", "t2_top"):
+        store.update_view_role(sid, "top")
+    store.sessionsChanged.emit()
+    store.sessionFactsChanged.emit()
+    assert calls == []
+    qtbot.waitUntil(lambda: len(calls) == 1)
+    QApplication.processEvents()
+    assert len(calls) == 1
+    assert _combo(screen, 2).currentText() == "Top"
+
+
+def test_hidden_page_rebuilds_on_show(qtbot, tmp_path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    store, screen = _make(qtbot, tmp_path)
+    QApplication.processEvents()
+    screen.hide()
+    calls = _count_rebuilds(screen, monkeypatch)
+    store.update_view_role("t1_top", "top")
+    QApplication.processEvents()
+    assert calls == []
+    screen.show()
+    assert len(calls) == 1
+    assert _combo(screen, 0).currentText() == "Top"
+    QApplication.processEvents()
+    assert len(calls) == 1
+
+
+def test_flush_commits_freshly_typed_pattern(qtbot, tmp_path) -> None:
+    store, screen = _make(qtbot, tmp_path)
+    screen._top_regex_edit.setText(TOP)
+    assert screen._commit.pending
+    screen.flush()
+    assert store.manifest.mode.pairing.top_regex == TOP
+    assert not screen._commit.pending
+
+
+# ── Panels section ──────────────────────────────────────────────────────────
+
+
+def _make_panels(
+    qtbot, tmp_path: Path, monkeypatch, layout="single_video_two_panels", names=("a", "b")
+):
+    from track2data.core.models import PanelRect
+    from ui.store.project_store import ProjectStore
+    from ui.views_screen import ViewsScreen
+    from ui.widgets import panels_section
+
+    calls: dict = {"dialogs": [], "loads": []}
+
+    def fake_load(manifest, session_id, cache_dir):
+        calls["loads"].append(session_id)
+        if calls.get("fail"):
+            raise RuntimeError("boom")
+        return SimpleNamespace(background_image_path=None)
+
+    class StubDialog:
+        accept = True
+
+        def __init__(self, session, mode, background_path=None, parent=None, initial_rect=None):
+            calls["dialogs"].append((mode, background_path))
+            calls.setdefault("initial", []).append(initial_rect)
+
+        def exec(self):
+            return calls.get("accept", True)
+
+        def result_rects(self):
+            return PanelRect(x=0, y=0, width=50, height=100), PanelRect(
+                x=50, y=0, width=50, height=100
+            )
+
+        def result_rect(self):
+            return PanelRect(x=5, y=6, width=40, height=30)
+
+    monkeypatch.setattr(panels_section, "load_unpanelled_session", fake_load)
+    monkeypatch.setattr(panels_section, "PanelDialog", StubDialog)
+    store = ProjectStore()
+    screen = ViewsScreen(store)
+    qtbot.addWidget(screen)
+    screen.show()
+    store.new_project("p", tmp_path, mode=ProjectMode(dimension="3d", layout=layout))
+    store.update_sessions(_refs(tmp_path, names))
+    screen.refresh_now()
+    return store, screen, calls
+
+
+def _select_panel_row(screen, row):
+    screen._panels_table.selectRow(row)
+
+
+def test_panels_box_visibility(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    assert screen._panels_box.isVisible()
+    _, screen2, _ = _make_panels(qtbot, tmp_path, monkeypatch, layout="two_videos")
+    assert not screen2._panels_box.isVisible()
+
+
+def test_panels_box_hidden_for_2d(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    store.new_project("q", tmp_path, mode=ProjectMode())
+    screen.refresh_now()
+    assert not screen._panels_box.isVisible()
+
+
+def test_panels_table_and_button_states(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import PanelRect
+
+    store, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    store.set_session_panel("b", PanelRect(x=1, y=2, width=30, height=40))
+    screen.refresh_now()
+    t = screen._panels_table
+    assert [(t.item(r, 0).text(), t.item(r, 1).text()) for r in range(2)] == [
+        ("a", "whole video"),
+        ("b", "1, 2, 30 \u00d7 40"),
+    ]
+    assert not screen._split_btn.isEnabled()
+    assert not screen._set_panel_btn.isEnabled()
+    _select_panel_row(screen, 0)
+    assert screen._split_btn.isEnabled() and screen._set_panel_btn.isEnabled()
+    assert not screen._clear_panel_btn.isEnabled()
+    _select_panel_row(screen, 1)
+    assert not screen._split_btn.isEnabled() and screen._set_panel_btn.isEnabled()
+    assert screen._clear_panel_btn.isEnabled()
+
+
+def test_split_applies_dialog_rects(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    _select_panel_row(screen, 0)
+    screen._split_btn.click()
+    qtbot.waitUntil(lambda: screen._panels_table.rowCount() == 3, timeout=3000)
+    assert calls["dialogs"] == [("split", None)]
+    names = [s.session_id for s in store.manifest.sessions]
+    assert names == ["a__top", "a__side", "b"]
+    assert store.manifest.sessions[0].panel.width == 50
+
+
+def test_set_and_clear_panel(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    _select_panel_row(screen, 1)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: store.manifest.sessions[1].panel is not None, timeout=3000)
+    assert calls["dialogs"] == [("single", None)]
+    assert store.manifest.sessions[1].panel.x == 5
+    screen.refresh_now()
+    _select_panel_row(screen, 1)
+    screen._clear_panel_btn.click()
+    assert store.manifest.sessions[1].panel is None
+
+
+def test_cancelled_dialog_writes_nothing(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    calls["accept"] = False
+    before = store.manifest
+    _select_panel_row(screen, 0)
+    screen._split_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 1, timeout=3000)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 2, timeout=3000)
+    assert store.manifest is before
+
+
+def test_load_failure_shows_error(qtbot, tmp_path, monkeypatch) -> None:
+    _, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    calls["fail"] = True
+    _select_panel_row(screen, 0)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: "boom" in screen._panels_status.text(), timeout=3000)
+    assert calls["dialogs"] == []
+
+
+def test_session_removed_meanwhile_is_ignored(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    _select_panel_row(screen, 0)
+    screen._split_btn.click()
+    store.update_sessions(_refs(tmp_path, ["b"]))
+    qtbot.waitUntil(lambda: "no longer" in screen._panels_status.text(), timeout=3000)
+    assert calls["dialogs"] == []
+    assert [s.session_id for s in store.manifest.sessions] == ["b"]
+
+
+def test_rebuild_never_writes(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, _ = _make_panels(qtbot, tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(store, "set_session_panel", lambda *a: calls.append(a))
+    monkeypatch.setattr(store, "split_session_into_panels", lambda *a: calls.append(a))
+    _select_panel_row(screen, 0)
+    screen.refresh_now()
+    store.sessionsChanged.emit()
+    screen.refresh_now()
+    assert calls == []
+
+
+def test_set_panel_starts_with_current_panel(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.core.models import PanelRect
+
+    store, screen, calls = _make_panels(qtbot, tmp_path, monkeypatch)
+    current = PanelRect(x=1, y=2, width=30, height=40)
+    store.set_session_panel("b", current)
+    screen.refresh_now()
+    _select_panel_row(screen, 1)
+    screen._set_panel_btn.click()
+    qtbot.waitUntil(lambda: len(calls["dialogs"]) == 1, timeout=3000)
+    assert calls["initial"] == [current]

@@ -46,3 +46,13 @@ def test_next_and_prev_page() -> None:
     assert prev_page(THREE_D, 0) is None
     assert prev_page(TWO_D, 2) == 1
     assert prev_page(TWO_D, 10) is None
+
+
+def test_views_page_index_defined_once() -> None:
+    import app.navigation as navigation
+    from ui.store import screen_flow
+
+    assert screen_flow.VIEWS_PAGE == 10
+    assert navigation.VIEWS_PAGE is screen_flow.VIEWS_PAGE
+    assert navigation.PAGE_TO_STAGE[screen_flow.VIEWS_PAGE] == 1
+    assert screen_flow.page_route(ProjectMode(dimension="3d", layout="two_videos"))[2] == 10

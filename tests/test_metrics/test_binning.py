@@ -103,3 +103,34 @@ def test_slice_psess_slices_every_per_frame_array() -> None:
     assert s.xy[0, 0, 0] == 50.0  # row 10
     assert s.fps == p.fps and s.session_id == p.session_id
     assert p.n_frames == 100  # original untouched
+
+
+def test_slice_psess_slices_depth() -> None:
+    p = _psess()
+    p.depth = np.tile(np.arange(100.0)[:, None], (1, 2))
+    s = slice_psess(p, 10, 30)
+    assert s.depth.shape == (20, 2)
+    assert s.depth[0, 0] == 10.0
+    assert _psess().depth is None and slice_psess(_psess(), 0, 5).depth is None
+
+
+def test_slice_psess_keeps_depth_metadata() -> None:
+    p = _psess()
+    p.depth = np.zeros((100, 2))
+    p.depth_height_cm = 25.0
+    p.depth_outside = np.array([3, 1])
+    s = slice_psess(p, 10, 30)
+    assert s.depth_height_cm == 25.0
+    assert s.depth_outside.tolist() == [3, 1]
+
+
+def test_slice_psess_slices_the_outside_mask() -> None:
+    p = _psess()
+    p.depth = np.zeros((100, 2))
+    mask = np.zeros((100, 2), dtype=bool)
+    mask[15, 0] = mask[50, 1] = True
+    p.depth_outside_mask = mask
+    s = slice_psess(p, 10, 30)
+    assert s.depth_outside_mask.shape == (20, 2)
+    assert s.depth_outside_mask[5, 0] and int(s.depth_outside_mask.sum()) == 1
+    assert slice_psess(_psess(), 0, 5).depth_outside_mask is None

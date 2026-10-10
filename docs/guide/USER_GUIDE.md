@@ -201,26 +201,102 @@ Calibration. In 2-D projects it does not exist.
   `(?P<key>.+)_side$` matches `trial01_side` with the same key, so the two are paired. The **ⓘ**
   button next to each field explains this in the app. A line under the fields says how many
   sessions each pattern catches and lists unpaired or ambiguous ones (several sessions with the
-  same key are not paired). An empty `key` means no match. Press **Pair by pattern** to set the
-  roles and create the pairs; pressing it again replaces the pairs it made earlier, and never
-  touches pairs you made by hand.
+  same key are not paired) and sessions that match **both** patterns ("Match both patterns"; these
+  are not paired). An empty `key` means no match. Press **Pair by pattern** to set the roles and
+  create the pairs. Pressing it again keeps the pairs it made earlier that the patterns still
+  produce, with their matching, and removes the ones they no longer produce. Sessions in pairs you
+  made or changed by hand are skipped: the button never touches those pairs.
 - **Pairs.** One row per pair, with a **Same IDs** tick, a **Status** and **Remove**. To pair by
   hand, choose a top and a side session below the list (only sessions with that role and not yet in
   a pair are offered) and press **Add pair**. A session belongs to at most one pair.
 - **Same IDs.** Tick it when fish with the same label are the same fish in both views; the fish map
-  is then filled in from the labels. Leave it unticked to match by hand.
+  is then filled in for the labels present in **both** views (the others stay unmatched), and filled
+  in again if the labels of either session change. The tick is disabled while either session has no
+  stable identities or its fish labels are not known yet (hover over it to see which). Unticking
+  clears only the tick and keeps the map. Changing a fish in the matching table clears the tick and
+  makes the pair yours, so **Pair by pattern** no longer touches it; ticking or unticking does too.
 - **Match fish.** Select a pair to get a table with one row per top-view fish and a dropdown for the
   side-view fish (or *(no match)*; a side fish already used is marked). Selecting a row highlights
   that fish and its match in the two track plots beside the table.
-- **Status.** *Needs matching*: no fish matched yet. *Matched*: a fish map exists (a tooltip lists
-  fish still unmatched). Otherwise the status is the problem, for example "cannot match fish: this
-  session has no stable identities" (identity-free sessions cannot be matched), "duplicate side
-  fish: ...", "unknown top fish: ..." or "3 top fish vs 2 side fish". The sidebar badge is ○ until
-  every session has a role, ⚠ while a session is unpaired or a pair needs matching or has no
-  stable identities, and ✓ when every pair is matched. It never stops you from continuing.
+- **Status.** The fish map is checked first. If the checks find a problem, the status shows it and
+  the tooltip lists all of them, for example "cannot match fish: this session has no stable
+  identities" (identity-free sessions cannot be matched), "duplicate side fish: ...", "unknown top
+  fish: ..." or "3 top fish vs 2 side fish" (an unequal count is shown even before any fish is
+  matched). Only when nothing is wrong does the status read *Needs matching* (no fish matched yet)
+  or *Matched* (at least one fish matched; the tooltip lists fish still unmatched).
+- **Sidebar.** In a 3-D project the **Sessions** row of the sidebar shows the worse of the Sessions
+  and Views statuses, and its tooltip adds the Views message (for example "Views: Session t1_top
+  is not paired."). Its summary line counts sessions and pairs. The row keeps its number, without
+  the ✓, until every session has a view; it gets the ✓ once every session has one, and the
+  tooltip still lists what is left (an unpaired session, a pair to match, a session without stable
+  identities). The sidebar checks the saved roles and pairs only; the page checks the fish maps
+  against the fish labels. None of this stops you from continuing.
 
 This only records the correspondence. 3-D fusion and 3-D metrics do not exist yet, so a 3-D project
 still cannot be run: Processing, Preview and Export stay blocked.
+
+### Panels (one video, two views)
+
+If you chose the layout **One video, two panels** on the Project screen, the top and side views are
+two parts (panels) of one video. The **Views** page then has a **Panels** section with one row per
+session, showing its panel (*whole video* or the rectangle as x, y, width × height in pixels). Select a
+row to use the buttons.
+
+- **Split into panels…** is for one tracker run on the whole frame. The editor offers the presets
+  **Left | Right** and **Top | Bottom** with a split slider (50% by default), exact x, y, width and
+  height fields for each panel, and a choice of which panel is the top view. A preview shows the
+  tracker's background image, or else the first video frame, or else the tracks, with the two
+  rectangles over it. A table lists each fish with its panel, the share of its positions inside
+  (*Inside*) and a *Flag*: *low* under 90%, *left out* under 50% (such a fish is not in that panel's
+  session), *no data* when it has no position. **OK** is off while a rectangle is invalid or a panel
+  would have no fish. The session is replaced by two, `<id>__top` and `<id>__side` (a number is added
+  if the name is taken), each with its panel, the view set, and a hand-made pair.
+- **Set panel…** is for two tracker runs on the same video, each limited to one panel: it opens the
+  same editor with one rectangle for the selected session.
+- **Clear panel** puts the session back on the whole video.
+
+A session with a panel keeps the fish with at least 50% of their positions inside it, and positions
+outside become empty (NaN) because they belong to the other view. Coordinates are relative to the
+panel (its top-left corner is 0, 0) and the video size becomes the panel size, so the Zones,
+Calibration and Preview screens show only the panel. The same folder with a different panel counts
+as a different session. Changing or clearing a panel resets the fish matching of its pair (the pair
+stays).
+
+Zones are still one set per project, and per-view pixel scale calibration is not part of this
+version. 3-D projects still cannot be run.
+
+### Fusion (top and side views)
+
+Once a pair has its fish matched, the **Fusion** box on the Views page combines the two views into one
+session that knows both where each fish is on the floor and how deep it is. It shows *Fusion setup
+needed.* until you set the pair up, and **Set up fusion…** opens the editor for the selected pair.
+
+- The editor shows the side view with two lines you can drag: the **water surface** and the **tank
+  floor**. The same two rows can be typed. Enter the **tank height** in cm (the water depth between the
+  lines; 20 cm to start with), which gives the side view its scale.
+- **Shared horizontal axis** says which top-view axis (x or y) the side view's left-right direction
+  follows; tick **Flip** if it runs the other way.
+- **Frame offset** shifts the side recording against the top one, in frames (side = top + offset). With
+  the layout "One video, two panels" it is hidden and fixed at 0. **Suggest offset** looks for the shift
+  that makes the two views agree best, within ±5 seconds around 0 only; it needs a calibrated top view
+  (set the scale on the Calibration page; the button is greyed out until then), can take about 3
+  seconds on a 1-hour recording with 5 fish, and answers "no better offset found" when nothing clearly
+  beats 0.
+- The summary under the fields updates as you edit: shared frames, fish fused, positions outside the
+  water column, and the agreement. **OK** is off while the settings are invalid or the pair cannot be
+  fused.
+
+Depth is 0 at the surface line and 1 at the floor line; a position outside the lines becomes empty and
+is counted, never clipped. The cameras are assumed to be at right angles, with no camera calibration.
+The agreement check compares the side view's horizontal position with the chosen top-view axis in cm
+(after removing the constant shift between them) and warns when the difference is more than 10% of the
+top-view range; it needs a calibrated top view, and says so when it cannot run.
+
+Fusion needs both views' fish to be matched, and the two recordings' frame rates must match (within
+0.1%). Frames missing from either view are left out, and fish that are not matched are not fused. Until
+a pair is set up, the Views step in the sidebar shows a warning "Fusion setup needed for ..."; it does
+not block Next. 3-D projects still cannot be run: Processing, Preview and Export stay blocked until the
+3-D metrics step exists.
 
 ## 3. Calibration
 

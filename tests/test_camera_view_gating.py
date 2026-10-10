@@ -216,3 +216,89 @@ def test_the_project_summary_names_the_view_only_when_declared() -> None:
 
     assert "Camera view: side view" in engine_side._project_readme_text([], [])
     assert "Camera view" not in engine_default._project_readme_text([], [])
+
+
+# ── fused sessions ───────────────────────────────────────────────────────────
+
+
+def _with_depth(psess):
+    import numpy as np
+
+    psess.depth = np.full((psess.xy.shape[0], psess.xy.shape[1]), 0.5)
+    psess.depth_height_cm = 20.0
+    psess.depth_outside_mask = np.zeros(psess.depth.shape, dtype=bool)
+    psess.depth_outside = np.zeros(psess.xy.shape[1], dtype=int)
+    return psess
+
+
+def test_a_fused_session_is_top_view_whatever_the_project_says() -> None:
+    engine = Engine(_manifest("side", []))
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    assert engine.camera_view_for_psess(psess) == "side"
+    assert engine.camera_view_for_psess(_with_depth(psess)) == "top"
+
+
+@pytest.mark.parametrize("view", ["unknown", "top"])
+def test_il15_runs_on_a_fused_session_but_not_on_a_plain_one(view) -> None:
+    plain = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest(view, ["IL-15"]))
+    assert "IL-15" not in engine.compute_metrics(plain)
+    assert "IL-15" in engine.skipped_metrics(False, plain.session, psess=plain)
+
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    results = engine.compute_metrics(fused)
+    assert "IL-15" in results
+    assert results["IL-15"]["depth_extent_source"].iloc[0] == "fusion"
+    assert engine.skipped_metrics(False, fused.session, psess=fused) == {}
+
+
+def test_a_fused_session_still_skips_other_side_only_metrics(monkeypatch) -> None:
+    _register_side_metric(monkeypatch)
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    engine = Engine(_manifest("side", ["IL-SIDE"]))
+    assert "IL-SIDE" not in engine.compute_metrics(fused)
+
+
+# ── manifest-level availability in a 3-D project ─────────────────────────────
+
+
+def _manifest_3d(view: str, individual: list[str]):
+    from track2data.core.models import ProjectMode
+
+    return _manifest(view, individual).model_copy(
+        update={"mode": ProjectMode(dimension="3d", layout="two_videos")}
+    )
+
+
+@pytest.mark.parametrize("view", ["unknown", "top", "side"])
+def test_a_3d_manifest_passes_the_view_gate_for_il15(view) -> None:
+    engine = Engine(_manifest_3d(view, ["IL-15"]))
+    assert engine.view_skipped_metrics() == {}
+    assert not any("view" in i for i in engine.validate())
+    assert engine._view_selection_notes() == []
+
+
+def test_a_3d_manifest_still_gates_other_side_only_metrics(monkeypatch) -> None:
+    _register_side_metric(monkeypatch)
+    engine = Engine(_manifest_3d("side", ["IL-15", "IL-SIDE"]))
+    assert set(engine.view_skipped_metrics()) == {"IL-SIDE"}
+
+
+def test_a_2d_manifest_still_gates_il15() -> None:
+    assert set(Engine(_manifest("top", ["IL-15"])).view_skipped_metrics()) == {"IL-15"}
+
+
+def test_manifest_view_helper() -> None:
+    from track2data.metrics.availability import manifest_view
+
+    assert manifest_view(_manifest_3d("side", [])) == ("top", True)
+    assert manifest_view(_manifest("side", [])) == ("side", False)
+
+
+@pytest.mark.parametrize("view", ["unknown", "side", "top"])
+def test_the_payload_of_a_fused_session_records_top_and_no_water_column(view) -> None:
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    engine = Engine(_manifest(view, ["IL-15"]))
+    payload = engine.build_payload(fused, engine.compute_metrics(fused))
+    assert payload.provenance.camera_view == "top"
+    assert payload.provenance.water_column is None

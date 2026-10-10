@@ -57,10 +57,17 @@ def _load_manifest(project: str) -> ProjectManifest:
         sys.exit(1)
 
 
-def _refuse_3d(engine: Engine) -> None:
-    """Exit 2 before any output is made when the project is 3-D."""
+def _refuse_3d(engine: Engine, *, sensitivity: bool = False) -> None:
+    """Exit 2 before any output is made when the project cannot be computed (a 3-D project with
+    no fusable pair; a sensitivity sweep refuses every 3-D project)."""
+    from track2data.core.models import SENSITIVITY_3D_REFUSAL
+
     try:
-        engine.require_computable()
+        if sensitivity:
+            if engine.manifest.mode.dimension == "3d":
+                raise ValueError(SENSITIVITY_3D_REFUSAL)
+        else:
+            engine.require_computable()
     except ValueError as exc:
         click.echo(f"[error] {exc}", err=True)
         sys.exit(2)
@@ -644,7 +651,7 @@ def sensitivity(
 
     manifest = _load_manifest(project)
     engine = Engine(manifest)
-    _refuse_3d(engine)
+    _refuse_3d(engine, sensitivity=True)
 
     def _ints(raw: str | None, default: tuple[int, ...]) -> tuple[int, ...]:
         if raw is None:

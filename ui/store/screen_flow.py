@@ -16,14 +16,15 @@ def screen_flow(mode: ProjectMode) -> Literal["standard"]:
     return "standard"
 
 
-#: The Views page index (mirrors ``app.navigation.VIEWS_PAGE``; ui must not import app).
-_VIEWS_PAGE = 10
+#: The Views page index in the stacked widget (3-D only). Defined here once:
+#: ``app.navigation`` and ``ui.store.stage_status`` import it.
+VIEWS_PAGE = 10
 
 
 def page_route(mode: ProjectMode) -> list[int]:
     """The wizard pages in order for *mode*; 3-D inserts Views after Sessions."""
     if mode.dimension == "3d":
-        return [0, 1, _VIEWS_PAGE, *range(2, 10)]
+        return [0, 1, VIEWS_PAGE, *range(2, 10)]
     return list(range(10))
 
 

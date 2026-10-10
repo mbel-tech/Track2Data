@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -29,6 +29,8 @@ from track2data.views.pairing import (
 )
 from ui.preview_screen import TrajectoryData, load_trajectory_data
 from ui.widgets.autocommit import AutoCommit
+from ui.widgets.fusion_section import FusionSection
+from ui.widgets.panels_section import PanelsSection
 from ui.widgets.regex_help import RegexHelpPopover
 from ui.widgets.trajectory_view import TrajectoryView
 from ui.widgets.weak_slot import weak_slot
@@ -38,6 +40,8 @@ NEEDS_MATCHING = "Needs matching"
 NO_MATCH = "(no match)"
 USED_MARK = " (used)"
 EMPTY_TEXT = "Open a 3-D project and add sessions to set up the views."
+SAME_IDS_FREE_TIP = "A session in this pair has no stable identities."
+SAME_IDS_WAIT_TIP = "Available once the fish labels of both sessions are known."
 
 
 class ViewsScreen(QWidget):
@@ -77,6 +81,14 @@ class ViewsScreen(QWidget):
         self._role_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         root.addWidget(self._role_table, 1)
 
+        self._panels_box = PanelsSection(store)
+        self._panels_table = self._panels_box._table
+        self._split_btn = self._panels_box._split_btn
+        self._set_panel_btn = self._panels_box._set_btn
+        self._clear_panel_btn = self._panels_box._clear_btn
+        self._panels_status = self._panels_box._status
+        root.addWidget(self._panels_box)
+
         self._pairs_box = QWidget()
         pairs_lay = QVBoxLayout(self._pairs_box)
         pairs_lay.setContentsMargins(0, 0, 0, 0)
@@ -109,6 +121,11 @@ class ViewsScreen(QWidget):
         manual.addWidget(self._manual_add_btn)
         pairs_lay.addLayout(manual)
         root.addWidget(self._pairs_box)
+
+        self._fusion_box = FusionSection(store)
+        self._fusion_status = self._fusion_box._status
+        self._fusion_btn = self._fusion_box._btn
+        root.addWidget(self._fusion_box)
 
         self._match_box = QWidget()
         mbox = QVBoxLayout(self._match_box)
@@ -196,6 +213,13 @@ class ViewsScreen(QWidget):
         self._side_help_btn.clicked.connect(weak_slot(self._show_help, self._side_help_btn))
 
         self._commit = AutoCommit(self._commit_patterns, self)
+        # Store signals only mark the page dirty; one rebuild runs per event-loop
+        # turn, and none while the page is hidden (showEvent catches up).
+        self._dirty = False
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(0)
+        self._refresh_timer.timeout.connect(self._on_refresh_timer)
         for edit in (self._top_regex_edit, self._side_regex_edit):
             edit.textChanged.connect(self._commit.trigger)
             edit.textChanged.connect(self._update_matches)
@@ -205,9 +229,13 @@ class ViewsScreen(QWidget):
             store.sessionsChanged.connect(self._refresh)
             store.modeChanged.connect(self._refresh)
             store.viewsChanged.connect(self._refresh)
+            # Fusion status depends on these project settings too (dirty/showEvent path).
+            store.calibrationChanged.connect(self._refresh)
+            store.preprocessChanged.connect(self._refresh)
+            store.zonesChanged.connect(self._refresh)
             store.sessionFactsChanged.connect(self._on_facts_changed)
             store.taskFinished.connect(self._on_traj_task_finished)
-        self._refresh()
+        self.refresh_now()
 
     def _pattern_row(self, layout: QVBoxLayout, caption: str, placeholder: str):
         row = QHBoxLayout()
@@ -235,12 +263,37 @@ class ViewsScreen(QWidget):
 
     # ── refresh from the store (never writes back) ─────────────────────────
 
-    def _refresh(self) -> None:
+    def _refresh(self, *_args: object) -> None:
+        """Schedule a rebuild: at most one per event-loop turn, none while hidden."""
+        self._dirty = True
+        if self.isVisible() and not self._refresh_timer.isActive():
+            self._refresh_timer.start()
+
+    def _on_refresh_timer(self) -> None:
+        if self._dirty and self.isVisible():
+            self.refresh_now()
+
+    def showEvent(self, event) -> None:  # Qt override
+        super().showEvent(event)
+        if self._dirty:
+            self.refresh_now()
+
+    def flush(self) -> None:
+        """Commit typed patterns now and bring the page up to date (leaving the page)."""
+        self._commit.flush()
+        if self._dirty:
+            self.refresh_now()
+
+    def refresh_now(self) -> None:
+        """Rebuild the page from the store at once."""
+        self._refresh_timer.stop()
+        self._dirty = False
         m = self._manifest()
         sessions = list(m.sessions) if m is not None and self._is_3d() else []
         self._empty_label.setVisible(not sessions)
         self._role_table.setVisible(bool(sessions))
         self._pattern_box.setVisible(self._is_3d())
+        self._panels_box.rebuild()
         self._pairs_box.setVisible(self._is_3d())
         with self._commit.suppressed():
             self._fill_roles(sessions)
@@ -254,6 +307,7 @@ class ViewsScreen(QWidget):
                     edit.blockSignals(True)
                     edit.setText(text)
                     edit.blockSignals(False)
+        self._fusion_box.rebuild()
         self._fill_match()
         self._update_matches()
 
@@ -348,9 +402,15 @@ class ViewsScreen(QWidget):
                 table.setItem(row, 3, st)
                 tick = QCheckBox()
                 tick.setChecked(pair.same_ids)
-                tick.setEnabled(
-                    pair.top_session_id not in free and pair.side_session_id not in free
-                )
+                ids = (pair.top_session_id, pair.side_session_id)
+                if any(sid in free for sid in ids):
+                    tip = SAME_IDS_FREE_TIP
+                elif any(self._store.session_facts(sid) is None for sid in ids):
+                    tip = SAME_IDS_WAIT_TIP
+                else:
+                    tip = ""
+                tick.setEnabled(not tip)
+                tick.setToolTip(tip)
                 tick.toggled.connect(weak_slot(self._on_same_ids, pair.top_session_id,
                                                pair.side_session_id, tick))
                 table.setCellWidget(row, 2, tick)
@@ -412,15 +472,16 @@ class ViewsScreen(QWidget):
         pair = self._find_pair(top_id, side_id)
         if pair is None or not tick.isEnabled():
             return
+        # Ticking or unticking takes the pair over: "Pair by pattern" leaves it alone.
         if tick.isChecked():
             shared, _ = identity_map(self._labels(top_id), self._labels(side_id))
-            update = {"same_ids": True, "fish_map": shared}
+            update = {"same_ids": True, "fish_map": shared, "auto": False}
         else:
-            update = {"same_ids": False}
+            update = {"same_ids": False, "auto": False}
         try:
             self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
-            self._refresh()
+            self.refresh_now()
             self._error_label.setText(str(exc))
 
     def _remove_pair(self, top_id: str, side_id: str) -> None:
@@ -454,9 +515,8 @@ class ViewsScreen(QWidget):
     def _on_facts_changed(self) -> None:
         pair = self._current_pair
         if pair is not None and self._facts_of(pair) != self._loaded_facts:
-            self._force_emit = True
+            self._force_emit = True  # consumed by the next rebuild
         self._refresh()
-        self._force_emit = False
 
     def _on_pair_selected(self, pair: object) -> None:
         """Idempotent; None clears the panel. Never writes to the store."""
@@ -465,6 +525,7 @@ class ViewsScreen(QWidget):
         self._top_plot.clear()
         self._side_plot.clear()
         self._loaded_facts = self._facts_of(pair)
+        self._fusion_box.set_pair(pair)
         self._match_status.setText("")
         if not pair or self._store is None or self._store.manifest is None:
             self._match_box.setVisible(False)
@@ -490,7 +551,7 @@ class ViewsScreen(QWidget):
         plot = self._top_plot if role == "top" else self._side_plot
         plot.set_data(
             result.raw_xy, result.xy, result.fps,
-            background_path=result.background, size=result.size,
+            background_path=result.background, size=result.size, crop=result.crop,
         )
         plot.set_trail_length(plot.n_frames)
         plot.set_frame(plot.n_frames - 1)
@@ -558,10 +619,12 @@ class ViewsScreen(QWidget):
             fish_map.pop(top_label, None)
         else:
             fish_map[top_label] = side
+        # A hand edit means the map no longer follows the labels, and the pair is the user's.
+        update = {"fish_map": fish_map, "same_ids": False, "auto": False}
         try:
-            self._store.update_view_pair(pair.model_copy(update={"fish_map": fish_map}))
+            self._store.update_view_pair(pair.model_copy(update=update))
         except ValueError as exc:
-            self._refresh()
+            self.refresh_now()
             self._match_issues.setText(str(exc))
 
     def _apply_highlight(self) -> None:

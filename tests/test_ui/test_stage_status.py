@@ -11,6 +11,7 @@ from track2data.core.models import (
     MODE_3D_BLOCK_REASON,
     CalibrationConfig,
     ExportTarget,
+    FusionSettings,
     IdSwitchCfg,
     MappingRule,
     MetadataSource,
@@ -216,7 +217,8 @@ def test_3d_processing_preview_export_blocked() -> None:
     infos = compute_stage_statuses(_manifest_3d(), has_run_results=True)
     for page in (PROC, PREVIEW, EXPORT):
         assert infos[page].status == "blocked"
-        assert infos[page].message == MODE_3D_BLOCK_REASON == "3-D fusion is not available yet"
+        assert infos[page].message == MODE_3D_BLOCK_REASON
+        assert MODE_3D_BLOCK_REASON == "Pair and fuse a top and a side session first"
 
 
 def test_2d_stage_statuses_unchanged() -> None:
@@ -245,6 +247,9 @@ def test_3d_stage_summaries_say_not_available() -> None:
 
 
 # ── Views page ───────────────────────────────────────────────────────────────
+
+
+_FUSION = FusionSettings(surface_row=10.0, floor_row=110.0, tank_height_cm=20.0)
 
 
 def _views(manifest) -> object:
@@ -306,13 +311,54 @@ def test_views_identity_free_pair_warns() -> None:
     assert "identit" in info.message
 
 
-@pytest.mark.parametrize("kw", [{"same_ids": True}, {"fish_map": {"0": "1"}}])
+@pytest.mark.parametrize(
+    "kw", [{"same_ids": True, "fish_map": {"0": "0"}}, {"fish_map": {"0": "1"}}]
+)
 def test_views_matched_pair_is_valid(kw) -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", fusion=_FUSION, **kw)],
+    )
+    assert _views(m).status == "valid"
+
+
+@pytest.mark.parametrize(
+    "kw", [{"same_ids": True, "fish_map": {"0": "0"}}, {"fish_map": {"0": "1"}}]
+)
+def test_views_matched_pair_without_fusion_settings_warns(kw) -> None:
     m = _manifest_3d(
         sessions=[_vref("t", "top"), _vref("s", "side")],
         view_pairs=[ViewPair(top_session_id="t", side_session_id="s", **kw)],
     )
-    assert _views(m).status == "valid"
+    info = _views(m)
+    assert info.status == "warning"
+    assert "fusion setup needed" in info.message.lower()
+    assert "t / s" in info.message
+
+
+def test_views_unmatched_pair_is_reported_before_fusion_setup() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert _views(m).message == "Match the fish of t / s."
+
+
+def test_views_ticked_pair_with_empty_map_needs_matching() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s", same_ids=True)],
+    )
+    info = _views(m)
+    assert (info.status, info.message) == ("warning", "Match the fish of t / s.")
+
+
+def test_views_identity_free_reported_before_missing_map() -> None:
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side", track_wo_identities=True)],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert _views(m).message == "Session s has no stable identities."
 
 
 def test_views_never_blocks_next() -> None:
@@ -338,3 +384,79 @@ def test_next_blocker_for_a_forced_views_status_does_not_raise() -> None:
         statuses = [*base[:VIEWS], StageInfo(status)]
         result = next_blocker(statuses, VIEWS)
         assert result is None or status == "blocked"
+
+
+# ── the sidebar Sessions row ────────────────────────────────────────────────
+
+
+def _row(manifest):
+    from ui.store.stage_status import sessions_row
+
+    return sessions_row(compute_stage_statuses(manifest, has_run_results=False), manifest)
+
+
+def test_sessions_row_2d_is_the_sessions_status() -> None:
+    m = _manifest(sessions=[_ref()])
+    assert _row(m) == compute_stage_statuses(m, has_run_results=False)[SESSIONS]
+    assert _row(None) == compute_stage_statuses(None, has_run_results=False)[SESSIONS]
+
+
+@pytest.mark.parametrize(
+    ("sessions", "pairs", "expected"),
+    [
+        ([_vref("t", "top"), _vref("s", "side")], [], "warning"),  # valid + warning
+        ([_vref("t", "top"), _ref("x")], [], "empty"),  # valid + empty
+        (
+            [_vref("t", "top"), _vref("s", "side")],
+            [ViewPair(top_session_id="t", side_session_id="s", fish_map={"0": "0"})],
+            "warning",  # fusion setup needed
+        ),
+        (
+            [_vref("t", "top"), _vref("s", "side")],
+            [
+                ViewPair(
+                    top_session_id="t", side_session_id="s", fish_map={"0": "0"}, fusion=_FUSION
+                )
+            ],
+            "valid",
+        ),
+        (
+            [_vref("t", "top", track_wo_identities=True), _ref("x")],
+            [],
+            "warning",  # warning + empty
+        ),
+    ],
+)
+def test_sessions_row_3d_is_the_worse_status(sessions, pairs, expected) -> None:
+    m = _manifest_3d(sessions=sessions, view_pairs=pairs)
+    row = _row(m)
+    assert row.status == expected
+    views = compute_stage_statuses(m, has_run_results=False)[VIEWS]
+    assert f"Views: {views.message}" in row.message
+
+
+def test_sessions_row_3d_blocked_layout_stays_blocked() -> None:
+    mode = ProjectMode.model_construct(dimension="3d", layout=None)
+    m = _manifest().model_copy(update={"mode": mode})
+    assert _row(m).status == "blocked"
+
+
+def test_3d_sessions_summary_counts_pairs() -> None:
+    from ui.store.stage_status import stage_summaries
+
+    m = _manifest_3d(
+        sessions=[_vref("t", "top"), _vref("s", "side")],
+        view_pairs=[ViewPair(top_session_id="t", side_session_id="s")],
+    )
+    assert stage_summaries(m, has_run_results=False)[1] == "2 sessions · 1 pair"
+    assert stage_summaries(_manifest(sessions=[_ref()]), has_run_results=False)[1] == "1 session"
+
+
+def test_a_3d_project_never_needs_a_zone_water_column() -> None:
+    from track2data.core.models import SceneConfig
+
+    m = _manifest_3d(
+        scene=SceneConfig(camera_view="side"), metrics=MetricSelection(individual=["IL-15"])
+    )
+    info = compute_stage_statuses(m, has_run_results=False)[ZONES]
+    assert "waterline" not in info.message and "IL-15" not in info.message

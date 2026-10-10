@@ -214,6 +214,7 @@ class MainWindow(QMainWindow):
             self._store.exportChanged,
             self._store.runResultsChanged,
             self._store.modeChanged,
+            self._store.viewsChanged,
         ):
             sig.connect(self._refresh_stage_status)
         self._store.runLogAppended.connect(self._run_log.append)
@@ -507,7 +508,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_stage_status(self) -> None:
         from app.navigation import STAGES
-        from ui.store.stage_status import compute_stage_statuses, stage_summaries
+        from ui.store.stage_status import compute_stage_statuses, sessions_row, stage_summaries
 
         self._page_statuses = compute_stage_statuses(
             self._store.manifest, has_run_results=self._store.run_results is not None
@@ -528,6 +529,8 @@ class MainWindow(QMainWindow):
                 summaries[7] = summaries[8] = f"{len(results) - failed} succeeded · {failed} failed"
         for stage_index, (_label, first_page) in enumerate(STAGES):
             info = self._page_statuses[first_page]
+            if stage_index == 1:
+                info = sessions_row(self._page_statuses, manifest)
             self._sidebar.set_status(
                 stage_index, info.status, info.message, summary=summaries[stage_index]
             )
@@ -555,7 +558,7 @@ class MainWindow(QMainWindow):
         self._refresh_footer_labels(page)
 
     def _refresh_footer_labels(self, page: int) -> None:
-        from app.navigation import PAGE_TO_STAGE, STAGES
+        from app.navigation import PAGE_TO_STAGE, STAGES, page_label
 
         mode = self._mode()
         prev_p, next_p = prev_page(mode, page), next_page(mode, page)
@@ -569,7 +572,7 @@ class MainWindow(QMainWindow):
         elif next_p is None:
             text, role = "Done", "primary"
         else:
-            text = f"Next: {STAGES[PAGE_TO_STAGE[next_p]][0]} →".replace("&", "&&")
+            text = f"Next: {page_label(next_p)} →".replace("&", "&&")
             role = "primary"
         self._btn_next.setText(text)
         if self._btn_next.property("role") != role:

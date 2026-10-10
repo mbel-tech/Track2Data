@@ -1117,3 +1117,24 @@ def test_tab_titles_carry_selected_over_total_counts(qtbot) -> None:
 
     screen.apply_preset("Standard locomotor")
     assert screen._tabs.tabText(0) == f"Individual 3/{total}"
+
+
+def test_il15_stays_enabled_in_a_3d_project_and_disabled_in_2d_top(qtbot) -> None:
+    from track2data.core.models import ProjectMode, SceneConfig
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+    _set_view(store, "top")
+    screen._update_availability()
+    assert not _is_enabled(_il15_item(screen))
+
+    store._manifest = store._manifest.model_copy(
+        update={
+            "mode": ProjectMode(dimension="3d", layout="two_videos"),
+            "scene": SceneConfig(camera_view="top"),
+        }
+    )
+    screen._update_availability()
+    assert _is_enabled(_il15_item(screen))

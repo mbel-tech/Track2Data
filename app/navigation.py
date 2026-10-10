@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.theme import theme
+from ui.store.screen_flow import VIEWS_PAGE
+from ui.store.stage_status import VIEWS_PAGE_NAME
 
 # 9 wizard stages, one sidebar row per page (Preview and Export share the
 # last row). The number lives in the painted dot, not the label.
@@ -28,13 +30,18 @@ STAGES: list[tuple[str, int]] = [
     ("Preview & Export", 8),
 ]
 
-# The 3-D-only Views page: appended after the original 10, so their indices
-# are unchanged. It is routed between Sessions and Calibration (screen_flow).
-VIEWS_PAGE = 10
+# The 3-D-only Views page (VIEWS_PAGE, defined in ui.store.screen_flow) is
+# appended after the original 10, so their indices are unchanged. It is routed
+# between Sessions and Calibration (screen_flow).
 
 # Maps each page index → its parent stage index (9 stages, 11 pages; Views
 # sits under Sessions).
 PAGE_TO_STAGE: list[int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 1]
+
+
+def page_label(page: int) -> str:
+    """The name the footer uses for *page*: its stage, or "Views" for the Views page."""
+    return VIEWS_PAGE_NAME if page == VIEWS_PAGE else STAGES[PAGE_TO_STAGE[page]][0]
 
 STATUS_ROLE = Qt.ItemDataRole.UserRole
 SUMMARY_ROLE = Qt.ItemDataRole.UserRole + 1

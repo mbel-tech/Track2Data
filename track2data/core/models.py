@@ -23,6 +23,8 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
+    from track2data.core.runplan import SkippedSession
+
     # Type-only: session_consistency imports Session from here, so a runtime
     # import would close the cycle. SessionRunResult is a plain dataclass, not
     # a pydantic model, so its annotations are never evaluated.
@@ -413,11 +415,28 @@ class SceneConfig(BaseModel):
     camera_view: CameraView = "unknown"
 
 
-MODE_3D_BLOCK_REASON = "3-D fusion is not available yet"
+MODE_3D_BLOCK_REASON = "Pair and fuse a top and a side session first"
+SENSITIVITY_3D_REFUSAL = "sensitivity is not supported for 3-D projects yet"
 VIEWS_3D_ONLY = "Views apply to 3-D projects only"
+PANELS_ONLY_FOR_SINGLE_VIDEO = "Panels apply to the 'One video, two panels' layout only"
 
 #: Which camera a session was recorded from, in a 3-D project.
 ViewRole = Literal["top", "side"]
+
+
+class PanelRect(BaseModel):
+    """The part of a video frame one camera view occupies, in video pixels.
+
+    ``x`` and ``y`` are the top-left corner. Used by a session of a 'One video, two panels'
+    project to cut the shared video into its top and side views.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    x: float = Field(default=0.0, ge=0)
+    y: float = Field(default=0.0, ge=0)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
 
 
 class PairingPatterns(BaseModel):
@@ -430,11 +449,37 @@ class PairingPatterns(BaseModel):
     side_regex: str = ""
 
 
+class FusionSettings(BaseModel):
+    """How the side view of a pair is lined up with its top view to give a depth.
+
+    ``frame_offset`` shifts the side clock against the top clock, in frames. The side view's
+    horizontal axis follows ``horizontal_axis`` of the top view (optionally ``flip``ped).
+    ``surface_row`` and ``floor_row`` are the water surface and tank floor, in side-view image
+    rows; ``tank_height_cm`` is the water depth between them, which sets the side view's scale.
+    """
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    frame_offset: int = 0
+    horizontal_axis: Literal["x", "y"] = "x"
+    flip: bool = False
+    surface_row: float = Field(ge=0)
+    floor_row: float
+    tank_height_cm: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _surface_above_floor(self) -> FusionSettings:
+        if self.surface_row >= self.floor_row:
+            raise ValueError("surface_row must be above floor_row")
+        return self
+
+
 class ViewPair(BaseModel):
     """One top session matched with one side session.
 
     ``fish_map`` maps a top fish label to the side fish label. ``same_ids`` says both views use
     the same labels, so the map is implied. ``auto`` marks a pair found by the name patterns.
+    ``fusion`` holds the alignment settings once the pair has been set up for fusion.
     """
 
     top_session_id: str
@@ -442,6 +487,7 @@ class ViewPair(BaseModel):
     same_ids: bool = False
     fish_map: dict[str, str] = {}
     auto: bool = False
+    fusion: FusionSettings | None = None
 
     @model_validator(mode="after")
     def _two_different_sessions(self) -> ViewPair:
@@ -575,6 +621,9 @@ class SessionRef(BaseModel):
     # Which camera recorded this session, in a 3-D project. None until the user (or the name
     # patterns) says so.
     view_role: ViewRole | None = None
+    # The part of the video this session covers, in a 'One video, two panels' project. None
+    # means the whole frame.
+    panel: PanelRect | None = None
 
     @field_validator("session_id")
     @classmethod
@@ -727,6 +776,8 @@ class RunResult:
     sessions: list[SessionRunResult] = field(default_factory=list)
     #: Files of the run-root ``all_sessions/`` folder (empty for fewer than two sessions).
     pooled: list[Path] = field(default_factory=list)
+    #: Sessions a 3-D run left out (not in a fusable pair, or in a pair that did not fuse).
+    skipped: list[SkippedSession] = field(default_factory=list)
 
     @property
     def written(self) -> list[Path]:
@@ -801,6 +852,18 @@ class PreprocessedSession:
     # was inserted). Tracker confidence is never invented for an inserted row.
     raw_xy_rows: np.ndarray | None = None
     id_probabilities_rows: np.ndarray | None = None
+    # (n_frames, n_animals) depth as a fraction of the water column, 0 = surface, 1 = floor; NaN
+    # where missing or outside the column. From fusing the side view into a 3-D track; None for a
+    # 2-D session or one that has not been fused.
+    depth: np.ndarray | None = None
+    # Tank height in cm (cm per unit depth fraction) and, per fused animal, the count of valid
+    # side positions that fell outside the water column. Whole-session facts set by fusion.
+    depth_height_cm: float | None = None
+    depth_outside: np.ndarray | None = None
+    # (n_frames, n_animals) bool, True where a valid side position was outside the column. Same
+    # shape as ``depth`` and sliced with it, so a window can count its own outside samples;
+    # ``depth_outside`` equals its sum over frames.
+    depth_outside_mask: np.ndarray | None = None
 
     @property
     def raw_xy_aligned(self) -> np.ndarray:

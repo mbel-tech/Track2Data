@@ -65,8 +65,10 @@ from track2data.readers import find_reader, read_session
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from track2data.core.models import CameraView
+    from track2data.core.models import CameraView, ViewPair
+    from track2data.core.runplan import RunPlan
     from track2data.core.session_consistency import SessionSummary
+    from track2data.fusion.fuse import FusedSession
     from track2data.metrics.base import Metric
     from track2data.readers.index import ScanBudget
     from track2data.readers.scan import ScanResult
@@ -444,7 +446,7 @@ class Engine:
             # may have derived another.
             session = self.import_session(ref.folder)
             session = session.model_copy(update={"session_id": ref.session_id})
-            return self._apply_video_override(session)
+            return self._apply_panel(self._apply_video_override(session), ref)
         try:
             session = read_session(
                 Path(ref.folder),
@@ -464,7 +466,19 @@ class Engine:
                 "session and add it again so a reader is detected afresh.",
             ) from exc
         session = session.model_copy(update={"session_id": ref.session_id})
-        return self._apply_import_settings(session)
+        return self._apply_panel(self._apply_import_settings(session), ref)
+
+    @staticmethod
+    def _apply_panel(session: Session, ref: SessionRef) -> Session:
+        """Cut *session* to the entry's panel, the last step of reading it (no panel: as is).
+
+        Raises ValueError when the panel does not fit inside the video.
+        """
+        if ref.panel is None:
+            return session
+        from track2data.views.panels import apply_panel
+
+        return apply_panel(session, ref.panel)
 
     def import_sessions(
         self, *, progress: ProgressCallback | None = None
@@ -528,17 +542,19 @@ class Engine:
                 return None
             reader_name = detected.name
         m = self._manifest
-        config_hash = dict_sha256(
-            {
-                "schema": self._CACHE_SCHEMA,
-                "app": __version__,
-                "reader_options": ref.reader_options,
-                "import_settings": self._import_settings_fingerprint(ref),
-                "preprocess": m.preprocess.model_dump(mode="json"),
-                "calibration": m.calibration.model_dump(mode="json"),
-                "zones": m.zones.model_dump(mode="json"),
-            }
-        )
+        payload: dict[str, Any] = {
+            "schema": self._CACHE_SCHEMA,
+            "app": __version__,
+            "reader_options": ref.reader_options,
+            "import_settings": self._import_settings_fingerprint(ref),
+            "preprocess": m.preprocess.model_dump(mode="json"),
+            "calibration": m.calibration.model_dump(mode="json"),
+            "zones": m.zones.model_dump(mode="json"),
+        }
+        if ref.panel is not None:
+            # Only when set, so the keys of sessions without a panel stay valid.
+            payload["panel"] = ref.panel.model_dump(mode="json")
+        config_hash = dict_sha256(payload)
         store = CacheStore(self._cache_dir)
         return store, store.key(reader_name, folder_fingerprint(ref.folder), config_hash)
 
@@ -825,8 +841,82 @@ class Engine:
         """
         return self._manifest.scene.camera_view
 
-    def view_skipped_metrics(self, session: Session | None = None) -> dict[str, str]:
-        """Selected metric ids the camera view rules out, mapped to the reason."""
+    def camera_view_for_psess(self, psess: PreprocessedSession) -> CameraView:
+        """The view metrics are gated on for *psess*: a fused session (it has a depth) is
+        top-view, anything else is read from its session."""
+        if psess.depth is not None:
+            return "top"
+        return self.camera_view_for(psess.session)
+
+    def _pair_inputs(self, pair: ViewPair) -> tuple[PreprocessedSession, PreprocessedSession]:
+        from track2data.core.errors import Track2DataError
+        from track2data.fusion.fuse import FusionError
+
+        by_id = {ref.session_id: ref for ref in self._manifest.sessions}
+        for sid in (pair.top_session_id, pair.side_session_id):
+            if sid not in by_id:
+                raise FusionError(f"session not in the project: {sid}")
+        loaded = []
+        for sid in (pair.top_session_id, pair.side_session_id):
+            try:
+                loaded.append(self.preprocess_ref(by_id[sid]))
+            except Track2DataError as exc:
+                raise FusionError(f"session {sid} could not be read: {exc}") from exc
+        return loaded[0], loaded[1]
+
+    def fuse_pair(self, pair: ViewPair) -> FusedSession:
+        """Fuse a matched top/side pair into one session with a depth (see ``track2data.fusion``).
+
+        Both sessions come through :meth:`preprocess_ref` (cached); nothing is stored, so a
+        changed setting or offset always gives a fresh result. Raises ``FusionError``.
+        """
+        from track2data.fusion.fuse import fuse
+
+        top, side = self._pair_inputs(pair)
+        same_video = self._manifest.mode.layout == "single_video_two_panels"
+        return fuse(top, side, pair, same_video=same_video)
+
+    def fuse_all(
+        self,
+    ) -> tuple[dict[tuple[str, str], FusedSession], dict[tuple[str, str], str]]:
+        """Fuse every pair that has fusion settings: results and error messages, both keyed by
+        ``(top_id, side_id)``. Pairs without settings are skipped; a failing pair is reported,
+        not raised."""
+        from track2data.fusion.fuse import FusionError
+
+        results: dict[tuple[str, str], FusedSession] = {}
+        errors: dict[tuple[str, str], str] = {}
+        for pair in self._manifest.view_pairs:
+            if pair.fusion is None:
+                continue
+            key = (pair.top_session_id, pair.side_session_id)
+            try:
+                results[key] = self.fuse_pair(pair)
+            except FusionError as exc:
+                errors[key] = str(exc)
+            except Exception as exc:  # one bad pair must not hide the others
+                errors[key] = f"{type(exc).__name__}: {exc}"
+        return results, errors
+
+    def suggest_offset(self, pair: ViewPair) -> int | None:
+        """The frame offset that best aligns the pair's views, or ``None`` (also when the pair
+        cannot be fused). For the fusion dialog, on a worker thread."""
+        from track2data.fusion.agreement import suggest_offset
+
+        if self._manifest.mode.layout == "single_video_two_panels":
+            return None  # fusion forces the offset to 0 for one video
+        try:
+            top, side = self._pair_inputs(pair)
+            return suggest_offset(top, side, pair)
+        except Exception:  # FusionError or anything unexpected: no suggestion
+            return None
+
+    def view_skipped_metrics(
+        self, session: Session | None = None, *, psess: PreprocessedSession | None = None
+    ) -> dict[str, str]:
+        """Selected metric ids the camera view rules out, mapped to the reason. With *psess* the
+        view is that session's (a fused one is top-view) and a depth metric is allowed when it
+        has depth."""
         from track2data.metrics import get
         from track2data.metrics.availability import view_skipped_metrics
 
@@ -835,16 +925,29 @@ class Engine:
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
         ]
-        return view_skipped_metrics(selected, self.camera_view_for(session), get)
+        if psess is None:
+            if session is None:
+                from track2data.metrics.availability import manifest_view
+
+                view, has_depth = manifest_view(self._manifest)
+                return view_skipped_metrics(selected, view, get, has_depth=has_depth)
+            return view_skipped_metrics(selected, self.camera_view_for(session), get)
+        return view_skipped_metrics(
+            selected, self.camera_view_for_psess(psess), get, has_depth=psess.depth is not None
+        )
 
     def skipped_metrics(
-        self, identity_free: bool, session: Session | None = None
+        self,
+        identity_free: bool,
+        session: Session | None = None,
+        *,
+        psess: PreprocessedSession | None = None,
     ) -> dict[str, str]:
         """Every selected metric id this session must not run, mapped to the reason, for the
         export record: the identity gate and the camera-view gate together. A metric that both
         gates rule out carries both reasons."""
         skipped = self.identity_skipped_metrics(identity_free)
-        for mid, reason in self.view_skipped_metrics(session).items():
+        for mid, reason in self.view_skipped_metrics(session, psess=psess).items():
             skipped[mid] = f"{skipped[mid]}; also {reason}" if mid in skipped else reason
         return skipped
 
@@ -927,8 +1030,12 @@ class Engine:
         During ``run()`` the run's *cancel_check* is called before each
         selected metric, so a cancellation request is noticed between
         metrics; ``OperationCancelled`` propagates out of this method.
+
+        A 3-D project computes fused sessions only (``psess.depth`` is set); the plan itself is
+        not rebuilt here, ``run()`` checks it once.
         """
-        self.require_computable()
+        if self._manifest.mode.dimension == "3d" and getattr(psess, "depth", None) is None:
+            raise ValueError("3-D projects compute fused sessions only")
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
 
@@ -949,8 +1056,8 @@ class Engine:
 
         is_identity_free = self.identity_free_for(psess.session, identity_free)
         identity_skipped = self.identity_skipped_metrics(is_identity_free)
-        view_skipped = self.view_skipped_metrics(psess.session)
-        skipped = self.skipped_metrics(is_identity_free, psess.session)
+        view_skipped = self.view_skipped_metrics(psess.session, psess=psess)
+        skipped = self.skipped_metrics(is_identity_free, psess.session, psess=psess)
         if identity_skipped:
             logger.warning(
                 "Skipping identity-dependent metrics (%s) for session %s: "
@@ -961,11 +1068,12 @@ class Engine:
             )
         if view_skipped:
             logger.warning(
-                "Skipping metrics (%s) for session %s: the project's camera view is %s, "
+                "Skipping metrics (%s) for session %s: its camera view is %s%s, "
                 "which they are not meaningful for.",
                 ", ".join(sorted(view_skipped)),
                 psess.session_id,
-                self.camera_view_for(psess.session),
+                self.camera_view_for_psess(psess),
+                " (a fused session)" if psess.depth is not None else "",
             )
 
         bin_seconds = self._bin_seconds()
@@ -1239,12 +1347,13 @@ class Engine:
         # display name and whether it was ever tested on real output; the manifest entry knows
         # who chose it and with which options. A reader that is no longer registered has neither.
         reader_cls = find_reader(session.reader)
-        camera_view = self.camera_view_for(session)
+        camera_view = self.camera_view_for_psess(psess)
         water_column = None
         from track2data.metrics import get as _get_metric
         from track2data.metrics.availability import view_dependent_metrics
 
-        if view_dependent_metrics(metric_results, "side", _get_metric):
+        # a fused depth does not come from zones, so there is no zone water column to record
+        if psess.depth is None and view_dependent_metrics(metric_results, "side", _get_metric):
             from track2data.metrics.derived import derive_metric_params
 
             water_column = derive_metric_params("IL-15", psess, self._manifest.zones)[
@@ -1309,7 +1418,7 @@ class Engine:
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
-            skipped_metrics=self.skipped_metrics(is_identity_free, psess.session),
+            skipped_metrics=self.skipped_metrics(is_identity_free, psess.session, psess=psess),
         )
 
     def export(
@@ -1319,8 +1428,11 @@ class Engine:
         exporters: list[str] | None = None,
     ) -> list[Path]:
         """Write *payload* to *out_dir* via the requested (or configured
-        default) exporters. Returns the list of written paths."""
-        self.require_computable()
+        default) exporters. Returns the list of written paths.
+
+        Called once per unit inside a run, so it uses the cheap :meth:`_require_not_blocked`
+        rather than :meth:`require_computable` (which would fuse every pair again)."""
+        self._require_not_blocked()
         from track2data.exporters import get_exporter
 
         out_dir = Path(out_dir)
@@ -1343,10 +1455,79 @@ class Engine:
 
         return written
 
-    def require_computable(self) -> None:
-        """Refuse to compute while the project is 3-D (fusion does not exist yet)."""
-        if self._manifest.mode.dimension == "3d":
+    def run_units(self) -> RunPlan:
+        """What a run processes (see ``track2data.core.runplan``).
+
+        2-D: one ``session`` unit per ref in manifest order, nothing skipped. 3-D: one ``pair``
+        unit per fusable pair in ``manifest.view_pairs`` order; a pair is fusable when it has
+        fusion settings and :meth:`fuse_pair` returns (each pair is fused once, and the result is
+        kept on the unit). Every session outside a fusable pair is skipped, once, in session
+        order, with the reason of the first pair that could not use it ("not in a fusable pair"
+        when it is in no pair).
+        """
+        from track2data.core.runplan import RunPlan, RunUnit, SkippedSession
+        from track2data.fusion.fuse import FusionError
+
+        if self._manifest.mode.dimension != "3d":
+            refs = self._manifest.sessions
+            return RunPlan(units=[RunUnit(ref.session_id, "session", ref=ref) for ref in refs])
+
+        plan = RunPlan()
+        in_unit: set[str] = set()
+        reasons: dict[str, str] = {}
+        for pair in self._manifest.view_pairs:
+            pair_id = f"{pair.top_session_id}+{pair.side_session_id}"
+            fused: FusedSession | None = None
+            if pair.fusion is None:
+                reason = f"pair {pair_id}: no fusion settings for this pair"
+            else:
+                try:
+                    fused = self.fuse_pair(pair)
+                except FusionError as exc:
+                    reason = f"pair {pair_id}: {exc}"
+                except Exception as exc:  # one bad pair must not hide the others
+                    reason = f"pair {pair_id}: {type(exc).__name__}: {exc}"
+            if fused is not None:
+                plan.units.append(RunUnit(pair_id, "pair", pair=pair, fused=fused))
+                in_unit.update((pair.top_session_id, pair.side_session_id))
+            else:
+                for sid in (pair.top_session_id, pair.side_session_id):
+                    reasons.setdefault(sid, reason)
+        for ref in self._manifest.sessions:
+            if ref.session_id not in in_unit:
+                plan.skipped.append(
+                    SkippedSession(
+                        ref.session_id, reasons.get(ref.session_id, "not in a fusable pair")
+                    )
+                )
+        return plan
+
+    def _require_not_blocked(self) -> None:
+        """The cheap half of :meth:`require_computable`, for calls made once per session inside a
+        run (``export``): in a 3-D project it only checks that some pair has fusion settings and
+        never fuses. ``run()`` has already built the plan by then, so repeating the full check
+        per session would fuse every pair again."""
+        if self._manifest.mode.dimension == "3d" and not any(
+            p.fusion is not None for p in self._manifest.view_pairs
+        ):
             raise ValueError(MODE_3D_BLOCK_REASON)
+
+    def require_computable(self) -> None:
+        """Refuse to run a 3-D project that has nothing to run.
+
+        Call once at an entry point (``run``, the CLI, the UI): in 3-D it builds the plan, which
+        fuses every pair. A project with no pairs raises ``MODE_3D_BLOCK_REASON``; one whose
+        pairs all fail raises ``"no pair is ready to fuse: ..."`` with the first three reasons.
+        2-D projects never refuse.
+        """
+        if self._manifest.mode.dimension != "3d":
+            return
+        if not self._manifest.view_pairs:
+            raise ValueError(MODE_3D_BLOCK_REASON)
+        plan = self.run_units()
+        if not plan.units:
+            distinct = list(dict.fromkeys(s.reason for s in plan.skipped))
+            raise ValueError("no pair is ready to fuse: " + "; ".join(distinct[:3]))
 
     # ── full run ───────────────────────────────────────────────────────────
 
@@ -1363,7 +1544,8 @@ class Engine:
 
         Returns list of written output paths.
         """
-        self.require_computable()
+        if self._manifest.mode.dimension == "3d":
+            raise ValueError("use run() for a 3-D project")
         psess = self.preprocess(session)
         emit(
             progress,
@@ -1937,8 +2119,7 @@ class Engine:
         written paths, not the full ``RunResult`` (diagnostics, metric
         previews, per-session timing/errors).
         """
-        self.require_computable()
-        return self.run(out_dir, exporters, progress=progress).written
+        return self.run(out_dir, exporters, progress=progress).written  # run() gates
 
     # ── preview ────────────────────────────────────────────────────────────
 

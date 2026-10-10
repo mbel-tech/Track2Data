@@ -19,6 +19,7 @@ from track2data.core.models import MODE_3D_BLOCK_REASON, ProjectManifest
 from track2data.metrics import get as _get_metric
 from track2data.metrics.availability import view_dependent_metrics
 from track2data.zones.extent import water_column
+from ui.store.screen_flow import VIEWS_PAGE as _VIEWS
 
 Status = Literal["empty", "valid", "warning", "blocked"]
 
@@ -31,8 +32,8 @@ def _missing_water_column(manifest: ProjectManifest) -> list[str]:
     Empty unless the project declared a side view, something selected is only meaningful for
     one, and no main-level zone outlines the water.
     """
-    if manifest.scene.camera_view != "side":
-        return []
+    if manifest.mode.dimension == "3d" or manifest.scene.camera_view != "side":
+        return []  # a 3-D project takes its depth from the fusion, not from zones
     sel = manifest.metrics
     needing = view_dependent_metrics(
         [*sel.individual, *sel.group, *sel.zone], "side", _get_metric
@@ -47,8 +48,8 @@ PAGE_NAMES = [
     "Preprocessing", "Metrics", "Processing", "Preview", "Export",
 ]
 (
-    _PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT, _VIEWS
-) = range(11)
+    _PROJECT, _SESSIONS, _CALIB, _ZONES, _META, _PREP, _METRICS, _PROC, _PREVIEW, _EXPORT
+) = range(10)
 
 #: Views is a sub-page of the Sessions stage, so it is not a guide chapter (not in PAGE_NAMES).
 VIEWS_PAGE_NAME = "Views"
@@ -165,15 +166,42 @@ def _views_status(manifest: ProjectManifest) -> StageInfo:
         if s.session_id not in paired:
             return StageInfo("warning", f"Session {s.session_id} is not paired.")
     for p in manifest.view_pairs:
-        name = f"{p.top_session_id} / {p.side_session_id}"
-        if not (p.same_ids or p.fish_map):
-            return StageInfo("warning", f"Match the fish of {name}.")
+        # Problems first, then matching -- the same order as the page's pair status.
         for sid in (p.top_session_id, p.side_session_id):
             # A dangling pair id is skipped: this status uses manifest data only.
             ref = by_id.get(sid)
             if ref is not None and ref.is_identity_free():
                 return StageInfo("warning", f"Session {sid} has no stable identities.")
+        # fish_map is the authority: a pair is matched iff its map is non-empty.
+        if not p.fish_map:
+            name = f"{p.top_session_id} / {p.side_session_id}"
+            return StageInfo("warning", f"Match the fish of {name}.")
+    # Matched pairs still need their depth set up; a hint only, never blocking.
+    for p in manifest.view_pairs:
+        if p.fusion is None:
+            name = f"{p.top_session_id} / {p.side_session_id}"
+            return StageInfo("warning", f"Fusion setup needed for {name}.")
     return StageInfo("valid", f"{len(manifest.view_pairs)} pair(s) matched.")
+
+
+#: How bad each status is, for combining two (higher is worse).
+_SEVERITY: dict[str, int] = {"valid": 0, "empty": 1, "warning": 2, "blocked": 3}
+
+
+def sessions_row(statuses: list[StageInfo], manifest: ProjectManifest | None) -> StageInfo:
+    """What the sidebar's Sessions row shows.
+
+    In a 3-D project the Views page sits under Sessions, so the row shows the worse of
+    the two statuses and the Views message is added to its tooltip. Next is unaffected:
+    it still follows each page's own status.
+    """
+    sessions = statuses[_SESSIONS]
+    if manifest is None or manifest.mode.dimension != "3d":
+        return sessions
+    views = statuses[_VIEWS]
+    status = max(sessions.status, views.status, key=_SEVERITY.__getitem__)
+    parts = [sessions.message, f"{VIEWS_PAGE_NAME}: {views.message}" if views.message else ""]
+    return StageInfo(status, "\n".join(p for p in parts if p))
 
 
 def next_blocker(statuses: list[StageInfo], page: int) -> str | None:
@@ -204,6 +232,12 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
     sel = manifest.metrics
     n_metrics = len(sel.individual) + len(sel.group) + len(sel.zone)
     n_sessions = len(manifest.sessions)
+    sessions_text = (
+        f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions"
+    )
+    if manifest.mode.dimension == "3d" and n_sessions:
+        n_pairs = len(manifest.view_pairs)
+        sessions_text += f" · {n_pairs} pair{'s' if n_pairs != 1 else ''}"
     if manifest.metadata_source is None:
         meta = "Not set"
     elif manifest.mapping is None or not manifest.mapping.rules:
@@ -217,7 +251,7 @@ def stage_summaries(manifest: ProjectManifest | None, *, has_run_results: bool) 
         preview_text = "Results ready" if has_run_results else "Needs a run"
     return [
         manifest.project_name or "Unnamed",
-        f"{n_sessions} session{'s' if n_sessions != 1 else ''}" if n_sessions else "No sessions",
+        sessions_text,
         cal_text,
         "Draw the water column"
         if _missing_water_column(manifest)

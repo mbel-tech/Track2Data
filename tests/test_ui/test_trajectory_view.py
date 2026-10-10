@@ -204,3 +204,24 @@ def test_clear_drops_loaded_data(qtbot) -> None:
     view.set_data(_line_xy(), _line_xy(), 30.0)
     view.clear()
     assert view.n_frames == 0 and view.trail_item_count() == 0
+
+
+def test_set_data_crops_the_backdrop_to_the_panel(qtbot, tmp_path) -> None:
+    from PySide6.QtGui import QColor, QImage
+
+    from track2data.core.models import PanelRect
+
+    image = QImage(400, 200, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    path = tmp_path / "bg.png"
+    assert image.save(str(path))
+    view = TrajectoryView()
+    qtbot.addWidget(view)
+    xy = _line_xy()
+    view.set_data(
+        xy, xy, 30.0, background_path=path, crop=PanelRect(x=100, y=50, width=200, height=100)
+    )
+    rect = view._gscene.sceneRect()
+    assert (rect.width(), rect.height()) == (200, 100)
+    view.set_data(xy, xy, 30.0, background_path=path)
+    assert view._gscene.sceneRect().width() == 400

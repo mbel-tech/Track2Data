@@ -470,3 +470,33 @@ def test_canvas_background_image_wins_over_the_frame_size(qtbot, tmp_path: Path)
 
     rect = canvas.scene().sceneRect()
     assert (rect.width(), rect.height()) == (20, 10)
+
+
+def _bg(tmp_path: Path) -> Path:
+    from PySide6.QtGui import QColor, QImage
+
+    image = QImage(400, 200, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    path = tmp_path / "bg.png"
+    assert image.save(str(path))
+    return path
+
+
+def test_load_session_crops_the_backdrop_to_the_panel(qtbot, tmp_path: Path) -> None:
+    from track2data.core.models import PanelRect
+
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+    canvas.load_session(
+        _bg(tmp_path), None, crop=PanelRect(x=100, y=50, width=200, height=100)
+    )
+    rect = canvas._gscene.sceneRect()
+    assert (rect.width(), rect.height()) == (200, 100)
+
+
+def test_load_session_without_crop_keeps_the_whole_backdrop(qtbot, tmp_path: Path) -> None:
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+    canvas.load_session(_bg(tmp_path), None)
+    rect = canvas._gscene.sceneRect()
+    assert (rect.width(), rect.height()) == (400, 200)

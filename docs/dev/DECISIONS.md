@@ -882,18 +882,104 @@ regex, both empty by default). *Pairing.* Two regexes, searched in the session i
 group; sessions with an equal key pair up. An empty `key` means no match, and a key shared by several
 sessions on one side is ambiguous and not paired. A session belongs to at most one pair. *Same IDs.*
 A per-pair tick says fish with the same label are the same fish; otherwise the user matches by hand.
+`fish_map` is the single authority (what D reads); `same_ids` only says the map was derived from equal
+labels. While it is set the map is re-derived when new labels arrive; the tick is disabled until both
+sessions' labels are known; any hand edit of the map clears it.
 *Identity-free.* A session without stable identities cannot be matched; the pair is flagged "cannot
 match fish: this session has no stable identities" (matching by geometry is not done). *auto.*
-Applying the pattern again replaces the pairs it made earlier (`auto=True`) and never touches
-hand-made ones. *Navigation.* Views is page 10, belongs to the Sessions sidebar row, shows only in 3-D
+Applying the pattern again keeps the pairs it made earlier (`auto=True`) that it still produces, with
+their matching, removes the ones it no longer produces, and never touches hand-made ones. A user change
+to a pair (ticking or unticking Same IDs, editing the map) makes it hand-made (`auto=False`). *Navigation.* Views is page 10, belongs to the Sessions sidebar row, shows only in 3-D
 and is reached by Next and Back between Sessions and Calibration; `PAGE_NAMES` keeps its ten entries.
 *Gate.* Pairs never block Next (3-D cannot compute anyway); the Views status is never `blocked`.
-*Status.* The sidebar status uses manifest data only (roles, pairs, `same_ids`, a non-empty map),
-while the page validates fish maps strictly (duplicate, unknown labels, counts) against the sessions'
-labels.
+*Status.* The Views status (`stage_status`) is manifest-only (roles, pairs, identity-free flags, a
+non-empty map means matched) and drives the Sessions row: in 3-D that row shows the worse of the
+Sessions and Views statuses. The page validates fish maps strictly (duplicate, unknown labels, counts)
+against the sessions' labels.
 
 **Rationale:** A fish mapping hangs off a pair of sessions, and one project-wide dictionary cannot
 describe many pairs, so the pair record and its UI belong with the mapping. Regex pairing scales to
 many trials, and the manual path covers names that follow no rule. Keeping hand-made pairs out of
 re-pairing means a correction is never silently undone. Fusion (D) will be the stage that requires
 complete pairs.
+
+### D-039 · Panel split: a session may carry a panel, applied on read, in panel-relative coordinates
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-panel-split-design.md`
+(sub-project F of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-038: a panel change clears `fish_map` and `same_ids` of the pair that holds the
+session.
+
+**Decision:** *Model.* `SessionRef.panel` is a `PanelRect(x, y, width, height)` (`x, y >= 0`,
+`width, height > 0`) or unset; manifests without it load unchanged. Panels exist only for a 3-D project
+with the layout `single_video_two_panels` (otherwise `ValueError`, "Panels apply to the 'One video, two
+panels' layout only"). *Applied on read.* `apply_panel` (`track2data/views/panels.py`, no Qt) runs as the
+last step of reading a session in the engine and the store's probe, so previews, runs and the CLI see
+the panel version. Coordinates are panel-relative (panel top-left is (0, 0), the video size becomes the
+panel size). Positions outside the panel become NaN; an animal is kept when at least 50% of its valid
+positions are inside (`MIN_COVERAGE`), and the editor flags animals under 90% (`LOW_COVERAGE`). An
+animal with no valid position has coverage 0 and is left out. A session without stable identities has
+no 50% rule: positions outside become NaN and slots with none left are dropped. A panel that is
+larger than or outside the video raises `ValueError` (video size 0 means unknown, no check). *Identity.*
+The same folder with a different panel is a different session, and the panel is part of the
+preprocessing cache key (added only when set, so existing keys stay valid). *Split.*
+`split_session_into_panels` replaces a whole-frame session with `<id>__top` and `<id>__side` (a numeric
+suffix on collision) with `view_role` set, and adds a `ViewPair` with `auto=False`, which a regex
+re-pairing (D-038) never removes. `set_session_panel` sets or clears one panel (two tracker runs on one
+video). Changing or clearing a panel clears `fish_map` and `same_ids` of the pair that holds the
+session; the pair stays. *UI.* The Panels section lives in `ui/widgets/panels_section.py` and is shown
+on the Views page for that layout only; the editor is `ui/dialogs/panel_dialog.py`. *Not in this cycle.*
+Zones remain one set per project; per-view pixel-to-centimetre calibration (needed by fusion and 3-D
+metrics), cropped video export, automatic panel detection, more than two panels and rotated panels.
+
+**Rationale:** One idea, a panel on a session, covers both a single tracker run on the whole frame and
+two runs limited to one panel each. Cutting on read keeps the tracker output untouched and gives the
+later stages (fusion D, 3-D metrics B) two ordinary sessions with their own video size plus
+`view_pairs`. Panel-relative coordinates let zones and depth (IL-15) work inside one panel.
+
+### D-040 · Fusion of top and side views: two cameras at right angles, computed on demand, depth beside the top-view session
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-09-fusion-design.md`
+(sub-project D of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It extends D-038 (the pair record
+gains the fusion settings) and D-039 (the fused session is built from the two panel sessions) and
+does not change D-037: 3-D projects still cannot compute, `Engine.require_computable()` is unchanged.
+
+**Decision:** *Model.* `ViewPair.fusion` is `FusionSettings(frame_offset=0, horizontal_axis="x"|"y",
+flip=False, surface_row >= 0, floor_row > surface_row, tank_height_cm > 0)` or unset; manifests
+without it load unchanged and it is part of `project_hash`. `PreprocessedSession.depth` is an optional
+`(n_frames, n_animals)` array. *Geometry.* The side view's horizontal axis follows one top-view axis;
+the cameras are assumed to be at right angles, with no calibration or triangulation. Depth is
+`(y_side - surface_row) / (floor_row - surface_row)`, 0 = surface, 1 = floor (the IL-15 convention);
+positions outside [0, 1] become NaN and are counted, never clipped. The side scale is
+`(floor_row - surface_row) / tank_height_cm` pixels per cm. *Alignment.* `fuse` (`track2data/fusion/`,
+no Qt) aligns on video frame numbers (side frame = top frame + `frame_offset`); frame rates that
+differ by more than 0.1% raise `FusionError`; the layout "One video, two panels" forces offset 0.
+Only the fish in the pair's `fish_map` are fused. Untracked and separator rows are left out, and the
+fused session carries no separator rows, so a consumer must read `frame_index`. The result
+(`FusedSession`) is the top-view session over the shared frames with `depth` set. *Agreement.* With a
+calibrated top view, both views are converted to cm and the side horizontal position is compared with
+the chosen top-view axis, median difference removed per fish; the RMS is reported (overall RMS pools
+the fish with at least 3 jointly valid samples) and a warning is set above 10% of the top-view range
+along the axis. An uncalibrated top view skips the check ("top view not calibrated") and still gets a
+depth. `suggest_offset` scans lags within +-5 s around 0 only, skips lags with fewer than 30 jointly
+valid samples and returns a lag only if its RMS is at least 20% below the lag-0 RMS; `fuse` does not
+fill `FusionReport.suggested_offset`, the dialog's "Suggest offset" button calls it on demand.
+*Engine.* `fuse_pair`, `fuse_all` (results and error messages per pair) and `suggest_offset`; fusion
+is not cached on disk, its inputs (the two preprocessed sessions) are. *Store and UI.*
+`ProjectStore.update_fusion` (3-D only, the pair must exist) keeps the settings when the fish map changes;
+a change of the side session's panel shifts the two water rows by the panel's y offset (cleared if they
+become invalid). The Views page gains a Fusion section (`ui/widgets/fusion_section.py`) with a status
+line and "Set up fusion…", which opens `ui/dialogs/fusion_dialog.py` (side-view backdrop with two
+draggable lines, `ui/widgets/water_column_view.py`, typed fields, a live summary). The Views stage
+status warns "Fusion setup needed for ..." while a pair has no settings and still never blocks.
+*Not in this cycle.* 3-D metrics and lifting the compute block (B), camera calibration and
+triangulation, cameras not at right angles, fusion across different frame rates, automatic detection
+of the water column, a z axis in the exports, several offsets for one pair.
+
+**Rationale:** Right-angle cameras need no calibration, so the fusion can ship before the 3-D metrics.
+Putting the depth beside an ordinary top-view session means the 2-D metrics run on the fused session
+and B only has to read one more array. Caveats: dropped stretches leave `frame_index` gaps without
+separator rows (distance-type metrics bridge them), and IL-15 on a fused session would use the
+top-view y, so B must read `psess.depth`. Counting out-of-column positions instead of
+clipping them keeps a wrong water column visible. Computing on demand from cached inputs avoids a
+second cache whose key would have to track every setting of both sessions.
+

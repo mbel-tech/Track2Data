@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from app.navigation import SUMMARY_ROLE
 from track2data.core.models import (
     ProjectMode,
     RunResult,
@@ -156,4 +157,55 @@ def test_mode_change_refreshes_footer(qtbot, tmp_path) -> None:
     win._go_to_page(1)
     assert win._btn_next.text() == "Next: Calibration →"
     win._store.update_mode(THREE_D)
-    assert win._btn_next.text() == "Next: Sessions →"  # the Views page, under Sessions
+    assert win._btn_next.text() == "Next: Views →"
+
+
+# ── the Sessions sidebar row carries the Views status in 3-D ───────────────
+
+
+def _two_view_refs(tmp_path: Path) -> list[SessionRef]:
+    return [
+        SessionRef(session_id=sid, folder=tmp_path / sid, sha256="0" * 64)
+        for sid in ("t1_top", "t1_side")
+    ]
+
+
+def test_3d_sessions_row_shows_worse_of_sessions_and_views(qtbot, tmp_path) -> None:
+    from track2data.core.models import FusionSettings, ViewPair
+
+    win = _window(qtbot, tmp_path)
+    store = win._store
+    store.update_mode(THREE_D)
+    store.update_sessions(_two_view_refs(tmp_path))
+    # Sessions valid, Views empty (no roles yet) -> empty
+    assert win._sidebar.status(1) == "empty"
+    assert "Views: Choose a view" in win._sidebar.item(1).toolTip()
+    assert win._sidebar.item(1).data(SUMMARY_ROLE) == "2 sessions · 0 pairs"
+    # Only viewsChanged fires for a role change: the row must still refresh.
+    store.update_view_role("t1_top", "top")
+    store.update_view_role("t1_side", "side")
+    assert win._sidebar.status(1) == "warning"
+    assert "is not paired" in win._sidebar.item(1).toolTip()
+    store.update_view_pair(
+        ViewPair(top_session_id="t1_top", side_session_id="t1_side", fish_map={"0": "0"})
+    )
+    assert win._sidebar.status(1) == "warning"
+    assert "Fusion setup needed" in win._sidebar.item(1).toolTip()
+    store.update_fusion(
+        "t1_top",
+        "t1_side",
+        FusionSettings(surface_row=10.0, floor_row=110.0, tank_height_cm=20.0),
+    )
+    assert win._sidebar.status(1) == "valid"
+    assert win._sidebar.item(1).data(SUMMARY_ROLE) == "2 sessions · 1 pair"
+    # Next from Sessions follows the Sessions page alone.
+    win._go_to_page(1)
+    assert win._next_action.isEnabled()
+
+
+def test_2d_sessions_row_ignores_views(qtbot, tmp_path) -> None:
+    win = _window(qtbot, tmp_path)
+    win._store.update_sessions(_two_view_refs(tmp_path))
+    assert win._sidebar.status(1) == "valid"
+    assert win._sidebar.item(1).toolTip() == "2 session(s)."
+    assert win._sidebar.item(1).data(SUMMARY_ROLE) == "2 sessions"

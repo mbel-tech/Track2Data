@@ -769,3 +769,174 @@ def test_project_hash_depends_on_pairs() -> None:
     m = _views_manifest()
     other = m.model_copy(update={"view_pairs": []})
     assert m.project_hash() != other.project_hash()
+
+
+# ── Panel rectangle on a session ──────────────────────────────────────────────
+
+
+def test_panel_defaults_to_none() -> None:
+    from track2data.core.models import PANELS_ONLY_FOR_SINGLE_VIDEO, PanelRect, SessionRef
+
+    assert SessionRef(session_id="a", folder=Path("/x"), sha256="0").panel is None
+    rect = PanelRect(width=10, height=5)
+    assert (rect.x, rect.y) == (0.0, 0.0)
+    assert PANELS_ONLY_FOR_SINGLE_VIDEO == "Panels apply to the 'One video, two panels' layout only"
+
+
+@pytest.mark.parametrize("width,height", [(0, 5), (5, 0), (-1, 5), (5, -1)])
+def test_panel_rect_rejects_non_positive_size(width: float, height: float) -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import PanelRect
+
+    with pytest.raises(ValidationError):
+        PanelRect(width=width, height=height)
+
+
+@pytest.mark.parametrize("x,y", [(-1, 0), (0, -1)])
+def test_panel_rect_rejects_negative_origin(x: float, y: float) -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import PanelRect
+
+    with pytest.raises(ValidationError):
+        PanelRect(x=x, y=y, width=10, height=10)
+
+
+def _panel_manifest(panel=None) -> ProjectManifest:
+    from track2data.core.models import ProjectMode, SessionRef
+
+    return _mode_manifest(
+        sessions=[SessionRef(session_id="a", folder=Path("/x"), sha256="0", panel=panel)],
+        mode=ProjectMode(dimension="3d", layout="single_video_two_panels"),
+    )
+
+
+def test_session_ref_with_panel_roundtrips_json() -> None:
+    from track2data.core.models import PanelRect
+
+    m = _panel_manifest(PanelRect(x=10, y=20, width=300, height=200))
+    back = ProjectManifest.model_validate_json(m.model_dump_json())
+    assert back == m
+    assert back.sessions[0].panel == PanelRect(x=10, y=20, width=300, height=200)
+
+
+def test_old_manifest_without_panel_loads() -> None:
+    data = _panel_manifest().model_dump()
+    for s in data["sessions"]:
+        s.pop("panel")
+    assert ProjectManifest.model_validate(data).sessions[0].panel is None
+
+
+def test_project_hash_depends_on_panel() -> None:
+    from track2data.core.models import PanelRect
+
+    assert (
+        _panel_manifest().project_hash()
+        != _panel_manifest(PanelRect(width=10, height=10)).project_hash()
+    )
+
+
+# ── Fusion settings on a view pair ────────────────────────────────────────────
+
+_FUSION = {"surface_row": 10.0, "floor_row": 110.0, "tank_height_cm": 20.0}
+
+
+def test_fusion_settings_defaults() -> None:
+    from track2data.core.models import FusionSettings
+
+    f = FusionSettings(**_FUSION)
+    assert f.frame_offset == 0
+    assert f.horizontal_axis == "x"
+    assert f.flip is False
+
+
+@pytest.mark.parametrize("missing", list(_FUSION))
+def test_fusion_settings_requires_the_three_fields(missing: str) -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import FusionSettings
+
+    kw = {k: v for k, v in _FUSION.items() if k != missing}
+    with pytest.raises(ValidationError):
+        FusionSettings(**kw)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"surface_row": 110.0},
+        {"surface_row": 120.0},
+        {"surface_row": -1.0},
+        {"tank_height_cm": 0.0},
+        {"tank_height_cm": -5.0},
+        {"surface_row": float("inf")},
+        {"floor_row": float("inf")},
+        {"tank_height_cm": float("nan")},
+        {"surface_row": float("nan")},
+        {"frame_offset": 1.5},
+        {"horizontal_axis": "z"},
+    ],
+)
+def test_fusion_settings_rejects_invalid(override: dict) -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import FusionSettings
+
+    with pytest.raises(ValidationError):
+        FusionSettings(**{**_FUSION, **override})
+
+
+def test_fusion_settings_message_for_inverted_rows() -> None:
+    from pydantic import ValidationError
+
+    from track2data.core.models import FusionSettings
+
+    with pytest.raises(ValidationError, match="surface_row must be above floor_row"):
+        FusionSettings(**{**_FUSION, "surface_row": 110.0})
+
+
+def _fusion_manifest(fusion=None) -> ProjectManifest:
+    m = _views_manifest()
+    pair = m.view_pairs[0].model_copy(update={"fusion": fusion})
+    return m.model_copy(update={"view_pairs": [pair]})
+
+
+def test_view_pair_fusion_defaults_to_none() -> None:
+    from track2data.core.models import ViewPair
+
+    assert ViewPair(top_session_id="a", side_session_id="b").fusion is None
+
+
+def test_view_pair_with_fusion_roundtrips_json() -> None:
+    from track2data.core.models import FusionSettings
+
+    m = _fusion_manifest(FusionSettings(frame_offset=-3, flip=True, **_FUSION))
+    back = ProjectManifest.model_validate_json(m.model_dump_json())
+    assert back == m
+    assert back.view_pairs[0].fusion.frame_offset == -3
+
+
+def test_old_manifest_without_fusion_loads() -> None:
+    data = _fusion_manifest().model_dump()
+    for p in data["view_pairs"]:
+        p.pop("fusion")
+    assert ProjectManifest.model_validate(data).view_pairs[0].fusion is None
+
+
+def test_project_hash_depends_on_fusion() -> None:
+    from track2data.core.models import FusionSettings
+
+    none = _fusion_manifest().project_hash()
+    zero = _fusion_manifest(FusionSettings(**_FUSION)).project_hash()
+    shifted = _fusion_manifest(FusionSettings(frame_offset=2, **_FUSION)).project_hash()
+    assert len({none, zero, shifted}) == 3
+
+
+def test_preprocessed_session_depth_defaults_to_none() -> None:
+    from track2data.core.models import PreprocessedSession
+
+    psess = PreprocessedSession(session=None, xy=np.zeros((2, 1, 2)), kinematics=None)
+    assert psess.depth is None
+    assert psess.depth_height_cm is None
+    assert psess.depth_outside is None

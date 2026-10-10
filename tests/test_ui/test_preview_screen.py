@@ -624,3 +624,18 @@ def test_screen_is_freed_by_refcount_not_left_to_interpreter_exit(qtbot) -> None
         assert ref() is None
     finally:
         gc.enable()
+
+
+def test_load_trajectory_data_fills_crop_from_the_refs_panel(
+    tiny_real_session: Path, tmp_path
+) -> None:
+    from track2data.core.models import PanelRect
+    from ui.preview_screen import load_trajectory_data
+
+    store = _trajectory_store(tmp_path, tiny_real_session)
+    assert load_trajectory_data(store.manifest, tiny_real_session.name, None).crop is None
+    panel = PanelRect(x=0, y=0, width=10, height=10)
+    ref = store.manifest.sessions[0]
+    store.manifest.sessions[0] = ref.model_copy(update={"panel": panel})
+    data = load_trajectory_data(store.manifest, tiny_real_session.name, None)
+    assert data.crop == panel

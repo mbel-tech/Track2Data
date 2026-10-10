@@ -21,13 +21,16 @@ from PySide6.QtCore import QObject, Signal
 
 from track2data.core.ids import default_session_id, uniquify
 from track2data.core.models import (
+    PANELS_ONLY_FOR_SINGLE_VIDEO,
     VIEWS_3D_ONLY,
     CalibrationConfig,
     ExportTarget,
+    FusionSettings,
     MappingRule,
     MetadataSource,
     MetricSelection,
     PairingPatterns,
+    PanelRect,
     PreprocessConfig,
     ProjectManifest,
     ProjectMode,
@@ -40,7 +43,7 @@ from track2data.core.models import (
 )
 from track2data.core.progress import CancellationToken, OperationCancelled
 from track2data.readers import find_reader
-from track2data.views.pairing import PairingResult, pair_by_regex
+from track2data.views.pairing import PairingResult, fish_labels, identity_map, pair_by_regex
 from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
 
@@ -102,13 +105,15 @@ def _is_duplicate(ref: SessionRef, existing: Sequence[SessionRef]) -> bool:
     reader (a legacy entry with no saved reader counts as any), picking the same arena.
 
     The same folder under another reader is not a duplicate: another reader could read the same
-    files into different numbers, so it is a different session.
+    files into different numbers, so it is a different session. So is the same folder with
+    another panel: it is another part of the video.
     """
     place, selector = _resolved(ref.folder), _selector(ref)
     return any(
         _resolved(other.folder) == place
         and (other.reader is None or other.reader == ref.reader)
         and _selector(other) == selector
+        and other.panel == ref.panel
         for other in existing
     )
 
@@ -202,6 +207,8 @@ class ProjectStore(QObject):
             self.viewsChanged,
         ):
             signal.connect(self._on_manifest_changed)
+        # Connected first, so pages see the re-derived maps when they hear the facts.
+        self.sessionFactsChanged.connect(self._rederive_same_ids)
 
     # ── accessors ──────────────────────────────────────────────────────────
 
@@ -498,6 +505,8 @@ class ProjectStore(QObject):
         if not self._require_3d():
             return
         assert self._manifest is not None
+        if self._manifest.mode.pairing == patterns:
+            return
         mode = self._manifest.mode.model_copy(update={"pairing": patterns})
         self._manifest = self._manifest.model_copy(update={"mode": mode})
         self.modeChanged.emit()
@@ -568,7 +577,162 @@ class ProjectStore(QObject):
                 other, pair.side_session_id
             ):
                 raise ValueError("a session can be in one pair only")
-        pairs = [p for p in pairs if (p.top_session_id, p.side_session_id) != key] + [pair]
+        index = next(
+            (i for i, p in enumerate(pairs) if (p.top_session_id, p.side_session_id) == key), None
+        )
+        if index is None:
+            pairs.append(pair)
+        else:
+            pairs[index] = pair
+        self._set_views(list(self._manifest.sessions), pairs)
+
+    def _require_panels(self) -> bool:
+        """False with no project open; raises unless it is a 'One video, two panels' project."""
+        if self._manifest is None:
+            return False
+        mode = self._manifest.mode
+        if mode.dimension != "3d" or mode.layout != "single_video_two_panels":
+            raise ValueError(PANELS_ONLY_FOR_SINGLE_VIDEO)
+        return True
+
+    def _index_of(self, session_id: str) -> int:
+        assert self._manifest is not None
+        for i, s in enumerate(self._manifest.sessions):
+            if s.session_id == session_id:
+                return i
+        raise ValueError(f"unknown session: {session_id}")
+
+    def split_session_into_panels(
+        self, session_id: str, top_rect: PanelRect, side_rect: PanelRect
+    ) -> tuple[str, str]:
+        """Replace one session with a top and a side session reading its two panels.
+
+        The new sessions take the original's place in the list, keep its folder and reader
+        choice, and are paired with each other (a hand-made pair). Returns their ids. Both
+        are probed again, since what they read is now the cut-out panel.
+        """
+        if not self._require_panels():
+            return ("", "")
+        assert self._manifest is not None
+        manifest = self._manifest
+        index = self._index_of(session_id)
+        sessions = list(manifest.sessions)
+        original = sessions[index]
+        if original.panel is not None:
+            raise ValueError(f"{session_id} already has a panel")
+        taken = {s.session_id for s in sessions}
+        top_id, side_id = uniquify([f"{session_id}__top", f"{session_id}__side"], taken)
+        shared = original.model_copy(update={"panel": None, "view_role": None})
+        top = shared.model_copy(
+            update={"session_id": top_id, "panel": top_rect, "view_role": "top"}
+        )
+        side = shared.model_copy(
+            update={"session_id": side_id, "panel": side_rect, "view_role": "side"}
+        )
+        sessions[index : index + 1] = [top, side]
+        pairs = [p for p in manifest.view_pairs if not self._in_pair(p, session_id)]
+        pairs.append(ViewPair(top_session_id=top_id, side_session_id=side_id, auto=False))
+        overrides = dict(manifest.video_overrides)
+        if session_id in overrides:
+            overrides[top_id] = overrides[side_id] = overrides.pop(session_id)
+        self._manifest = manifest.model_copy(
+            update={"sessions": sessions, "view_pairs": pairs, "video_overrides": overrides}
+        )
+        self.sessionsChanged.emit()
+        self.viewsChanged.emit()
+        if self._session_facts.pop(session_id, None) is not None:
+            self.sessionFactsChanged.emit()
+        self._submit_probe(top_id, top.folder)
+        self._submit_probe(side_id, side.folder)
+        return top_id, side_id
+
+    def set_session_panel(self, session_id: str, rect: PanelRect | None) -> None:
+        """Set (or clear, via None) the part of the video a session covers.
+
+        The session is probed again and its cached facts dropped. A fish map made against the
+        old panel no longer holds, so the pair holding the session loses its map and its
+        "Same IDs" tick (the pair itself stays). The water-column rows of a pair this session is
+        the side of are in side-panel pixels, so they move with the panel's top edge; settings
+        that are no longer valid after the move are dropped. The same panel again changes
+        nothing.
+        """
+        if not self._require_panels():
+            return
+        assert self._manifest is not None
+        manifest = self._manifest
+        index = self._index_of(session_id)
+        sessions = list(manifest.sessions)
+        if sessions[index].panel == rect:
+            return
+        old_y = sessions[index].panel.y if sessions[index].panel is not None else 0.0
+        shift = old_y - (rect.y if rect is not None else 0.0)
+        sessions[index] = sessions[index].model_copy(update={"panel": rect})
+        pairs = []
+        for p in manifest.view_pairs:
+            if self._in_pair(p, session_id):
+                if p.fish_map or p.same_ids:
+                    p = p.model_copy(update={"fish_map": {}, "same_ids": False})
+                if p.side_session_id == session_id and p.fusion is not None and shift:
+                    p = p.model_copy(update={"fusion": self._shifted_fusion(p.fusion, shift)})
+            pairs.append(p)
+        self._manifest = manifest.model_copy(update={"sessions": sessions, "view_pairs": pairs})
+        self.sessionsChanged.emit()
+        self.viewsChanged.emit()
+        if self._session_facts.pop(session_id, None) is not None:
+            self.sessionFactsChanged.emit()
+        self._submit_probe(session_id, sessions[index].folder)
+
+    @staticmethod
+    def _shifted_fusion(fs: FusionSettings, shift: float) -> FusionSettings | None:
+        """*fs* with both water rows moved by *shift*, or None when that is not valid."""
+        surface, floor = fs.surface_row + shift, fs.floor_row + shift
+        if surface < 0 or surface >= floor:
+            return None
+        return fs.model_copy(update={"surface_row": surface, "floor_row": floor})
+
+    def _rederive_same_ids(self) -> None:
+        """Re-fill the map of every "Same IDs" pair from the labels now known.
+
+        A ticked pair has no hand edits (a manual change clears the tick), so its
+        map is always the identity map of the two label lists. Pairs whose labels
+        are not known for both sessions are left as they are.
+        """
+        m = self._manifest
+        if m is None or m.mode.dimension != "3d" or not any(p.same_ids for p in m.view_pairs):
+            return
+        pairs = list(m.view_pairs)
+        changed = False
+        for i, p in enumerate(pairs):
+            if not p.same_ids:
+                continue
+            facts = [self._session_facts.get(s) for s in (p.top_session_id, p.side_session_id)]
+            if None in facts:
+                continue
+            top_l, side_l = (fish_labels(f.identities_labels, f.n_animals) for f in facts)
+            fish_map, _ = identity_map(top_l, side_l)
+            if fish_map != p.fish_map:
+                pairs[i] = p.model_copy(update={"fish_map": fish_map})
+                changed = True
+        if changed:
+            self._set_views(list(m.sessions), pairs)
+
+    def update_fusion(
+        self, top_session_id: str, side_session_id: str, settings: FusionSettings | None
+    ) -> None:
+        """Set (or clear, via None) the fusion settings of one pair; its other fields stay."""
+        if not self._require_3d():
+            return
+        assert self._manifest is not None
+        key = (top_session_id, side_session_id)
+        pairs = list(self._manifest.view_pairs)
+        index = next(
+            (i for i, p in enumerate(pairs) if (p.top_session_id, p.side_session_id) == key), None
+        )
+        if index is None:
+            raise ValueError(f"unknown pair: {top_session_id} / {side_session_id}")
+        if pairs[index].fusion == settings:
+            return
+        pairs[index] = pairs[index].model_copy(update={"fusion": settings})
         self._set_views(list(self._manifest.sessions), pairs)
 
     def remove_view_pair(self, top_session_id: str, side_session_id: str) -> None:
@@ -741,6 +905,10 @@ class ProjectStore(QObject):
         session_id = self._identity_probes.pop(task_id, None)
         if session_id is None:
             return  # not an identity-probe task (e.g. a pipeline run/preview)
+        if self._manifest is None or all(
+            r.session_id != session_id for r in self._manifest.sessions
+        ):
+            return  # split or removed while the probe ran
         if isinstance(result, Exception):
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
             if _is_pickle_refusal(result):
@@ -757,6 +925,7 @@ class ProjectStore(QObject):
                 )
                 self.pickleConsentRequired.emit(session_id, folder)
             return
+        result = self._apply_session_panel(session_id, result)
         self._set_session_identity(
             session_id, result.has_stable_identities, result.track_wo_identities
         )
@@ -766,6 +935,24 @@ class ProjectStore(QObject):
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
+
+    def _apply_session_panel(self, session_id: str, session: Any) -> Any:
+        """Cut a probed session to its panel, if the session has one.
+
+        The probe reads the whole video; the engine cuts later runs the same way. A panel that
+        does not fit is logged and the whole-video session kept, so the page does not crash.
+        """
+        sessions = self._manifest.sessions if self._manifest else []
+        ref = next((r for r in sessions if r.session_id == session_id), None)
+        if ref is None or ref.panel is None:
+            return session
+        from track2data.views.panels import apply_panel
+
+        try:
+            return apply_panel(session, ref.panel)
+        except ValueError as exc:
+            self.append_log(f"_Panel of `{session_id}` does not fit its video: {exc}_\n")
+            return session
 
     def set_allow_pickle_trajectories(self, allowed: bool) -> None:
         """Record the project's answer to the unpickling question.
