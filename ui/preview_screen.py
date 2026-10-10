@@ -20,7 +20,7 @@ Diagnostics tab, per selected session (store.run_results.sessions):
     SessionRunResult.preprocess_report (step_name/affected_frames/
     affected_per_individual/notes), one row per PPStepResult. The
     report is None when the session never got past preprocessing (see
-    Engine._run_one_session in track2data/api.py, which preserves it
+    Engine._run_one_unit in track2data/api.py, which preserves it
     for failures in any later stage), in which case this table renders
     empty.
   The two diagnostic tables are built by concatenating the metric

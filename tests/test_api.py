@@ -339,7 +339,7 @@ def test_user_override_ungates_a_session_tracked_without_identities() -> None:
 
 
 def test_explicit_identity_free_argument_wins_over_the_manifest() -> None:
-    """_run_one_session passes the answer it already holds, since it is
+    """_run_one_unit passes the answer it already holds, since it is
     keyed by ref.session_id and a reader-derived id may differ."""
     from track2data.api import Engine
 
@@ -1490,7 +1490,7 @@ def _report_fingerprint(report: PreprocessReport) -> list[tuple]:
 def test_run_attaches_preprocess_report_to_session_run_result(tmp_path: Path) -> None:
     """SessionRunResult.preprocess_report must carry the same PreprocessReport
     that Engine.preprocess() produces for that session -- currently it's
-    computed but discarded before _run_one_session() builds the result."""
+    computed but discarded before _run_one_unit() builds the result."""
     from track2data.api import Engine
 
     session = _make_session(n_frames=10, n_animals=1)
@@ -1533,7 +1533,7 @@ def test_run_leaves_preprocess_report_none_when_preprocessing_fails(tmp_path: Pa
 
 
 def test_run_keeps_preprocess_report_when_a_later_stage_fails(tmp_path: Path) -> None:
-    """_run_one_session()'s except block covers import, preprocess, metrics,
+    """_run_one_unit()'s except block covers import, preprocess, metrics,
     payload build and export alike. When preprocessing succeeded and a *later*
     stage blew up, the report exists and is exactly what the user needs to
     diagnose the failure -- it must not be discarded along with the rest."""

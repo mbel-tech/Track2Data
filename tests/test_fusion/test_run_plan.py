@@ -130,6 +130,23 @@ def test_skipped_sessions_are_listed_once_in_session_order(monkeypatch):
     assert plan.skipped[2].reason == "pair t2+s2: no fusion settings for this pair"
 
 
+def test_a_session_already_in_a_unit_is_not_used_by_a_second_pair(monkeypatch):
+    pairs, psesses, ids = _two_pairs(monkeypatch, extra_ids=("t3",))
+    psesses["t3"] = make_psess("t3", top_xy(), labels=["a", "b", "c"], px_per_cm=2.0)
+    # a hand-edited manifest puts s1 in a second, fusable pair: it would be counted twice
+    twice = pairs[0].model_copy(update={"top_session_id": "t3"})
+    engine = _engine(monkeypatch, [*pairs, twice], psesses, ids)
+    calls = []
+    real = engine.fuse_pair
+    monkeypatch.setattr(engine, "fuse_pair", lambda p: (calls.append(p), real(p))[1])
+    plan = engine.run_units()
+    assert [u.unit_id for u in plan.units] == ["t1+s1", "t2+s2"]
+    assert [(s.session_id, s.reason) for s in plan.skipped] == [
+        ("t3", "pair t3+s1: session s1 is already in pair t1+s1")
+    ]
+    assert len(calls) == 2  # the second use is refused before fusing
+
+
 def test_a_good_pair_beside_a_bad_one_still_yields_its_unit(monkeypatch):
     pairs, psesses, ids = _two_pairs(monkeypatch)
     pairs[0] = pairs[0].model_copy(update={"fusion": settings(frame_offset=1000)})

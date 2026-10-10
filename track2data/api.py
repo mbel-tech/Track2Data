@@ -66,7 +66,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from track2data.core.models import CameraView, ViewPair
-    from track2data.core.runplan import RunPlan
+    from track2data.core.runplan import RunPlan, RunUnit
     from track2data.core.session_consistency import SessionSummary
     from track2data.fusion.fuse import FusedSession
     from track2data.metrics.base import Metric
@@ -138,22 +138,33 @@ def _parallel_init(events: Any, cancel: Any) -> None:
 
 def _parallel_run_one(
     manifest_json: str,
+    kind: str,
     index: int,
     out_dir: str,
     exporters: list[str] | None,
     cache_dir: str | None,
 ) -> SessionRunResult | None:
-    """Run session *index* in a worker process.
+    """Run one plan unit in a worker process.
+
+    The unit arrives as plain values -- its ``kind`` and its *index* into
+    ``manifest.sessions`` (``"session"``) or ``manifest.view_pairs`` (``"pair"``) -- never as the
+    plan's own fused arrays: a pair unit fuses again here from the manifest.
 
     Returns None when cancelled (rather than raising: custom exception types
     do not reliably survive the trip back across the process boundary).
     """
     from track2data.core.models import ProjectManifest
     from track2data.core.progress import OperationCancelled
+    from track2data.core.runplan import RunUnit
 
     manifest = ProjectManifest.model_validate_json(manifest_json)
     engine = Engine(manifest, cache_dir=Path(cache_dir) if cache_dir else None)
-    ref = manifest.sessions[index]
+    if kind == "pair":
+        pair = manifest.view_pairs[index]
+        unit = RunUnit(f"{pair.top_session_id}+{pair.side_session_id}", "pair", pair=pair)
+    else:
+        ref = manifest.sessions[index]
+        unit = RunUnit(ref.session_id, "session", ref=ref)
 
     def check() -> None:
         if _WORKER_CANCEL.is_set():
@@ -166,7 +177,7 @@ def _parallel_run_one(
     engine._cancel_check = check
 
     try:
-        return engine._run_one_session(ref, Path(out_dir) / ref.session_id, exporters, callback)
+        return engine._run_one_unit(unit, Path(out_dir) / unit.unit_id, exporters, callback)
     except OperationCancelled:
         return None
 
@@ -493,7 +504,7 @@ class Engine:
         everything, or tell me exactly what's wrong" entry point for
         direct/CLI use. ``Engine.run()`` does NOT call this method for
         its own batch resilience -- it imports each session individually
-        inside ``_run_one_session`` so one bad session is captured as
+        inside ``_run_one_unit`` so one bad session is captured as
         that session's ``SessionRunResult.error`` instead of aborting an
         entire multi-session run.
         """
@@ -1024,7 +1035,7 @@ class Engine:
           written; this is where it actually happens.
 
         *identity_free* forces the verdict for callers that already know it
-        (``_run_one_session`` passes the user's override, which may itself
+        (``_run_one_unit`` passes the user's override, which may itself
         be None); None resolves it via ``identity_free_for()``.
 
         During ``run()`` the run's *cancel_check* is called before each
@@ -1463,7 +1474,9 @@ class Engine:
         fusion settings and :meth:`fuse_pair` returns (each pair is fused once, and the result is
         kept on the unit). Every session outside a fusable pair is skipped, once, in session
         order, with the reason of the first pair that could not use it ("not in a fusable pair"
-        when it is in no pair).
+        when it is in no pair). A pair that reuses a session an earlier unit already runs is
+        skipped without fusing ("session X is already in pair c+d"): a hand-edited manifest can
+        put one session in two pairs, which would count its fish twice.
         """
         from track2data.core.runplan import RunPlan, RunUnit, SkippedSession
         from track2data.fusion.fuse import FusionError
@@ -1473,12 +1486,15 @@ class Engine:
             return RunPlan(units=[RunUnit(ref.session_id, "session", ref=ref) for ref in refs])
 
         plan = RunPlan()
-        in_unit: set[str] = set()
+        in_unit: dict[str, str] = {}  # session id -> the unit id that runs it
         reasons: dict[str, str] = {}
         for pair in self._manifest.view_pairs:
             pair_id = f"{pair.top_session_id}+{pair.side_session_id}"
             fused: FusedSession | None = None
-            if pair.fusion is None:
+            used = [s for s in (pair.top_session_id, pair.side_session_id) if s in in_unit]
+            if used:
+                reason = f"pair {pair_id}: session {used[0]} is already in pair {in_unit[used[0]]}"
+            elif pair.fusion is None:
                 reason = f"pair {pair_id}: no fusion settings for this pair"
             else:
                 try:
@@ -1489,7 +1505,7 @@ class Engine:
                     reason = f"pair {pair_id}: {type(exc).__name__}: {exc}"
             if fused is not None:
                 plan.units.append(RunUnit(pair_id, "pair", pair=pair, fused=fused))
-                in_unit.update((pair.top_session_id, pair.side_session_id))
+                in_unit[pair.top_session_id] = in_unit[pair.side_session_id] = pair_id
             else:
                 for sid in (pair.top_session_id, pair.side_session_id):
                     reasons.setdefault(sid, reason)
@@ -1512,22 +1528,37 @@ class Engine:
         ):
             raise ValueError(MODE_3D_BLOCK_REASON)
 
-    def require_computable(self) -> None:
-        """Refuse to run a 3-D project that has nothing to run.
+    def _checked_plan(self) -> RunPlan:
+        """The run plan, or the gate's ``ValueError`` when a 3-D project has nothing to run.
 
-        Call once at an entry point (``run``, the CLI, the UI): in 3-D it builds the plan, which
-        fuses every pair. A project with no pairs raises ``MODE_3D_BLOCK_REASON``; one whose
-        pairs all fail raises ``"no pair is ready to fuse: ..."`` with the first three reasons.
-        2-D projects never refuse.
+        Builds the plan once (in 3-D that fuses every pair). A 3-D project with no pairs raises
+        ``MODE_3D_BLOCK_REASON``; one whose pairs all fail raises ``"no pair is ready to fuse:
+        ..."`` with the first three distinct reasons. A 2-D plan never refuses.
         """
         if self._manifest.mode.dimension != "3d":
-            return
+            return self.run_units()
         if not self._manifest.view_pairs:
             raise ValueError(MODE_3D_BLOCK_REASON)
         plan = self.run_units()
-        if not plan.units:
+        self._check_plan(plan)
+        return plan
+
+    def _check_plan(self, plan: RunPlan) -> None:
+        """Raise the gate's ``ValueError`` for an already-built 3-D *plan* with no unit."""
+        if self._manifest.mode.dimension == "3d" and not plan.units:
+            if not self._manifest.view_pairs:
+                raise ValueError(MODE_3D_BLOCK_REASON)
             distinct = list(dict.fromkeys(s.reason for s in plan.skipped))
             raise ValueError("no pair is ready to fuse: " + "; ".join(distinct[:3]))
+
+    def require_computable(self) -> RunPlan:
+        """Refuse to run a 3-D project that has nothing to run; return the plan otherwise.
+
+        Call once at an entry point (``run``, the CLI, the UI): in 3-D it builds the plan, which
+        fuses every pair. Hand the returned plan to ``run(plan=...)`` so the run does not fuse
+        every pair again. See :meth:`_checked_plan` for the refusal texts; 2-D never refuses.
+        """
+        return self._checked_plan()
 
     # ── full run ───────────────────────────────────────────────────────────
 
@@ -1593,11 +1624,18 @@ class Engine:
         progress: ProgressCallback | None = None,
         n_workers: int = 1,
         cancel_check: Callable[[], None] | None = None,
+        plan: RunPlan | None = None,
     ) -> RunResult:
         """
-        Run the full pipeline for every session in the manifest.
+        Run the full pipeline for every unit of the run plan (:meth:`run_units`): every session
+        of a 2-D project, every fusable top/side pair of a 3-D one. The sessions a 3-D plan
+        leaves out are listed, with their reasons, in ``RunResult.skipped``.
 
-        Each session's output is written to ``out_dir/<session_id>/`` so
+        *plan* is a plan the caller already has from :meth:`require_computable` (to show it, or
+        because it gated on it); it is checked again for emptiness but not rebuilt, so the pairs
+        are not fused a second time. Without it the plan is built and checked here, once.
+
+        Each unit's output is written to ``out_dir/<unit_id>/`` so
         multi-session runs never collide. A session that raises during
         import, preprocessing, metrics, or export is captured as that
         session's ``SessionRunResult.error`` without aborting the rest of
@@ -1621,28 +1659,33 @@ class Engine:
         (``min(n_workers, n_sessions)``); each worker rebuilds an Engine from
         the serialised manifest and sends progress events back over a queue,
         so the *progress* callback is only ever called in the calling
-        process. Results come back in manifest order. Pick a value with
+        process; a worker fuses its pair again from the manifest rather than
+        receiving the plan's arrays. Results come back in plan order. Pick a value with
         ``track2data.core.parallel.worker_count()``. A raise from *progress*
         (``OperationCancelled``) stops the run: workers see a shared flag at
         their next checkpoint and stop.
         """
-        self.require_computable()
+        if plan is None:
+            plan = self._checked_plan()
+        else:
+            self._check_plan(plan)
         previous_check, self._cancel_check = self._cancel_check, cancel_check
         try:
-            return self._run(out_dir, exporters, progress, n_workers, cancel_check)
+            return self._run(plan, out_dir, exporters, progress, n_workers, cancel_check)
         finally:
             self._cancel_check = previous_check
 
     def _run(
         self,
+        plan: RunPlan,
         out_dir: Path,
         exporters: list[str] | None,
         progress: ProgressCallback | None,
         n_workers: int,
         cancel_check: Callable[[], None] | None,
     ) -> RunResult:
-        refs = self._manifest.sessions
-        n_configured = len(refs)
+        units = plan.units
+        n_configured = len(units)
         emit(
             progress,
             ProgressEvent(stage="run", current=0, total=n_configured, message="Run started"),
@@ -1652,16 +1695,14 @@ class Engine:
         n_pool = min(n_workers, n_configured)
         if n_pool > 1:
             results = self._run_parallel(
-                refs, Path(out_dir), exporters, progress, n_pool, cancel_check
+                units, Path(out_dir), exporters, progress, n_pool, cancel_check
             )
         else:
-            for i, ref in enumerate(refs):
+            for i, unit in enumerate(units):
                 if cancel_check is not None:
                     cancel_check()
                 results.append(
-                    self._run_one_session(
-                        ref, Path(out_dir) / ref.session_id, exporters, progress
-                    )
+                    self._run_one_unit(unit, Path(out_dir) / unit.unit_id, exporters, progress)
                 )
                 emit(
                     progress,
@@ -1669,7 +1710,7 @@ class Engine:
                         stage="session",
                         current=i + 1,
                         total=n_configured,
-                        session_id=ref.session_id,
+                        session_id=unit.unit_id,
                         message="Session complete",
                     ),
                 )
@@ -1683,7 +1724,7 @@ class Engine:
                 stage="run", current=n_configured, total=n_configured, message="Run complete"
             ),
         )
-        return RunResult(sessions=results, pooled=pooled)
+        return RunResult(sessions=results, pooled=pooled, skipped=list(plan.skipped))
 
     def _hash_and_check_input(self, session: Session, ref: SessionRef) -> str:
         """SHA-256 of the trajectory file that produced this session's numbers.
@@ -1911,14 +1952,17 @@ class Engine:
 
     def _run_parallel(
         self,
-        refs: list[SessionRef],
+        units: list[RunUnit],
         out_dir: Path,
         exporters: list[str] | None,
         progress: ProgressCallback | None,
         n_pool: int,
         cancel_check: Callable[[], None] | None = None,
     ) -> list[SessionRunResult]:
-        """Run *refs* across *n_pool* spawned processes; see ``run()``."""
+        """Run *units* across *n_pool* spawned processes; see ``run()``.
+
+        Each worker gets the unit as ``(kind, index into the manifest)`` (see
+        :meth:`_unit_source`), never the plan's fused arrays."""
         # "spawn" on every OS: it is the only start method on Windows and the
         # default on macOS, so Linux behaves the same instead of masking
         # pickling problems only the other two would hit.
@@ -1926,7 +1970,8 @@ class Engine:
         events = ctx.Queue()
         cancel = ctx.Event()
         manifest_json = self._manifest.model_dump_json()
-        total = len(refs)
+        total = len(units)
+        sources = [self._unit_source(unit) for unit in units]
         results: dict[int, SessionRunResult] = {}
 
         def drain() -> None:
@@ -1947,7 +1992,8 @@ class Engine:
                 pool.submit(
                     _parallel_run_one,
                     manifest_json,
-                    i,
+                    sources[i][0],
+                    sources[i][1],
                     str(out_dir),
                     exporters,
                     str(self._cache_dir) if self._cache_dir is not None else None,
@@ -1964,12 +2010,12 @@ class Engine:
                     for fut in finished:
                         pending.discard(fut)
                         i = futures[fut]
-                        results[i] = self._collect_parallel_result(refs[i], fut)
+                        results[i] = self._collect_parallel_result(units[i].unit_id, fut)
                         emit(
                             progress,
                             ProgressEvent(
                                 stage="session", current=len(results), total=total,
-                                session_id=refs[i].session_id, message="Session complete",
+                                session_id=units[i].unit_id, message="Session complete",
                             ),
                         )
                     if not finished:
@@ -1987,44 +2033,87 @@ class Engine:
                 raise
         return [results[i] for i in range(total)]
 
+    def _unit_source(self, unit: RunUnit) -> tuple[str, int]:
+        """``(kind, index)`` locating *unit* in this engine's manifest: an index into
+        ``sessions`` for a session unit, into ``view_pairs`` for a pair unit."""
+        if unit.kind == "pair":
+            assert unit.pair is not None
+            key = (unit.pair.top_session_id, unit.pair.side_session_id)
+            pairs = self._manifest.view_pairs
+            return "pair", next(
+                i for i, p in enumerate(pairs) if (p.top_session_id, p.side_session_id) == key
+            )
+        assert unit.ref is not None
+        refs = self._manifest.sessions
+        return "session", next(
+            i for i, r in enumerate(refs) if r.session_id == unit.ref.session_id
+        )
+
     @staticmethod
-    def _collect_parallel_result(ref: SessionRef, fut: Any) -> SessionRunResult:
+    def _collect_parallel_result(unit_id: str, fut: Any) -> SessionRunResult:
         from track2data.core.progress import OperationCancelled
 
         try:
             result = fut.result()
         except Exception as exc:  # worker crash / unpicklable result
-            logger.exception("Worker for session %s failed.", ref.session_id)
-            return SessionRunResult(session_id=ref.session_id, error=f"Worker failed: {exc}")
+            logger.exception("Worker for unit %s failed.", unit_id)
+            return SessionRunResult(session_id=unit_id, error=f"Worker failed: {exc}")
         if result is None:
             raise OperationCancelled()
         return result
 
-    def _run_one_session(
+    def _run_one_unit(
         self,
-        ref: SessionRef,
+        unit: RunUnit,
         session_out_dir: Path,
         exporters: list[str] | None,
         progress: ProgressCallback | None,
     ) -> SessionRunResult:
-        """Run one session for ``run()``, capturing its outcome (including
-        any failure -- import, preprocess, metrics, or export) as a
+        """Run one plan unit for ``run()``, capturing its outcome (including
+        any failure -- import, fusion, preprocess, metrics, or export) as a
         SessionRunResult rather than raising -- except OperationCancelled,
         which must propagate to stop the whole run. Keyed throughout by
-        ``ref.session_id`` (the manifest's own identity), not a
-        reader-derived one, since it must be available even when import
-        itself fails."""
+        ``unit.unit_id`` (the manifest's own identity: the session id, or
+        ``"{top}+{side}"`` for a pair), not a reader-derived one, since it
+        must be available even when import itself fails.
+
+        A pair unit takes its ``PreprocessedSession`` from the fusion -- the
+        plan's own result when it carries one (serial run), a fresh
+        :meth:`fuse_pair` otherwise (worker process) -- instead of import and
+        preprocessing, and is never written to the preprocessing cache. The
+        top session's ref stands in for the pair wherever a ref is needed
+        (identity-free override, input checksum). Everything after that is
+        the same code for both kinds."""
         import time
 
         from track2data.core.progress import OperationCancelled
+        from track2data.core.runplan import FusionRunInfo
         from track2data.core.session_consistency import SessionSummary
 
         start = time.monotonic()
+        unit_id = unit.unit_id
         psess = None
+        fusion: FusionRunInfo | None = None
         try:
-            psess = self._cache_get(ref)
-            cached = psess is not None
-            # A cached result carries the Session it was built from, which is all
+            if unit.kind == "pair":
+                pair = unit.pair
+                assert pair is not None and pair.fusion is not None
+                ref = next(
+                    r for r in self._manifest.sessions if r.session_id == pair.top_session_id
+                )
+                fused = unit.fused if unit.fused is not None else self.fuse_pair(pair)
+                psess = fused.psess
+                applied = pair.fusion
+                if self._manifest.mode.layout == "single_video_two_panels":
+                    applied = applied.model_copy(update={"frame_offset": 0})  # as fuse applies it
+                fusion = FusionRunInfo.from_fused(pair, applied, fused)
+                cached = False
+            else:
+                assert unit.ref is not None
+                ref = unit.ref
+                psess = self._cache_get(ref)
+                cached = psess is not None
+            # A cached or fused result carries the Session it was built from, which is all
             # the summary and the input hash below need.
             session = self.import_ref(ref) if psess is None else psess.session
             # The override only, not ref.is_identity_free(): this method is
@@ -2038,7 +2127,7 @@ class Engine:
                 progress,
                 ProgressEvent(
                     stage="import", current=1, total=4,
-                    session_id=ref.session_id,
+                    session_id=unit_id,
                     message="Import complete (cached)" if cached else "Import complete",
                 ),
             )
@@ -2049,7 +2138,7 @@ class Engine:
                 progress,
                 ProgressEvent(
                     stage="preprocess", current=2, total=4,
-                    session_id=ref.session_id,
+                    session_id=unit_id,
                     message="Preprocessing complete (cached)" if cached
                     else "Preprocessing complete",
                 ),
@@ -2062,7 +2151,7 @@ class Engine:
                 progress,
                 ProgressEvent(
                     stage="metrics", current=3, total=4,
-                    session_id=ref.session_id, message="Metrics computed",
+                    session_id=unit_id, message="Metrics computed",
                 ),
             )
             written = self.export(payload, session_out_dir, exporters)
@@ -2070,7 +2159,7 @@ class Engine:
                 progress,
                 ProgressEvent(
                     stage="export", current=4, total=4,
-                    session_id=ref.session_id, message="Export complete",
+                    session_id=unit_id, message="Export complete",
                 ),
             )
             diagnostics = {k: v for k, v in metric_results.items() if k.startswith("D-")}
@@ -2078,7 +2167,7 @@ class Engine:
                 k: v.head(200) for k, v in metric_results.items() if not k.startswith("D-")
             }
             return SessionRunResult(
-                session_id=ref.session_id,
+                session_id=unit_id,
                 written=written,
                 diagnostics=diagnostics,
                 metric_previews=metric_previews,
@@ -2094,16 +2183,18 @@ class Engine:
                     px_per_cm=psess.px_per_cm,
                     trajectory_sha256=self._hash_and_check_input(session, ref),
                 ),
+                fusion=fusion,
             )
         except OperationCancelled:
             raise
         except Exception as exc:
-            logger.exception("Session %s failed.", ref.session_id)
+            logger.exception("Session %s failed.", unit_id)
             return SessionRunResult(
-                session_id=ref.session_id,
+                session_id=unit_id,
                 preprocess_report=_recover_preprocess_report(psess, exc),
                 duration_s=time.monotonic() - start,
                 error=str(exc),
+                fusion=fusion,
             )
 
     def run_all(
@@ -2144,9 +2235,36 @@ class Engine:
         :meth:`consistency_warnings`, which the GUI and CLI surface
         alongside this and which ``run()`` records in the export.
         """
+        return self.validation_issues()[0]
+
+    def validation_issues(self, plan: RunPlan | None = None) -> tuple[list[str], list[str]]:
+        """``(blocking, notes)``: :meth:`validate`'s blocking issues, and the non-blocking notes.
+
+        In a 3-D project the run plan is built (fusing every pair) unless *plan* is given. The
+        project is blocked only when the plan has no unit (the gate's refusal text). Every pair
+        the plan skips is a note, ``"pair t+s: reason"`` once per pair, and every session in no
+        pair is ``"session X: not in a fusable pair"``; those sessions are left out of the run,
+        the others still run.
+        """
         issues: list[str] = []
+        notes: list[str] = []
         if self._manifest.mode.dimension == "3d":
-            issues.append(MODE_3D_BLOCK_REASON)
+            if plan is None and self._manifest.view_pairs:
+                plan = self.run_units()
+            if plan is None:
+                issues.append(MODE_3D_BLOCK_REASON)
+            else:
+                try:
+                    self._check_plan(plan)
+                except ValueError as exc:
+                    issues.append(str(exc))
+                for skip in plan.skipped:
+                    # a pair's reason already names the pair, and both its sessions share it
+                    if skip.reason == "not in a fusable pair":
+                        notes.append(f"session {skip.session_id}: {skip.reason}")
+                    else:
+                        notes.append(skip.reason)
+                notes = list(dict.fromkeys(notes))
         if not self._manifest.sessions:
             issues.append("No sessions imported.")
         cfg = self._manifest.calibration
@@ -2158,7 +2276,7 @@ class Engine:
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
         issues.extend(self._gate_selection_issues())
-        return issues
+        return issues, notes
 
     def consistency_warnings(self) -> list[str]:
         """Report the ways this project's sessions disagree with each other.
