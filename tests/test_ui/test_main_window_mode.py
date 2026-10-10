@@ -300,3 +300,4 @@ def test_3d_validate_while_checking_says_so(qtbot, tmp_path, monkeypatch) -> Non
     win._action_validate()
     fake.hold.set()
     assert len(shown) == 1 and "Checking" in shown[0]
+

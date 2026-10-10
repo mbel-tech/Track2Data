@@ -257,6 +257,11 @@ class TaskRunner(QObject):
 
         return _cleanup
 
+    @property
+    def closed(self) -> bool:
+        """``shutdown()`` was called: a submit now returns an id but never starts a task."""
+        return self._closed
+
     def cancel(self, task_id: str) -> None:
         """Request cancellation of one in-flight task. Cooperative: the
         task only actually stops the next time its callable checks in

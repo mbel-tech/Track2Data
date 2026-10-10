@@ -666,7 +666,7 @@ def test_a_superseded_plan_build_is_cancelled(qtbot, tmp_path, monkeypatch) -> N
     assert len(fake.calls) == 3  # the first build, A and C: B never ran
 
 
-def test_a_late_cancel_does_not_resubmit(qtbot, tmp_path, monkeypatch) -> None:
+def test_a_late_cancel_rebuilds_once_through_the_pages(qtbot, tmp_path, monkeypatch) -> None:
     store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
     qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
     watcher = store.run_plan
@@ -676,15 +676,13 @@ def test_a_late_cancel_does_not_resubmit(qtbot, tmp_path, monkeypatch) -> None:
     store.update_fusion("t2", "s2", OTHER)  # B queued
     queued = next(iter(watcher._pending))
     with qtbot.waitSignal(store.tasks.taskCancelled, timeout=3000) as blocker:
-        store.tasks.cancel_all()  # what shutdown() does
+        store.tasks.cancel_all()  # B is dropped when it reaches the front of the lane
         fake.hold.set()
     assert blocker.args == [queued]
-    assert watcher._pending == {} and watcher._key is None
+    # the drop is announced, the Processing page asks again and exactly one rebuild runs
+    qtbot.waitUntil(lambda: watcher._outcome is not None, timeout=3000)
     qtbot.waitUntil(lambda: store.tasks._active == {}, timeout=3000)
-    assert len(fake.calls) == 2  # nothing was submitted from the cancelled slot
-    assert watcher.snapshot().checking  # rebuilt lazily when asked
-    qtbot.waitUntil(lambda: watcher.snapshot().plan is not None, timeout=3000)
-    assert len(fake.calls) == 3
+    assert len(fake.calls) == 3 and watcher._pending == {}
 
 
 def test_compute_plan_keeps_no_fusion_results(tmp_path) -> None:
@@ -724,3 +722,73 @@ def test_finished_run_rows_survive_a_plan_change_and_checking_is_shown(
     fake.hold.set()
     qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
     assert screen._status_table.item(0, 1).text() == "Done"  # the results stay
+
+
+# ── fix round 2: a dropped plan build is rebuilt ─────────────────────────────
+
+
+def _hold_lane(store) -> threading.Event:
+    """Occupy the run lane with a task that ignores cancellation until released."""
+    gate = threading.Event()
+    store.tasks.submit(lambda: gate.wait(5))
+    return gate
+
+
+def test_a_toolbar_cancel_of_a_queued_plan_build_rebuilds_it(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import CHECKING_TEXT
+
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    watcher = store.run_plan
+    lane = _hold_lane(store)
+    store.update_fusion("t1", "s1", OTHER)  # the build queues behind the held lane
+    assert screen._status_label.text() == CHECKING_TEXT
+    with qtbot.waitSignal(store.tasks.taskCancelled, timeout=3000):
+        store.tasks.cancel_all(lane="run")  # the toolbar Cancel
+        lane.set()
+    qtbot.waitUntil(lambda: screen._status_label.text() != CHECKING_TEXT, timeout=3000)
+    assert watcher._outcome is not None and screen._run_btn.isEnabled()
+    assert len(fake.calls) == 2  # the first build and the rebuild; the dropped one never ran
+    assert fake.calls[-1].view_pairs[0].fusion == OTHER
+
+
+def test_a_user_cancel_of_a_run_rebuilds_the_queued_plan(qtbot, tmp_path, monkeypatch) -> None:
+    from track2data.api import Engine
+    from track2data.core.models import RunResult
+    from ui.store.run_plan import CHECKING_TEXT
+
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    release = threading.Event()
+
+    def fake_run(self, out_dir, exporters=None, **kw):
+        release.wait(5)
+        return RunResult(sessions=[])
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    screen.start_run()
+    store.update_fusion("t1", "s1", OTHER)  # queued behind the run
+    screen._cancel_run()
+    release.set()
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=5000)
+    assert screen._status_label.text() != CHECKING_TEXT
+    assert store.run_plan._outcome is not None
+    assert fake.calls[-1].view_pairs[0].fusion == OTHER
+
+
+def test_no_rebuild_after_shutdown(qtbot, tmp_path, monkeypatch) -> None:
+    store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch)
+    qtbot.waitUntil(screen._run_btn.isEnabled, timeout=3000)
+    watcher = store.run_plan
+    lane = _hold_lane(store)
+    store.update_fusion("t1", "s1", OTHER)  # queued
+    cancelled: list[str] = []
+    store.tasks.taskCancelled.connect(cancelled.append)
+    lane.set()
+    assert store.tasks.shutdown(3000) is True
+    qtbot.waitUntil(lambda: len(cancelled) == 1, timeout=3000)  # the dropped build
+    qtbot.waitUntil(lambda: watcher._pending == {}, timeout=3000)
+    screen._on_project_changed()  # a page asking again after shutdown submits nothing
+    store.run_plan.snapshot()
+    assert store.tasks._active == {}
+    assert len(fake.calls) == 1 and len(cancelled) == 1

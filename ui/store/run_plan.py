@@ -162,6 +162,8 @@ class RunPlanWatcher(QObject):
         self._key = key
         self._outcome = None
         store = self._store()
+        if store is not None and store.tasks.closed:
+            return  # shutting down: build nothing more
         if store is not None:
             # A newer request supersedes the older ones: a queued build never starts (one
             # already running finishes, and its result is ignored).
@@ -206,8 +208,11 @@ class RunPlanWatcher(QObject):
     def _on_task_cancelled(self, task_id: str) -> None:
         if self._pending.pop(task_id, None) is None:
             return
-        # A Cancel of the run lane (or shutdown) dropped the plan task. Never resubmit from
-        # here (the window may be closing): forget it, and build again the next time a page
-        # asks (snapshot) or an input changes.
+        # A Cancel of the run lane (or shutdown) dropped the plan task: forget it and tell the
+        # pages, whose snapshot() then builds it again. Not after shutdown: the runner is
+        # closed, refresh() submits nothing, and nothing is announced while the window closes.
         self._key = None
         self._outcome = None
+        store = self._store()
+        if store is not None and not store.tasks.closed:
+            self.changed.emit()
