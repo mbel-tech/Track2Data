@@ -216,3 +216,43 @@ def test_the_project_summary_names_the_view_only_when_declared() -> None:
 
     assert "Camera view: side view" in engine_side._project_readme_text([], [])
     assert "Camera view" not in engine_default._project_readme_text([], [])
+
+
+# ── fused sessions ───────────────────────────────────────────────────────────
+
+
+def _with_depth(psess):
+    import numpy as np
+
+    psess.depth = np.full((psess.xy.shape[0], psess.xy.shape[1]), 0.5)
+    psess.depth_height_cm = 20.0
+    psess.depth_outside = np.zeros(psess.xy.shape[1], dtype=int)
+    return psess
+
+
+def test_a_fused_session_is_top_view_whatever_the_project_says() -> None:
+    engine = Engine(_manifest("side", []))
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    assert engine.camera_view_for_psess(psess) == "side"
+    assert engine.camera_view_for_psess(_with_depth(psess)) == "top"
+
+
+@pytest.mark.parametrize("view", ["unknown", "top"])
+def test_il15_runs_on_a_fused_session_but_not_on_a_plain_one(view) -> None:
+    plain = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest(view, ["IL-15"]))
+    assert "IL-15" not in engine.compute_metrics(plain)
+    assert "IL-15" in engine.skipped_metrics(False, plain.session, psess=plain)
+
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    results = engine.compute_metrics(fused)
+    assert "IL-15" in results
+    assert results["IL-15"]["depth_extent_source"].iloc[0] == "fusion"
+    assert engine.skipped_metrics(False, fused.session, psess=fused) == {}
+
+
+def test_a_fused_session_still_skips_other_side_only_metrics(monkeypatch) -> None:
+    _register_side_metric(monkeypatch)
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    engine = Engine(_manifest("side", ["IL-SIDE"]))
+    assert "IL-SIDE" not in engine.compute_metrics(fused)

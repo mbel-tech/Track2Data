@@ -840,6 +840,13 @@ class Engine:
         """
         return self._manifest.scene.camera_view
 
+    def camera_view_for_psess(self, psess: PreprocessedSession) -> CameraView:
+        """The view metrics are gated on for *psess*: a fused session (it has a depth) is
+        top-view, anything else is read from its session."""
+        if psess.depth is not None:
+            return "top"
+        return self.camera_view_for(psess.session)
+
     def _pair_inputs(self, pair: ViewPair) -> tuple[PreprocessedSession, PreprocessedSession]:
         from track2data.core.errors import Track2DataError
         from track2data.fusion.fuse import FusionError
@@ -903,8 +910,12 @@ class Engine:
         except Exception:  # FusionError or anything unexpected: no suggestion
             return None
 
-    def view_skipped_metrics(self, session: Session | None = None) -> dict[str, str]:
-        """Selected metric ids the camera view rules out, mapped to the reason."""
+    def view_skipped_metrics(
+        self, session: Session | None = None, *, psess: PreprocessedSession | None = None
+    ) -> dict[str, str]:
+        """Selected metric ids the camera view rules out, mapped to the reason. With *psess* the
+        view is that session's (a fused one is top-view) and a depth metric is allowed when it
+        has depth."""
         from track2data.metrics import get
         from track2data.metrics.availability import view_skipped_metrics
 
@@ -913,16 +924,24 @@ class Engine:
             *self._manifest.metrics.group,
             *self._manifest.metrics.zone,
         ]
-        return view_skipped_metrics(selected, self.camera_view_for(session), get)
+        if psess is None:
+            return view_skipped_metrics(selected, self.camera_view_for(session), get)
+        return view_skipped_metrics(
+            selected, self.camera_view_for_psess(psess), get, has_depth=psess.depth is not None
+        )
 
     def skipped_metrics(
-        self, identity_free: bool, session: Session | None = None
+        self,
+        identity_free: bool,
+        session: Session | None = None,
+        *,
+        psess: PreprocessedSession | None = None,
     ) -> dict[str, str]:
         """Every selected metric id this session must not run, mapped to the reason, for the
         export record: the identity gate and the camera-view gate together. A metric that both
         gates rule out carries both reasons."""
         skipped = self.identity_skipped_metrics(identity_free)
-        for mid, reason in self.view_skipped_metrics(session).items():
+        for mid, reason in self.view_skipped_metrics(session, psess=psess).items():
             skipped[mid] = f"{skipped[mid]}; also {reason}" if mid in skipped else reason
         return skipped
 
@@ -1027,8 +1046,8 @@ class Engine:
 
         is_identity_free = self.identity_free_for(psess.session, identity_free)
         identity_skipped = self.identity_skipped_metrics(is_identity_free)
-        view_skipped = self.view_skipped_metrics(psess.session)
-        skipped = self.skipped_metrics(is_identity_free, psess.session)
+        view_skipped = self.view_skipped_metrics(psess.session, psess=psess)
+        skipped = self.skipped_metrics(is_identity_free, psess.session, psess=psess)
         if identity_skipped:
             logger.warning(
                 "Skipping identity-dependent metrics (%s) for session %s: "
@@ -1043,7 +1062,7 @@ class Engine:
                 "which they are not meaningful for.",
                 ", ".join(sorted(view_skipped)),
                 psess.session_id,
-                self.camera_view_for(psess.session),
+                self.camera_view_for_psess(psess),
             )
 
         bin_seconds = self._bin_seconds()
@@ -1387,7 +1406,7 @@ class Engine:
             preprocess_report=psess.report,
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
-            skipped_metrics=self.skipped_metrics(is_identity_free, psess.session),
+            skipped_metrics=self.skipped_metrics(is_identity_free, psess.session, psess=psess),
         )
 
     def export(

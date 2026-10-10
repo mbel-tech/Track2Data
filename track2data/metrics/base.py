@@ -137,6 +137,9 @@ class Metric(ABC):
     # "top-down or not set" gate cannot lock out legacy projects. Read it through
     # metrics/availability.py, never directly: test doubles predate the attribute.
     valid_camera_views: ClassVar[frozenset[CameraView] | None] = None
+    # True for a metric that reads the fused depth array (PreprocessedSession.depth): it is then
+    # available for any session that has depth, whatever its camera view says.
+    uses_depth: ClassVar[bool] = False
     # Zone metrics that stay meaningful on an identity-free session when
     # computed on a pooled view of all slots (see metrics/zone.py).
     pools_when_identity_free: ClassVar[bool] = False

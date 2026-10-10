@@ -20,14 +20,20 @@ def view_label(camera_view: str) -> str:
     return _VIEW_WORDS.get(camera_view, camera_view)
 
 
-def view_unavailable_reason(metric_cls: Any, camera_view: str) -> str | None:
+def view_unavailable_reason(
+    metric_cls: Any, camera_view: str, *, has_depth: bool = False
+) -> str | None:
     """Why *metric_cls* cannot run for a project with *camera_view*, or None when it can.
+
+    A metric with ``uses_depth`` is available whenever the session has depth (*has_depth*).
 
     Read with ``getattr`` so a class (or a test double) that predates the attribute counts as
     "any view".
     """
     valid = getattr(metric_cls, "valid_camera_views", None)
     if valid is None or camera_view in valid:
+        return None
+    if has_depth and getattr(metric_cls, "uses_depth", False):
         return None
     return (
         f"needs a {required_views_text(metric_cls)} recording; the project's camera view is "
@@ -49,6 +55,8 @@ def view_skipped_metrics(
     metric_ids: Iterable[str],
     camera_view: str,
     lookup: Callable[[str], Any],
+    *,
+    has_depth: bool = False,
 ) -> dict[str, str]:
     """``{metric_id: reason}`` for the ids in *metric_ids* that *camera_view* rules out.
 
@@ -60,7 +68,7 @@ def view_skipped_metrics(
         cls = lookup(mid)
         if cls is None:
             continue
-        reason = view_unavailable_reason(cls, camera_view)
+        reason = view_unavailable_reason(cls, camera_view, has_depth=has_depth)
         if reason is not None:
             skipped[mid] = reason
     return skipped

@@ -1647,6 +1647,7 @@ class VerticalPosition(Metric):
     priority = "optional"
     requires_identity = True
     valid_camera_views = frozenset({"side"})
+    uses_depth = True
     output_columns: ClassVar[list[str]] = [
         "session_id",
         "metric_id",
@@ -1720,6 +1721,55 @@ class VerticalPosition(Metric):
     ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        if session.depth is not None:
+            return self._compute_fused(session)
+        return self._compute_zones(session, cfg)
+
+    def _compute_fused(self, session: PreprocessedSession) -> pd.DataFrame:
+        """Depth from the fused depth array (already a 0-1 fraction; NaN where missing or outside
+        the water column). Outside samples were dropped by the fusion and are counted in
+        ``depth_outside``, so the share outside is that count over all valid samples."""
+        assert session.depth is not None
+        height = session.depth_height_cm
+        records: list[dict] = []
+        for k in range(session.n_animals):
+            d = session.depth[:, k]
+            d = d[np.isfinite(d)]
+            n_out = int(session.depth_outside[k]) if session.depth_outside is not None else 0
+            row: dict = {
+                "session_id": session.session_id,
+                "metric_id": self.id,
+                "individual_id": k,
+                "mean_depth_fraction": np.nan,
+                "median_depth_fraction": np.nan,
+                "sd_depth_fraction": np.nan,
+                "mean_depth_cm": np.nan,
+                "frac_outside_extent": np.nan,
+                "depth_extent_source": "fusion",
+            }
+            total = n_out + d.size
+            if total:
+                row["frac_outside_extent"] = float(n_out / total)
+            if d.size:
+                mean = float(d.mean())
+                row["mean_depth_fraction"] = mean
+                row["median_depth_fraction"] = float(np.median(d))
+                if d.size > 1:
+                    row["sd_depth_fraction"] = float(d.std(ddof=1))
+                if height is not None:
+                    row["mean_depth_cm"] = mean * float(height)
+            if total and n_out / total > _OUTSIDE_EXTENT_WARN:
+                logger.warning(
+                    "IL-15: %.0f%% of animal %d's fused samples in session %s fall outside the "
+                    "water column; check the fusion settings.",
+                    100 * n_out / total,
+                    k,
+                    session.session_id,
+                )
+            records.append(row)
+        return pd.DataFrame(records, columns=self.output_columns)
+
+    def _compute_zones(self, session: PreprocessedSession, cfg: dict | None) -> pd.DataFrame:
         column = (cfg or {}).get("water_column") or {}
         top, bottom = column.get("top_px"), column.get("bottom_px")
         source = str(column.get("source", "none:not_derived"))

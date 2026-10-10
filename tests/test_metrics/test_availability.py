@@ -75,3 +75,28 @@ def test_the_reason_uses_the_same_wording_as_required_views_text() -> None:
     reason = view_unavailable_reason(_TopOrUnknown, "side")
     assert reason is not None
     assert required_views_text(_TopOrUnknown) in reason
+
+
+class _DepthMetric:
+    id = "IL-DEPTH"
+    valid_camera_views = frozenset({"side"})
+    uses_depth = True
+
+
+@pytest.mark.parametrize("view", ["unknown", "top", "side"])
+def test_a_depth_metric_is_available_for_a_session_with_depth(view: str) -> None:
+    assert view_unavailable_reason(_DepthMetric, view, has_depth=True) is None
+
+
+def test_a_depth_metric_without_depth_keeps_its_view_reason() -> None:
+    assert view_unavailable_reason(_DepthMetric, "top") == view_unavailable_reason(
+        _SideOnly, "top"
+    )
+    assert view_unavailable_reason(_DepthMetric, "side") is None
+
+
+def test_has_depth_does_not_widen_other_metrics() -> None:
+    assert view_unavailable_reason(_SideOnly, "top", has_depth=True) is not None
+    registry = {"IL-SIDE": _SideOnly, "IL-DEPTH": _DepthMetric}
+    skipped = view_skipped_metrics(["IL-SIDE", "IL-DEPTH"], "top", registry.get, has_depth=True)
+    assert set(skipped) == {"IL-SIDE"}
