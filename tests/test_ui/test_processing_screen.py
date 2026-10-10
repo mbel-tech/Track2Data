@@ -792,3 +792,51 @@ def test_no_rebuild_after_shutdown(qtbot, tmp_path, monkeypatch) -> None:
     store.run_plan.snapshot()
     assert store.tasks._active == {}
     assert len(fake.calls) == 1 and len(cancelled) == 1
+
+
+def test_3d_validate_button_shows_the_plan_outcome(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import PlanOutcome
+
+    outcome = PlanOutcome(make_plan(("t1+s1", "t2+s2"), (("x", "not in a fusable pair"),)))
+    _store, screen, fake = _screen_3d(qtbot, tmp_path, monkeypatch, outcome)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    lines, ok = screen._validation_lines()
+    assert lines[0] == "✓  2 unit(s) will run"
+    assert ok and not any("session(s) imported" in line for line in lines)
+    assert all(t is not threading.main_thread() for t in fake.threads)
+
+
+def test_3d_validate_button_says_nothing_will_run(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.store.run_plan import PlanOutcome
+
+    outcome = PlanOutcome(make_plan((), (("t1", "pair t1+s1: x"),)), gate=GATE)
+    _store, screen, _fake = _screen_3d(qtbot, tmp_path, monkeypatch, outcome)
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+    lines, ok = screen._validation_lines()
+    assert lines[0] == f"✗  Nothing will run: {GATE}"
+    assert not ok
+
+
+def test_3d_validate_button_while_the_plan_is_checked(qtbot, tmp_path, monkeypatch) -> None:
+    from ui.processing_screen import ProcessingScreen
+    from ui.store.run_plan import CHECKING_TEXT
+
+    fake = install_planner(monkeypatch)
+    fake.hold = threading.Event()
+    screen = ProcessingScreen(store_3d(tmp_path))
+    qtbot.addWidget(screen)
+    try:
+        lines, ok = screen._validation_lines()
+    finally:
+        fake.hold.set()
+    assert lines[0] == f"…  {CHECKING_TEXT}" and not ok
+    qtbot.waitUntil(lambda: _plan_ready(screen), timeout=3000)
+
+
+def test_2d_validate_button_still_counts_sessions(qtbot, tmp_path: Path) -> None:
+    from ui.processing_screen import ProcessingScreen
+
+    screen = ProcessingScreen(_make_empty_store(tmp_path))
+    qtbot.addWidget(screen)
+    lines, ok = screen._validation_lines()
+    assert lines[0] == "✗  No sessions imported" and not ok

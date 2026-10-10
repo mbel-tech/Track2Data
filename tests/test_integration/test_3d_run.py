@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.test_fusion import scene
 from tests.test_fusion.scene import (
     DEPTHS,
     LABELS,
@@ -21,7 +22,7 @@ from track2data.api import Engine
 from track2data.core.models import ProjectMode
 
 EXPORTERS = ["csv_long", "csv_wide", "feather", "readme"]
-_STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+\+00:00")
+_STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?\+00:00")
 OLD_SESSIONS_HEADER = (
     "session_id,reader,fps,n_frames,duration_s,n_animals,width_px,height_px,calibration_mode,"
     "length_unit,px_per_cm,is_calibrated,is_identity_free,trajectory_source,trajectory_sha256,"
@@ -38,10 +39,35 @@ def _files(root: Path) -> dict[str, bytes]:
     }
 
 
+#: NaN gaps longer than the gap fill (30 frames) and side samples above the water surface.
+TOP_GAP = slice(10, 50)  # top fish 0
+SIDE_GAP = slice(40, 85)  # side fish 1
+OUTSIDE = slice(70, 80)  # side fish 2, above the surface row
+
+
+def _gappy_top(shift: float = 0.0) -> np.ndarray:
+    xy = _TOP(shift)
+    xy[TOP_GAP, 0, :] = np.nan
+    return xy
+
+
+def _gappy_side(shift: float = 0.0) -> np.ndarray:
+    xy = _SIDE(shift)
+    xy[SIDE_GAP, 1, :] = np.nan
+    xy[OUTSIDE, 2, 1] = 50.0
+    return xy
+
+
+_TOP, _SIDE = scene.top_xy, scene.side_xy
+
+
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     base = tmp_path_factory.mktemp("e2e3d")
-    manifest = build_scene(base / "data")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(scene, "top_xy", _gappy_top)
+        mp.setattr(scene, "side_xy", _gappy_side)
+        manifest = build_scene(base / "data")
     Engine(manifest).run(base / "serial", exporters=EXPORTERS)
     Engine(manifest).run(base / "parallel", exporters=EXPORTERS, n_workers=2)
     return base / "serial", base / "parallel"
@@ -65,6 +91,15 @@ def test_exported_depth_matches_the_scene(runs: tuple[Path, Path]) -> None:
         np.testing.assert_allclose(
             frames["depth_cm"], frames["depth_fraction"] * TANK_CM, equal_nan=True
         )
+        # every gap stays a gap (never filled across), and outside samples have no depth
+        depth = frames.pivot(index="frame", columns="individual_id", values="depth_fraction")
+        x = frames.pivot(index="frame", columns="individual_id", values="x_px")
+        assert x.loc[TOP_GAP.start : TOP_GAP.stop - 1, 0].isna().all()
+        assert depth.loc[TOP_GAP.start : TOP_GAP.stop - 1, 0].isna().all()
+        assert depth.loc[SIDE_GAP.start : SIDE_GAP.stop - 1, 1].isna().all()
+        # side smoothing pulls the first and last outside sample back inside the column
+        assert depth.loc[OUTSIDE.start + 1 : OUTSIDE.stop - 2, 2].isna().all()
+        assert depth.notna().sum().tolist() == [60, 55, 92]
 
 
 def test_il15_mean_depth_cm_matches_the_scene(runs: tuple[Path, Path]) -> None:
@@ -72,6 +107,9 @@ def test_il15_mean_depth_cm_matches_the_scene(runs: tuple[Path, Path]) -> None:
     rows = long[(long["metric_id"] == "IL-15") & (long["column"] == "mean_depth_cm")]
     got = rows.sort_values("individual_id")["value"].to_numpy(dtype=float)
     np.testing.assert_allclose(got, np.array(DEPTHS) * TANK_CM, rtol=0.05)
+    outside = long[(long["metric_id"] == "IL-15") & (long["column"] == "frac_outside_extent")]
+    shares = outside.sort_values("individual_id")["value"].to_numpy(dtype=float)
+    np.testing.assert_allclose(shares, [0.0, 0.0, 8 / 100])
 
 
 def test_the_unpaired_session_is_listed_with_its_reason(runs: tuple[Path, Path]) -> None:

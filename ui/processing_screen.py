@@ -470,6 +470,16 @@ class ProcessingScreen(QWidget):
         if self._store is None or self._store.manifest is None:
             QMessageBox.warning(self, "Validation", "No project is open.")
             return
+        lines, ok = self._validation_lines()
+        summary = "\n".join(lines)
+        icon = QMessageBox.Icon.Information if ok else QMessageBox.Icon.Warning
+        box = QMessageBox(icon, "Pipeline validation", summary, QMessageBox.StandardButton.Ok, self)
+        box.exec()
+
+    def _validation_lines(self) -> tuple[list[str], bool]:
+        """The Validate dialog's lines and whether the project is ready. In 3-D the first line is
+        the run plan's outcome, read from the store's snapshot (never built on this thread)."""
+        assert self._store is not None and self._store.manifest is not None
         m = self._store.manifest
         lines: list[str] = []
         ok = True
@@ -477,6 +487,16 @@ class ProcessingScreen(QWidget):
         if n_sessions == 0:
             lines.append("✗  No sessions imported")
             ok = False
+        elif m.mode.dimension == "3d":
+            state = self._plan_state()
+            if state.checking:
+                lines.append(f"…  {CHECKING_TEXT}")
+                ok = False
+            elif state.runnable and state.plan is not None:
+                lines.append(f"✓  {len(state.plan.units)} unit(s) will run")
+            else:
+                lines.append(f"✗  Nothing will run: {state.gate}")
+                ok = False
         else:
             lines.append(f"✓  {n_sessions} session(s) imported")
         if m.calibration.mode == "scalar" and (
@@ -491,10 +511,7 @@ class ProcessingScreen(QWidget):
             lines.append(f"✓  {total} metric(s) selected")
         else:
             lines.append("⚠  No metrics selected")
-        summary = "\n".join(lines)
-        icon = QMessageBox.Icon.Information if ok else QMessageBox.Icon.Warning
-        box = QMessageBox(icon, "Pipeline validation", summary, QMessageBox.StandardButton.Ok, self)
-        box.exec()
+        return lines, ok
 
     def _on_project_changed(self) -> None:
         has = self._store is not None and self._store.has_project

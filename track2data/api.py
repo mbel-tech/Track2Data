@@ -244,6 +244,20 @@ class Engine:
         fields = join.matched.get(session_id, {})
         return {k: v for k, v in fields.items() if k not in ("session_id", "individual_id")}
 
+    def _metadata_key(self, psess: PreprocessedSession) -> str:
+        """The session id *psess*'s metadata is filed under.
+
+        A fused pair unit (``"{top}+{side}"``) takes its TOP session's metadata. The id is looked
+        up among the manifest's pairs, never split on ``+`` (a session id may contain one).
+        """
+        if psess.depth is None:
+            return psess.session_id
+        tops = {
+            f"{p.top_session_id}+{p.side_session_id}": p.top_session_id
+            for p in self._manifest.view_pairs
+        }
+        return tops.get(psess.session_id, psess.session_id)
+
     def _metadata_individual_fields_for(
         self, psess: PreprocessedSession, identity_free: bool
     ) -> dict[int, dict[str, Any]]:
@@ -270,7 +284,8 @@ class Engine:
 
         join = self._metadata_join
         rule = self._manifest.mapping
-        keyed = join.matched_individuals.get(psess.session_id) if join is not None else None
+        key_id = self._metadata_key(psess)
+        keyed = join.matched_individuals.get(key_id) if join is not None else None
         if not keyed or rule is None:
             return {}
         if identity_free:
@@ -282,9 +297,18 @@ class Engine:
             return {}
         n_animals = psess.n_animals
         labels = [str(x).strip().lower() for x in (psess.session.identities_labels or [])]
+        # A fused unit keeps only the mapped fish: a metadata index names the TOP session's
+        # animal, which sits at fused position source.index(top index) (absent when left out).
+        source = psess.source_animal_index
+        by_position = rule.individual_match == "index" or not labels
         out: dict[int, dict[str, Any]] = {}
         for key, fields in keyed.items():
-            idx = resolve_animal(key, labels, rule.individual_match, n_animals)
+            if source is not None and by_position:
+                top_idx = resolve_animal(key, [], "index", int(source.max(initial=-1)) + 1)
+                found = np.flatnonzero(source == top_idx) if top_idx is not None else []
+                idx = int(found[0]) if len(found) else None
+            else:
+                idx = resolve_animal(key, labels, rule.individual_match, n_animals)
             if idx is None:
                 logger.warning(
                     "Session %s: metadata individual '%s' matches no animal (%s); ignored.",
@@ -313,7 +337,7 @@ class Engine:
         if df is None or len(df.columns) == 0:
             return
         attached: set[str] = set()
-        session_fields = self._metadata_fields_for(psess.session_id)
+        session_fields = self._metadata_fields_for(self._metadata_key(psess))
         for col, val in session_fields.items():
             if col not in df.columns:
                 df[col] = val
@@ -1943,7 +1967,7 @@ class Engine:
             f"# Track2Data Run — {self._manifest.project_name}",
             "",
             f"- Project hash: `{self._manifest.project_hash()}`",
-            f"- Sessions processed: {len(ok)} of {len(results)}",
+            self._processed_line(len(ok), len(results), len(skipped)),
             *self._camera_view_summary(),
             "",
             "Per-session outputs are in the subdirectory named after each "
@@ -2018,6 +2042,16 @@ class Engine:
             ]
 
         return "\n".join(lines)
+
+    def _processed_line(self, n_ok: int, n_units: int, n_skipped: int) -> str:
+        """The summary's count line: sessions in 2-D, fused-pair units (and skipped sessions)
+        in 3-D."""
+        if self._manifest.mode.dimension != "3d":
+            return f"- Sessions processed: {n_ok} of {n_units}"
+        line = f"- Units processed (fused pairs): {n_ok} of {n_units}"
+        if n_skipped:
+            line += f"; {n_skipped} session{'s' if n_skipped != 1 else ''} skipped"
+        return line
 
     def _run_parallel(
         self,
@@ -2385,7 +2419,8 @@ class Engine:
         ]
 
     def _session_summaries(self) -> list[SessionSummary]:
-        """Read every session in the manifest and summarise it.
+        """Read every session that takes part in the run and summarise it (see
+        :meth:`_checked_refs`: in 3-D, the top session of each pair with fusion settings).
 
         Best-effort: a session that cannot be read contributes nothing rather
         than aborting the report, because the whole point is to describe the
@@ -2395,7 +2430,7 @@ class Engine:
 
         mode = self._manifest.calibration.mode
         summaries: list[SessionSummary] = []
-        for ref in self._manifest.sessions:
+        for ref in self._checked_refs(sides=False):
             try:
                 session = self.import_ref(ref)
             except Exception:
@@ -2409,6 +2444,21 @@ class Engine:
                 )
             )
         return summaries
+
+    def _checked_refs(self, *, sides: bool) -> list[SessionRef]:
+        """The sessions a pre-flight check reads: every session in 2-D. In 3-D only the sessions
+        of pairs with fusion settings (the others never run): the top sessions, which become the
+        units, plus the side sessions when *sides* (they are preprocessed before fusing too)."""
+        refs = self._manifest.sessions
+        if self._manifest.mode.dimension != "3d":
+            return list(refs)
+        wanted: set[str] = set()
+        for pair in self._manifest.view_pairs:
+            if pair.fusion is not None:
+                wanted.add(pair.top_session_id)
+                if sides:
+                    wanted.add(pair.side_session_id)
+        return [ref for ref in refs if ref.session_id in wanted]
 
     def _resolve_px_per_cm(self, session: Session) -> float | None:
         """The px-to-cm ratio this session would be calibrated with, if any.
@@ -2514,7 +2564,8 @@ class Engine:
 
     def _session_calibration_issues(self) -> list[str]:
         """Fail loudly, name the sessions: for 'session' calibration
-        mode, every imported session must carry its own length_unit, or
+        mode, every session the run preprocesses (see _checked_refs: in
+        3-D, both sessions of each pair with fusion settings) must carry its own length_unit, or
         the run should be blocked here rather than each affected
         session silently failing calibration one at a time inside
         Engine.run() (see apply_session_calibration's CAL-SESSION-MISSING).
@@ -2526,7 +2577,7 @@ class Engine:
 
         missing: list[str] = []
         unreadable: list[str] = []
-        for ref in self._manifest.sessions:
+        for ref in self._checked_refs(sides=True):
             try:
                 session = self.import_ref(ref)
             except Exception:

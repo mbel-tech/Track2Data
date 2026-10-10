@@ -104,6 +104,13 @@ class ReadmeExporter(Exporter):
             "## Preprocessing steps",
             "",
         ]
+        if p.fusion is not None:
+            readme_lines += [
+                f"The steps of the top session (`{p.fusion.top_session_id}`); the side session "
+                f"(`{p.fusion.side_session_id}`) went through the same preprocessing settings "
+                "before fusion.",
+                "",
+            ]
         if preprocess_steps:
             for step in preprocess_steps:
                 readme_lines.append(

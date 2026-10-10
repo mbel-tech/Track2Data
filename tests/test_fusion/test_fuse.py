@@ -109,8 +109,11 @@ def test_separator_rows_not_fused():
     top.separator_mask = sep
     fused = fuse(top, side, pair, same_video=False)
     assert fused.report.overlap_frames == 98
-    assert 10 not in fused.psess.frame_index and 11 not in fused.psess.frame_index
-    assert fused.psess.separator_mask is None and fused.psess.tracked_mask is None
+    p = fused.psess
+    counted = p.frame_index[p.counted_rows()]
+    assert 10 not in counted and 11 not in counted
+    # the jump over frames 10-11 is kept apart by one separator row
+    assert p.separator_mask is not None and np.flatnonzero(p.separator_mask).tolist() == [10]
 
 
 def test_side_separator_and_untracked_rows_not_fused():
@@ -123,7 +126,8 @@ def test_side_separator_and_untracked_rows_not_fused():
     top.tracked_mask = tracked
     fused = fuse(top, side, pair, same_video=False)
     assert fused.report.overlap_frames == 98
-    assert 20 not in fused.psess.frame_index and 30 not in fused.psess.frame_index
+    counted = fused.psess.frame_index[fused.psess.counted_rows()]
+    assert 20 not in counted and 30 not in counted
 
 
 def test_true_frames_used_not_row_numbers():
@@ -284,3 +288,80 @@ def test_outside_counted_per_animal_on_side_y_alone_with_top_nan():
     fused = fuse(top, side, pair, same_video=False)
     assert fused.psess.depth_outside.tolist() == [0, 1, 0]
     assert fused.psess.depth_outside_mask[0, 1]
+
+
+def _zigzag_pair():
+    """Fish moving back and forth along x, so a straight bridge over a gap is too short."""
+    top, side, pair = make_pair()
+    t = np.arange(100, dtype=float)
+    for k in range(3):
+        top.xy[:, k, 0] = 100 + 30 * np.sin(t / 3) + 10 * k
+        side.xy[:, k, 0] = top.xy[:, k, 0]
+    return top, side, pair
+
+
+def test_a_frame_jump_gets_one_separator_row_on_every_per_row_array():
+    top, side, pair = _zigzag_pair()
+    r = np.arange(100)
+    top.main_zone = np.array([[f"m{i}"] * 3 for i in r], dtype=object)
+    top.sec_zone = np.array([[f"s{i}"] * 3 for i in r], dtype=object)
+    top.jump_replaced = np.ones((100, 3), dtype=bool)
+    top.raw_xy_rows = top.xy + 0.5
+    top.id_probabilities_rows = np.full((100, 3), 0.9)
+    tracked = np.ones(100, dtype=bool)
+    tracked[30:70] = False  # the side view is not tracked for 40 frames
+    side.tracked_mask = tracked
+    side.xy[75, 1, 1] = 50.0  # one outside-column sample after the gap
+    fused = fuse(top, side, pair, same_video=False)
+    p = fused.psess
+    assert p.n_frames == 61  # 30 + separator + 30
+    sep = np.zeros(61, dtype=bool)
+    sep[30] = True
+    np.testing.assert_array_equal(p.separator_mask, sep)
+    np.testing.assert_array_equal(p.tracked_mask, ~sep)
+    np.testing.assert_array_equal(p.counted_rows(), ~sep)
+    np.testing.assert_array_equal(p.frame_index, [*range(30), 30, *range(70, 100)])
+    assert np.isnan(p.xy[30]).all() and np.isnan(p.depth[30]).all()
+    for arr in (p.kinematics.speed_px_s, p.kinematics.accel_px_s2, p.kinematics.heading_rad,
+                p.raw_xy_rows, p.id_probabilities_rows):
+        assert arr.shape[0] == 61 and np.isnan(arr[30]).all()
+    assert not p.depth_outside_mask[30].any() and not p.jump_replaced[30].any()
+    assert p.jump_replaced[~sep].all()
+    assert list(p.main_zone[30]) == ["", "", ""] and list(p.sec_zone[30]) == ["", "", ""]
+    assert p.main_zone[31, 0] == "m70" and p.sec_zone[29, 2] == "s29"
+    np.testing.assert_allclose(p.xy[31], top.xy[70])
+    np.testing.assert_allclose(np.nanmean(p.depth[~sep], axis=0), [0.25, 0.5, 0.75])
+    # the counts are unaffected by the separator
+    assert p.depth_outside.tolist() == [0, 1, 0] and fused.report.n_outside_column == 1
+    assert int(p.depth_outside_mask.sum()) == 1 and p.depth_outside_mask[36, 1]
+    assert fused.report.overlap_frames == 60
+
+
+def test_a_contiguous_fusion_has_no_separator_and_unchanged_arrays():
+    top, side, pair = _zigzag_pair()
+    p = fuse(top, side, pair, same_video=False).psess
+    assert p.separator_mask is None and p.tracked_mask is None
+    np.testing.assert_array_equal(p.frame_index, np.arange(100))
+    np.testing.assert_array_equal(p.xy, top.xy)
+    top, side, pair = make_pair(fusion=settings(frame_offset=5))
+    p = fuse(top, side, pair, same_video=False).psess
+    assert p.separator_mask is None and p.n_frames == 95
+
+
+def test_path_length_does_not_bridge_a_fused_gap():
+    from track2data.metrics import get
+
+    top, side, pair = _zigzag_pair()
+    tracked = np.ones(100, dtype=bool)
+    tracked[30:70] = False
+    side.tracked_mask = tracked
+    p = fuse(top, side, pair, same_video=False).psess
+    halves = [
+        float(np.linalg.norm(np.diff(top.xy[a:b, k], axis=0), axis=1).sum())
+        for k in range(3)
+        for a, b in ((0, 30), (70, 100))
+    ]
+    il1 = get("IL-1")().compute(p)
+    got = il1.sort_values("individual_id")["path_length_px"].to_numpy()
+    np.testing.assert_allclose(got, [halves[0] + halves[1], halves[2] + halves[3],
+                                     halves[4] + halves[5]])
