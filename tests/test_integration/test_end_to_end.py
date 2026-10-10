@@ -319,8 +319,11 @@ def test_compute_metrics_every_registered_metric_runs_without_crashing(
     psess = engine.preprocess(session)
     results = engine.compute_metrics(psess)
 
-    missing = [mid for mid in all_ids if mid not in results]
+    # A 3-D metric (needs a fused session and a cm scale) is never offered in a 2-D project.
+    expected = [mid for mid in all_ids if not metrics_registry.get(mid).requires_depth_scale]
+    missing = [mid for mid in expected if mid not in results]
     assert not missing, f"metrics absent from compute_metrics() output: {missing}"
+    assert not any(metrics_registry.get(mid).requires_depth_scale for mid in results)
 
     new_metric_ids = {
         "IL-9", "IL-10", "IL-11", "IL-14",

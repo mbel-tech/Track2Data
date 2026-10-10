@@ -152,7 +152,7 @@ class Metric(ABC):
     window_safe: ClassVar[bool] = True
     output_columns: ClassVar[list[str]]
     documentation: ClassVar[MetricDocumentation]
-    # Most metrics (30 of 51 today) take no configuration at all --
+    # Most metrics (31 of 52 today) take no configuration at all --
     # an empty default, not a required field, so every existing
     # metric class stays valid without declaring it. The figure is
     # pinned by tests/test_metric_references_consistency.py.

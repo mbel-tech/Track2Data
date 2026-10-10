@@ -1,5 +1,5 @@
 """
-Individual-level metrics: IL-1 to IL-11, IL-14 and IL-15.
+Individual-level metrics: IL-1 to IL-11 and IL-14 to IL-16.
 
 Each class implements :class:`track2data.metrics.base.Metric` and returns
 a :class:`pandas.DataFrame` with at least the columns ``session_id``,
@@ -17,6 +17,7 @@ import pandas as pd
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
+from track2data.metrics.geometry3d import body_length_cm, positions_cm
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -1825,6 +1826,94 @@ class VerticalPosition(Metric):
         return pd.DataFrame(records, columns=self.output_columns)
 
 
+# ── IL-16: PathLength3D ───────────────────────────────────────────────────────
+
+
+class PathLength3D(Metric):
+    """IL-16 — Distance travelled in 3-D (cm) on a fused top + side session."""
+
+    id = "IL-16"
+    name = "path_length_3d"
+    label = "3-D Distance Travelled"
+    level = "individual"
+    priority = "optional"
+    requires_identity = True
+    requires_depth_scale = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        # Emitted unconditionally: NaN when the session has no depth or no cm scale.
+        "path_length_3d_cm",
+        "path_length_3d_bl",
+        "n_valid_steps",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Total distance travelled by each individual through the water, in cm, from the "
+            "top view's horizontal position and the side view's depth of a fused 3-D session."
+        ),
+        formula_plain=(
+            "sum of ||P[t+1,k] - P[t,k]|| over frame pairs where both positions are finite, "
+            "with P = (x_px / px_per_cm, y_px / px_per_cm, depth * tank_height_cm)"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.depth",
+            "PreprocessedSession.px_per_cm",
+            "PreprocessedSession.depth_height_cm",
+        ],
+        assumptions=[
+            "The depth comes from a side camera at right angles to the top camera, and the "
+            "fusion's water column and tank height give the vertical scale",
+            "A step counts only when all three coordinates (x, y, depth) are finite at both "
+            "of its frames; an animal with no such step reports NaN (cm and BL), never 0, and "
+            "n_valid_steps says how many steps the length rests on",
+            "Interpolated frames contribute a straight line, which understates the real path "
+            "across a gap -- see D-11's frac_interpolated",
+        ],
+        warnings=[
+            "Under-smoothed data inflates the length, exactly as for IL-1: summing step "
+            "lengths sums |dx| rather than dx, so positional noise always adds length and the "
+            "inflation grows with frame rate. Depth noise adds to it as well.",
+            "No refraction or parallax correction: a fish near the front glass looks larger "
+            "and sits at a different apparent depth than one at the back.",
+            "A wrong tank height scales every vertical distance, and so the 3-D length, by the "
+            "same factor.",
+            "Needs a cm scale for the top view; without it (or without depth) every column "
+            "is NaN.",
+        ],
+        citation="Standard kinematics",
+        supporting_references=[MARTIN_BATESON_2007],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """3-D path length for every individual; NaN columns without depth or a cm scale."""
+        pos = positions_cm(session)
+        records: list[dict] = []
+        for k in range(session.n_animals):
+            n_steps = 0
+            path_cm = float("nan")
+            if pos is not None:
+                diff = pos[1:, k, :] - pos[:-1, k, :]
+                valid = np.isfinite(diff).all(axis=1)
+                n_steps = int(valid.sum())
+                if n_steps > 0:
+                    path_cm = float(np.sqrt((diff[valid] ** 2).sum(axis=1)).sum())
+            bl_cm = body_length_cm(session, k)
+            records.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "individual_id": k,
+                    "path_length_3d_cm": path_cm,
+                    "path_length_3d_bl": path_cm / bl_cm if bl_cm > 0 else float("nan"),
+                    "n_valid_steps": n_steps,
+                }
+            )
+        return pd.DataFrame(records, columns=self.output_columns)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -1842,3 +1931,4 @@ _register(RoamingEntropy)
 _register(CircularHeadingStats)
 _register(WallDistanceThigmotaxis)
 _register(VerticalPosition)
+_register(PathLength3D)

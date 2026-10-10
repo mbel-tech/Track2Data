@@ -95,7 +95,7 @@ derives *from the data* is resolved once on the whole session so bins stay
 comparable: the IL-4/IL-7 activity threshold (`mean speed x multiplier`), the fitted
 bout criterion (IL-7, Z-3/Z-4/Z-5), the IL-3/IL-14 arena, the IL-15 water column, the
 Z-2/Z-8 zone areas.
-Consequences: IL-1 path length loses the one step across each bin edge, so bins sum
+Consequences: IL-1 path length (and IL-16, its 3-D counterpart) loses the one step across each bin edge, so bins sum
 to slightly less than the whole session; Z-1 `time_s` is exactly additive; Z-6
 `first_entry_t_s` is a latency from the start of the bin. Z-5 event `frame`/`t_s` stay
 on the session axis. IL-5 (tortuosity, defined over the whole track) and IL-9 (a
@@ -129,6 +129,7 @@ Individual        Locomotion               IL-1, IL-2, IL-6
                   Activity / freezing      IL-4, IL-7
                   Space use                IL-3, IL-9, IL-10, IL-14
                   Vertical position        IL-15
+                  3-D movement             IL-16
                   Path geometry            IL-5, IL-8, IL-11
 Group             Social spacing           GL-1, GL-2, GL-13
                   Cohesion                 GL-4, GL-6, GL-10, GL-15
@@ -408,6 +409,23 @@ info-button modal (§6).
 | **Parameters** | `water_column` is `derived=True` and cannot be overridden. |
 | **Reference** | Standard descriptive statistic of vertical position in the water column; no single originating work defines this mean-depth fraction. The construct, vertical position as a behavioural measure in novel-tank assays, is in the supporting references. |
 | **Supporting references** | Cachat et al. 2010, Nat. Protoc. 5(11):1786-1799 (measuring behavioral and endocrine responses to novelty stress in adult zebrafish) (DOI: 10.1038/nprot.2010.140); Egan et al. 2009, Behav. Brain Res. 205(1):38-44 (understanding behavioral and physiological phenotypes of stress and anxiety in zebrafish) (DOI: 10.1016/j.bbr.2009.06.022); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031); Stewart et al. 2012, Neuropharmacology 62(1):135-143 (modeling anxiety using adult zebrafish: a conceptual review -- no operational threshold given) (DOI: 10.1016/j.neuropharm.2011.07.037); Kalueff et al. 2013, Zebrafish 10(1):70-86 (towards a comprehensive catalog of zebrafish behavior 1.0 and beyond) (DOI: 10.1089/zeb.2012.0861) |
+
+#### IL-16 — 3-D distance travelled
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Total distance travelled in 3-D |
+| **Level** | Individual; trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session |
+| **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
+| **Formula** | `Σ_t ‖P[t+1, k] − P[t, k]‖` over frame pairs where both positions are finite, with `P = (x_px / px_per_cm, y_px / px_per_cm, depth · tank_height_cm)` |
+| **Output columns** | `individual_id`, `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` |
+| **Units** | cm / BL / count |
+| **Assumptions** | The depth comes from a side camera at right angles to the top camera. A step needs three finite coordinates (x, y, depth) at both of its frames; an animal with no such step has **no measured distance**, reported as NaN (cm and BL) with `n_valid_steps` 0, never as 0. Interpolated frames contribute a straight line |
+| **Warnings** | Under-smoothed data inflates the length, as for IL-1 (and depth noise adds to it). No refraction or parallax correction. A wrong tank height scales every vertical distance. Always at least IL-1 for the same frames. Without depth or a cm scale all columns are NaN |
+| **Reference** | Standard kinematics |
+| **Supporting references** | Martin & Bateson 2007, Measuring Behaviour: An Introductory Guide, 3rd ed. (Cambridge University Press) (DOI: 10.1017/CBO9780511810893) |
 
 ### 4.2 Zone metrics
 
@@ -825,6 +843,7 @@ three together.
 | IL-11 Circular Statistics of Heading | ❌ | Per-animal time series |
 | IL-14 Wall-Distance Thigmotaxis | ❌ | Per-animal time series |
 | IL-15 Vertical Position (Depth) | ❌ | Per-animal time series |
+| IL-16 3-D Distance Travelled | ❌ | Per-animal time series |
 | GL-1 Nearest-Neighbour Distance | ✅ | Unordered point set per frame |
 | GL-2 Inter-Individual Distance | ✅ | Unordered point set per frame |
 | GL-3 Polarisation | ❌ | Heading requires per-individual tracklets |
@@ -1152,6 +1171,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | IL-11 | `metrics/individual.py` | `CircularHeadingStats` | np-only; Zar's Rayleigh-test approximation |
 | IL-14 | `metrics/individual.py` | `WallDistanceThigmotaxis` | `shapely` -- the only IL-* metric with that dependency |
 | IL-15 | `metrics/individual.py` | `VerticalPosition` | np-only; the water column comes from `zones/extent.py`, derived in `metrics/derived.py`; gated by `Metric.valid_camera_views` (`metrics/availability.py`) |
+| IL-16 | `metrics/individual.py` | `PathLength3D` | np-only; positions from `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` (`metrics/availability.py`) |
 
 ### 5.1 Shared computations (no duplicated work)
 
@@ -1382,7 +1402,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 15 of the 35
+   it is disabled with an explanatory tooltip for the 16 of the 36
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by
