@@ -514,7 +514,7 @@ class ZonesScreen(QWidget):
         if zones.rois or self._store is None:
             return {}
         facts = self._store.session_facts(self._session_combo.currentText())
-        if facts is None or facts.width_px <= 0 or facts.height_px <= 0:
+        if facts is None or not facts.pixel_size_known:
             return {}
         return {"source_width_px": facts.width_px, "source_height_px": facts.height_px}
 

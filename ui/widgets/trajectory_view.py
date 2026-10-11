@@ -89,6 +89,10 @@ def _heat_image(heat: np.ndarray) -> QImage:
     return img.copy()  # detach from the numpy buffer
 
 
+_FRAME_LONG_SIDE = 480.0
+_FRAME_PAD_SHARE = 0.05
+
+
 class TrajectoryView(QGraphicsView):
     frameChanged = Signal(int)
 
@@ -101,6 +105,10 @@ class TrajectoryView(QGraphicsView):
         self._xy: np.ndarray | None = None
         self._rois: list[Any] = []
         self._size = (640.0, 480.0)
+        # No pixel frame (native 3-D): positions are drawn as (xy - origin) * scale + pad
+        self._origin: np.ndarray | None = None
+        self._scale = 1.0
+        self._pad = 0.0
         self._frame = 0
         self._trail = 250
         self._source = "processed"
@@ -128,6 +136,7 @@ class TrajectoryView(QGraphicsView):
     ) -> None:
         """Load a session: *raw_xy* and *xy* are (n_frames, n_animals, 2) pixels."""
         self._raw, self._xy, self._rois = raw_xy, xy, list(rois)
+        self._origin, self._scale, self._pad = None, 1.0, 0.0
         self._fps = fps
         self._gscene.clear()
         self._dynamic, self._zone_items, self._heat_item = [], [], None
@@ -142,9 +151,7 @@ class TrajectoryView(QGraphicsView):
         elif size is not None:
             self._size = (float(size[0]), float(size[1]))
         else:
-            finite = xy[np.isfinite(xy).all(axis=-1)]
-            top = finite.max(axis=0) if len(finite) else np.array([640.0, 480.0])
-            self._size = (float(top[0]) + 20, float(top[1]) + 20)
+            self._size = self._frame_from_positions(xy)
         self._gscene.setSceneRect(0, 0, *self._size)
 
         self._frame = 0
@@ -152,6 +159,32 @@ class TrajectoryView(QGraphicsView):
         self._rebuild_heatmap()
         self._redraw()
         self.fitInView(self._gscene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def _frame_from_positions(self, xy: np.ndarray) -> tuple[float, float]:
+        """A frame for positions with no pixel frame: the finite extent, scaled so its longer
+        side is ``_FRAME_LONG_SIDE`` scene units, with a margin of ``_FRAME_PAD_SHARE`` of that.
+        A single point (zero span) gets a unit span. Sets the origin, scale and pad."""
+        finite = xy[np.isfinite(xy).all(axis=-1)]
+        if not len(finite):
+            return 640.0, 480.0
+        lo, hi = finite.min(axis=0), finite.max(axis=0)
+        span = hi - lo
+        longest = float(span.max())
+        if not longest > 0:
+            longest = 1.0
+        self._origin = lo.astype(float)
+        self._scale = _FRAME_LONG_SIDE / longest
+        self._pad = _FRAME_LONG_SIDE * _FRAME_PAD_SHARE
+        return (
+            float(span[0]) * self._scale + 2 * self._pad,
+            float(span[1]) * self._scale + 2 * self._pad,
+        )
+
+    def _to_scene(self, pts: np.ndarray) -> np.ndarray:
+        """Positions in scene units (the identity for a session with a pixel frame)."""
+        if self._origin is None:
+            return pts
+        return (pts - self._origin) * self._scale + self._pad
 
     @property
     def n_frames(self) -> int:
@@ -260,7 +293,7 @@ class TrajectoryView(QGraphicsView):
         self._heat_item = None
         if not self._show_heatmap or self._xy is None:
             return
-        heat = occupancy_heatmap(self._xy, *self._size)
+        heat = occupancy_heatmap(self._to_scene(self._xy), *self._size)
         pix = QPixmap.fromImage(_heat_image(heat)).scaled(
             int(self._size[0]), int(self._size[1]),
             Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation,
@@ -281,7 +314,7 @@ class TrajectoryView(QGraphicsView):
 
         start = max(0, self._frame - self._trail)
         for data, is_raw in sources:
-            window = data[start : self._frame + 1]
+            window = self._to_scene(data[start : self._frame + 1])
             stride = max(1, int(np.ceil(len(window) / _MAX_TRAIL_POINTS)))
             for k in range(data.shape[1]):
                 colour = QColor(ANIMAL_COLORS[k % len(ANIMAL_COLORS)])
@@ -310,7 +343,7 @@ class TrajectoryView(QGraphicsView):
                 self._trail_items += 1
                 self._trail_points += n_pts
                 if not is_raw:
-                    x, y = data[self._frame, k]
+                    x, y = self._to_scene(data[self._frame, k])
                     if np.isfinite(x) and np.isfinite(y):
                         dot = self._gscene.addEllipse(
                             float(x) - radius, float(y) - radius, 2 * radius, 2 * radius,

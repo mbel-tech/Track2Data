@@ -302,17 +302,29 @@ def test_readme_native_block_without_water_column(tmp_path: Path) -> None:
 
 
 def test_readme_unchanged_for_pixel_sessions(tmp_path: Path) -> None:
+    """Byte-identical to the README the renderer wrote before the native block existed
+    (golden rendered from 5dd0c7f; only the generation time is masked)."""
+    import re
+
     import pandas as pd
 
-    from track2data.exporters.base import ExportPayload
+    from track2data.exporters.base import ExportPayload, SessionProvenance
     from track2data.exporters.readme import ReadmeExporter
 
     payload = ExportPayload(
         session_id="s", project_name="p", project_hash="0" * 16, app_version="x",
         fish_by_frame=pd.DataFrame(),
+        provenance=SessionProvenance(
+            reader="idtrackerai", source_software="idtracker.ai",
+            reader_verification="synthetic_only", length_unit=1.0, length_unit_label="cm",
+            length_unit_confirmed_by_user=True,
+        ),
     )
     ReadmeExporter().write(payload, tmp_path)
-    assert "Native 3-D source" not in (tmp_path / "README.md").read_text(encoding="utf-8")
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    text = re.sub(r"^\| Generated at \| .* \|$", "| Generated at | <TS> |", text, flags=re.M)
+    golden = (Path(__file__).parent / "golden_pixel_readme.md").read_text(encoding="utf-8")
+    assert text == golden
 
 
 def test_engine_provenance_carries_the_native_block(tmp_path: Path) -> None:
@@ -381,3 +393,77 @@ def test_cli_import_without_required_options_names_them(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, args)
     assert result.exit_code != 0
     assert "fps" in result.output
+
+
+# ── Trajectories preview framing ─────────────────────────────────────────────
+
+
+def _view_for(qtbot, xy: np.ndarray, size=None):
+    pytest.importorskip("PySide6")
+    from ui.widgets.trajectory_view import TrajectoryView
+
+    view = TrajectoryView()
+    qtbot.addWidget(view)
+    view.set_data(xy, xy, fps=25.0, size=size)
+    return view
+
+
+def _marker_inside_scene(view) -> None:
+    rect = view._gscene.sceneRect()
+    assert rect.width() > 0 and rect.height() > 0
+    paths = [i for i in view._dynamic if hasattr(i, "path")]
+    assert paths
+    for item in view._dynamic:
+        assert rect.contains(item.sceneBoundingRect().center()), item
+
+
+def test_native_preview_frames_negative_coordinates(qtbot) -> None:
+    xy = np.stack([np.linspace(-100, -50, 20), np.linspace(-80, -60, 20)], axis=-1)[:, None, :]
+    view = _view_for(qtbot, xy)
+    view.set_frame(10)
+    _marker_inside_scene(view)
+    view.set_heatmap(True)
+    assert view._gscene.sceneRect().width() > 100
+
+
+def test_native_preview_frames_metre_scale_data(qtbot) -> None:
+    xy = np.stack([np.linspace(0, 0.3, 20), np.linspace(0, 0.1, 20)], axis=-1)[:, None, :]
+    view = _view_for(qtbot, xy)
+    view.set_frame(19)
+    _marker_inside_scene(view)
+    rect = view._gscene.sceneRect()
+    assert rect.width() > 100  # not a 20 x 20 collapse
+    path = next(i for i in view._dynamic if hasattr(i, "path")).path().boundingRect()
+    assert path.width() > 100  # the track spans the scene, not one pixel
+
+
+def test_native_preview_all_nan_and_single_point(qtbot) -> None:
+    nan_view = _view_for(qtbot, np.full((5, 1, 2), np.nan))
+    assert nan_view._gscene.sceneRect().width() > 0
+    one = np.zeros((4, 1, 2))
+    one[:] = [3.0, -7.0]
+    single = _view_for(qtbot, one)
+    single.set_frame(2)
+    _marker_inside_scene(single)
+
+
+def test_pixel_preview_framing_unchanged(qtbot) -> None:
+    xy = np.stack([np.linspace(10, 190, 20), np.linspace(10, 90, 20)], axis=-1)[:, None, :]
+    view = _view_for(qtbot, xy, size=(200.0, 100.0))
+    rect = view._gscene.sceneRect()
+    assert (rect.x(), rect.y(), rect.width(), rect.height()) == (0.0, 0.0, 200.0, 100.0)
+    zero = _view_for(qtbot, xy, size=(0.0, 0.0))
+    assert zero._size == (0.0, 0.0)
+
+
+def test_preview_frame_size_native_vs_pixel() -> None:
+    from ui.preview_screen import _frame_size
+
+    native = _native_session()
+    assert _frame_size(native) is None
+    unread = native.model_copy(update={"has_pixel_frame": True})
+    assert _frame_size(unread) == (0.0, 0.0)  # a pixel session whose reader found no size
+    sized = unread.model_copy(
+        update={"video": VideoInfo(fps=25.0, n_frames=8, width_px=640, height_px=480)}
+    )
+    assert _frame_size(sized) == (640.0, 480.0)

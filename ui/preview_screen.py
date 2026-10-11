@@ -85,9 +85,9 @@ class TrajectoryData:
 
 
 def _frame_size(session: Session) -> tuple[float, float] | None:
-    """The video frame in pixels, or None when there is none (a native 3-D session): the view
-    then sizes itself from the positions."""
-    if not session.pixel_size_known:
+    """The video frame in pixels (0 x 0 when the reader could not read it, as before), or None
+    when there is no pixel frame (a native 3-D session): the view then frames the positions."""
+    if not session.has_pixel_frame:
         return None
     return float(session.video.width_px), float(session.video.height_px)
 

@@ -98,6 +98,11 @@ class SessionFacts:
     # False for a native 3-D session: no image frame, width_px/height_px are 0 and mean nothing.
     has_pixel_frame: bool = True
 
+    @property
+    def pixel_size_known(self) -> bool:
+        """As Session.pixel_size_known: a real, positive video frame size in pixels."""
+        return self.has_pixel_frame and self.width_px > 0 and self.height_px > 0
+
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
         """Build from the full engine-side Session a background probe

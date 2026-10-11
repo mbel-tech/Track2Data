@@ -565,7 +565,7 @@ class CalibrationScreen(QWidget):
                 facts = self._store.session_facts(ref.session_id)
                 if facts is not None:
                     background = facts.background_image_path
-                    if facts.has_pixel_frame and facts.width_px > 0 and facts.height_px > 0:
+                    if facts.pixel_size_known:
                         size = (float(facts.width_px), float(facts.height_px))
                     crop = ref.panel
                     break
