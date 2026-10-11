@@ -257,7 +257,8 @@ def test_vertical_speed_helper_matches_the_estimator(kcfg) -> None:
     vh = psess.kinematics.speed_px_s / PX_PER_CM
     row = _run(psess, {"kinematics": kcfg.model_dump()}).iloc[0]
     speed = np.sqrt(vh[:, 0] ** 2 + vz[:, 0] ** 2)
-    assert row["mean_speed_3d_cm_s"] == np.nanmean(speed)
+    # not bit-exact across numpy/scipy builds (1 ulp on the CI's Python 3.11)
+    assert row["mean_speed_3d_cm_s"] == pytest.approx(np.nanmean(speed), rel=1e-12)
 
 
 def test_vertical_speed_is_none_without_z_or_scale() -> None:
@@ -368,7 +369,8 @@ def test_whole_session_iL17_is_unchanged(method: str) -> None:  # noqa: N802
     engine = Engine(manifest).compute_metrics(psess, identity_free=False)["IL-17"]
     direct = _run(psess, {"kinematics": kcfg.model_dump()})
     for df in (engine, direct):
-        np.testing.assert_array_equal(df[cols].to_numpy(), np.array(_OLD_IL17[method]))
+        # values pinned from the old code; equal to float rounding across numpy/scipy builds
+        np.testing.assert_allclose(df[cols].to_numpy(), np.array(_OLD_IL17[method]), rtol=1e-12)
 
 
 def _engine_for(individual: list[str]):
