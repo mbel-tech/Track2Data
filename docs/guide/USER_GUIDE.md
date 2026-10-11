@@ -744,8 +744,9 @@ keep measuring in the top-view plane.
   frames where the vertical speed exists it is at least IL-2's cm/s; IL-16 is at least IL-1 over the
   steps where the depth is also valid; GL-16 is at least GL-1 for a frame where both exist. Over
   whole sessions these do not have to hold, because the 3-D metrics leave out frames the 2-D ones keep.
-- **Time bins** work as for the 2-D metrics (each bin has its own value). In a binned run the vertical
-  speed is estimated inside each bin.
+- **Time bins** work as for the 2-D metrics (each bin has its own value). The vertical speed is
+  estimated once on the whole session and cut into the bins, like IL-2's speed, so a bin's first and
+  last frames carry the whole-session value.
 - **Limits.** Depth comes from a side camera at right angles to the top camera; there is no
   correction for refraction or parallax. Vertical speed as its own metric, 3-D inter-individual
   distance and cohesion are not included.

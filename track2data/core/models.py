@@ -928,6 +928,12 @@ class PreprocessedSession:
     # (preprocess/z_axis.py). Identity-switch correction never touches it, so it is only valid
     # for single-animal sources (native files are one animal).
     z: np.ndarray | None = None
+    # (n_frames, n_animals) vertical speed in the project length unit per second, from
+    # ``compute_kinematics`` on the WHOLE session's Z with the manifest's KinematicsCfg
+    # (metrics.geometry3d.vertical_speed). Set by the Engine before windows are cut and sliced
+    # with the session, so a bin sees the whole-session estimate at its edge frames (as IL-2's
+    # kinematics do). None when not computed: IL-17 then estimates it from its own session.
+    z_speed: np.ndarray | None = None
     # (n_animals,) int: the top session's animal index of each fused animal (fusion keeps only
     # the fish in the pair's fish map, so fused position k is not top animal k). None otherwise.
     source_animal_index: np.ndarray | None = None

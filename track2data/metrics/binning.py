@@ -90,6 +90,7 @@ def slice_psess(psess: PreprocessedSession, start: int, stop: int) -> Preprocess
             None if psess.depth_jump_replaced is None else psess.depth_jump_replaced[start:stop]
         ),
         z=None if psess.z is None else psess.z[start:stop],
+        z_speed=None if psess.z_speed is None else psess.z_speed[start:stop],
         kinematics=KinematicsArrays(
             speed_px_s=kin.speed_px_s[start:stop],
             accel_px_s2=kin.accel_px_s2[start:stop],

@@ -11,7 +11,40 @@ from __future__ import annotations
 
 import numpy as np
 
-from track2data.core.models import PreprocessedSession
+from track2data.core.models import KinematicsCfg, PreprocessedSession
+
+
+def z_cm(psess: PreprocessedSession) -> np.ndarray | None:
+    """``(n_frames, n_animals)`` float64 vertical coordinate in cm, or None without one.
+
+    ``psess.z`` for a native 3-D session (absolute, in the project unit), else
+    ``depth * depth_height_cm`` for a fused one. Not masked by the horizontal position.
+    """
+    if psess.z is not None:
+        return np.asarray(psess.z, dtype=np.float64)
+    if psess.depth is not None and psess.depth_height_cm is not None:
+        return np.asarray(psess.depth, dtype=np.float64) * float(psess.depth_height_cm)
+    return None
+
+
+def vertical_speed(psess: PreprocessedSession, kin_cfg: KinematicsCfg | dict) -> np.ndarray | None:
+    """``(n_frames, n_animals)`` vertical speed (cm/s, unsigned) of the session's Z, or None.
+
+    The single implementation of IL-17's vertical part: the pipeline's own derivative
+    (``compute_kinematics``) applied to ``[Z, 0]``, so the speed is ``|vz|``, NaN wherever Z is
+    or the estimator has no value. The Engine calls it once on the whole session and slices the
+    result with the windows; ``Speed3D`` calls it only when the session carries no precomputed
+    series. None without a Z or without the cm scale.
+    """
+    from track2data.core.models import KinematicsCfg
+    from track2data.preprocess.kinematics import compute_kinematics
+
+    z = z_cm(psess)
+    if z is None or psess.px_per_cm is None:
+        return None
+    kcfg = KinematicsCfg.model_validate(kin_cfg or {})
+    zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
+    return compute_kinematics(zz, psess.fps, kcfg).speed_px_s
 
 
 def positions_cm(psess: PreprocessedSession) -> np.ndarray | None:
@@ -25,11 +58,8 @@ def positions_cm(psess: PreprocessedSession) -> np.ndarray | None:
     """
     if psess.px_per_cm is None:
         return None
-    if psess.z is not None:
-        z = np.asarray(psess.z, dtype=np.float64)
-    elif psess.depth is not None and psess.depth_height_cm is not None:
-        z = np.asarray(psess.depth, dtype=np.float64) * float(psess.depth_height_cm)
-    else:
+    z = z_cm(psess)
+    if z is None:
         return None
     xy = np.asarray(psess.xy, dtype=np.float64)
     pos = np.empty((*xy.shape[:2], 3), dtype=np.float64)

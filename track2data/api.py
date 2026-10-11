@@ -1376,6 +1376,31 @@ class Engine:
             return parts[0] if parts else pd.DataFrame()
         return pd.concat(non_empty, ignore_index=True)
 
+    def _with_whole_session_z_speed(
+        self, psess: PreprocessedSession, skipped: Any
+    ) -> PreprocessedSession:
+        """*psess* with ``z_speed`` set from the whole session's Z, when a metric needs it.
+
+        Runs before any window is cut, so a binned run slices the series with the session (as it
+        does the kinematics) instead of re-estimating the derivative inside each bin. Only when a
+        selected, not skipped metric has ``uses_kinematics_cfg`` (IL-17) and the session has a Z
+        and a cm scale (fused and native 3-D alike); otherwise *psess* is returned unchanged.
+        The caller's session is not modified.
+        """
+        from track2data.metrics import get
+        from track2data.metrics.geometry3d import vertical_speed
+
+        sel = self._manifest.metrics
+        wanted = False
+        for mid in (*sel.individual, *sel.group, *sel.zone):
+            cls = get(mid)
+            if cls is not None and cls.uses_kinematics_cfg and mid not in skipped:
+                wanted = True
+        if not wanted:
+            return psess
+        vz = vertical_speed(psess, self._manifest.preprocess.kinematics)
+        return psess if vz is None else dataclasses.replace(psess, z_speed=vz)
+
     def _log_depth_scale_skip(self, metric_id: str, reason: str, session_id: str) -> None:
         """Log (or, inside :meth:`_aggregated_skip_log`, tally) one depth-scale metric skip."""
         if self._skip_tally is not None:
@@ -1494,6 +1519,8 @@ class Engine:
                 )
             for mid in sorted(depth_ids):
                 self._log_depth_scale_skip(mid, view_skipped[mid], psess.session_id)
+
+        psess = self._with_whole_session_z_speed(psess, skipped)
 
         bin_seconds = self._bin_seconds()
         windows = None
