@@ -190,8 +190,8 @@ class NearestNeighbourDistance3D(Metric):
             "GL-1 in three dimensions. For each frame the nearest-neighbour distance of "
             "every animal is the minimum Euclidean distance, in cm, to any other animal in "
             "(X, Y, Z) space (X, Y from the top view, Z from the side-view depth times the "
-            "tank height; for a native 3-D file, its absolute z). The group NND per frame is the mean across animals; the metric "
-            "reports the mean and median of the frame-level values."
+            "tank height; for a native 3-D file, its absolute z). The group NND per frame is the "
+            "mean across animals; the metric reports the mean and median of the frame-level values."
         ),
         formula_plain=(
             "P[t,k] = (x/px_per_cm, y/px_per_cm, depth*tank_height_cm); "
