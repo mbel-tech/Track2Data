@@ -17,7 +17,7 @@ PX_PER_CM = 8.0
 HEIGHT_CM = 200.0
 COLUMNS = [
     "session_id", "metric_id", "mean_nnd_3d_cm", "median_nnd_3d_cm",
-    "mean_nnd_3d_bl", "n_skipped_frames_3d",
+    "mean_nnd_3d_bl", "n_skipped_frames_3d", "frac_frames_used_3d",
 ]
 STATS = COLUMNS[2:5]
 
@@ -198,3 +198,51 @@ def test_nnd3d_zero_animals_and_zero_frames_give_nan_without_warnings() -> None:
         assert list(_run(psess).columns) == COLUMNS
         assert np.isnan(row[STATS].astype(float)).all()
         assert row["n_skipped_frames_3d"] == shape[0]
+
+
+def test_frac_frames_used_is_the_share_of_frames_with_every_animal_in_3d() -> None:
+    psess = _fused(_three_fish(10))
+    psess.depth[[2, 7], 1] = np.nan  # two frames lose one fish's depth
+    row = _run(psess).iloc[0]
+    assert row["n_skipped_frames_3d"] == 2
+    assert row["frac_frames_used_3d"] == pytest.approx(0.8)
+
+
+def test_frac_frames_used_is_one_with_complete_data() -> None:
+    assert _run(_fused(_three_fish(6))).iloc[0]["frac_frames_used_3d"] == 1.0
+
+
+def test_frac_frames_used_is_nan_without_a_3d_position() -> None:
+    psess = _fused(_three_fish(4))
+    psess.depth = None
+    assert np.isnan(_run(psess).iloc[0]["frac_frames_used_3d"])
+
+
+def test_frac_frames_used_ignores_separator_rows() -> None:
+    psess = _fused(_three_fish(6))
+    sep = np.zeros(6, dtype=bool)
+    sep[2] = True
+    psess.separator_mask = sep
+    psess.xy[2] = np.nan
+    psess.depth[2] = np.nan
+    row = _run(psess).iloc[0]
+    assert row["frac_frames_used_3d"] == 1.0  # the 5 real frames are all usable
+
+
+def test_depth_loss_beyond_gl1_is_warned_about_once(caplog) -> None:
+    import logging
+
+    psess = _fused(_three_fish(10))
+    psess.depth[:5, 1] = np.nan  # GL-1 still uses these 5 frames; GL-16 cannot
+    with caplog.at_level(logging.WARNING):
+        _run(psess)
+    assert caplog.text.count("GL-16") == 1
+    assert "GL-1" in caplog.text and "different frames" in caplog.text
+
+
+def test_no_warning_when_gl16_uses_the_frames_gl1_uses(caplog) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        _run(_fused(_three_fish(10)))
+    assert "GL-16" not in caplog.text

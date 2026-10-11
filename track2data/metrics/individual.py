@@ -1767,8 +1767,16 @@ class VerticalPosition(Metric):
                 # a native 3-D session got its depth from the entered water column
                 "depth_extent_source": "water_column" if session.z is not None else "fusion",
             }
-            # without the mask the outside share is unknown (NaN), never 0
-            total = n_out + d.size if n_out is not None else 0
+            # without the mask the outside share is unknown (NaN), never 0. The denominator is
+            # the side view's own samples when the fusion recorded them: counting only samples
+            # that also have a depth would let top-view gaps inflate the share.
+            side = session.depth_side_valid
+            if n_out is None:
+                total = 0
+            elif side is not None:
+                total = int(side[:, k].sum())
+            else:
+                total = n_out + d.size
             if total and n_out is not None:
                 row["frac_outside_extent"] = float(n_out / total)
             if d.size:
@@ -1781,8 +1789,9 @@ class VerticalPosition(Metric):
                     row["mean_depth_cm"] = mean * float(height)
             if total and n_out is not None and n_out / total > _OUTSIDE_EXTENT_WARN:
                 logger.warning(
-                    "IL-15: %.0f%% of animal %d's fused samples in session %s fall outside the "
-                    "water column; check the fusion settings.",
+                    "IL-15: %.0f%% of animal %d's side-view samples in session %s fall outside "
+                    "the water column; check the surface and floor rows in the fusion settings "
+                    "and the side tracking.",
                     100 * n_out / total,
                     k,
                     session.session_id,
