@@ -913,6 +913,14 @@ class PreprocessedSession:
     # shape as ``depth`` and sliced with it, so a window can count its own outside samples;
     # ``depth_outside`` equals its sum over frames.
     depth_outside_mask: np.ndarray | None = None
+    # (n_frames, n_animals) bool, same shape as ``depth``: True where the side view's position
+    # behind that depth was reconstructed rather than measured -- gap-filled
+    # (``depth_interpolated``) or a replaced jump (``depth_jump_replaced``). False where the depth
+    # is missing and on separator rows. A fused session's ``was_interpolated`` / ``jump_replaced``
+    # describe the top view only, so these are the vertical axis's own. None for a session
+    # without a fused depth (a native 3-D session marks its reconstructed z through xy).
+    depth_interpolated: np.ndarray | None = None
+    depth_jump_replaced: np.ndarray | None = None
     # (n_rows, n_animals) absolute vertical coordinate of a native 3-D session, in the
     # session's coordinate unit, laid out on the same rows as ``xy`` (NaN on inserted rows).
     # None for every other session. It is the file's coordinate cleaned like ``xy``: blanked

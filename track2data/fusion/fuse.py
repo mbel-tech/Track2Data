@@ -137,6 +137,12 @@ def fuse(
         # counted on the side y alone; depth is NaN wherever either view lacks a position
         outside = np.isfinite(y) & ~((depth >= 0) & (depth <= 1))
     depth = np.where(valid & ~outside, depth, np.nan)
+    # which of those depths rest on a reconstructed side position (the side view's own flags)
+    has_depth = np.isfinite(depth)
+    depth_interpolated = side.was_interpolated[srows][:, side_cols] & has_depth
+    depth_jump_replaced = np.zeros_like(has_depth)
+    if side.jump_replaced is not None:
+        depth_jump_replaced = side.jump_replaced[srows][:, side_cols] & has_depth
 
     kin = top.kinematics
     n = top.n_animals
@@ -186,6 +192,8 @@ def fuse(
         depth_height_cm=fs.tank_height_cm,
         depth_outside=outside.sum(axis=0).astype(int),
         depth_outside_mask=_separate(outside, at),
+        depth_interpolated=_separate(depth_interpolated, at),
+        depth_jump_replaced=_separate(depth_jump_replaced, at),
         source_animal_index=np.asarray(keep, dtype=np.int64),
     )
     rms: float | None = None
