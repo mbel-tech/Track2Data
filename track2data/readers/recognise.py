@@ -86,6 +86,26 @@ def _fictrac(entry: IndexEntry, _index: ScanIndex, peek: Peeker) -> bool:
     return True
 
 
+def _dlc_3d_unreadable(entry: IndexEntry, _index: ScanIndex, peek: Peeker) -> bool:
+    """A DeepLabCut 3-D table the ``deeplabcut_3d`` reader does not take: a multi-animal one (an
+    extra ``individuals`` row) or one without a full x, y, z triple. Single-animal tables that
+    reader claims are never reported here."""
+    if entry.is_dir or entry.suffix != ".csv":
+        return False
+    lines = peek.text_lines(entry.path, 4)
+    if not lines or not lines[0].lower().startswith("scorer"):
+        return False
+    for line in lines[1:4]:
+        cells = [c.strip().lower() for c in line.split(",")]
+        if cells and cells[0] == "coords":
+            if "z" not in cells[1:] or "likelihood" in cells[1:]:
+                return False
+            from track2data.readers.deeplabcut_3d import _parse_header
+
+            return _parse_header(lines) is None
+    return False
+
+
 FORMATS: tuple[RecognisedFormat, ...] = (
     RecognisedFormat(
         "sleap_slp",
@@ -129,6 +149,13 @@ FORMATS: tuple[RecognisedFormat, ...] = (
         "These are AnimalTA's per-target detailed files, which do not record their unit, so "
         "they are not read. Add the Coordinates .csv from the same AnimalTA run instead.",
         _animalta_detailed,
+    ),
+    RecognisedFormat(
+        "dlc_3d",
+        "DeepLabCut 3-D table (not single-animal)",
+        "This is a DeepLabCut 3-D table that Track2Data cannot read yet: it has an individuals "
+        "row, or a body part without all of x, y and z. Export one animal per table.",
+        _dlc_3d_unreadable,
     ),
     RecognisedFormat(
         "fictrac",

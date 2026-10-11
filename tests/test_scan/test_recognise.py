@@ -15,6 +15,12 @@ from track2data.readers.recognise import FORMATS
 from track2data.readers.scan import scan
 
 DLC_2D = "scorer,s,s,s\nbodyparts,nose,nose,nose\ncoords,x,y,likelihood\n0,1.0,2.0,0.9\n"
+DLC_3D_MULTI = (
+    "scorer,s,s,s,s,s,s\nindividuals,a,a,a,b,b,b\nbodyparts,h,h,h,h,h,h\n"
+    "coords,x,y,z,x,y,z\n0,1,2,3,4,5,6\n"
+)
+DLC_3D_INCOMPLETE = "scorer,s,s\nbodyparts,h,h\ncoords,x,z\n0,1,2\n"
+DLC_3D_SINGLE = "scorer,s,s,s\nbodyparts,h,h,h\ncoords,x,y,z\n0,1,2,3\n"
 FICTRAC = ",".join(str(float(i)) for i in range(25)) + "\n"
 
 
@@ -34,6 +40,7 @@ BUILDERS = {
     "animalta_detailed": lambda r: _write(
         r / "Results" / "Detailed_data" / "vid" / "Arena_0A.csv", "Time;X;Y\n0;1;2\n"
     ),
+    "dlc_3d": lambda r: _write(r / "trial_3d.csv", DLC_3D_MULTI),
     "fictrac": lambda r: _write(r / "fictrac-20240101.dat", FICTRAC),
 }
 
@@ -166,3 +173,16 @@ def test_a_file_in_a_subfolder_of_a_readable_session_is_not_reported(
     shutil.copytree(tiny_real_session, tmp_path / "s1")
     _write(tmp_path / "s1" / "a" / "stray.slp")
     assert scan([tmp_path]).recognised == ()
+
+
+def test_an_incomplete_3d_table_is_named_with_its_file(tmp_path: Path) -> None:
+    _write(tmp_path / "half.csv", DLC_3D_INCOMPLETE)
+    (found,) = scan([tmp_path]).recognised
+    assert found.key == "dlc_3d" and found.example.name == "half.csv"
+
+
+def test_a_single_animal_3d_table_is_read_not_reported(tmp_path: Path) -> None:
+    _write(tmp_path / "trial_3d.csv", DLC_3D_SINGLE)
+    result = scan([tmp_path])
+    assert result.recognised == ()
+    assert [g.best.reader for g in result.groups] == ["deeplabcut_3d"]
