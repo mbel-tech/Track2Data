@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Sessions screen: a session tracked in separate intervals shows its real length.** The Frames column and the detail panel read "400 of 600" (rows tracked of video frames up to the end of the last interval), and the minutes in the detail panel and the summary line use the real elapsed time rather than the row count, which understated a file with gaps (a file with frames 0-199 and 400-599 showed 13 s instead of 20 s). Sessions without gaps look as before; the reader contract (`video.n_frames` is the row count) is unchanged.
 - **Clearer native 3-D wording on the command line.** `track2data validate` and `run` name the project setting (`calibration.water_column`) instead of the Calibration page when IL-15 waits for the water column; the Metrics screen and the run `README.md` keep their text. `track2data list-metrics` ends with a line saying that availability also depends on the project (3-D data, cm scale, pixel frame, number of animals) and pointing to `validate`. `track2data add --yes` prints a `check:` line for every required option the reader proposed rather than you gave (for example `unit=mm` for Anipose). `docs/METRICS_SPEC.md` gains an Availability note on IL-3, IL-9, IL-10, IL-14 and the group metrics for native 3-D projects.
 
 ### Fixed
