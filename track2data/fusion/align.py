@@ -105,7 +105,8 @@ def side_horizontal_cm(
 ) -> np.ndarray:
     """The side view's horizontal position in cm, (len(rows), len(cols)); negated when ``flip``."""
     fs = _settings(pair)
-    side_scale = (fs.floor_row - fs.surface_row) / fs.tank_height_cm
+    # px per cm; the absolute value keeps the sign of an upside-down view out of the direction
+    side_scale = abs(fs.floor_row - fs.surface_row) / fs.tank_height_cm
     cm = side.xy[:, :, 0][rows][:, cols] / side_scale
     return -cm if fs.flip else cm
 
