@@ -56,6 +56,14 @@ class _RowLine(QGraphicsLineItem):
     def label_text(self) -> str:
         return self._label.text()
 
+    def set_role(self, label: str, colour: str) -> None:
+        """Rename and recolour the line (which water-column edge it stands for)."""
+        pen = self.pen()
+        pen.setColor(QColor(colour))
+        self.setPen(pen)
+        self._label.setText(label)
+        self._label.setBrush(QBrush(QColor(colour)))
+
     def set_grab(self, scene_units: float) -> None:
         if scene_units != self._grab:
             self.prepareGeometryChange()
@@ -113,6 +121,9 @@ class WaterColumnView(QWidget):
         self._floor: float | None = None
         self._surface_line: _RowLine | None = None
         self._floor_line: _RowLine | None = None
+        # An upside-down side view has the floor as its upper line and the surface as its lower:
+        # the upper line is always the one the first drag handle moves.
+        self._inverted = False
         self._rebuild_lines()
 
     # -- public API -------------------------------------------------------------------
@@ -141,6 +152,19 @@ class WaterColumnView(QWidget):
         self._surface = self._finite(surface)
         self._floor = self._finite(floor)
         self._sync()
+
+    def set_inverted(self, inverted: bool) -> None:
+        """Label the upper line "Floor" and the lower one "Surface" (an upside-down camera)."""
+        self._inverted = bool(inverted)
+        self._apply_roles()
+
+    def _apply_roles(self) -> None:
+        upper = ("Floor", _FLOOR_COLOUR) if self._inverted else ("Surface", _SURFACE_COLOUR)
+        lower = ("Surface", _SURFACE_COLOUR) if self._inverted else ("Floor", _FLOOR_COLOUR)
+        if self._surface_line is not None:
+            self._surface_line.set_role(*upper)
+        if self._floor_line is not None:
+            self._floor_line.set_role(*lower)
 
     def rows(self) -> tuple[float | None, float | None]:
         """The rows as drawn: clamped to the frame, surface above floor."""
@@ -202,6 +226,7 @@ class WaterColumnView(QWidget):
         )
         for item in (self._surface_line, self._floor_line):
             scene.addItem(item)
+        self._apply_roles()
         self._sync()
 
     def _sync(self) -> None:

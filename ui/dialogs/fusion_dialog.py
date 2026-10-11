@@ -85,6 +85,11 @@ class FusionDialog(QDialog):
         self._axis_combo = QComboBox()
         self._axis_combo.addItems(list(_AXES))
         self._flip_check = QCheckBox("Flip")
+        self._inverted_check = QCheckBox(
+            "The side view is upside down (the surface is the lower line)"
+        )
+        self._upper_label = QLabel("Water surface row")
+        self._lower_label = QLabel("Tank floor row")
         self._offset_spin = QSpinBox()
         self._offset_spin.setRange(-1_000_000, 1_000_000)
         self._offset_spin.setSuffix(" frames")
@@ -99,8 +104,9 @@ class FusionDialog(QDialog):
         self._timer.timeout.connect(weak_slot(self._refresh_now))
 
         form = QFormLayout()
-        form.addRow("Water surface row", self._surface_spin)
-        form.addRow("Tank floor row", self._floor_spin)
+        form.addRow(self._upper_label, self._surface_spin)
+        form.addRow(self._lower_label, self._floor_spin)
+        form.addRow(self._inverted_check)
         form.addRow("Tank height", self._height_spin)
         axis_row = QHBoxLayout()
         axis_row.addWidget(self._axis_combo)
@@ -138,12 +144,20 @@ class FusionDialog(QDialog):
         )
 
         start = pair.fusion
+        inverted = False
         if start is None:
-            surface, floor = 0.1 * frame_size[1], 0.9 * frame_size[1]
+            upper, lower = 0.1 * frame_size[1], 0.9 * frame_size[1]
         else:
-            surface, floor = start.surface_row, start.floor_row
-        self._fill_spin(self._surface_spin, surface)
-        self._fill_spin(self._floor_spin, floor)
+            # the lines are always drawn upper-then-lower; an upside-down view has the surface
+            # as its lower line
+            inverted = start.surface_row > start.floor_row
+            upper, lower = sorted((start.surface_row, start.floor_row))
+        self._fill_spin(self._surface_spin, upper)
+        self._fill_spin(self._floor_spin, lower)
+        was = self._inverted_check.blockSignals(True)
+        self._inverted_check.setChecked(inverted)
+        self._inverted_check.blockSignals(was)
+        self._apply_inverted()
         self._fill_spin(self._height_spin, start.tank_height_cm if start else _DEFAULT_TANK_CM)
         was = self._axis_combo.blockSignals(True)
         self._axis_combo.setCurrentIndex(1 if start and start.horizontal_axis == "y" else 0)
@@ -158,11 +172,27 @@ class FusionDialog(QDialog):
             spin.valueChanged.connect(weak_slot(self._on_edit))
         self._axis_combo.currentIndexChanged.connect(weak_slot(self._on_edit))
         self._flip_check.toggled.connect(weak_slot(self._on_edit))
+        self._inverted_check.toggled.connect(weak_slot(self._on_inverted))
         self._water_view.rowsChanged.connect(weak_slot(self._on_rows_dragged, pass_args=True))
         self._suggest_btn.clicked.connect(weak_slot(self._on_suggest))
         self._refresh_now()
 
     # ---- helpers --------------------------------------------------------------
+
+    def _apply_inverted(self) -> None:
+        """Name the two lines for the camera's orientation (the picture is drawn upright)."""
+        inverted = self._inverted_check.isChecked()
+        self._upper_label.setText(
+            "Tank floor row (upper line)" if inverted else "Water surface row"
+        )
+        self._lower_label.setText(
+            "Water surface row (lower line)" if inverted else "Tank floor row"
+        )
+        self._water_view.set_inverted(inverted)
+
+    def _on_inverted(self) -> None:
+        self._apply_inverted()
+        self._on_edit()
 
     @staticmethod
     def _row_spin(decimals: int, maximum: float) -> QDoubleSpinBox:
@@ -181,17 +211,22 @@ class FusionDialog(QDialog):
         """The settings shown, or ``(None, reason)`` when they are not valid."""
         if self._height_spin.value() <= 0:
             return None, "The tank height must be above 0 cm."
+        inverted = self._inverted_check.isChecked()
         try:
             fs = FusionSettings(
                 frame_offset=0 if self._same_video else self._offset_spin.value(),
                 horizontal_axis="y" if self._axis_combo.currentIndex() == 1 else "x",
                 flip=self._flip_check.isChecked(),
-                surface_row=self._surface_spin.value(),
-                floor_row=self._floor_spin.value(),
+                # the spin boxes hold the upper and the lower line; upside down, the lower is the
+                # surface
+                surface_row=(
+                    self._floor_spin.value() if inverted else self._surface_spin.value()
+                ),
+                floor_row=self._surface_spin.value() if inverted else self._floor_spin.value(),
                 tank_height_cm=self._height_spin.value(),
             )
         except ValueError:
-            return None, "The water surface must be above the tank floor."
+            return None, "The water surface and the tank floor must be on different rows."
         return fs, ""
 
     def result_settings(self) -> FusionSettings:

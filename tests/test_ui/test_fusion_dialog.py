@@ -260,3 +260,54 @@ def test_unknown_video_size_does_not_raise(qtbot):
     assert d._surface_spin.value() == pytest.approx(10.0)
     assert d._floor_spin.value() == pytest.approx(90.0)
     d._water_view._drag_line("floor", 500.0)
+
+
+# ---- an upside-down side view ----------------------------------------------------
+
+
+def test_upside_down_swaps_which_row_is_the_surface(qtbot):
+    d = _dlg(qtbot)
+    d._surface_spin.setValue(100.0)  # upper line
+    d._floor_spin.setValue(300.0)  # lower line
+    d._inverted_check.setChecked(True)
+    _settle(d)
+    fs = d.result_settings()
+    # the lower line is the water surface when the camera is upside down
+    assert (fs.surface_row, fs.floor_row) == (300.0, 100.0)
+    assert d._ok_button.isEnabled()
+
+
+def test_upright_keeps_the_upper_line_as_the_surface(qtbot):
+    d = _dlg(qtbot)
+    assert not d._inverted_check.isChecked()
+    fs = d.result_settings()
+    assert fs.surface_row < fs.floor_row
+
+
+def test_a_pair_saved_inverted_opens_with_the_box_ticked_and_the_lines_upright(qtbot):
+    top, side, pair = make_pair(fusion=settings(surface_row=300.0, floor_row=100.0))
+    d = FusionDialog(top, side, pair, False)
+    qtbot.addWidget(d)
+    assert d._inverted_check.isChecked()
+    assert d._surface_spin.value() == 100.0 and d._floor_spin.value() == 300.0
+    fs = d.result_settings()
+    assert (fs.surface_row, fs.floor_row) == (300.0, 100.0)
+
+
+def test_the_form_labels_follow_the_box(qtbot):
+    d = _dlg(qtbot)
+    assert d._upper_label.text() == "Water surface row"
+    assert d._lower_label.text() == "Tank floor row"
+    d._inverted_check.setChecked(True)
+    assert "floor" in d._upper_label.text().lower()
+    assert "surface" in d._lower_label.text().lower()
+    assert d._water_view._surface_line.label_text() == "Floor"
+
+
+def test_equal_rows_still_disable_ok_with_a_message_that_is_not_about_order(qtbot):
+    d = _dlg(qtbot)
+    d._inverted_check.setChecked(True)
+    d._surface_spin.setValue(d._floor_spin.value())
+    _settle(d)
+    assert not d._ok_button.isEnabled()
+    assert "different rows" in d._summary.text()

@@ -865,8 +865,7 @@ def test_fusion_settings_requires_the_three_fields(missing: str) -> None:
 @pytest.mark.parametrize(
     "override",
     [
-        {"surface_row": 110.0},
-        {"surface_row": 120.0},
+        {"surface_row": 110.0},  # the same row as the floor
         {"surface_row": -1.0},
         {"tank_height_cm": 0.0},
         {"tank_height_cm": -5.0},
@@ -887,13 +886,20 @@ def test_fusion_settings_rejects_invalid(override: dict) -> None:
         FusionSettings(**{**_FUSION, **override})
 
 
-def test_fusion_settings_message_for_inverted_rows() -> None:
+def test_fusion_settings_accepts_an_inverted_side_view() -> None:
+    from track2data.core.models import FusionSettings
+
+    fs = FusionSettings(**{**_FUSION, "surface_row": 110.0, "floor_row": 10.0})
+    assert fs.surface_row > fs.floor_row
+
+
+def test_fusion_settings_refuses_the_same_row_for_surface_and_floor() -> None:
     from pydantic import ValidationError
 
     from track2data.core.models import FusionSettings
 
-    with pytest.raises(ValidationError, match="surface_row must be above floor_row"):
-        FusionSettings(**{**_FUSION, "surface_row": 110.0})
+    with pytest.raises(ValidationError, match="surface_row and floor_row must differ"):
+        FusionSettings(**{**_FUSION, "surface_row": 10.0, "floor_row": 10.0})
 
 
 def _fusion_manifest(fusion=None) -> ProjectManifest:
