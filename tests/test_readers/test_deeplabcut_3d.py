@@ -87,7 +87,8 @@ def test_vertical_axis_and_flip(tmp_path: Path) -> None:
     path = write_dlc3d_csv(tmp_path / "a.csv", ["a"], 2, xyz=xyz)
     s = read(path, target_unit="mm", vertical_axis="y")
     assert s.raw_z is not None and s.keypoints is not None
-    np.testing.assert_array_equal(s.raw_xy[:, 0, :], [[1, 3], [4, 6]])
+    # vertical y: the horizontal plane is (z, x), right-handed seen from above
+    np.testing.assert_array_equal(s.raw_xy[:, 0, :], [[3, 1], [6, 4]])
     np.testing.assert_array_equal(s.raw_z[:, 0], [2, 5])
     f = read(path, target_unit="mm", vertical_axis="y", flip=True)
     assert f.raw_z is not None and f.keypoints is not None
