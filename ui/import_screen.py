@@ -331,10 +331,15 @@ class ImportScreen(QWidget):
         video_text, _tip = self._video_cell(ref, facts)
         rows = [("Reader", self._reader_label(ref.reader) if ref.reader else _PLACEHOLDER)]
         if facts is not None:
-            minutes = facts.n_frames / facts.fps / 60 if facts.fps else 0
+            minutes = facts.video_frames / facts.fps / 60 if facts.fps else 0
             rows += [
                 ("Frame rate", f"{facts.fps:g} fps"),
-                ("Frames", f"{facts.n_frames:,} ({minutes:.0f} min)".replace(",", chr(0x202F))),
+                (
+                    "Frames",
+                    f"{facts.frames_text} ({minutes:.0f} min)".replace(",", chr(0x202F))
+                    if facts.span_frames is not None
+                    else f"{facts.n_frames:,} ({minutes:.0f} min)".replace(",", chr(0x202F)),
+                ),
                 ("Animals", str(facts.n_animals)),
             ]
         rows.append(("Video", video_text))
@@ -381,7 +386,7 @@ class ImportScreen(QWidget):
         if facts:
             fps = sorted({f"{f.fps:g}" for f in facts})
             animals = sorted({f.n_animals for f in facts})
-            minutes = sum(f.n_frames / f.fps for f in facts if f.fps) / 60
+            minutes = sum(f.video_frames / f.fps for f in facts if f.fps) / 60
             self._facts_label.setText(
                 f"{'/'.join(fps)} fps · {'/'.join(map(str, animals))} animals · {minutes:.0f} min"
             )
@@ -670,7 +675,7 @@ class ImportScreen(QWidget):
                 values = [
                     saved_reader or facts.reader,
                     str(facts.fps),
-                    str(facts.n_frames),
+                    facts.frames_text,
                     str(facts.n_animals),
                     "Stable" if facts.has_stable_identities else "Unstable",
                 ]
