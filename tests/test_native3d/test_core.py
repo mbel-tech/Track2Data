@@ -108,12 +108,13 @@ def test_pipeline_lays_out_z_with_xy() -> None:
     assert psess.separator_mask.any()
     assert np.isnan(psess.z[psess.separator_mask]).all()
     assert gap.raw_z is not None
-    np.testing.assert_array_equal(psess.z[psess.tracked_mask], gap.raw_z)
+    # z now goes through the same smoothing as xy; a straight line is unchanged by it
+    np.testing.assert_allclose(psess.z[psess.tracked_mask], gap.raw_z, atol=1e-9)
 
     whole = _session_z(None)
     plain = run(whole, PreprocessConfig())
     assert whole.raw_z is not None
-    np.testing.assert_array_equal(plain.z, whole.raw_z)
+    np.testing.assert_allclose(plain.z, whole.raw_z, atol=1e-9)
     assert plain.z is not whole.raw_z
 
 
@@ -179,7 +180,7 @@ def test_apply_water_column_non_finite_z_is_missing_not_outside() -> None:
     assert out.depth_outside is not None and out.depth_outside.tolist() == [0]
 
 
-def test_z_through_a_bridged_gap_is_nan_not_interpolated() -> None:
+def test_z_through_a_bridged_gap_is_bridged_like_xy() -> None:
     session = _session_z([(0, 10), (12, 22)])
     cfg = PreprocessConfig(gap_fill=GapFillCfg(across_tracking_intervals=True))
     psess = run(session, cfg, bridge_allowed=True)
@@ -187,7 +188,7 @@ def test_z_through_a_bridged_gap_is_nan_not_interpolated() -> None:
     assert psess.separator_mask is not None
     bridged = ~psess.tracked_mask & ~psess.separator_mask
     assert bridged.any()
-    assert np.isnan(psess.z[bridged]).all()
+    assert np.isfinite(psess.z[bridged]).all()
     assert np.isfinite(psess.xy[bridged]).any()
 
 
@@ -221,7 +222,7 @@ def test_fuse_refuses_native_3d_sessions() -> None:
             fuse(top, side, pair, same_video=False)
 
 
-def test_a_replaced_jump_also_blanks_z() -> None:
+def test_a_replaced_jump_also_re_fills_z() -> None:
     n = 40
     session = _session_z(None, n)
     xy = np.zeros((n, 1, 2))
@@ -233,6 +234,7 @@ def test_a_replaced_jump_also_blanks_z() -> None:
     out = run(session, config)
     assert out.jump_replaced is not None and out.jump_replaced[20, 0]
     assert out.z is not None
-    assert np.isnan(out.z[20, 0])
-    assert np.isfinite(out.z[10, 0]) and out.z[10, 0] == session.raw_z[10, 0]
+    # the glitch's own z is dropped and rebuilt from its neighbours (a line here: 120)
+    assert out.z[20, 0] == pytest.approx(120.0, abs=1e-9)
+    assert np.isfinite(out.z[10, 0]) and out.z[10, 0] == pytest.approx(110.0, abs=1e-9)
     assert session.raw_z[20, 0] == 120.0  # the session's own array is untouched

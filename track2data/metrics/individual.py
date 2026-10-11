@@ -1884,7 +1884,8 @@ class PathLength3D(Metric):
         warnings=[
             "Under-smoothed data inflates the length, exactly as for IL-1: summing step "
             "lengths sums |dx| rather than dx, so positional noise always adds length and the "
-            "inflation grows with frame rate. Depth noise adds to it as well.",
+            "inflation grows with frame rate. Depth noise adds to it as well; a native 3-D "
+            "file's z is smoothed with the same settings as x and y.",
             "No refraction or parallax correction: a fish near the front glass looks larger "
             "and sits at a different apparent depth than one at the back.",
             "A wrong tank height scales every vertical distance, and so the 3-D length, by the "

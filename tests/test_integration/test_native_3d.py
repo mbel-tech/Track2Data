@@ -182,6 +182,12 @@ def test_il15_with_the_water_column_counts_the_outside_values(
     their depth is NaN and they are counted, never clipped: 2 of 11 outside; the other nine
     frames (z 10 to 19.6) average 14.8 cm = 0.74."""
     manifest = _manifest(project, WaterColumn(surface_z=0.0, floor_z=20.0))
+    # the scene sits exactly on the surface (z = 0 at frame 0); smoothing's rounding noise
+    # (-3e-16) would put that one sample outside, which is not what this test is about
+    no_smoothing = manifest.preprocess.smoothing.model_copy(update={"enabled": False})
+    manifest = manifest.model_copy(
+        update={"preprocess": manifest.preprocess.model_copy(update={"smoothing": no_smoothing})}
+    )
     Engine(manifest).run(tmp_path / "o", exporters=["csv_long", "csv_wide"])
     one = _long(tmp_path / "o", "fish1")
     assert _value(one, "IL-15", "mean_depth_fraction") == pytest.approx(0.3, abs=1e-9)
