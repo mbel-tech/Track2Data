@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Calibration screen: native 3-D sessions are no longer described as having a pixel scale.** The per-session readiness list said "calibrated (1 px per unit)" and the note under Session calibration asked for a "Scale (pixels per cm)" import option that native readers do not have. A project with only native 3-D files now shows "<id> — in cm (converted when read)" (with the project unit) and a note that native files are already in physical units. Mixed lists and idtracker.ai projects keep their text.
 - **Clearer native 3-D wording on the command line.** `track2data validate` and `run` name the project setting (`calibration.water_column`) instead of the Calibration page when IL-15 waits for the water column; the Metrics screen and the run `README.md` keep their text. `track2data list-metrics` ends with a line saying that availability also depends on the project (3-D data, cm scale, pixel frame, number of animals) and pointing to `validate`, and, above that line, lists what a native 3-D project rules out (IL-3, IL-9, IL-10, IL-14, IL-15 until the water column is given, and every group metric) with the same reasons as the Metrics screen. `track2data add --yes` prints a `check:` line for every required option the reader proposed rather than you gave (for example `unit=mm` for Anipose). `docs/METRICS_SPEC.md` gains an Availability note on IL-3, IL-9, IL-10, IL-14 and the group metrics for native 3-D projects.
 
 ### Fixed
