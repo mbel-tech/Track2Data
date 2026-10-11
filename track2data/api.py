@@ -751,6 +751,11 @@ class Engine:
                 from track2data.calibration.session_unit import apply_session_calibration
                 psess = apply_session_calibration(psess, cfg)
 
+            # A native 3-D session's depth comes from its water column, once that is known.
+            if cfg.water_column is not None and psess.z is not None:
+                from track2data.calibration.water_column import apply_water_column
+                psess = apply_water_column(psess, cfg.water_column)
+
             # Zone assignment.
             zone_set = self._manifest.zones
             if zone_set.rois:

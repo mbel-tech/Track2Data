@@ -83,6 +83,7 @@ def slice_psess(psess: PreprocessedSession, start: int, stop: int) -> Preprocess
         depth_outside_mask=(
             None if psess.depth_outside_mask is None else psess.depth_outside_mask[start:stop]
         ),
+        z=None if psess.z is None else psess.z[start:stop],
         kinematics=KinematicsArrays(
             speed_px_s=kin.speed_px_s[start:stop],
             accel_px_s2=kin.accel_px_s2[start:stop],

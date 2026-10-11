@@ -93,8 +93,11 @@ def run(
     # intervals as adjacent frames. None for a session whose rows already are its frames.
     expansion = plan_expansion(session, config.gap_fill, bridge_allowed=bridge_allowed)
     raw_rows = id_prob_rows = None
+    z_rows: np.ndarray | None = None if session.raw_z is None else session.raw_z.copy()
     if expansion is not None:
         raw_rows = lay_out(expansion, session.raw_xy)
+        if session.raw_z is not None:
+            z_rows = lay_out(expansion, session.raw_z)
         if session.id_probabilities is not None:
             id_prob_rows = lay_out(expansion, session.id_probabilities)
         xy = raw_rows.copy()
@@ -189,5 +192,6 @@ def run(
         kinematics=kinematics,
         report=report,
         jump_replaced=jump_replaced,
+        z=z_rows,
         **extra,
     )
