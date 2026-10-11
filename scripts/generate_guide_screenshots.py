@@ -26,6 +26,10 @@ from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Offscreen Qt has no system font path, so symbols the bundled fonts lack (check marks,
+# arrows, the theme-pill icon) render as boxes. Point it at the OS fonts for fallback.
+if sys.platform == "win32":
+    os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
