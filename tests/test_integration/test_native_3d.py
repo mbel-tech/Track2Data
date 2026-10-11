@@ -160,8 +160,8 @@ def test_the_2d_metrics_use_the_horizontal_plane(run_no_column: Path) -> None:
     assert _value(long, "IL-1", "path_length_cm") == pytest.approx(5.0, abs=1e-9)
     assert _value(long, "IL-2", "mean_speed_cm_s") == pytest.approx(12.5, abs=1e-9)
     frames = pd.read_csv(run_no_column / "fish1" / "master_fish_by_frame.csv")
-    assert "z" not in frames.columns and "z_cm" not in frames.columns
-    assert "depth_fraction" not in frames.columns  # no water column, so no depth
+    assert "z_cm" in frames.columns  # the vertical coordinate is exported without a water column
+    assert "depth_fraction" not in frames.columns  # but no depth: that needs the water column
 
 
 def test_il15_is_unavailable_without_the_water_column(
