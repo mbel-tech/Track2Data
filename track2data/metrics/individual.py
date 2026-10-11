@@ -17,7 +17,7 @@ import pandas as pd
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
-from track2data.metrics.geometry3d import body_length_cm, positions_cm
+from track2data.metrics.geometry3d import body_length_cm, positions_cm, vertical_cm
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -2017,12 +2017,8 @@ class Speed3D(Metric):
         from track2data.preprocess.kinematics import compute_kinematics
 
         speed_3d: np.ndarray | None = None
-        height, scale = session.depth_height_cm, session.px_per_cm
-        z_cm: np.ndarray | None = None
-        if session.z is not None:  # a native 3-D file: z is already absolute, in the project unit
-            z_cm = np.asarray(session.z, dtype=np.float64)
-        elif session.depth is not None and height is not None:
-            z_cm = np.asarray(session.depth, dtype=np.float64) * float(height)
+        scale = session.px_per_cm
+        z_cm = vertical_cm(session)  # inside the water column when one is set
         if z_cm is not None and scale is not None:
             kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
             z = z_cm

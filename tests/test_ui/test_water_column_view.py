@@ -121,3 +121,19 @@ def test_real_mouse_drag(view, qtbot):
         )
     assert sig.args[0] == 100.0
     assert sig.args[1] == pytest.approx(450, abs=2)
+
+
+def test_inverted_view_swaps_the_line_labels(view):
+    """An upside-down side view has the floor as its upper line and the surface as its lower."""
+    view.set_inverted(True)
+    assert view._surface_line.label_text() == "Floor"
+    assert view._floor_line.label_text() == "Surface"
+    view.set_inverted(False)
+    assert view._surface_line.label_text() == "Surface"
+    assert view._floor_line.label_text() == "Floor"
+
+
+def test_inverted_view_survives_a_new_source(view):
+    view.set_inverted(True)
+    view.set_source((400.0, 300.0), None, None, None, None)
+    assert view._surface_line.label_text() == "Floor"

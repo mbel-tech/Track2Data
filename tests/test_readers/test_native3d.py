@@ -36,11 +36,41 @@ def test_convert_units_is_exact_for_common_cases() -> None:
 
 
 def test_horizontal_axes() -> None:
+    # cyclic order after the vertical axis: x -> (y, z), y -> (z, x), z -> (x, y)
     assert horizontal_axes("z") == (0, 1)
-    assert horizontal_axes("y") == (0, 2)
+    assert horizontal_axes("y") == (2, 0)
     assert horizontal_axes("x") == (1, 2)
     with pytest.raises(ValueError):
         horizontal_axes("w")
+
+
+@pytest.mark.parametrize("vertical", ["x", "y", "z"])
+def test_the_horizontal_plane_is_right_handed_with_the_vertical_axis_up(vertical: str) -> None:
+    """first x second = up, so a counterclockwise turn seen from above stays counterclockwise."""
+    first, second = horizontal_axes(vertical)
+    unit = np.eye(3)
+    np.testing.assert_array_equal(
+        np.cross(unit[first], unit[second]), unit["xyz".index(vertical)]
+    )
+
+
+@pytest.mark.parametrize(
+    ("vertical", "permutation"), [("z", (0, 1, 2)), ("x", (2, 0, 1)), ("y", (1, 2, 0))]
+)
+def test_a_proper_rotation_of_the_scene_leaves_the_horizontal_track_unchanged(
+    vertical: str, permutation: tuple[int, int, int]
+) -> None:
+    """The same physical track, with up on each axis in turn (cyclic permutations of the file
+    axes are proper rotations): the horizontal track the reader returns must not change, not
+    even by a mirror, or every signed heading and turn would."""
+    rng = np.random.default_rng(0)
+    base = rng.normal(size=(12, 1, 1, 3))  # (frames, animals, keypoints, xyz), z up
+    rotated = base[..., list(permutation)]
+    red, z = reduce_native(
+        rotated, ["a"], None, keypoint="a", cutoff=None, vertical_axis=vertical, flip=False
+    )
+    np.testing.assert_array_equal(red.raw_xy[:, 0, :], base[:, 0, 0, :2])
+    np.testing.assert_array_equal(z[:, 0], base[:, 0, 0, 2])
 
 
 def test_native_parameters_order_and_requirements() -> None:
@@ -71,9 +101,9 @@ def test_reduce_native_picks_the_vertical_coordinate() -> None:
     red, z = reduce_native(
         xyz, ["a", "b"], None, keypoint="b", cutoff=None, vertical_axis="y", flip=True
     )
-    np.testing.assert_array_equal(red.raw_xy[:, 0, :], xyz[:, 0, 1, [0, 2]])
+    np.testing.assert_array_equal(red.raw_xy[:, 0, :], xyz[:, 0, 1, [2, 0]])
     np.testing.assert_array_equal(z[:, 0], -xyz[:, 0, 1, 1])
-    assert red.selection.plane == ("x", "z")
+    assert red.selection.plane == ("z", "x")
 
 
 def _assemble(**over):

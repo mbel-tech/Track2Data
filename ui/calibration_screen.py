@@ -353,8 +353,8 @@ class CalibrationScreen(QWidget):
             "(0 at the surface, 1 at the floor) and the vertical-position metrics need both. "
             "One surface and floor apply to every session, so the files must share a vertical "
             "axis and an origin. Samples outside the column are left out of the vertical-position "
-            "metrics and of the 3-D path length and speed; they are never clipped. Leave one "
-            "empty for none."
+            "metrics and of the 3-D path length, speed and nearest-neighbour distance; they are "
+            "never clipped. Leave one empty for none."
         )
         self._water_help = water_help
         water_help.setProperty("role", "muted")
