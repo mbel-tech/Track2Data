@@ -102,7 +102,8 @@ def fuse(
     ``psess.session`` keeps its full-length per-frame data, filtered by animal only.
 
     Raises ``FusionError`` for missing settings, differing frame rates, an invalid fish map, no
-    matched fish, no frames the two views share, or a native 3-D session (no pixel frame). ``same_video`` forces the offset to 0.
+    matched fish, no frames the two views share, or a native 3-D session (no pixel frame).
+    ``same_video`` forces the offset to 0.
     """
     fs = pair.fusion
     if fs is None:
