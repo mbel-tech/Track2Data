@@ -102,21 +102,39 @@ def test_t2d_add_names_the_unreadable_native_file(tmp_path: Path) -> None:
     assert read_manifest(project).sessions == []
 
 
-def test_add_session_refuses_a_mixed_native_folder_before_listing(qtbot, tmp_path: Path) -> None:
+def test_add_session_refuses_a_native_folder_before_listing(qtbot, tmp_path: Path) -> None:
+    """A bare add cannot give a native file its unit/fps, so it is refused up front (it used to
+    be listed reader-less, counted as a pixel session, and fail at its probe)."""
     pytest.importorskip("PySide6")
-    from tests.test_native3d.test_project_rules import _manifest, _ref
+    from tests.test_native3d.test_project_rules import _manifest
     from ui.store.project_store import ProjectStore
 
-    folder = tmp_path / "pose"
-    folder.mkdir()
-    write_anipose_csv(folder / "fish.csv", ["head"], 8)
     store = ProjectStore()
-    store._manifest = _manifest([_ref("p1", "idtrackerai")])
+    store._manifest = _manifest([])
     submitted: list[str] = []
     store._submit_probe = lambda sid, f: submitted.append(sid)  # type: ignore[method-assign]
     refused: list[tuple[str, str]] = []
     store.sessionRefused.connect(lambda sid, msg: refused.append((sid, msg)))
+    for name in ("a", "b"):
+        folder = tmp_path / name
+        folder.mkdir()
+        write_anipose_csv(folder / "fish.csv", ["head"], 8)
+        store.add_session(folder)
+    assert store.manifest.sessions == [] and submitted == []
+    assert len(refused) == 2 and all("NATIVE_3D_NEEDS_OPTIONS" in m for _, m in refused)
+    assert "t2d add" in refused[0][1]
+
+
+def test_add_session_of_a_pixel_folder_keeps_a_reader_less_ref(qtbot, tmp_path: Path) -> None:
+    pytest.importorskip("PySide6")
+    from tests.test_native3d.test_project_rules import _manifest
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    store._manifest = _manifest([])
+    store._submit_probe = lambda sid, f: None  # type: ignore[method-assign]
+    folder = tmp_path / "empty"
+    folder.mkdir()
     store.add_session(folder)
-    assert [r.session_id for r in store.manifest.sessions] == ["p1"]
-    assert submitted == []
-    assert refused and "NATIVE_3D_MIXED" in refused[0][1]
+    (ref,) = store.manifest.sessions
+    assert ref.reader is None and ref.reader_options == {} and ref.reader_chosen_by is None

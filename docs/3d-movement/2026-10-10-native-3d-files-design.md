@@ -134,7 +134,7 @@ code does.
   filled; unsorted `fnum` is sorted; duplicate, negative or non-integer `fnum` is `ANIPOSE_BAD_FRAME_INDEX`.
 - **Units are converted in the reader**, on all three axes and with exact integer ratios, so the stored
   skeleton is in the project unit too (axes are neither permuted nor flipped there).
-- **`fuse()` refuses native sessions** ("native 3-D sessions have no views to fuse"); mixing is
+- **`fuse()` refuses native sessions** ("session <id> has no pixel frame (a native 3-D session has no views to fuse)"); mixing is
   `NATIVE_3D_MIXED` and a second target unit `NATIVE_3D_UNIT_MISMATCH`.
 - **IL-17 reads `z`.** The first build left IL-17 on `depth * height`, so a native session without the
   water column got NaN; found by the end-to-end test and fixed. IL-15 outside values, and non-finite z,
