@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 _UNCALIBRATED_SENTINEL = -1.0
 
 
+_OPTION_NAMES = {"frames_per_second": "fps", "width": "width_px", "height": "height_px"}
+
+
 class Normaliser:
     def __init__(self, folder: Path) -> None:
         self._folder = Path(folder)
@@ -47,6 +50,7 @@ class Normaliser:
         *,
         trajectory_format: str | None = None,
         session_meta: dict[str, Any] | None = None,
+        video_defaults: dict[str, Any] | None = None,
     ) -> Session:
         """
         Transform a raw trajectory dict into a canonical Session.
@@ -59,9 +63,13 @@ class Normaliser:
             Which file format the payload was loaded from (e.g. "npy", "h5", "csv").
         session_meta:
             Parsed contents of session.json, if available.
+        video_defaults:
+            User-supplied ``frames_per_second`` / ``width`` / ``height``; the last resort,
+            behind the trajectory payload and session.json.
         """
         payload = self._apply_aliases(payload)
         meta = session_meta or {}
+        given = video_defaults or {}
         raw_xy = self._extract_trajectories(payload, meta)
         n_frames, n_animals = raw_xy.shape[0], raw_xy.shape[1]
 
@@ -73,13 +81,14 @@ class Normaliser:
         version = payload.get("version") or meta.get("version")
         raw_attrs = self._collect_unknown_keys(payload)
         fps = self._require_positive_number(
-            "frames_per_second", payload.get("frames_per_second"), meta.get("frames_per_second")
+            "frames_per_second", payload.get("frames_per_second"), meta.get("frames_per_second"),
+            given.get("frames_per_second"),
         )
         width = int(self._require_positive_number(
-            "width", payload.get("width"), meta.get("width")
+            "width", payload.get("width"), meta.get("width"), given.get("width"),
         ))
         height = int(self._require_positive_number(
-            "height", payload.get("height"), meta.get("height")
+            "height", payload.get("height"), meta.get("height"), given.get("height"),
         ))
         video_paths = payload.get("video_paths") or meta.get("video_paths") or []
         video_path = self._resolve_video_path(video_paths)
@@ -240,11 +249,21 @@ class Normaliser:
             arr = arr[:, :, 0]
         if arr.ndim != 2:
             return None
+        if arr.shape != (n_frames, n_animals):
+            raise DataValidationError(
+                f"id_probabilities has shape {arr.shape} but the trajectories hold "
+                f"{n_frames} frames of {n_animals} animals.",
+                code="IDT_SHAPE_MISMATCH",
+                severity="error",
+                subject="id_probabilities",
+                remediation="The probabilities and trajectories come from different runs, "
+                "or a column was dropped; re-export the session.",
+            )
         return arr
 
     @staticmethod
     def _require_positive_number(
-        field_name: str, primary: Any, fallback: Any
+        field_name: str, primary: Any, fallback: Any, last_resort: Any = None
     ) -> float:
         """
         Resolve *field_name* from the trajectory dict, falling back to
@@ -260,7 +279,7 @@ class Normaliser:
         so a NaN value used to pass this check silently too -- isfinite()
         below closes that hole.
         """
-        for candidate in (primary, fallback):
+        for candidate in (primary, fallback, last_resort):
             if candidate is None:
                 continue
             try:
@@ -277,7 +296,8 @@ class Normaliser:
             subject=field_name,
             remediation=(
                 f"Ensure the session's trajectory file or session.json carries a "
-                f"valid '{field_name}' value; it cannot be safely defaulted."
+                f"valid '{field_name}' value, or give the reader option "
+                f"'{_OPTION_NAMES.get(field_name, field_name)}'; it cannot be safely defaulted."
             ),
         )
 

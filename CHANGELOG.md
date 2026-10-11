@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **idtracker.ai bare exports.** A CSV bundle written without a time column (idtracker.ai omits it when the frame rate is unknown) no longer crashes with a bare `ValueError`: the column count decides whether a leading time column is present, for `trajectories.csv` and `id_probabilities.csv` alike. `id_probabilities` that do not match the trajectories (frames or animals) are now refused with `IDT_SHAPE_MISMATCH` instead of passing silently. The idtracker.ai reader gains optional `fps`, `width_px` and `height_px` options for exports that record no video size or frame rate; they fill gaps only, behind the trajectory file and `session.json`. A folder whose only trajectory format is a pickle and has no consent now fails with `IDT_PICKLE_REFUSED` (was `IDT_FORMAT_AMBIGUOUS`).
 - **The test run no longer crashes at exit, and runs about three times faster.** After every test had passed, the Qt
   tests intermittently ended with "QObject: shared QObject was deleted directly" and a segfault (exit 139), which
   failed CI on a green run. The cause was in the application, not the tests: PySide keeps a `lambda` or

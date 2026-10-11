@@ -525,3 +525,34 @@ class TestNormaliserUnknownKeys:
         assert "id_probabilities" not in s.raw_attrs
         # Unknown key is captured
         assert "some_future_key" in s.raw_attrs
+
+
+class TestIdProbabilityShape:
+    """F4: a probability array that disagrees with the trajectories must not pass silently."""
+
+    def test_wrong_animal_count_is_refused(self) -> None:
+        import numpy as np
+
+        from track2data.core.errors import DataValidationError
+        from track2data.readers.idtrackerai.normaliser import Normaliser
+
+        with pytest.raises(DataValidationError) as err:
+            Normaliser._normalise_id_probabilities(np.ones((4, 1)), 4, 2)
+        assert err.value.code == "IDT_SHAPE_MISMATCH"
+
+    def test_wrong_frame_count_is_refused(self) -> None:
+        import numpy as np
+
+        from track2data.core.errors import DataValidationError
+        from track2data.readers.idtrackerai.normaliser import Normaliser
+
+        with pytest.raises(DataValidationError):
+            Normaliser._normalise_id_probabilities(np.ones((3, 2)), 4, 2)
+
+    def test_matching_shape_and_trailing_singleton_pass(self) -> None:
+        import numpy as np
+
+        from track2data.readers.idtrackerai.normaliser import Normaliser
+
+        assert Normaliser._normalise_id_probabilities(np.ones((4, 2)), 4, 2).shape == (4, 2)
+        assert Normaliser._normalise_id_probabilities(np.ones((4, 2, 1)), 4, 2).shape == (4, 2)

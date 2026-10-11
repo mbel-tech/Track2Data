@@ -50,6 +50,7 @@ from track2data.readers.idtrackerai.session_json import (
     parse_timers_to_durations,
 )
 from track2data.readers.index import ScanIndex
+from track2data.readers.params import ReaderParameter, resolve_options
 from track2data.readers.peek import Peeker
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,32 @@ class IDTrackerAiReader(SessionReader):
     verification: ClassVar[Literal["real_sample", "synthetic_only"]] = "real_sample"
     provides_body_length: ClassVar[bool] = True
     provides_identification_quality: ClassVar[bool] = True
+    # A bare export (h5, csv, a pickled dict) records no video size, and a csv written without
+    # a time column records no frame rate. These fill such gaps only: the trajectory file, then
+    # session.json, win over them, so they never override what the tracker itself recorded.
+    parameters: ClassVar[tuple[ReaderParameter, ...]] = (
+        ReaderParameter(
+            name="fps",
+            label="Frame rate (frames per second)",
+            kind="float",
+            minimum=0.001,
+            help="Used only when neither the trajectory file nor session.json records it.",
+        ),
+        ReaderParameter(
+            name="width_px",
+            label="Frame width (pixels)",
+            kind="int",
+            minimum=1,
+            help="Bare idtracker.ai exports do not record the video's size; "
+            "used only when session.json does not either.",
+        ),
+        ReaderParameter(
+            name="height_px",
+            label="Frame height (pixels)",
+            kind="int",
+            minimum=1,
+        ),
+    )
 
     # ── SessionReader protocol ─────────────────────────────────────────────────
 
@@ -149,15 +176,24 @@ class IDTrackerAiReader(SessionReader):
         hint = _trajectories_subfolder_hint(cls, index)
         return [hint] if hint is not None else []
 
-    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
+    def read(
+        self,
+        folder: Path,
+        *,
+        allow_pickle: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> Session:
         """Parse *folder* and return a Session.
 
         ``allow_pickle`` gates the formats whose deserialisation executes
         code (npy). Defaults to False; when the folder also carries an
         h5 or csv trajectory, the fallback walk in ``_load_payload`` uses
         that instead and the refusal is invisible to the user.
+
+        ``options`` are the declared ``parameters`` (frame rate and video size), used only
+        where the trajectory file and session.json record none.
         """
-        return self._read(folder, light=False, allow_pickle=allow_pickle)
+        return self._read(folder, light=False, allow_pickle=allow_pickle, options=options)
 
     def probe(
         self,
@@ -175,12 +211,20 @@ class IDTrackerAiReader(SessionReader):
 
         ``allow_pickle`` is the same consent ``read`` takes: a probe loads the
         same trajectory file, so it must be refused (or allowed) the same way.
-        ``options`` is part of the probe contract; this reader takes none.
+        ``options`` are the same video-info options ``read`` takes.
         """
-        return self._read(folder, light=True, allow_pickle=allow_pickle)
+        return self._read(folder, light=True, allow_pickle=allow_pickle, options=options)
 
-    def _read(self, folder: Path, *, light: bool, allow_pickle: bool) -> Session:
+    def _read(
+        self,
+        folder: Path,
+        *,
+        light: bool,
+        allow_pickle: bool,
+        options: Mapping[str, Any] | None = None,
+    ) -> Session:
         folder = Path(folder)
+        opts = resolve_options(self.name, self.parameters, options)
         hit = detect(folder)
         if hit is None:
             from track2data.core.errors import ImportError_
@@ -222,7 +266,14 @@ class IDTrackerAiReader(SessionReader):
         # Build the normalised Session (core trajectory data + quality + labels).
         normaliser = Normaliser(folder)
         session = normaliser.normalise(
-            payload, trajectory_format=fmt_used, session_meta=session_meta
+            payload,
+            trajectory_format=fmt_used,
+            session_meta=session_meta,
+            video_defaults={
+                "frames_per_second": opts["fps"],
+                "width": opts["width_px"],
+                "height": opts["height_px"],
+            },
         )
 
         # Enrich from session.json (tracking_intervals, roi_list, etc.).
@@ -365,9 +416,12 @@ class IDTrackerAiReader(SessionReader):
         # i.e. nowhere the person hitting the error would look.
         why = f" Skipped: {'; '.join(skipped)}." if skipped else ""
         refused_pickle = any("IDT_PICKLE_REFUSED" in s for s in skipped)
+        # Consent is the whole problem when every format passed over was refused for it:
+        # nothing is ambiguous, so say so with the code the consent prompt looks for.
+        only_refusals = bool(skipped) and all("IDT_PICKLE_REFUSED" in s for s in skipped)
         raise ImportError_(
             f"No readable trajectory format among: {available}.{why}",
-            code="IDT_FORMAT_AMBIGUOUS",
+            code="IDT_PICKLE_REFUSED" if only_refusals else "IDT_FORMAT_AMBIGUOUS",
             severity="error",
             subject=str(hit.path),
             remediation=(
