@@ -257,6 +257,11 @@ which are disabled when there is no pixel frame; and the IL-3 and IL-14 arena
 fallback, which uses data extent plus a warning instead of `width_px`/`height_px` = 0.
 Existing idtracker.ai outputs stay unchanged.
 
+**Built (P5).** The two native 3-D readers use `has_pixel_frame False` and `coordinate_unit`
+as described; they convert to the project unit when reading instead of at calibration time,
+so the `_mm` suffix table was not needed (the `_cm` suffix is nominal, the run README states
+the real unit).
+
 ## 5. Rollout tiers
 
 | Tier | Prio | Importer | Citations | Cum. % | Gate | Suite cases that must flip XFAIL → PASS |
@@ -266,7 +271,7 @@ Existing idtracker.ai outputs stay unchanged.
 | 1 | 2 | SLEAP analysis HDF5 (+ CSV layouts; `.slp` recognise-only) | 760 | 65.0 | none | `sleap_named_tracks`, `sleap_no_tracks` |
 | 2 | 3 | Ctrax raw `.mat`, `trx.mat`, FlyTracker `-track.mat` | 371 | 70.5 | G-JAABA, G-fragments | `ctrax_raw_mat` |
 | 3 | 4 | ToxTrac `Tracking_RealSpace.txt` (+ pixel twin) | 218 | 73.7 | G-units | `toxtrac_realspace` |
-| 3 | 5 | Anipose pose-3d CSV (+ DLC-3D) | 195 | 76.6 | G-units | quirk tests; a Session-level case is added with the reader |
+| 3 | 5 | Anipose pose-3d CSV (+ DLC-3D) | 195 | 76.6 | G-units | quirk tests; a Session-level case is added with the reader. **Built (P5)** |
 | 4 | 6 | TRex `.npz` (new and old versions; CSV export) | 166 | 79.0 | none | `trex_new_export`, `trex_old_export` |
 | 4 | 7 | AnimalTA CSV (fixed and variable; detailed = recognise-only) | 95 | 80.5 | none | `animalta_fixed_csv` |
 | 5 | – | Backlog by ease: FastTrack, OCTRON, generic table, WCON, TrackMate, Argos, Tierpsy, ZebraZoom, Stytra, ethoscope, `.slp`, NWB, movement `.nc`. Blocked (no documented schema): DANNCE, AlphaTracker, anTraX, MWT, MARGO, BioTracker, LabGym, pathtrackr, DeepPoseKit, FicTrac (not arena trajectories) | – | – | demand and a sample | – |
@@ -375,7 +380,16 @@ tests. Where they differ, the pinned tests win.
   With no twin, native-unit mode applies. One session per arena. The suite's check is
   unit-neutral (axis directions only).
 
-### P5 Anipose pose-3d CSV (quirk tests today; a Session-level case is added with the reader)
+### P5 Anipose pose-3d CSV and DLC-3D (built; synthetic files only)
+
+**Status: built** (reader ids `anipose` and `deeplabcut_3d`, `verification = "synthetic_only"`;
+spec `docs/3d-movement/2026-10-10-native-3d-files-design.md`, decision D-043). The notes below
+are the design inputs; what was built differs in four ways. The reader requires `fps` **and**
+`unit` (the file records neither; Anipose proposes `mm` and never defaults it); the unit is
+converted to the project unit (`target_unit`, default `cm`) when reading, so the project's
+calibration is `session`, label = that unit, confirmed, with `length_unit = 1.0`; the plane is
+the horizontal one, chosen by `vertical_axis` (default `z`) and `flip`; and z is kept as
+`Session.raw_z` (absolute, in the project unit) beside `KeypointData.xy` (D = 3).
 
 - **Detect.** Columns `<kp>_x/_y/_z/_error/_ncams/_score`, `M_00…M_22`, `center_0…2`,
   `fnum`. Pinned: 246 × 49, six keypoints (`l-base`, `l-edge`, `l-middle`, `r-base`,
@@ -385,6 +399,15 @@ tests. Where they differ, the pinned tests win.
 - **From the user.** fps (200 in the sample, not stored) and the plane (default x,y).
   Board units (mm) mean native-unit mode with no pixel frame. z is kept in
   `Session.keypoints` (D = 3).
+- **DLC-3D** (`deeplabcut_3d`). The triangulated table of DeepLabCut's 3-D mode: three header
+  rows (`scorer`, `bodyparts`, `coords`) with `x`, `y`, `z` per body part, no likelihood, the
+  frame number in the first column. A body part that could not be triangulated is `0, 0, 0`:
+  a row is missing only when x, y **and** z are all exactly 0 (or any of them is not finite),
+  a single 0 is a real coordinate. The unit is the calibration board's; the reader proposes
+  none, so `unit` must be given. No `likelihood_cutoff` option. One animal per file: a
+  multi-animal table (four header rows, an `individuals` row) is not detected by this reader and
+  the scan gives no notice for it either, because the old `dlc_3d` entry of `readers/recognise.py` was removed when this
+  reader landed.
 
 ### P6 TRex `.npz` (cases `trex_new_export`, `trex_old_export`)
 

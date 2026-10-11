@@ -1,6 +1,6 @@
 # Reading native 3-D tracker files (sub-project A)
 
-**Status:** draft 2026-10-10, awaiting review
+**Status:** implemented 2026-10-11 (decision D-043). See "Changes made during the build" at the end.
 **Part of:** [the 3-D roadmap](2026-10-08-3d-roadmap.md). Builds on [3-D metrics](2026-10-10-3d-metrics-design.md) (B2) and [running a 3-D project](2026-10-10-3d-run-design.md) (B1). Amends D-031 a second time (B2 was the first).
 
 ## Why
@@ -110,3 +110,43 @@ A adds readers for both and lets the 3-D metrics of B2 and IL-15 run on them.
 Mixed native and fused projects, several animals in one Anipose file, mm or m export suffixes, reading
 the camera model or the reprojection error, a z column in the per-frame table, and a water column
 estimated from the data.
+
+## Changes made during the build
+
+The design above is what was proposed; these rulings were made while building it and are what the
+code does.
+
+- **A native 3-D project is a `dimension "2d"` project** whose sessions come from native readers
+  (`NATIVE_3D_READERS`). The spec's "No Views or Fusion step" holds, and no new dimension value was
+  added: `"3d"` keeps meaning "top and side views to fuse", which avoids about thirty-five
+  dimension-keyed sites. The mode banner and the Project screen therefore say 2-D (cosmetic).
+- **Only the add entry point sets up calibration.** `Engine.set_up_native_import` (used by
+  `track2data add` and the GUI's add; a batch is checked as a whole) sets mode `session`, label = target
+  unit and confirmed. Import, validate and run are read-only on the manifest and only check; a native
+  session in a non-session calibration mode raises `NATIVE_3D_NEEDS_SESSION_CALIBRATION` (also
+  in validate); validate also reports an unconfirmed unit and a label that differs from the sessions'
+  unit. `Engine.import_sessions` only checks.
+- **`unit` and `fps` are required options.** Anipose proposes `mm` (source `tool-default`) but never
+  defaults it; DLC-3D proposes nothing. `likelihood_cutoff` above 0 without `_score` columns for every
+  keypoint is `READER_OPTION_INVALID`; DLC-3D has no such option.
+- **Missing values.** Anipose: NaN in x, y, z together (a partly NaN triple counts as missing). DLC-3D:
+  x, y, z all exactly 0 (or any non-finite). Anipose `fnum` gaps are kept as tracking intervals, not
+  filled; unsorted `fnum` is sorted; duplicate, negative or non-integer `fnum` is `ANIPOSE_BAD_FRAME_INDEX`.
+- **Units are converted in the reader**, on all three axes and with exact integer ratios, so the stored
+  skeleton is in the project unit too (axes are neither permuted nor flipped there).
+- **`fuse()` refuses native sessions** ("native 3-D sessions have no views to fuse"); mixing is
+  `NATIVE_3D_MIXED` and a second target unit `NATIVE_3D_UNIT_MISMATCH`.
+- **IL-17 reads `z`.** The first build left IL-17 on `depth * height`, so a native session without the
+  water column got NaN; found by the end-to-end test and fixed. IL-15 outside values, and non-finite z,
+  are NaN and counted.
+- **GL-16 is empty for native files** (one animal per file; the metric needs two in a session), with every
+  frame counted in `n_skipped_frames_3d`.
+- **The unreadable-format notice for DLC-3D was removed** from `readers/recognise.py`: the reader now
+  reads those files. A multi-animal DLC-3D table (extra `individuals` header row) is not detected and
+  gets no notice.
+- **Provenance and outputs.** `project_hash` changes once for every project (the manifest gained
+  `calibration.water_column`); `manifest.json` carries empty `water_column` and `native_3d` keys for pixel
+  projects. Nothing else in a pixel project's output changed (a golden README test pins it).
+- **UI.** Zones and background are disabled for native projects; the trajectories preview frames the data
+  from its extent; the Calibration screen shows the **WATER COLUMN** group (Surface z, Floor z) for
+  native projects only; the GUI add refuses a batch that would break the rules before listing it.

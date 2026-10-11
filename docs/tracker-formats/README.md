@@ -55,7 +55,7 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 | 2 | SLEAP analysis HDF5 | 1 | **built** | `sleap_named_tracks`, `sleap_no_tracks` pass |
 | 3 | Ctrax raw `.mat` (**built**), `trx.mat`, FlyTracker | 2 | raw `.mat` built; `trx.mat` waits for a real sample; FlyTracker recognise-only | `ctrax_raw_mat` passes |
 | 4 | ToxTrac `Tracking_RealSpace.txt` | 3 | planned | `toxtrac_realspace` |
-| 5 | Anipose pose-3d CSV (and DLC-3D) | 3 | planned | quirk tests only |
+| 5 | Anipose pose-3d CSV (and DLC-3D) | 3 | **built** (both; synthetic files only, `verification = "synthetic_only"`) | quirk tests, and synthetic-file reader tests; the real-sample contract case runs when its fixture is present |
 | 6 | TRex `.npz` | 4 | planned | `trex_new_export`, `trex_old_export` |
 | 7 | AnimalTA CSV | 4 | planned | `animalta_fixed_csv` |
 

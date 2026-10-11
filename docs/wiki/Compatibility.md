@@ -14,6 +14,8 @@ is authoritative.
 | **DeepLabCut** (CSV; also Lightning Pose) | **Supported** | One session per file. Frame rate and frame size are required options; the optional **Scale (pixels per cm)** feeds Session calibration |
 | **SLEAP** (analysis HDF5) | **Supported** | Export Analysis HDF5 from SLEAP. Same required options and optional scale as DeepLabCut |
 | **Ctrax** (raw `.mat`) | **Supported** | Frame size is a required option; the frame rate comes from the file. Ctrax track ids are fragments, so a session is identity-free. Optional scale as above |
+| **Anipose** (`pose-3d` CSV) | **Unverified** | Built from the published layout, tested on synthetic files only. Native 3-D: one animal per file; the frame rate and the unit of the coordinates are required options (never guessed). See the 3-D section of the user guide |
+| **DeepLabCut 3-D** (triangulated CSV) | **Unverified** | Same as Anipose; the unit is the calibration board's and is not proposed. Multi-animal 3-D tables are not detected |
 | **Ctrax / FlyTracker / JAABA** (`trx.mat`) | **Unverified** | Built from the documented layout with no real sample yet, and labelled as such in the confirm step. Classic MATLAB files only. `pxpermm` becomes the session scale |
 
 `track2data list-readers` prints what this build can read and which options each reader
@@ -29,7 +31,7 @@ A scan names these rather than reporting "nothing recognised", and says what to 
 instead: SLEAP `.slp` projects (export the Analysis HDF5), a `trx.mat` saved with MATLAB's
 `-v7.3` option (save it again with `-v7`), FlyTracker
 `-track.mat`, DANNCE `save_data_AVG.mat`, Multi-Worm Tracker `.blobs`, AnimalTA detailed
-files, DeepLabCut 3-D tables, and FicTrac logs.
+files, and FicTrac logs.
 
 ### Pickled trajectories
 

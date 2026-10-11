@@ -1078,3 +1078,60 @@ the CLI and the README in agreement. Stating the inequalities as conditional kee
 true for gappy tracks. *Limits.* Depth comes from a side camera at right angles (no refraction or
 parallax correction); a wrong tank height scales every vertical distance; no vertical speed metric,
 3-D inter-individual distance or cohesion.
+
+---
+
+### D-043 · Native 3-D files: a 2-D project whose sessions come from native readers, units converted on reading, z absolute
+
+**Status:** accepted; implemented. Design: `docs/3d-movement/2026-10-10-native-3d-files-design.md`
+(sub-project A of `docs/3d-movement/2026-10-08-3d-roadmap.md`). It amends D-031 a second time (D-042
+was the first): D-031 said "metrics use a chosen 2-D plane (default x, y); z is kept". For a
+native 3-D file the 2-D metrics use the horizontal plane (the two axes that are not vertical), z is
+kept as an absolute coordinate in the project unit, and the 3-D metrics of D-042 run on it.
+
+**Decision:** *Readers.* `anipose` and `deeplabcut_3d` (`readers/anipose.py`,
+`readers/deeplabcut_3d.py`, shared `readers/native3d.py`), `verification = "synthetic_only"`; the
+set of ids is `NATIVE_3D_READERS`. One animal per file. Options: `fps` and `unit` are required and
+never defaulted (Anipose proposes `mm` with source `tool-default`; DeepLabCut 3-D proposes
+nothing); `target_unit` (default `cm`), `keypoint`, `likelihood_cutoff` (Anipose only), `vertical_axis`
+(default `z`), `flip`, `keep_skeleton`. Missing is NaN in x, y and z together (Anipose) and a row
+where x, y and z are all exactly 0 (DeepLabCut 3-D), so a real 0 coordinate is kept. *A native
+3-D project is a `dimension "2d"` project whose sessions come from native readers.* A new
+dimension value would have meant about thirty-five dimension-keyed sites (run units, stage flow,
+Views and Fusion steps) for nothing; "3d" keeps meaning "top and side views to fuse". The cost is
+cosmetic (the mode banner and Project screen say 2-D). *Units.* Converted when reading, exactly (integer
+ratios), to the project unit; the first add sets the calibration (`session`, label = target
+unit, confirmed, `length_unit = 1.0`); only the add entry points (`Engine.set_up_native_import`,
+used by `track2data add` and the GUI's add) do so. Import, validate and run are read-only on the
+manifest: they check, and a native session in any other calibration mode raises
+`NATIVE_3D_NEEDS_SESSION_CALIBRATION` (validate reports the same text, plus
+`NATIVE_3D_UNIT_NOT_CONFIRMED` and the unit-versus-label message). `Engine.import_sessions` only
+checks. *No mixing:* `NATIVE_3D_MIXED` (native with pixel sessions, or native in a fused 3-D project)
+and `NATIVE_3D_UNIT_MISMATCH` (two target units); `fuse()` refuses native sessions. *z.*
+`Session.raw_z` and `PreprocessedSession.z`, row-aligned with `xy`, not smoothed, interpolated
+or permuted by identity fixes; `has_pixel_frame False`, `coordinate_unit`, `video.width_px = height_px = 0`
+(zones and background disabled, the IL-3 and IL-14 arena from the data extent with a warning).
+`geometry3d.positions_cm` and IL-17 take Z from `z` when present, otherwise `depth * depth_height_cm`.
+*IL-15* needs the water column (`CalibrationConfig.water_column`: `surface_z`, `floor_z`, finite, different,
+either order): `depth = (z - surface_z) / (floor_z - surface_z)`, `depth_height_cm = |floor_z - surface_z|`,
+values outside [0, 1] and non-finite z become NaN and are counted, never clipped; without it the
+reason is "needs the water column (surface and floor z) on the Calibration page". *Outputs.* z is not
+exported in the per-frame table (only through the metrics); with a water column the table carries the
+depth columns; the run README has a "Native 3-D source" section. Pixel-frame outputs are unchanged,
+except that `manifest.json` carries the new empty `water_column` and `native_3d` keys and `project_hash`
+changes once (the new field is part of the manifest). *Recognition.* The `dlc_3d` entry of
+`readers/recognise.py` ("unreadable format") was removed because the reader now reads those files;
+a multi-animal DeepLabCut 3-D table (an extra `individuals` header row) is not detected by this reader
+and so gets no notice.
+
+**Rationale:** A wrong unit silently scales every speed, so the unit is a required option and the
+calibration is set once, by the add, and only checked afterwards; a run that rewrote the project
+would change its hash and its results behind the user's back. Converting on reading keeps one
+unit in the whole pipeline and lets the existing "session" calibration (`length_unit = 1.0`)
+carry it with no new path. Keeping z absolute (not a fraction) means the 3-D metrics need no tank
+height; the water column is an explicit entry because estimating the surface from the data would hide
+an error. Missing-as-all-zero keeps a real zero coordinate that a per-axis rule would erase.
+*Limits.* One animal per file (so GL-16 is empty: it needs two animals in a session); no mixing with
+pixel sessions; the board unit must be confirmed by the user; no refraction correction; the water
+column is entered, not estimated; no z column in the per-frame table; formats are read from synthetic
+files only.
