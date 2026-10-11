@@ -39,6 +39,14 @@ zone metrics emitted per-slot rows on identity-free sessions, and Z-1, Z-2 and Z
 pooled without `individual_id` while Z-3 … Z-9 require identity (D-016); per-animal
 metadata is now matched per animal instead of being copied onto every animal (D-025); distance (IL-1) and freezing bouts (IL-7) are NaN, not 0, for an animal that was never measured (D-034); zone events (Z-5) report the original video frame and time, as the per-frame table does, and Z-6 states its origin frame (D-032); and a session tracked in separate intervals is processed on real elapsed time, so values near the junctions between its intervals change (D-035).
 
+3-D projects changed in several places after v0.1.0, so diff these first: native-file
+IL-16, IL-17 and `max_speed_3d_cm_s` (the vertical coordinate is now gap-filled and smoothed
+like x and y, so these fall); native IL-15, IL-16, IL-17 and GL-16 when a water column is set
+(samples outside it are now left out); IL-15 `frac_outside_extent` on fused projects with
+top-view gaps (its denominator is now the side-view samples); IL-11 `mean_heading_rad` and
+`left_right_turn_bias` for native files read with a vertical axis of `x` or `y` (the
+horizontal plane is now right-handed). GL-16 also gains `frac_frames_used_3d`, a new column.
+
 Metric-level detail lives in
 [`docs/METRICS_SPEC.md`](https://github.com/mbel-tech/Track2Data/blob/main/docs/METRICS_SPEC.md),
 and the reasoning behind a change in
