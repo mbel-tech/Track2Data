@@ -517,8 +517,9 @@ class Engine:
     ) -> None:
         """The add entry point: check a batch of sessions being added, and set the project up.
 
-        Every add path calls it once per batch: ``t2d add``, the GUI's add path (when the
-        batch's probes have finished) and :meth:`import_sessions`. Each session carries the id
+        Every add path calls it once per batch: ``t2d add`` and the GUI's add path (when the
+        batch's probes have finished). :meth:`import_sessions` does not: it reads entries that
+        are already in the project, so it only checks them. Each session carries the id
         it has in the project; the batch's entries may already be in the manifest, since the
         project "before the batch" is every entry with another id. Mixing and units are checked
         across that project and within the batch. Only when the project had no native session
@@ -811,9 +812,10 @@ class Engine:
                     message=f"Importing {ref.session_id}",
                 ),
             )
+            # Each entry is checked read-only (import_ref). Nothing is set up here: every entry
+            # was in the project before the call, so none is an add, and a project that is not
+            # set up stays so (validate says why) rather than being rewritten.
             sessions.append(self.import_ref(ref))
-        # An add path too: a project of native 3-D files is set up here when it was not yet.
-        self.set_up_native_import(sessions)
         return sessions
 
     # ── preprocessed-session cache ─────────────────────────────────────────

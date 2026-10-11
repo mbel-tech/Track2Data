@@ -140,10 +140,44 @@ def test_import_ref_is_read_only_on_the_manifest(tmp_path: Path) -> None:
     assert engine.manifest is manifest
 
 
-def test_import_sessions_sets_up_a_native_project(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("calibration", "expected"),
+    [
+        (CalibrationConfig(mode="bodylength"), NATIVE_3D_NEEDS_SESSION_CALIBRATION),
+        (
+            SESSION_CM.model_copy(update={"length_unit_confirmed_by_user": False}),
+            NATIVE_3D_UNIT_NOT_CONFIRMED,
+        ),
+        (
+            SESSION_CM.model_copy(update={"length_unit_label": "mm"}),
+            native_unit_issue("mm", "cm", "a, b"),
+        ),
+    ],
+    ids=["bodylength", "unconfirmed", "label-mm"],
+)
+def test_import_sessions_never_rewrites_an_existing_project(
+    tmp_path: Path, calibration: CalibrationConfig, expected: str
+) -> None:
+    """import_sessions reads the project's own entries: none is new, so nothing is set up; a
+    project that is not set up stays so and validate keeps saying why."""
+    refs = [_file_ref(tmp_path, "a"), _file_ref(tmp_path, "b")]
+    manifest = _manifest(refs, calibration=calibration, individual=("IL-1",))
+    before = manifest.project_hash()
+    engine = Engine(manifest)
+    try:
+        engine.import_sessions()
+    except ImportError_ as exc:  # a confirmed label in another unit is refused, read-only
+        assert exc.code == "NATIVE_3D_UNIT_MISMATCH"
+    assert engine.manifest is manifest
+    assert engine.manifest.project_hash() == before
+    assert expected in engine.validate()
+
+
+def test_a_fresh_project_is_set_up_by_its_add_not_by_import_sessions(tmp_path: Path) -> None:
+    """The set-up belongs to the add: a batch whose entries were not in the project before."""
     refs = [_file_ref(tmp_path, "a", "mm"), _file_ref(tmp_path, "b", "mm")]
-    engine = Engine(_manifest(refs))
-    engine.import_sessions()
+    engine = Engine(_manifest([]))
+    engine.set_up_native_import([engine.read_ref(r) for r in refs])
     cal = engine.manifest.calibration
     assert (cal.mode, cal.length_unit_label, cal.length_unit_confirmed_by_user) == (
         "session",
