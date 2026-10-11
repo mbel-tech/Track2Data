@@ -208,6 +208,62 @@
    "licence": "GPL-3.0 (repository licence; data terms not stated separately)",
    "attribution": "qpetitjean/MoveR_SampleData sample_1",
    "group": "trex"
+  },
+  "idtrackerai_test_B.trajectories.h5": {
+   "url": "https://raw.githubusercontent.com/animovement/movement-data/f02a8a75369d610c497b509d93ac2444c142cbcb/data/idtrackerai/trajectories.h5",
+   "sha256": "ad1dc121580e79622d68b68003042b9ebdca4f37181d28d34af48ada60cdc53a",
+   "bytes": 110472,
+   "licence": "movement-data README: CC BY 4.0; upstream licence still to be confirmed with the contributor (metadata.yaml)",
+   "attribution": "Jordi Torrents via animovement/movement-data",
+   "group": "idtrackerai"
+  },
+  "idtrackerai_test_B.trajectories.csv": {
+   "url": "https://raw.githubusercontent.com/animovement/movement-data/f02a8a75369d610c497b509d93ac2444c142cbcb/data/idtrackerai/trajectories_csv/trajectories.csv",
+   "sha256": "c7384191e34f1adea2f08bf7a898bd4695942614508bc4dc0d518f13b9741be5",
+   "bytes": 67515,
+   "licence": "movement-data README: CC BY 4.0; upstream licence still to be confirmed with the contributor (metadata.yaml)",
+   "attribution": "Jordi Torrents via animovement/movement-data",
+   "group": "idtrackerai"
+  },
+  "idtrackerai_test_B.id_probabilities.csv": {
+   "url": "https://raw.githubusercontent.com/animovement/movement-data/f02a8a75369d610c497b509d93ac2444c142cbcb/data/idtrackerai/trajectories_csv/id_probabilities.csv",
+   "sha256": "5b9007d6960feeb7e19a3fcf9e0225a0c0b461b19f8c5208519720ba812370b5",
+   "bytes": 42316,
+   "licence": "movement-data README: CC BY 4.0; upstream licence still to be confirmed with the contributor (metadata.yaml)",
+   "attribution": "Jordi Torrents via animovement/movement-data",
+   "group": "idtrackerai"
+  },
+  "idtrackerai_test_B.attributes.json": {
+   "url": "https://raw.githubusercontent.com/animovement/movement-data/f02a8a75369d610c497b509d93ac2444c142cbcb/data/idtrackerai/trajectories_csv/attributes.json",
+   "sha256": "018b743a587a8c23fc7eea85cc95f5b4a29d69acbb4eaf19b28e1eaa102a23a2",
+   "bytes": 491,
+   "licence": "movement-data README: CC BY 4.0; upstream licence still to be confirmed with the contributor (metadata.yaml)",
+   "attribution": "Jordi Torrents via animovement/movement-data",
+   "group": "idtrackerai"
+  },
+  "idtrackerai_synthetic_no_fps.trajectories.csv": {
+   "url": "https://raw.githubusercontent.com/animovement/movement-data/f02a8a75369d610c497b509d93ac2444c142cbcb/data/idtrackerai/trajectories_csv_no_fps/trajectories.csv",
+   "sha256": "4e4c8312f20f5c4b14f0d86af509c0ceb1146c001af0a22ac6f51771bd18fe1c",
+   "bytes": 132,
+   "licence": "CC BY 4.0 (metadata.yaml upstream.license); synthetic",
+   "attribution": "Mikkel Roald-Arbol via animovement/movement-data",
+   "group": "idtrackerai"
+  },
+  "idtrackerai_synthetic_no_fps.id_probabilities.csv": {
+   "url": "https://raw.githubusercontent.com/animovement/movement-data/f02a8a75369d610c497b509d93ac2444c142cbcb/data/idtrackerai/trajectories_csv_no_fps/id_probabilities.csv",
+   "sha256": "ba3404b4f49134eafa14bffc3d166a9ac21295f6ced2b093aa8df73b46f42357",
+   "bytes": 116,
+   "licence": "CC BY 4.0 (metadata.yaml upstream.license); synthetic",
+   "attribution": "Mikkel Roald-Arbol via animovement/movement-data",
+   "group": "idtrackerai"
+  },
+  "MoveR_sample_1.IdTrackerOutput.2602_ISA3080_Low_5.npy": {
+   "url": "https://raw.githubusercontent.com/qpetitjean/MoveR_SampleData/50972de006d20f62da9064e43b1c2db70983735a/sample_1/IdTrackerOutput/2602_ISA3080_Low_5.npy",
+   "sha256": "35035d134f39d927b99e12cb4c6b7c49deb96f7d11aabc8f228d3ce867f82693",
+   "bytes": 3851211,
+   "licence": "GPL-3.0 (repo level; no separate data licence found)",
+   "attribution": "qpetitjean/MoveR_SampleData",
+   "group": "idtrackerai"
   }
  }
 }
