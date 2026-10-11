@@ -47,6 +47,25 @@ file (h5, no-fps CSV, MoveR pickled dict: `new`, `add --option width_px=... heig
   - 8: the README lists reader options the user gave ("not recorded in the files"); it lists identity slots that are more than
     90 % missing; `IDT_VERSION_UNKNOWN` is information, not a warning, for 4.x files.
 
+## 1c. Follow-up: all 16 FishTank files, memory, the GUI, and the failing tests
+
+Done by four agents on 2026-10-11, reviewed and integrated in PR #154.
+
+- **FishTank:** all 16 readable files (2 x 4.0.9, 1 x 4.0.8, 13 x six-key; 463,997 to 1,695,643 frames) went through `add --allow-pickle`, `validate`, `run -e readme`
+  with exit 0 each (placeholder 1000x1000 video size). `validate`: 8-11 s, 158-219 MB peak. `run`: 69-213 s, 483-1267 MB peak,
+  about 190 MB + 636 MB per million frames. One file is an automated slow test (`tests/real_samples/test_idtrackerai_fishtank_cli_run.py`).
+  The 6 files whose pickles reference `_codecs.encode` stay unread (no restricted unpickler, by decision).
+- **GUI (headless, offscreen Qt; not a real window):** the confirm dialog shows `fps`, `width_px`, `height_px` (optional) for a bare export.
+  Defect found and fixed: the GUI "Validate pipeline" said "Ready to run." for a session the run could not open; it now calls `Engine.session_read_issues()` (2-D and 3-D).
+  Still open: an unreadable session shows as dashes like one still loading (reason only in the run log); neither the dialog nor the pickle-consent
+  prompt says a bare export needs the video size; the Run button is not blocked by unreadable sessions; Validate reads sessions on the GUI thread.
+- **Found on the way:** every run logs `ERROR Metric D-1 failed; skipping` (and D-2) because D-1 reads `raw_xy` from a `PreprocessedSession`, yet D-1
+  values still appear in the output (spawned as its own task). GL-1 and other group metrics skip every frame with a missing animal, so a file with
+  always-empty identity slots (MoveR: 3 of 20) gets all-NaN group columns (spawned as its own task; the run README now says why).
+- **Six tests fail on a clean main under Windows:** three 3-D serial/parallel tests compare output keyed by backslash paths in the tests' own helpers
+  (fix: `.as_posix()`, test-only, in its own PR); the fusion timing test takes 4.2 s against a 3.0 s limit (machine speed, untouched); two native 3-D
+  golden-hash tests encode a POSIX path (untouched, need regenerated goldens or a path-neutral hash).
+
 ## 2. Method
 
 For each dataset: copy the cached, sha256-pinned fixture into `<session>/trajectories/<export>` (the only layout

@@ -672,7 +672,7 @@ class TestEmptyIdentitySlots:
         )
         text = _render_readme(minimal_payload, tmp_path)
         section = text.split("## Identity slots with little data")[1].split("\n## ")[0]
-        rows =[ln for ln in section.splitlines() if ln.startswith("| ") and "%" in ln]
+        rows = [ln for ln in section.splitlines() if ln.startswith("| ") and "%" in ln]
         assert len(rows) == 20
         assert "and 6 more" in section
 
