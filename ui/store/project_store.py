@@ -167,6 +167,10 @@ class ProjectStore(QObject):
     scanProgress  = Signal(str, object)   # task_id, ProgressEvent
     scanFinished  = Signal(str, object)   # task_id, ScanResult-or-exception
     scanCancelled = Signal(str)           # task_id
+    # A session just added could not join the project (Engine.register_native_import refused
+    # it: native 3-D and pixel sessions mixed, or another unit). It has been removed again;
+    # carries (session_id, message).
+    sessionRefused = Signal(str, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -181,6 +185,10 @@ class ProjectStore(QObject):
         # The window flushes/saves before either Project-screen or menu replacement.
         self.prepare_project_change: Callable[[], bool] | None = None
         self._identity_probes: dict[str, str] = {}  # task_id -> session_id
+        # Sessions added in this store whose first probe has not finished: that probe checks
+        # them against the project (Engine.register_native_import). A reopened project's
+        # sessions were checked when they were added, so their probes do not ask again.
+        self._new_session_ids: set[str] = set()
         self._scans: set[str] = set()  # task ids of scans whose result is still wanted
         # Derived cache, never persisted -- see ui/store/session_facts.py's
         # module docstring for why this lives here and not on SessionRef.
@@ -373,6 +381,7 @@ class ProjectStore(QObject):
         self._cancel_pending_probes()
         self._cancel_pending_scans()
         self._session_facts.clear()
+        self._new_session_ids.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
             project_name=name,
@@ -403,6 +412,7 @@ class ProjectStore(QObject):
         self._cancel_pending_probes()
         self._cancel_pending_scans()
         self._session_facts.clear()
+        self._new_session_ids.clear()
         self._manifest = manifest
         self._project_dir = t2d_path.parent
         self._manifest_path = Path(t2d_path)
@@ -828,6 +838,7 @@ class ProjectStore(QObject):
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
 
+        self._new_session_ids.add(session_id)
         self._submit_probe(session_id, folder)
 
     def _submit_probe(self, session_id: str, folder: Path) -> None:
@@ -908,6 +919,7 @@ class ProjectStore(QObject):
         self._manifest = self._manifest.model_copy(update={"sessions": [*existing, *added]})
         self.sessionsChanged.emit()
         for ref in added:
+            self._new_session_ids.add(ref.session_id)
             self._submit_probe(ref.session_id, ref.folder)
         return added
 
@@ -936,6 +948,10 @@ class ProjectStore(QObject):
                 self.pickleConsentRequired.emit(session_id, folder)
             return
         result = self._apply_session_panel(session_id, result)
+        if session_id in self._new_session_ids:
+            self._new_session_ids.discard(session_id)
+            if not self._register_native_import(session_id, result):
+                return
         self._set_session_identity(
             session_id, result.has_stable_identities, result.track_wo_identities
         )
@@ -945,6 +961,31 @@ class ProjectStore(QObject):
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
+
+    def _register_native_import(self, session_id: str, session: Any) -> bool:
+        """Check a just-added session against the project with the engine's one rule
+        (``Engine.register_native_import``), and take the calibration it sets for the first
+        native 3-D session. A refused session is removed again, logged and reported on
+        ``sessionRefused``; returns whether it stays."""
+        from track2data.api import Engine
+        from track2data.core.errors import ImportError_
+
+        if self._manifest is None:
+            return False
+        engine = Engine(self._manifest)
+        try:
+            engine.register_native_import(session.model_copy(update={"session_id": session_id}))
+        except ImportError_ as exc:
+            self.update_sessions(
+                [r for r in self._manifest.sessions if r.session_id != session_id]
+            )
+            self.append_log(f"_Session `{session_id}` was not added: {exc}_\n")
+            self.sessionRefused.emit(session_id, str(exc))
+            return False
+        if engine.manifest is not self._manifest:
+            self._manifest = engine.manifest
+            self.calibrationChanged.emit()
+        return True
 
     def _apply_session_panel(self, session_id: str, session: Any) -> Any:
         """Cut a probed session to its panel, if the session has one.

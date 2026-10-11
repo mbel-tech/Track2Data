@@ -78,6 +78,20 @@ logger = logging.getLogger(__name__)
 
 _BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
 
+#: The validation issue of a native 3-D project whose calibration is not "session": its
+#: coordinates are already in the project unit (``length_unit = 1.0``), which only "session"
+#: calibration reads.
+NATIVE_3D_NEEDS_SESSION_CALIBRATION = (
+    "A native 3-D project needs session calibration: its sessions are already in the project's "
+    "length unit. Set the calibration mode to 'session' on the Calibration screen."
+)
+
+
+def _view_note(psess: PreprocessedSession) -> str:
+    """What the log adds after a session's camera view: why it is top-view, if it is forced."""
+    if psess.z is not None:
+        return " (a native 3-D session)"
+    return " (a fused session)" if psess.depth is not None else ""
 
 
 def _with_bin_columns(df: Any, window: Any | None) -> Any:
@@ -397,11 +411,91 @@ class Engine:
         Trajectory formats that execute code on load are refused unless this project has
         opted in via ``security.allow_pickle_trajectories``. A folder that also carries an h5
         or csv trajectory imports normally either way -- the reader falls through to it.
+
+        A folder read on its own is not a project entry (no entry id to check it against), so
+        the project rules of :meth:`register_native_import` are checked by :meth:`import_ref`.
         """
         session = read_session(
             Path(folder), allow_pickle=self._manifest.security.allow_pickle_trajectories
         )
         return self._apply_import_settings(session)
+
+    def register_native_import(self, session: Session) -> None:
+        """Check *session* may join this project, and set up the project for native 3-D data.
+
+        Every import of a project entry ends here: :meth:`import_ref` calls it, and so does
+        every caller of it (:meth:`import_sessions`, a run, the pre-flight checks, ``t2d add``),
+        and the GUI's add path calls it on the probed session, so the rules live in one place.
+        *session* carries the id it has in the project, so the project's other sessions are the
+        entries with another id.
+
+        A project holds pixel sessions (including fused pairs) or native 3-D sessions, never
+        both, and a fused 3-D project (``dimension "3d"``) holds no native session: either is
+        refused with ``NATIVE_3D_MIXED``. A native session whose unit is not the one the
+        project's other native sessions were converted to is refused with
+        ``NATIVE_3D_UNIT_MISMATCH``. The first native session (no other native one in the
+        project) sets ``calibration.mode = "session"``, ``length_unit_label`` to its unit and
+        confirms it. A pixel session in a pixel project, or a native session in a project
+        already set up for it, changes nothing (the manifest object is kept).
+        """
+        from track2data.readers.native3d import NATIVE_3D_READERS
+
+        others = [r for r in self._manifest.sessions if r.session_id != session.session_id]
+        native = session.reader in NATIVE_3D_READERS or not session.has_pixel_frame
+        native_others = [r.session_id for r in others if r.reader in NATIVE_3D_READERS]
+        pixel_others = [r.session_id for r in others if r.reader not in NATIVE_3D_READERS]
+        sid = session.session_id
+        if native and self._manifest.mode.dimension == "3d":
+            raise ImportError_(
+                f"Session {sid!r} is a native 3-D session ({session.reader}), and this is a "
+                "3-D project of top and side pixel recordings to be fused",
+                code="NATIVE_3D_MIXED",
+                subject=sid,
+                remediation="Add native 3-D files to a 2-D project of their own; a fused 3-D "
+                "project holds pixel sessions only.",
+            )
+        if native and pixel_others:
+            raise ImportError_(
+                f"Session {sid!r} is a native 3-D session ({session.reader}), and this project "
+                f"holds pixel-tracked sessions ({', '.join(pixel_others)})",
+                code="NATIVE_3D_MIXED",
+                subject=sid,
+                remediation="A project holds either pixel-tracked or native 3-D sessions; add "
+                "this one to a project of its own.",
+            )
+        if not native and native_others:
+            raise ImportError_(
+                f"Session {sid!r} is a pixel-tracked session ({session.reader}), and this "
+                f"project holds native 3-D sessions ({', '.join(native_others)})",
+                code="NATIVE_3D_MIXED",
+                subject=sid,
+                remediation="A project holds either pixel-tracked or native 3-D sessions; add "
+                "this one to a project of its own.",
+            )
+        if not native:
+            return
+        unit = session.coordinate_unit or ""
+        cfg = self._manifest.calibration
+        if native_others:
+            if unit != cfg.length_unit_label:
+                raise ImportError_(
+                    f"Session {sid!r} was converted to {unit!r}, but this project's native 3-D "
+                    f"sessions are in {cfg.length_unit_label!r}",
+                    code="NATIVE_3D_UNIT_MISMATCH",
+                    subject=sid,
+                    remediation=f"Add it again with target_unit = {cfg.length_unit_label!r}.",
+                )
+            return
+        wanted = {
+            "mode": "session",
+            "length_unit_label": unit,
+            "length_unit_confirmed_by_user": True,
+        }
+        if all(getattr(cfg, key) == value for key, value in wanted.items()):
+            return
+        self._manifest = self._manifest.model_copy(
+            update={"calibration": cfg.model_copy(update=wanted)}
+        )
 
     def _apply_import_settings(self, session: Session) -> Session:
         """Settings that act on a freshly read session: blob-derived body lengths, tracker
@@ -497,7 +591,9 @@ class Engine:
             # may have derived another.
             session = self.import_session(ref.folder)
             session = session.model_copy(update={"session_id": ref.session_id})
-            return self._apply_panel(self._apply_video_override(session), ref)
+            session = self._apply_panel(self._apply_video_override(session), ref)
+            self.register_native_import(session)
+            return session
         try:
             session = read_session(
                 Path(ref.folder),
@@ -517,7 +613,9 @@ class Engine:
                 "session and add it again so a reader is detected afresh.",
             ) from exc
         session = session.model_copy(update={"session_id": ref.session_id})
-        return self._apply_panel(self._apply_import_settings(session), ref)
+        session = self._apply_panel(self._apply_import_settings(session), ref)
+        self.register_native_import(session)
+        return session
 
     @staticmethod
     def _apply_panel(session: Session, ref: SessionRef) -> Session:
@@ -728,8 +826,12 @@ class Engine:
         if session.body_length_px is not None:
             psess.body_length_px = np.asarray(session.body_length_px, dtype=np.float64).copy()
         try:
-            # Calibration.
+            # Calibration. A native 3-D session is already in the project unit
+            # (length_unit = 1.0), so it is read by session calibration whatever the mode says;
+            # validate() blocks a run whose mode is another.
             cfg = self._manifest.calibration
+            if not session.has_pixel_frame and cfg.mode != "session":
+                cfg = cfg.model_copy(update={"mode": "session"})
             if cfg.mode == "scalar" and cfg.px_per_cm is not None:
                 from track2data.calibration.scalar import apply_scalar_calibration
                 psess = apply_scalar_calibration(psess, cfg)
@@ -904,9 +1006,9 @@ class Engine:
         return self._manifest.scene.camera_view
 
     def camera_view_for_psess(self, psess: PreprocessedSession) -> CameraView:
-        """The view metrics are gated on for *psess*: a fused session (it has a depth) is
-        top-view, anything else is read from its session."""
-        if psess.depth is not None:
+        """The view metrics are gated on for *psess*: a fused session (it has a depth) and a
+        native 3-D one (it has a ``z``) are top-view, anything else is read from its session."""
+        if psess.depth is not None or psess.z is not None:
             return "top"
         return self.camera_view_for(psess.session)
 
@@ -978,7 +1080,9 @@ class Engine:
     ) -> dict[str, str]:
         """Selected metric ids the camera view rules out, mapped to the reason. With *psess* the
         view is that session's (a fused one is top-view) and a depth metric is allowed when it
-        has depth."""
+        has depth. A native 3-D session (a ``z``) has 3-D data; its depth is the water
+        column's. A native session without *psess* is answered from the manifest, which knows
+        the water column."""
         from track2data.metrics import get
         from track2data.metrics.availability import (
             manifest_depth_scale,
@@ -993,7 +1097,7 @@ class Engine:
         ]
         scale = manifest_depth_scale(self._manifest)
         if psess is None:
-            if session is None:
+            if session is None or not session.has_pixel_frame:
                 view, has_depth = manifest_view(self._manifest)
                 return view_skipped_metrics(
                     selected, view, get, has_depth=has_depth, depth_scale=scale
@@ -1002,10 +1106,12 @@ class Engine:
                 selected, self.camera_view_for(session), get, depth_scale=scale
             )
         scale.update(
-            has_depth=psess.depth is not None,
+            has_depth=psess.depth is not None or psess.z is not None,
             px_per_cm=psess.px_per_cm,
             depth_height_cm=psess.depth_height_cm,
         )
+        if psess.z is not None:
+            scale.update(dimension="3d", native_3d=True)
         return view_skipped_metrics(
             selected,
             self.camera_view_for_psess(psess),
@@ -1154,7 +1260,7 @@ class Engine:
                     ", ".join(sorted(view_only)),
                     psess.session_id,
                     self.camera_view_for_psess(psess),
-                    " (a fused session)" if psess.depth is not None else "",
+                    _view_note(psess),
                 )
             for mid in sorted(depth_ids):
                 logger.warning(
@@ -2394,6 +2500,8 @@ class Engine:
         pair is ``"session X: not in a fusable pair"``; those sessions are left out of the run,
         the others still run.
         """
+        from track2data.readers.native3d import manifest_native_3d
+
         issues: list[str] = []
         notes: list[str] = []
         if self._manifest.mode.dimension == "3d":
@@ -2416,7 +2524,10 @@ class Engine:
         if not self._manifest.sessions:
             issues.append("No sessions imported.")
         cfg = self._manifest.calibration
-        if cfg.mode == "scalar" and (cfg.px_per_cm is None or cfg.px_per_cm <= 0):
+        native = self._manifest.mode.dimension != "3d" and manifest_native_3d(self._manifest)
+        if native and cfg.mode != "session":
+            issues.append(NATIVE_3D_NEEDS_SESSION_CALIBRATION)
+        elif cfg.mode == "scalar" and (cfg.px_per_cm is None or cfg.px_per_cm <= 0):
             issues.append("Scalar calibration selected but px_per_cm is not set.")
         elif cfg.mode == "session":
             issues.extend(self._session_calibration_issues())
@@ -2509,9 +2620,9 @@ class Engine:
         *_cm columns?", which is what the consistency report turns on.
         """
         cfg = self._manifest.calibration
-        if cfg.mode == "scalar":
+        if cfg.mode == "scalar" and session.has_pixel_frame:
             return cfg.px_per_cm if cfg.px_per_cm and cfg.px_per_cm > 0 else None
-        if cfg.mode == "session":
+        if cfg.mode == "session" or not session.has_pixel_frame:
             from track2data.calibration.session_unit import session_scale
 
             return session_scale(

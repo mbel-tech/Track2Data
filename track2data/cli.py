@@ -560,6 +560,7 @@ def add(
     from track2data.core.manifest import write as manifest_write
     from track2data.readers.confirm import ConfirmDraft
     from track2data.readers.index import ScanBudget
+    from track2data.readers.native3d import manifest_native_3d
     from track2data.readers.params import parse_assignments
 
     manifest = _load_manifest(project)
@@ -617,6 +618,17 @@ def add(
             "updated_at": datetime.now(tz=UTC),
         }
     )
+    if manifest_native_3d(updated):
+        # Native 3-D files involved: import the new sessions so the engine's one rule checks
+        # them (no mixing, one unit) and the first one sets the project's calibration.
+        engine = Engine(updated)
+        try:
+            for ref in refs:
+                engine.import_ref(ref)
+        except Track2DataError as exc:
+            click.echo(f"[error] {exc}", err=True)
+            sys.exit(1)
+        updated = engine.manifest
     manifest_write(updated, Path(project))
     click.echo(f"Added {len(refs)} session(s) to {project}.")
 

@@ -149,3 +149,53 @@ def test_manifest_depth_scale_uses_the_scalar_value_when_set() -> None:
     assert depth_scale_reason(get("IL-16"), **manifest_depth_scale(given)) is None
     session = unset.model_copy(update={"calibration": CalibrationConfig(mode="session")})
     assert depth_scale_reason(get("IL-16"), **manifest_depth_scale(session)) is None
+
+
+def test_a_native_project_has_3d_data_and_asks_for_the_water_column() -> None:
+    from pathlib import Path
+
+    from tests.test_api import _make_manifest
+    from track2data.core.models import CalibrationConfig, SceneConfig, SessionRef, WaterColumn
+    from track2data.metrics import get
+    from track2data.metrics.availability import (
+        DEPTH_SCALE_REASONS,
+        NEEDS_WATER_COLUMN_REASON,
+        manifest_depth_scale,
+        manifest_view,
+        unavailable_reason,
+    )
+
+    assert NEEDS_WATER_COLUMN_REASON == (
+        "needs the water column (surface and floor z) on the Calibration page"
+    )
+    assert NEEDS_WATER_COLUMN_REASON in DEPTH_SCALE_REASONS
+    ref = SessionRef(session_id="n", folder=Path("n"), sha256="", reader="deeplabcut_3d")
+    native = _make_manifest(
+        sessions=[ref], calibration=CalibrationConfig(mode="session")
+    ).model_copy(update={"scene": SceneConfig(camera_view="side")})
+    view, has_depth = manifest_view(native)
+    assert (view, has_depth) == ("top", False)  # the declared view is irrelevant
+    scale = manifest_depth_scale(native)
+    assert scale["dimension"] == "3d" and scale["has_depth"] is True
+    for mid in ("IL-16", "IL-17", "GL-16", "IL-1"):
+        assert unavailable_reason(get(mid), view, has_depth=has_depth, depth_scale=scale) is None
+    assert (
+        unavailable_reason(get("IL-15"), view, has_depth=has_depth, depth_scale=scale)
+        == NEEDS_WATER_COLUMN_REASON
+    )
+    # a native unit has no depth_height_cm without a water column: z is enough
+    unit = {**scale, "px_per_cm": 1.0, "depth_height_cm": None}
+    assert unavailable_reason(get("IL-16"), "top", depth_scale=unit) is None
+
+    calibration = CalibrationConfig(
+        mode="session", water_column=WaterColumn(surface_z=0.0, floor_z=5.0)
+    )
+    with_column = native.model_copy(update={"calibration": calibration})
+    view, has_depth = manifest_view(with_column)
+    assert (view, has_depth) == ("top", True)
+    assert (
+        unavailable_reason(
+            get("IL-15"), view, has_depth=has_depth, depth_scale=manifest_depth_scale(with_column)
+        )
+        is None
+    )

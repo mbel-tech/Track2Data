@@ -12,6 +12,7 @@ one (Anipose proposes mm) but never fills it in on its own.
 from __future__ import annotations
 
 from fractions import Fraction
+from typing import Any
 
 import numpy as np
 
@@ -36,6 +37,15 @@ _RATIO_TO_MM: dict[str, Fraction] = {
 
 UNITS: tuple[str, ...] = tuple(UNIT_FACTORS_M)
 AXES: tuple[str, ...] = ("x", "y", "z")
+
+
+def manifest_native_3d(manifest: Any) -> bool:
+    """Whether *manifest* is a native 3-D project: any of its sessions comes from a native reader.
+
+    Decided from the saved reader names alone (no file is read). A project never mixes the two
+    kinds (``Engine.register_native_import`` refuses it), so one native session decides it.
+    """
+    return any(ref.reader in NATIVE_3D_READERS for ref in manifest.sessions)
 
 
 def convert_units(values: np.ndarray, unit: str, target: str) -> np.ndarray:
