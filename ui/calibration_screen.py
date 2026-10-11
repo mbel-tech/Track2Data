@@ -351,10 +351,12 @@ class CalibrationScreen(QWidget):
         water_help = QLabel(
             "Where the water surface and the floor lie on the file's vertical axis. Depth "
             "(0 at the surface, 1 at the floor) and the vertical-position metrics need both. "
-            "Samples outside the column are left out of those metrics and also of the 3-D path "
-            "length, speed and nearest-neighbour distance; they are never clipped. Leave one "
-            "empty for none."
+            "One surface and floor apply to every session, so the files must share a vertical "
+            "axis and an origin. Samples outside the column are left out of the vertical-position "
+            "metrics and of the 3-D path length, speed and nearest-neighbour distance; they are "
+            "never clipped. Leave one empty for none."
         )
+        self._water_help = water_help
         water_help.setProperty("role", "muted")
         water_help.setWordWrap(True)
         water_layout.addWidget(water_help)

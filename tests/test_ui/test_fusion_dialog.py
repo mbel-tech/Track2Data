@@ -262,6 +262,10 @@ def test_unknown_video_size_does_not_raise(qtbot):
     d._water_view._drag_line("floor", 500.0)
 
 
+def test_the_axis_and_flip_say_they_only_check_the_views_agree(qtbot):
+    d = _dlg(qtbot)
+    text = d._axis_help.text()
+    assert "agree" in text and "does not change the fused positions" in text
 # ---- an upside-down side view ----------------------------------------------------
 
 

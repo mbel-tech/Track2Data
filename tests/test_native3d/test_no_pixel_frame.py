@@ -232,7 +232,12 @@ def test_native_side_view_project_has_no_zone_water_column_warning() -> None:
 # ── README block ─────────────────────────────────────────────────────────────
 
 
-def _readme_for(tmp_path: Path, water_column: WaterColumn | None, flip: bool = False) -> str:
+def _readme_for(
+    tmp_path: Path,
+    water_column: WaterColumn | None,
+    flip: bool = False,
+    outside_samples: int | None = None,
+) -> str:
     import pandas as pd
 
     from track2data.exporters.base import ExportPayload, SessionProvenance
@@ -249,6 +254,8 @@ def _readme_for(tmp_path: Path, water_column: WaterColumn | None, flip: bool = F
             else None
         ),
     }
+    if outside_samples is not None:
+        native["outside_samples"] = outside_samples
     payload = ExportPayload(
         session_id="n1",
         project_name="proj",
@@ -279,6 +286,21 @@ def test_readme_native_block(tmp_path: Path) -> None:
     assert "| Flipped | True |" in text
     assert "| Water column | surface z 0 cm, floor z 20 cm |" in text
     assert "px per cm" not in text
+
+
+def test_readme_native_block_counts_the_samples_outside_the_water_column(tmp_path: Path) -> None:
+    text = _readme_for(
+        tmp_path, WaterColumn(surface_z=0.0, floor_z=20.0), outside_samples=5
+    )
+    assert (
+        "| Samples outside the water column | 5 (left out of IL-15, IL-16, IL-17 and GL-16, "
+        "never clipped) |" in text
+    )
+
+
+def test_readme_native_block_has_no_outside_row_without_a_count(tmp_path: Path) -> None:
+    text = _readme_for(tmp_path, WaterColumn(surface_z=0.0, floor_z=20.0))
+    assert "Samples outside the water column" not in text
 
 
 def test_readme_native_block_without_water_column(tmp_path: Path) -> None:
