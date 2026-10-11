@@ -181,6 +181,7 @@ def validate(project: str) -> None:
     manifest = _load_manifest(project)
     engine = Engine(manifest)
     issues, notes = engine.validation_issues()
+    issues.extend(engine.session_read_issues())
 
     # Non-blocking, and printed whether or not there are blocking issues:
     # a mixed-frame-rate project is a legitimate design, but silently
@@ -537,6 +538,10 @@ def _echo_plan(draft: ConfirmDraft) -> None:
 @click.option("--yes", "-y", is_flag=True, default=False, help="Do not ask for confirmation.")
 @click.option("--dry-run", is_flag=True, default=False,
               help="Show what would be added; add nothing.")
+@click.option("--allow-pickle", is_flag=True, default=False,
+              help="Trust these folders' pickled trajectory files (idtracker.ai trajectories.npy "
+                   "executes code when loaded). Sets security.allow_pickle_trajectories on the "
+                   "project; use it only for data you trust.")
 def add(
     project: str,
     roots: tuple[str, ...],
@@ -548,6 +553,7 @@ def add(
     max_depth: int | None,
     yes: bool,
     dry_run: bool,
+    allow_pickle: bool,
 ) -> None:
     """Scan ROOTS, confirm which software wrote them, and add their sessions to PROJECT.
 
@@ -611,13 +617,20 @@ def add(
     if not yes:
         click.confirm(f"Add {len(chosen)} session(s) to {project}?", abort=True)
     refs = draft.to_session_refs()
-    updated = manifest.model_copy(
-        update={
-            "sessions": [*manifest.sessions, *refs],
-            "updated_at": datetime.now(tz=UTC),
-        }
-    )
-    manifest_write(updated, Path(project))
+    changes: dict[str, Any] = {
+        "sessions": [*manifest.sessions, *refs],
+        "updated_at": datetime.now(tz=UTC),
+    }
+    if allow_pickle and not manifest.security.allow_pickle_trajectories:
+        changes["security"] = manifest.security.model_copy(
+            update={"allow_pickle_trajectories": True}
+        )
+        click.echo(
+            "[warn] --allow-pickle: this project may now load pickled trajectory files, which "
+            "executes code from the file. Only add data you trust.",
+            err=True,
+        )
+    manifest_write(manifest.model_copy(update=changes), Path(project))
     click.echo(f"Added {len(refs)} session(s) to {project}.")
 
 

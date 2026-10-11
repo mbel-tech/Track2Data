@@ -60,7 +60,7 @@ from track2data.core.progress import (
     emit,
 )
 from track2data.core.timeline import timeline_problem
-from track2data.readers import find_reader, read_session
+from track2data.readers import find_reader, probe_session, read_session
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -2420,6 +2420,37 @@ class Engine:
             issues.append("No metrics selected.")
         issues.extend(self._gate_selection_issues())
         return issues, notes
+
+    def session_read_issues(self) -> list[str]:
+        """One issue per session that cannot be read as the project is set up.
+
+        A pre-flight check, kept apart from :meth:`validation_issues` because it opens every
+        session (the cheap ``probe`` path, not a full read): the CLI's ``validate`` runs it,
+        the GUI does not on each edit. It reports what ``run`` would fail on for that
+        session: a missing video size or frame rate, a pickle without consent, a reader
+        that is not installed. The message carries the error code and its fix.
+        """
+        from track2data.core.errors import Track2DataError
+
+        issues: list[str] = []
+        allow_pickle = self._manifest.security.allow_pickle_trajectories
+        for ref in self._checked_refs(sides=True):
+            try:
+                if ref.reader is None:
+                    probe_session(Path(ref.folder), allow_pickle=allow_pickle)
+                else:
+                    probe_session(
+                        Path(ref.folder),
+                        reader=ref.reader,
+                        options=ref.reader_options,
+                        allow_pickle=allow_pickle,
+                    )
+            except Track2DataError as exc:
+                fix = f" Fix: {exc.remediation}" if getattr(exc, "remediation", None) else ""
+                issues.append(f"session '{ref.session_id}': {exc}{fix}")
+            except Exception as exc:  # a reader's own failure is still a reason not to run
+                issues.append(f"session '{ref.session_id}': cannot be read: {exc}")
+        return issues
 
     def consistency_warnings(self) -> list[str]:
         """Report the ways this project's sessions disagree with each other.
