@@ -34,23 +34,38 @@ if TYPE_CHECKING:
     from track2data.core.models import PreprocessedSession
 
 def depth_columns(psess: PreprocessedSession) -> dict[str, np.ndarray]:
-    """``{column: flat values}`` for the per-frame table of *psess*, empty without a depth.
+    """``{column: flat values}`` for the vertical columns of *psess*'s per-frame table.
 
-    The one place that decides whether, and which, depth columns the per-frame table has; every
-    exporter writes that table as built, so the formats cannot disagree.
+    The one place that decides whether, and which, vertical columns the per-frame table has;
+    every exporter writes that table as built, so the formats cannot disagree.
 
-    Row order is the table's (frame-major, animal-minor). A depth is NaN where the depth itself
-    or the animal's position is NaN; ``depth_cm`` is NaN as well when the tank height is unknown.
+    * ``z_cm`` -- a native 3-D session's own vertical coordinate in the project's length unit
+      (preprocessed like x and y, the value IL-16/IL-17 use), whether or not a water column is
+      set. It is the file's coordinate, not a depth: the sign and origin are the source's.
+    * ``depth_fraction`` / ``depth_cm`` -- depth below the surface, when a depth exists (a fused
+      session, or a native one with a water column). ``depth_cm`` is NaN when the tank height
+      is unknown.
+
+    Row order is the table's (frame-major, animal-minor). Every value is NaN where the animal's
+    position is NaN. Empty for a 2-D session.
     """
     import numpy as np
 
-    if psess.depth is None:
-        return {}
-    fraction = np.asarray(psess.depth, dtype=float).reshape(-1).copy()
-    fraction[~np.isfinite(psess.xy.reshape(-1, 2)).all(axis=1)] = np.nan
-    height = psess.depth_height_cm
-    cm = fraction * height if height is not None else np.full_like(fraction, np.nan)
-    return {"depth_fraction": fraction, "depth_cm": cm}
+    out: dict[str, np.ndarray] = {}
+    missing = ~np.isfinite(psess.xy.reshape(-1, 2)).all(axis=1)
+    if psess.z is not None:
+        z = np.asarray(psess.z, dtype=float).reshape(-1).copy()
+        z[missing] = np.nan
+        out["z_cm"] = z
+    if psess.depth is not None:
+        fraction = np.asarray(psess.depth, dtype=float).reshape(-1).copy()
+        fraction[missing] = np.nan
+        height = psess.depth_height_cm
+        cm = fraction * height if height is not None else np.full_like(fraction, np.nan)
+        out["depth_fraction"] = fraction
+        out["depth_cm"] = cm
+    return out
+
 
 #: Columns identifying a row rather than measuring anything. Excluded from the
 #: long table's value rows, and marked as identifiers in the codebook.
