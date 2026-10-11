@@ -141,7 +141,11 @@ class ReadmeExporter(Exporter):
             "app_version": p.app_version,
             "generated_at": timestamp,
             "metrics_computed": all_metric_ids,
-            "session_provenance": asdict(p.provenance),
+            "session_provenance": {
+                k: v
+                for k, v in asdict(p.provenance).items()
+                if not (k == "native_3d" and v is None)  # only a native 3-D session has it
+            },
         }
         if p.fusion is not None:
             manifest_data["run_metadata"]["fusion"] = p.fusion.as_row()

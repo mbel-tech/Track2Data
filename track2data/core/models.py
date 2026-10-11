@@ -21,7 +21,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from track2data.core.runplan import FusionRunInfo, SkippedSession
@@ -434,6 +442,15 @@ class CalibrationConfig(BaseModel):
     # Surface and floor of the water column in the native 3-D file's z coordinate; None until
     # the user gives them. Derives ``depth`` for a native 3-D session.
     water_column: WaterColumn | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_water_column(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Leave ``water_column`` out while it is None, so a project without one serialises, hashes
+        and keys its cache exactly as it did before the field existed."""
+        data: dict[str, Any] = handler(self)
+        if data.get("water_column") is None:
+            data.pop("water_column", None)
+        return data
 
 
 #: How the camera looked at the animals. "unknown" is the default and means nothing was declared,
