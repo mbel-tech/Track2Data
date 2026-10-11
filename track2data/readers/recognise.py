@@ -92,7 +92,7 @@ def _dlc_3d_unreadable(entry: IndexEntry, _index: ScanIndex, peek: Peeker) -> bo
     reader claims are never reported here."""
     if entry.is_dir or entry.suffix != ".csv":
         return False
-    lines = peek.text_lines(entry.path, 4)
+    lines = peek.header_lines(entry.path, 4)  # whole lines: a wide header exceeds the peek
     if not lines or not lines[0].lower().startswith("scorer"):
         return False
     for line in lines[1:4]:

@@ -150,3 +150,37 @@ def test_read_header_lines_is_whole_lines_and_bounded(tmp_path) -> None:
     assert len(first) == 200_000 and second == "second"
     assert read_header_lines(path, 2, limit=100_000) is None  # past the cap: undetected
     assert read_header_lines(tmp_path / "missing.csv", 1) is None
+
+
+def test_read_header_lines_never_reads_past_the_cap(tmp_path) -> None:
+    from track2data.readers import peek
+
+    path = tmp_path / "huge.csv"
+    path.write_bytes(b"x" * 1_000_000)  # no newline at all
+    reads: list[int] = []
+    real_open = open
+
+    class Counting:
+        def __init__(self, handle):
+            self._h = handle
+
+        def read(self, n=-1):
+            data = self._h.read(n)
+            reads.append(len(data))
+            return data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._h.close()
+
+    import builtins
+
+    original = builtins.open
+    builtins.open = lambda *a, **k: Counting(real_open(*a, **k))  # type: ignore[assignment]
+    try:
+        assert peek.read_header_lines(path, 1, limit=300_000) is None
+    finally:
+        builtins.open = original
+    assert sum(reads) <= 300_000

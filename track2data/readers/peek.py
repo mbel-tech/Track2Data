@@ -1,7 +1,9 @@
 """Header peeks: the only place a scan opens a file.
 
-Detection must be cheap, safe and bounded, so a peek reads a few kilobytes at most and parses a
-*header*, never data:
+Detection must be cheap, safe and bounded, so a peek reads a few kilobytes and parses a *header*,
+never data. The one exception is a text table's header lines (``header_lines``), which are read
+whole, up to a fixed cap (8 MB), because a table with thousands of keypoints has a very long first
+line:
 
 * ``.npy`` headers are parsed with ``numpy.lib.format`` (a literal-eval of the header dict), so an
   object array is reported as one without being unpickled. A pickle inside a file a user merely
@@ -48,12 +50,12 @@ def read_header_lines(path: Path, n: int, limit: int = MAX_HEADER_BYTES) -> list
     try:
         with open(path, "rb") as handle:
             while True:
-                more = handle.read(chunk)
+                more = handle.read(min(chunk, max(limit - len(data), 0)))
                 data += more
                 text = data.decode("utf-8-sig", errors="replace")
                 parts = text.splitlines(keepends=True)
                 ended = [len(part.splitlines()[0]) != len(part) for part in parts if part]
-                if sum(ended) >= n or not more:
+                if sum(ended) >= n or (not more and len(data) < limit):
                     return text.splitlines()[:n]
                 if len(data) >= limit:
                     _log.info(

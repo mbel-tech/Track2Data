@@ -260,3 +260,25 @@ def test_a_2d_table_with_z_and_likelihood_is_not_claimed_by_dlc3d(tmp_path: Path
     assert readers.detect_reader(path) is DeepLabCutReader
     (group,) = scan([tmp_path]).groups
     assert [d.reader for d in group.detections] == ["deeplabcut"]
+
+
+def test_the_3d_readers_texts_all_say_deeplabcut_3d(tmp_path: Path) -> None:
+    assert "DeepLabCut 3-D" in DeepLabCut3DReader.display_name
+    plain = tmp_path / "notes.csv"
+    plain.write_text("a,b\n1,2\n")
+    with pytest.raises(Track2DataError) as err:
+        read(plain)
+    assert err.value.code == "DLC3D_NOT_A_3D_FILE"
+    assert "DeepLabCut 3-D" in str(err.value) and "DeepLabCut 3-D" in err.value.remediation
+    folder = tmp_path / "two"
+    folder.mkdir()
+    write_dlc3d_csv(folder / "a.csv", ["a"], 3)
+    write_dlc3d_csv(folder / "b.csv", ["a"], 3)
+    with pytest.raises(Track2DataError) as err:
+        read(folder)
+    assert err.value.code == "SESSION_AMBIGUOUS" and "DeepLabCut 3-D" in str(err.value)
+    empty = tmp_path / "empty.csv"
+    empty.write_text("scorer,s,s,s\nbodyparts,a,a,a\ncoords,x,y,z\n")
+    with pytest.raises(Track2DataError) as err:
+        read(empty)
+    assert "DeepLabCut 3-D" in err.value.remediation

@@ -113,7 +113,7 @@ class DeepLabCut3DReader(SessionReader):
     """DeepLabCut-3D triangulated tables (CSV): one session per file."""
 
     name = "deeplabcut_3d"
-    display_name: ClassVar[str] = "DeepLabCut 3D (triangulated CSV)"
+    display_name: ClassVar[str] = "DeepLabCut 3-D (triangulated CSV)"
     verification = "synthetic_only"
     coordinate_frame = "physical_unaligned"
     provides_native_3d: ClassVar[bool] = True
@@ -147,7 +147,7 @@ class DeepLabCut3DReader(SessionReader):
             for path, _ in found
         )
         evidence = (
-            f"{len(found)} file(s) with a DeepLabCut-3D header "
+            f"{len(found)} file(s) with a DeepLabCut 3-D header "
             "(scorer / bodyparts / coords, with x, y and z and no likelihood)",
         )
         return [
@@ -182,14 +182,14 @@ class DeepLabCut3DReader(SessionReader):
             raise _error(
                 "DLC3D_NO_FILE",
                 f"Nothing to read at {folder}.",
-                "Point at a DeepLabCut-3D .csv file, or a folder that holds one.",
+                "Point at a DeepLabCut 3-D .csv file, or a folder that holds one.",
                 str(folder),
             )
         if len(files) > 1:
             names = ", ".join(f.name for f in files)
             raise _error(
                 "SESSION_AMBIGUOUS",
-                f"{folder} holds {len(files)} DeepLabCut-3D files, one per animal or video.",
+                f"{folder} holds {len(files)} DeepLabCut 3-D files, one per animal or video.",
                 f"Add one of them directly, or scan the folder to add them all: {names}.",
                 str(folder),
             )
@@ -204,8 +204,8 @@ def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
 def _not_a_dlc3d_file(path: Path) -> ImportError_:
     return _error(
         "DLC3D_NOT_A_3D_FILE",
-        f"{path} is not a DeepLabCut-3D table.",
-        "A DeepLabCut-3D table starts with 'scorer', 'bodyparts' and 'coords' rows and has x, y "
+        f"{path} is not a DeepLabCut 3-D table.",
+        "A DeepLabCut 3-D table starts with 'scorer', 'bodyparts' and 'coords' rows and has x, y "
         "and z columns for each body part (and no likelihood).",
         str(path),
     )
@@ -289,7 +289,7 @@ def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any
             f"{path.name} holds no frames.",
             code="READER_OUTPUT_INVALID",
             subject="raw_xy",
-            remediation="The file has a header but no data; re-export it from DeepLabCut.",
+            remediation="The file has a header but no data; re-export it from DeepLabCut 3-D.",
         )
     order = np.argsort(table.frames, kind="stable")
     frames = table.frames[order]
