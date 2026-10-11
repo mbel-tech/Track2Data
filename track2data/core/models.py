@@ -501,7 +501,8 @@ class FusionSettings(BaseModel):
     ``frame_offset`` shifts the side clock against the top clock, in frames. The side view's
     horizontal axis follows ``horizontal_axis`` of the top view (optionally ``flip``ped).
     ``surface_row`` and ``floor_row`` are the water surface and tank floor, in side-view image
-    rows; ``tank_height_cm`` is the water depth between them, which sets the side view's scale.
+    rows, in either order (the surface is the larger row when the camera is upside down);
+    ``tank_height_cm`` is the water depth between them, which sets the side view's scale.
     """
 
     model_config = ConfigDict(allow_inf_nan=False)
@@ -514,9 +515,11 @@ class FusionSettings(BaseModel):
     tank_height_cm: float = Field(gt=0)
 
     @model_validator(mode="after")
-    def _surface_above_floor(self) -> FusionSettings:
-        if self.surface_row >= self.floor_row:
-            raise ValueError("surface_row must be above floor_row")
+    def _surface_and_floor_differ(self) -> FusionSettings:
+        # Either order is valid: a side camera mounted upside down, or seen through a mirror, has
+        # the surface at the larger image row. The depth then counts from that row.
+        if self.surface_row == self.floor_row:
+            raise ValueError("surface_row and floor_row must differ")
         return self
 
 
