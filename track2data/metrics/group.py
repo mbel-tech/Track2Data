@@ -190,7 +190,7 @@ class NearestNeighbourDistance3D(Metric):
             "GL-1 in three dimensions. For each frame the nearest-neighbour distance of "
             "every animal is the minimum Euclidean distance, in cm, to any other animal in "
             "(X, Y, Z) space (X, Y from the top view, Z from the side-view depth times the "
-            "tank height). The group NND per frame is the mean across animals; the metric "
+            "tank height; for a native 3-D file, its absolute z). The group NND per frame is the mean across animals; the metric "
             "reports the mean and median of the frame-level values."
         ),
         formula_plain=(
@@ -200,12 +200,13 @@ class NearestNeighbourDistance3D(Metric):
         ),
         inputs=[
             "PreprocessedSession.xy",
-            "PreprocessedSession.depth",
+            "PreprocessedSession.depth (fused) or PreprocessedSession.z (native 3-D file)",
             "PreprocessedSession.px_per_cm",
-            "PreprocessedSession.depth_height_cm",
+            "PreprocessedSession.depth_height_cm (fused only)",
         ],
         assumptions=[
-            "The depth comes from a side camera at right angles to the top camera",
+            "The depth comes from a side camera at right angles to the top camera (a native "
+            "3-D file holds one animal per session, so this metric is not offered for it)",
             "A frame needs finite X, Y and Z for every animal; other frames are skipped "
             "and counted (a frame GL-1 keeps can be skipped here for missing depth)",
             "Body length for the BL column is the mean over animals, as for GL-1",

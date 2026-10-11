@@ -283,3 +283,11 @@ def test_a_pixel_frame_project_is_unchanged(tmp_path: Path) -> None:
     assert NEEDS_WATER_COLUMN_REASON not in (out / "t1" / "README.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_il15_names_the_water_column_as_its_source(project: Path) -> None:
+    manifest = _manifest(project, WaterColumn(surface_z=0.0, floor_z=20.0))
+    engine = Engine(manifest)
+    psess = engine.preprocess(engine.import_ref(manifest.sessions[0]))
+    result = engine.compute_metrics(psess)["IL-15"]
+    assert set(result["depth_extent_source"]) == {"water_column"}
