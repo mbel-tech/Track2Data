@@ -260,6 +260,32 @@ def test_gl16_bl_matches_gl1_convention() -> None:
     row = _run(psess).iloc[0]
     expected = row["mean_nnd_3d_cm"] / (np.mean([10.0, 0.0, 20.0]) / PX_PER_CM)
     assert row["mean_nnd_3d_bl"] == pytest.approx(expected, rel=1e-12)
-    for bad in ([0.0, 0.0, 0.0], [np.nan] * 3, [np.inf, 1.0, 1.0], [-5.0, 1.0, 1.0]):
+    for bad in ([0.0, 0.0, 0.0], [np.nan] * 3, [-5.0, 1.0, 1.0]):
         psess.body_length_px = np.array(bad)
         assert np.isnan(_run(psess).iloc[0]["mean_nnd_3d_bl"])
+
+
+def test_gl16_bl_is_exactly_the_old_value_for_ordinary_sessions() -> None:
+    rng = np.random.default_rng(11)
+    for px_per_cm in (7.3, 3.17, 11.9):
+        pos = rng.uniform(0, 50, (12, 3, 3))
+        psess = _fused(pos)
+        psess.px_per_cm = px_per_cm
+        for how in ("px", "cm"):
+            lengths = rng.uniform(1.0, 30.0, 3)
+            if how == "px":
+                psess.body_length_px, psess.body_length_cm = lengths, None
+            else:
+                psess.body_length_px, psess.body_length_cm = None, lengths
+            row = _run(psess).iloc[0]
+            old_bl = float(np.nanmean(psess.body_length_in_px() / px_per_cm))  # old formula
+            assert row["mean_nnd_3d_bl"] == row["mean_nnd_3d_cm"] / old_bl
+
+
+def test_gl16_bl_zero_negative_and_inf_lengths_follow_gl1() -> None:
+    psess = _fused(_three_fish())
+    cm = _run(psess).iloc[0]["mean_nnd_3d_cm"]
+    for lengths, mean_px in (([-5.0, 10.0, 20.0], 25.0 / 3), ([np.inf, 1.0, 1.0], np.inf)):
+        psess.body_length_px = np.array(lengths)
+        got = _run(psess).iloc[0]["mean_nnd_3d_bl"]
+        assert got == cm / (mean_px / PX_PER_CM)

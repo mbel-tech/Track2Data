@@ -433,3 +433,21 @@ def test_gl1_sessions_without_separators_are_unchanged() -> None:
     assert row["n_skipped_frames"] == 1
     assert row["mean_nnd_px"] == pytest.approx(np.mean(vals), rel=1e-12)
     assert row["median_nnd_px"] == pytest.approx(np.median(vals), rel=1e-12)
+
+
+def test_gl1_body_length_ratio_is_unchanged_for_every_length_pattern() -> None:
+    import warnings
+
+    xy = np.zeros((5, 2, 2))
+    xy[:, 1, 0] = 10.0  # mean_nnd_px == 10
+    old = {  # mean_nnd_bl of the previous implementation
+        (10.0, 0.0): 2.0, (0.0, 0.0): np.nan, (-5.0, -5.0): np.nan, (-5.0, 10.0): 4.0,
+        (np.nan, 10.0): 1.0, (np.nan, np.nan): np.nan, (np.inf, 1.0): 0.0,
+        (-np.inf, 1.0): np.nan, (np.inf, -np.inf): np.nan,
+    }
+    for lengths, want in old.items():
+        psess = make_psess(xy=xy.copy(), body_length_px=np.array(lengths))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            got = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_bl"]
+        assert (np.isnan(got) and np.isnan(want)) or got == want, lengths

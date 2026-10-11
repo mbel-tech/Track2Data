@@ -41,18 +41,6 @@ _COHESION_SOURCES = ("nnd", "iid")
 # ── GL-1: NearestNeighbourDistance ────────────────────────────────────────────
 
 
-def _nnd_in_body_lengths(mean_nnd_px: float, body_length_px: np.ndarray | None) -> float:
-    """*mean_nnd_px* over the nan-mean body length in px; NaN unless that mean is positive and
-    finite (shared by GL-1 and GL-16 so they follow one rule)."""
-    if body_length_px is None or not np.isfinite(mean_nnd_px):
-        return float("nan")
-    bl = np.asarray(body_length_px, dtype=np.float64)
-    if not np.isfinite(bl).any():
-        return float("nan")
-    mean_bl = float(np.nanmean(bl))
-    return mean_nnd_px / mean_bl if np.isfinite(mean_bl) and mean_bl > 0 else float("nan")
-
-
 class NearestNeighbourDistance(Metric):
     """GL-1 — Mean nearest-neighbour distance (NND) across the group."""
 
@@ -171,7 +159,16 @@ class NearestNeighbourDistance(Metric):
             else np.nan
         )
         bl_all = session.body_length_in_px()
-        row["mean_nnd_bl"] = _nnd_in_body_lengths(mean_nnd, bl_all)
+        # Same rule as GL-16's mean_nnd_3d_bl (which averages in cm); keep the two in step.
+        # The isfinite guard only avoids nanmean's all-NaN warning; the value stays NaN.
+        mean_bl_px = (
+            float(np.nanmean(bl_all))
+            if bl_all is not None and np.isfinite(np.asarray(bl_all, dtype=float)).any()
+            else np.nan
+        )
+        row["mean_nnd_bl"] = (
+            mean_nnd / mean_bl_px if mean_bl_px > 0 and not np.isnan(mean_nnd) else np.nan
+        )
 
         return pd.DataFrame([row])
 
@@ -275,14 +272,16 @@ class NearestNeighbourDistance3D(Metric):
         else:
             mean_nnd = median_nnd = np.nan
 
-        # Same convention as GL-1's mean_nnd_bl: the nan-mean of the raw per-animal body length
-        # in px, valid only when positive and finite. mean_nnd is in cm, so convert it to px.
+        # Same rule as GL-1's mean_nnd_bl (nan-mean of the raw per-animal lengths, valid when
+        # the mean is positive), averaged in cm so ordinary sessions keep their exact value.
+        bl_px = session.body_length_in_px()
         px_per_cm = session.px_per_cm
-        mean_nnd_bl = (
-            _nnd_in_body_lengths(mean_nnd * px_per_cm, session.body_length_in_px())
-            if px_per_cm is not None and np.isfinite(mean_nnd)
-            else np.nan
-        )
+        mean_bl = np.nan
+        if bl_px is not None and px_per_cm is not None:
+            bl_cm = np.asarray(bl_px, dtype=np.float64) / px_per_cm
+            if np.isfinite(bl_cm).any():
+                mean_bl = float(np.nanmean(bl_cm))
+        mean_nnd_bl = mean_nnd / mean_bl if mean_bl > 0 and not np.isnan(mean_nnd) else np.nan
 
         return pd.DataFrame(
             [
