@@ -41,14 +41,15 @@ from track2data.core.models import SessionRef
 from track2data.readers import get_reader, reader_names
 from track2data.readers.confirm import ConfirmDraft
 from track2data.readers.detection import Confidence
+from ui.widgets.dots import level_colour
 from ui.widgets.reader_options_form import ReaderOptionsForm
 
 _COL_INCLUDE, _COL_ID, _COL_SOURCE, _COL_NOTE = range(4)
 _ROLE_ORIGINAL_ID = Qt.ItemDataRole.UserRole
-_CONFIDENCE_COLOUR = {
-    Confidence.HIGH: "#27ae60",
-    Confidence.MEDIUM: "#e67e22",
-    Confidence.LOW: "#c0392b",
+_CONFIDENCE_LEVEL = {
+    Confidence.HIGH: "good",
+    Confidence.MEDIUM: "check",
+    Confidence.LOW: "review",
 }
 _UNVERIFIED = (
     "Unverified: this reader was written from the format's documentation and is not yet checked "
@@ -107,7 +108,7 @@ class ConfirmFormatDialog(QDialog):
             "The scan stopped at its limit, so the folder may hold more than is listed here."
         )
         self.truncated_label.setWordWrap(True)
-        self.truncated_label.setStyleSheet("color: #b9770e;")
+        self.truncated_label.setProperty("role", "warn")
         root.addWidget(self.truncated_label)
 
         self.empty_label = QLabel()
@@ -137,7 +138,7 @@ class ConfirmFormatDialog(QDialog):
 
         self.unverified_label = QLabel(_UNVERIFIED)
         self.unverified_label.setWordWrap(True)
-        self.unverified_label.setStyleSheet("color: #b9770e;")
+        self.unverified_label.setProperty("role", "warn")
         content.addWidget(self.unverified_label)
 
         self.evidence_label = QLabel()
@@ -167,7 +168,7 @@ class ConfirmFormatDialog(QDialog):
 
         self.problems_label = QLabel()
         self.problems_label.setWordWrap(True)
-        self.problems_label.setStyleSheet("color: #b9770e;")
+        self.problems_label.setProperty("role", "warn")
         content.addWidget(self.problems_label)
         root.addWidget(self._content, 1)
 
@@ -260,7 +261,7 @@ class ConfirmFormatDialog(QDialog):
     def _sync_detection(self) -> None:
         """Everything that depends on the selected reader: badges, options, sessions."""
         draft = self._draft
-        colour = _CONFIDENCE_COLOUR[draft.confidence]
+        colour = level_colour(_CONFIDENCE_LEVEL[draft.confidence])
         self.confidence_label.setText(f"● {draft.confidence.name.title()} confidence")
         self.confidence_label.setStyleSheet(f"color: {colour}; font-weight: bold;")
         self.unverified_label.setVisible(draft.verification == "synthetic_only")

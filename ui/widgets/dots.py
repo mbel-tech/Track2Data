@@ -11,8 +11,8 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
 from app.theme import theme
 
-_LIGHT = {"good": "#3a9a72", "check": "#e0a92a", "review": "#d1453b"}
-_DARK = {"good": "#3fa7b5", "check": "#e8b64c", "review": "#ff8a76"}
+_LIGHT = {"good": "#00a3d1", "check": "#e0a92a", "review": "#f03500"}
+_DARK = {"good": "#00bbf0", "check": "#fdb44b", "review": "#f03500"}
 
 
 def level_colour(level: str) -> str:

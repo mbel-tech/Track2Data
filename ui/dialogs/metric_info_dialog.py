@@ -57,7 +57,7 @@ class MetricInfoDialog(QDialog):
                 "compatibility with existing projects; computes exactly "
                 "what it always has."
             )
-            notice.setStyleSheet("color: #b06a00; font-size: 12px;")
+            notice.setProperty("role", "warn")
             notice.setWordWrap(True)
             layout.addWidget(notice)
 
@@ -67,7 +67,7 @@ class MetricInfoDialog(QDialog):
                 f"Needs a {needed_view} recording. Set the camera view on the Calibration "
                 "screen; until then this metric is skipped."
             )
-            view_notice.setStyleSheet("color: #b06a00; font-size: 12px;")
+            view_notice.setProperty("role", "warn")
             view_notice.setWordWrap(True)
             layout.addWidget(view_notice)
 

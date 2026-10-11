@@ -68,7 +68,7 @@ QMainWindow
 
 The toolbar is gone; Back / Next / Run / Cancel remain `QAction`s that the menu and the footer
 buttons share. Preview & Export stays locked in the sidebar until a run has produced results.
-Colours and type come from `app/resources/track2data-{light,dark}.qss` (tokens in the Teal Field
+Colours and type come from `app/resources/track2data-{light,dark}.qss` (tokens in the Harbor Navy
 design handoff); `app/theme.py` loads them and remembers the choice in `QSettings`.
 
 **Command palette** (Ctrl/Cmd-K, PRD §14): `ui/dialogs/command_palette.py`, a `QDialog` over the

@@ -90,7 +90,7 @@ class StageDelegate(QStyledItemDelegate):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#ffffff"))
             painter.drawEllipse(dot)
-            painter.setPen(QColor("#1c5866"))
+            painter.setPen(theme.color("tealText"))
             painter.drawText(dot, Qt.AlignmentFlag.AlignCenter, number)
         else:
             ring = theme.color("sideLocked")
