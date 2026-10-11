@@ -8,6 +8,8 @@ import pandas as pd
 
 from track2data.exporters._merge import merge_metric_frames
 from track2data.exporters.base import Exporter, ExportPayload
+from track2data.exporters.csv_long import write_fish_by_frame
+from track2data.exporters.schema import VERTICAL_COLUMNS
 
 # ── CSV write helpers ──────────────────────────────────────────────────────────
 
@@ -47,6 +49,10 @@ class CsvWideExporter(Exporter):
 
     * ``trial_summary_wide.csv`` — one row per (session_id, individual_id) with
       all individual metric values in wide format.
+
+    A 3-D run (a per-frame table with ``z_cm`` or ``depth_*``) also gets
+    ``master_fish_by_frame.csv``, identical to the long exporter's file, because the summary
+    holds no vertical data. A 2-D run writes the summary only.
     """
 
     name = "csv_wide"
@@ -74,7 +80,11 @@ class CsvWideExporter(Exporter):
         wide_df = _build_wide(p.individual_metrics)
         path = _write_csv(wide_df, out_dir / "trial_summary_wide.csv")
 
-        return [path]
+        written = [path]
+        if any(c in p.fish_by_frame.columns for c in VERTICAL_COLUMNS):
+            written.append(write_fish_by_frame(p.fish_by_frame, out_dir))
+
+        return written
 
 
 # ── Registration ──────────────────────────────────────────────────────────────

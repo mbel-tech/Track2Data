@@ -121,3 +121,11 @@ def test_a_non_native_session_gets_no_z_column(tmp_path: Path) -> None:
     engine = Engine(build_scene(tmp_path / "data"))
     fused = engine.fuse_pair(engine._manifest.view_pairs[0])
     assert "z_cm" not in engine.build_fish_by_frame(fused.psess).columns
+
+
+def test_a_wide_only_run_of_a_native_project_carries_z_cm(project: Path, tmp_path: Path) -> None:
+    out = tmp_path / "o"
+    Engine(_manifest(project, None)).run(out, exporters=["csv_wide"])
+    df = pd.read_csv(out / "fish1" / "master_fish_by_frame.csv")
+    np.testing.assert_allclose(df["z_cm"].to_numpy(), np.arange(11) * 1.2, atol=1e-9)
+    assert (out / "fish1" / "trial_summary_wide.csv").exists()

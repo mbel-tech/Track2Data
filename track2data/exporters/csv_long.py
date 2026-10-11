@@ -61,6 +61,18 @@ def _sorted_by(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
 _merge_metric_dfs = merge_metric_frames  # name kept for existing callers/tests
 
 
+def write_fish_by_frame(fish_df: pd.DataFrame, out_dir: Path) -> Path:
+    """Write the master per-frame table as ``master_fish_by_frame.csv``.
+
+    Shared by every exporter that writes this file, so the formats cannot disagree on its bytes.
+    """
+    sort_keys = [k for k in ("session_id", "individual_id", "frame") if k in fish_df.columns]
+    return _write_csv(
+        _sorted_by(fish_df, sort_keys), Path(out_dir) / "master_fish_by_frame.csv",
+        chunksize=_CHUNK_ROWS,
+    )
+
+
 # ── CsvLongExporter ───────────────────────────────────────────────────────────
 
 
@@ -110,12 +122,7 @@ class CsvLongExporter(Exporter):
         written: list[Path] = []
 
         # ── master per-frame CSV ───────────────────────────────────────────────
-        fish_df = p.fish_by_frame
-        sort_keys = [k for k in ("session_id", "individual_id", "frame") if k in fish_df.columns]
-        fish_df = _sorted_by(fish_df, sort_keys)
-        written.append(
-            _write_csv(fish_df, out_dir / "master_fish_by_frame.csv", chunksize=_CHUNK_ROWS)
-        )
+        written.append(write_fish_by_frame(p.fish_by_frame, out_dir))
 
         # ── individual metrics summary ─────────────────────────────────────────
         indiv_summary = _merge_metric_dfs(p.individual_metrics)
