@@ -68,21 +68,6 @@ def _animalta_detailed(entry: IndexEntry, index: ScanIndex, _peek: Peeker) -> bo
     )
 
 
-def _dlc_3d(entry: IndexEntry, _index: ScanIndex, peek: Peeker) -> bool:
-    """A DeepLabCut table whose coordinates are x, y, z and that has no likelihood."""
-    if entry.is_dir or entry.suffix != ".csv":
-        return False
-    lines = peek.text_lines(entry.path, 4)
-    if not lines or not lines[0].lower().startswith("scorer"):
-        return False
-    for line in lines[1:4]:
-        cells = [c.strip().lower() for c in line.split(",")]
-        if cells and cells[0] == "coords":
-            coords = set(cells[1:])
-            return "z" in coords and "likelihood" not in coords
-    return False
-
-
 def _fictrac(entry: IndexEntry, _index: ScanIndex, peek: Peeker) -> bool:
     """A headerless ``.dat`` whose first line is a long row of numbers."""
     if entry.is_dir or entry.suffix != ".dat":
@@ -144,13 +129,6 @@ FORMATS: tuple[RecognisedFormat, ...] = (
         "These are AnimalTA's per-target detailed files, which do not record their unit, so "
         "they are not read. Add the Coordinates .csv from the same AnimalTA run instead.",
         _animalta_detailed,
-    ),
-    RecognisedFormat(
-        "dlc_3d",
-        "DeepLabCut 3-D table",
-        "This is a DeepLabCut 3-D table (x, y, z with no likelihood), which Track2Data cannot "
-        "read yet. Add the 2-D CSV or .h5 DeepLabCut wrote for one camera instead.",
-        _dlc_3d,
     ),
     RecognisedFormat(
         "fictrac",

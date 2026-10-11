@@ -58,3 +58,41 @@ def write_anipose_csv(
         lines.append(",".join(cells))
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+def write_dlc3d_csv(
+    path: Path,
+    bodyparts: Sequence[str],
+    frames: Sequence[int] | int,
+    *,
+    xyz: np.ndarray | None = None,
+    scorer: str = "DLC_3D",
+    coords: Sequence[str] = ("x", "y", "z"),
+) -> Path:
+    """Write a DeepLabCut-3D triangulated table and return its path.
+
+    Three header rows (``scorer``, ``bodyparts``, ``coords``), then one line per frame whose first
+    cell is the frame number. *frames* is the list of first-column values (or a count for 0..n-1);
+    *xyz* ``(F, K, 3)`` defaults to ``frame + 100 * k + 10 * axis``. NaN is written as an empty
+    cell. *coords* renames the three columns (to build near-miss headers).
+    """
+    index = list(range(frames)) if isinstance(frames, int) else list(frames)
+    n, k = len(index), len(bodyparts)
+    if xyz is None:
+        base = np.arange(n, dtype=float)[:, None, None]
+        xyz = base + 100.0 * np.arange(k)[None, :, None] + 10.0 * np.arange(3)[None, None, :]
+    width = len(coords)
+    lines = [
+        ",".join(["scorer"] + [scorer] * (k * width)),
+        ",".join(["bodyparts"] + [bp for bp in bodyparts for _ in coords]),
+        ",".join(["coords"] + list(coords) * k),
+    ]
+    for row in range(n):
+        cells = [str(index[row])]
+        for j in range(k):
+            for a in range(width):
+                value = xyz[row, j, a]
+                cells.append("" if not np.isfinite(value) else repr(float(value)))
+        lines.append(",".join(cells))
+    path.write_text("\n".join(lines) + "\n")
+    return path

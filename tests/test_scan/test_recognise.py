@@ -14,7 +14,6 @@ import pytest
 from track2data.readers.recognise import FORMATS
 from track2data.readers.scan import scan
 
-DLC_3D = "scorer,s,s,s\nbodyparts,nose,nose,nose\ncoords,x,y,z\n0,1.0,2.0,3.0\n"
 DLC_2D = "scorer,s,s,s\nbodyparts,nose,nose,nose\ncoords,x,y,likelihood\n0,1.0,2.0,0.9\n"
 FICTRAC = ",".join(str(float(i)) for i in range(25)) + "\n"
 
@@ -35,7 +34,6 @@ BUILDERS = {
     "animalta_detailed": lambda r: _write(
         r / "Results" / "Detailed_data" / "vid" / "Arena_0A.csv", "Time;X;Y\n0;1;2\n"
     ),
-    "dlc_3d": lambda r: _write(r / "trial_3d.csv", DLC_3D),
     "fictrac": lambda r: _write(r / "fictrac-20240101.dat", FICTRAC),
 }
 
