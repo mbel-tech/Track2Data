@@ -448,13 +448,13 @@ class Engine:
             return
         per_animal = self._metadata_individual_fields_for(psess, identity_free)
         rule = self._manifest.mapping
-        if psess.depth is not None and rule is not None:
+        if (psess.depth is not None or psess.z is not None) and rule is not None:
             carried = {c.strip().lower() for c in (*rule.rules, *rule.extra_columns)}
-            for col in ("depth_fraction", "depth_cm"):
+            for col in ("depth_fraction", "depth_cm", "z_cm"):
                 if col in carried and col in df.columns:
                     logger.warning(
                         "metadata column '%s' is ignored in the per-frame table: "
-                        "the fused depth is used",
+                        "the vertical coordinate from the tracking is used",
                         col,
                     )
         if not per_animal:
@@ -1664,8 +1664,8 @@ class Engine:
         if threshold > 0 and id_prob is not None:
             below = df["id_probability"] < threshold
             masked_cols = [
-                c for c in ("x_px", "y_px", "x_cm", "y_cm", "depth_fraction", "depth_cm",
-                            "speed_px_s", "speed_cm_s", "heading_rad")
+                c for c in ("x_px", "y_px", "x_cm", "y_cm", "z_cm", "depth_fraction",
+                            "depth_cm", "speed_px_s", "speed_cm_s", "heading_rad")
                 if c in df.columns
             ]
             df.loc[below, masked_cols] = np.nan
