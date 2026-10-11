@@ -94,6 +94,39 @@ def _value(long: pd.DataFrame, metric: str, column: str) -> float:
     return float(rows["value"].iloc[0])
 
 
+def _difference_report(
+    serial: dict[str, bytes], parallel: dict[str, bytes], lines: int = 12
+) -> str:
+    """What differs between two runs' files, readable in a failure message: the files only one
+    run wrote, and the first changed lines of each file that differs. A run whose worker died
+    differs by a 'Sessions that failed' section, which this makes visible."""
+    import difflib
+
+    out: list[str] = []
+    for name in sorted(serial.keys() ^ parallel.keys()):
+        out.append(f"only in the {'serial' if name in serial else 'parallel'} run: {name}")
+    for name in sorted(serial.keys() & parallel.keys()):
+        if serial[name] == parallel[name]:
+            continue
+        a = serial[name].decode("utf-8", "replace").splitlines()
+        b = parallel[name].decode("utf-8", "replace").splitlines()
+        diff = list(difflib.unified_diff(a, b, "serial", "parallel", lineterm="", n=0))
+        out.append(f"{name} differs ({len(serial[name])} vs {len(parallel[name])} bytes):")
+        out.extend(f"    {line[:200]}" for line in diff[:lines])
+    return "\n".join(out)
+
+
+def test_the_difference_report_names_files_and_changed_lines() -> None:
+    serial = {"a.csv": b"x\n1\n", "same.txt": b"s", "only_serial": b"o"}
+    parallel = {"a.csv": b"x\n2\n", "same.txt": b"s", "only_parallel": b"o"}
+    report = _difference_report(serial, parallel)
+    assert "only in the serial run: only_serial" in report
+    assert "only in the parallel run: only_parallel" in report
+    assert "a.csv differs" in report and "-1" in report and "+2" in report
+    assert "same.txt" not in report
+    assert _difference_report(serial, serial) == ""
+
+
 def _files(root: Path) -> dict[str, bytes]:
     return {
         str(p.relative_to(root)): _STAMP.sub(b"<time>", p.read_bytes())
@@ -223,8 +256,8 @@ def test_serial_and_parallel_runs_write_identical_files(
     Engine(manifest).run(tmp_path / "serial", exporters=exporters)
     Engine(manifest).run(tmp_path / "parallel", exporters=exporters, n_workers=2)
     serial, parallel = _files(tmp_path / "serial"), _files(tmp_path / "parallel")
-    assert serial.keys() == parallel.keys()
-    assert [n for n in serial if serial[n] != parallel[n]] == []
+    report = _difference_report(serial, parallel)
+    assert report == "", "serial and parallel runs wrote different files:\n" + report
     assert {n.split("/")[0] for n in serial} >= {"fish1", "fish2", "sessions.csv"}
 
 
