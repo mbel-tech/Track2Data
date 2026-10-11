@@ -177,7 +177,7 @@ def test_a_native_project_has_3d_data_and_asks_for_the_water_column() -> None:
     assert (view, has_depth) == ("top", False)  # the declared view is irrelevant
     scale = manifest_depth_scale(native)
     assert scale["dimension"] == "3d" and scale["has_depth"] is True
-    for mid in ("IL-16", "IL-17", "GL-16", "IL-1"):
+    for mid in ("IL-16", "IL-17", "IL-1"):
         assert unavailable_reason(get(mid), view, has_depth=has_depth, depth_scale=scale) is None
     assert (
         unavailable_reason(get("IL-15"), view, has_depth=has_depth, depth_scale=scale)

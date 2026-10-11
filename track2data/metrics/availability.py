@@ -70,9 +70,28 @@ NEEDS_CM_SCALE_REASON = "needs a cm scale for the top view"
 NEEDS_WATER_COLUMN_REASON = (
     "needs the water column (surface and floor z) on the Calibration page"
 )
+#: Metrics whose default threshold, bin or arena is sized in video pixels (IL-3 arena, IL-9 and
+#: IL-10 occupancy bins, IL-14 wall distance). A native 3-D file has no pixels, so the same number
+#: would silently mean the project unit and change with ``target_unit``.
+PIXEL_FRAME_METRIC_IDS = frozenset({"IL-3", "IL-9", "IL-10", "IL-14"})
+#: Why those four are unavailable in a native 3-D project.
+NEEDS_PIXEL_FRAME_REASON = (
+    "uses a pixel-sized default and the project's native 3-D files have no pixel frame"
+)
+#: Why every group-level metric is unavailable in a native 3-D project.
+NEEDS_SEVERAL_ANIMALS_REASON = (
+    "needs several animals in one session; a native 3-D file holds one animal"
+)
 #: The reasons that are 3-D requirements rather than the camera view.
 DEPTH_SCALE_REASONS = frozenset(
-    {NEEDS_FUSED_REASON, NEEDS_CM_MODE_REASON, NEEDS_CM_SCALE_REASON, NEEDS_WATER_COLUMN_REASON}
+    {
+        NEEDS_FUSED_REASON,
+        NEEDS_CM_MODE_REASON,
+        NEEDS_CM_SCALE_REASON,
+        NEEDS_WATER_COLUMN_REASON,
+        NEEDS_PIXEL_FRAME_REASON,
+        NEEDS_SEVERAL_ANIMALS_REASON,
+    }
 )
 
 # Manifest-level answers cannot know a unit's scale yet; they pass these stand-ins and leave the
@@ -153,14 +172,17 @@ def unavailable_reason(
 
     In a native 3-D project (``depth_scale["native_3d"]``) a depth metric without a depth is
     waiting for the water column, never for a camera view: :data:`NEEDS_WATER_COLUMN_REASON`.
+    A native project also rules out the metrics sized in pixels (:data:`NEEDS_PIXEL_FRAME_REASON`)
+    and every group-level metric (:data:`NEEDS_SEVERAL_ANIMALS_REASON`: one animal per file). The
+    data-extent arena fallback of ``metrics/derived.py`` is therefore not reachable in a run.
     """
-    if (
-        depth_scale is not None
-        and depth_scale.get("native_3d", False)
-        and getattr(metric_cls, "uses_depth", False)
-        and not has_depth
-    ):
-        return NEEDS_WATER_COLUMN_REASON
+    if depth_scale is not None and depth_scale.get("native_3d", False):
+        if getattr(metric_cls, "id", None) in PIXEL_FRAME_METRIC_IDS:
+            return NEEDS_PIXEL_FRAME_REASON
+        if getattr(metric_cls, "level", None) == "group":
+            return NEEDS_SEVERAL_ANIMALS_REASON
+        if getattr(metric_cls, "uses_depth", False) and not has_depth:
+            return NEEDS_WATER_COLUMN_REASON
     reason = view_unavailable_reason(metric_cls, camera_view, has_depth=has_depth)
     if reason is None and depth_scale is not None:
         reason = depth_scale_reason(metric_cls, **depth_scale)

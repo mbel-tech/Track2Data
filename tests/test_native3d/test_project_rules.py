@@ -34,6 +34,7 @@ from track2data.core.models import (
 from track2data.metrics import get
 from track2data.metrics.availability import (
     NEEDS_FUSED_REASON,
+    NEEDS_SEVERAL_ANIMALS_REASON,
     NEEDS_WATER_COLUMN_REASON,
     manifest_depth_scale,
     manifest_view,
@@ -382,14 +383,18 @@ def _native_psess(engine: Engine, session: Session | None = None):
 
 def test_native_project_offers_the_three_3d_metrics() -> None:
     manifest = _manifest(
-        [_ref("n1")], calibration=SESSION_CM, individual=("IL-16", "IL-17"), group=("GL-16",)
+        [_ref("n1")], calibration=SESSION_CM, individual=("IL-16", "IL-17")
     )
     view, has_depth = manifest_view(manifest)
     assert (view, has_depth) == ("top", False)
     scale = manifest_depth_scale(manifest)
     assert scale["dimension"] == "3d" and scale["has_depth"] is True
-    for mid in THREE_D_IDS:
+    for mid in ("IL-16", "IL-17"):
         assert unavailable_reason(get(mid), view, has_depth=has_depth, depth_scale=scale) is None
+    # GL-16 stays a fused-3-D metric: a native file holds one animal (see test_gating.py)
+    assert unavailable_reason(
+        get("GL-16"), view, has_depth=has_depth, depth_scale=scale
+    ) == NEEDS_SEVERAL_ANIMALS_REASON
     engine = Engine(manifest)
     assert engine.skipped_metrics(False) == {}
     psess = _native_psess(engine)
@@ -397,7 +402,7 @@ def test_native_project_offers_the_three_3d_metrics() -> None:
     assert engine.skipped_metrics(False, psess.session, psess=psess) == {}
     assert engine.skipped_metrics(False, psess.session) == {}
     results = engine.compute_metrics(psess)
-    assert set(THREE_D_IDS) <= set(results)
+    assert {"IL-16", "IL-17"} <= set(results)
 
 
 def test_il15_needs_the_water_column_in_a_native_project() -> None:

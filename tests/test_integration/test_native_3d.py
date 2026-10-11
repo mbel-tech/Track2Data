@@ -36,7 +36,7 @@ from track2data.core.models import (
     ProjectMode,
     WaterColumn,
 )
-from track2data.metrics.availability import NEEDS_WATER_COLUMN_REASON
+from track2data.metrics.availability import NEEDS_SEVERAL_ANIMALS_REASON, NEEDS_WATER_COLUMN_REASON
 
 N_FRAMES = 11
 FPS = 25.0
@@ -146,10 +146,13 @@ def test_3d_metrics_have_the_hand_computed_values(run_no_column: Path) -> None:
             assert _value(long, "IL-17", column) == pytest.approx(SPEED_CM_S, abs=1e-9)
 
 
-def test_gl16_needs_two_animals_and_a_native_file_has_one(run_no_column: Path) -> None:
+def test_group_metrics_are_unavailable_for_native_files(run_no_column: Path) -> None:
+    """GL-16 (and every group metric) needs several animals in a session; a native file holds one,
+    so it is skipped with its reason instead of reporting NaN."""
     long = _long(run_no_column, "fish1")
-    assert math.isnan(_value(long, "GL-16", "mean_nnd_3d_cm"))
-    assert _value(long, "GL-16", "n_skipped_frames_3d") == N_FRAMES
+    assert "GL-16" not in set(long["metric_id"])
+    readme = (run_no_column / "fish1" / "README.md").read_text(encoding="utf-8")
+    assert NEEDS_SEVERAL_ANIMALS_REASON in readme
 
 
 def test_the_2d_metrics_use_the_horizontal_plane(run_no_column: Path) -> None:
