@@ -107,6 +107,12 @@ class FusionDialog(QDialog):
         axis_row.addWidget(self._flip_check)
         axis_row.addStretch(1)
         form.addRow("Shared horizontal axis", axis_row)
+        self._axis_help = QLabel(
+            "Used to check that the two views agree; does not change the fused positions."
+        )
+        self._axis_help.setProperty("role", "muted")
+        self._axis_help.setWordWrap(True)
+        form.addRow("", self._axis_help)
         offset_row = QHBoxLayout()
         offset_row.addWidget(self._offset_spin)
         offset_row.addWidget(self._suggest_btn)

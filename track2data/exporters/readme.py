@@ -208,6 +208,14 @@ class ReadmeExporter(Exporter):
             f"| Vertical axis | {n.get('vertical_axis') or '*(not recorded)*'} |",
             f"| Flipped | {n.get('flip', False)} |",
             f"| Water column | {water} |",
+            *(
+                [
+                    f"| Samples outside the water column | {n['outside_samples']} "
+                    "(left out of IL-15, IL-16, IL-17 and GL-16, never clipped) |"
+                ]
+                if n.get("outside_samples") is not None
+                else []
+            ),
             "",
         ]
 
