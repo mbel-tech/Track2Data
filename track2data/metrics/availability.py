@@ -70,6 +70,21 @@ NEEDS_CM_SCALE_REASON = "needs a cm scale for the top view"
 NEEDS_WATER_COLUMN_REASON = (
     "needs the water column (surface and floor z) on the Calibration page"
 )
+#: The same reason as the command line says it (there is no Calibration page there).
+_WATER_COLUMN_CLI_REASON = (
+    "needs the water column (surface and floor z) on the calibration settings "
+    "(`calibration.water_column` in the project)"
+)
+
+
+def reason_for_cli(reason: str) -> str:
+    """*reason* as the command line prints it: the water-column reason names the project setting.
+
+    Works on a line that quotes the reason too; every other text comes back unchanged.
+    """
+    return reason.replace(NEEDS_WATER_COLUMN_REASON, _WATER_COLUMN_CLI_REASON)
+
+
 #: Metrics whose default threshold, bin or arena is sized in video pixels (IL-3 arena, IL-9 and
 #: IL-10 occupancy bins, IL-14 wall distance). A native 3-D file has no pixels, so the same number
 #: would silently mean the project unit and change with ``target_unit``.

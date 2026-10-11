@@ -103,6 +103,7 @@ def run(
     computes all selected metrics, and writes output to OUT_DIR.
     """
     from track2data.api import Engine
+    from track2data.metrics.availability import reason_for_cli
 
     manifest = _load_manifest(project)
 
@@ -124,7 +125,7 @@ def run(
     issues, _notes = engine.validation_issues(plan)
     if issues:
         for issue in issues:
-            click.echo(f"[warn] {issue}", err=True)
+            click.echo(f"[warn] {reason_for_cli(issue)}", err=True)
     # Left out of a 3-D run: in no pair, or in a pair that does not fuse.
     for skip in plan.skipped:
         click.echo(f"[skipped] {skip.session_id}: {skip.reason}", err=True)
@@ -177,6 +178,7 @@ def validate(project: str) -> None:
     out. Only a 3-D project with no fusable pair at all fails.
     """
     from track2data.api import Engine
+    from track2data.metrics.availability import reason_for_cli
 
     manifest = _load_manifest(project)
     engine = Engine(manifest)
@@ -186,15 +188,15 @@ def validate(project: str) -> None:
     # a mixed-frame-rate project is a legitimate design, but silently
     # pooling it is the mistake this exists to prevent.
     for warning in engine.consistency_warnings():
-        click.echo(f"[consistency] {warning}", err=True)
+        click.echo(f"[consistency] {reason_for_cli(warning)}", err=True)
     for note in notes:
-        click.echo(f"[issue] {note}", err=True)
+        click.echo(f"[issue] {reason_for_cli(note)}", err=True)
 
     if not issues:
         click.echo(f"OK — '{manifest.project_name}' is ready to run.")
     else:
         for issue in issues:
-            click.echo(f"[issue] {issue}", err=True)
+            click.echo(f"[issue] {reason_for_cli(issue)}", err=True)
         sys.exit(1)
 
 
@@ -256,6 +258,10 @@ def list_metrics(level: str | None) -> None:
         click.echo(
             f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {view:<{view_w}}  {label}"
         )
+    click.echo(
+        "Availability also depends on the project (3-D data, cm scale, pixel frame, number of "
+        "animals): run `track2data validate PROJECT` to see what a project will skip."
+    )
 
 
 # ── cache ─────────────────────────────────────────────────────────────────────
@@ -608,6 +614,16 @@ def add(
         if any(p.code == "OPTION_MISSING" for p in problems):
             click.echo("Give each with --option NAME=VALUE, e.g. --option fps=30.", err=True)
         sys.exit(1)
+    if yes:
+        # --yes accepts what the reader proposed, so say what that was (a unit is a guess).
+        for spec in draft.parameters:
+            if spec.required and spec.name in draft.options and (
+                draft.option_source(spec.name) != "user"
+            ):
+                click.echo(
+                    f"check: {spec.name}={draft.options[spec.name]} (proposed by the reader; "
+                    f"override with --option {spec.name}=...)"
+                )
     chosen = [row for row in rows if row.included]
     if dry_run:
         click.echo(f"Dry run: would add {len(chosen)} session(s); nothing was changed.")
