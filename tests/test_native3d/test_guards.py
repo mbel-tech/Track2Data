@@ -138,3 +138,29 @@ def test_add_session_of_a_pixel_folder_keeps_a_reader_less_ref(qtbot, tmp_path: 
     store.add_session(folder)
     (ref,) = store.manifest.sessions
     assert ref.reader is None and ref.reader_options == {} and ref.reader_chosen_by is None
+
+
+@pytest.mark.parametrize("kind", ["undetected", "pixel"])
+def test_add_session_refuses_a_non_native_folder_in_a_native_project(
+    qtbot, tmp_path: Path, monkeypatch, kind: str
+) -> None:
+    pytest.importorskip("PySide6")
+    from tests.test_native3d.test_project_rules import _manifest, _ref
+    from ui.store.project_store import ProjectStore
+
+    folder = tmp_path / "other"
+    folder.mkdir()
+    store = ProjectStore()
+    store._manifest = _manifest([_ref("n1")])
+    if kind == "pixel":
+        monkeypatch.setattr(ProjectStore, "_detected_reader", staticmethod(lambda f: "idtrackerai"))
+    submitted: list[str] = []
+    store._submit_probe = lambda sid, f: submitted.append(sid)  # type: ignore[method-assign]
+    refused: list[tuple[str, str]] = []
+    changed: list[int] = []
+    store.sessionRefused.connect(lambda sid, msg: refused.append((sid, msg)))
+    store.sessionsChanged.connect(lambda: changed.append(1))
+    store.add_session(folder)
+    assert submitted == [] and changed == []
+    assert [r.session_id for r in store.manifest.sessions] == ["n1"]
+    assert refused and "NATIVE_3D_MIXED" in refused[0][1]

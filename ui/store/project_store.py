@@ -855,7 +855,12 @@ class ProjectStore(QObject):
             return
         session_id = default_session_id(folder)
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
-        if self._refuse_bare_native(session_id, folder):
+        detected = self._detected_reader(folder)
+        if self._refuse_bare_native(session_id, folder, detected):
+            return
+        # A pixel or undetected folder: the mixing rule needs no probe, so check a throw-away
+        # entry carrying the detected reader (the saved entry stays reader-less).
+        if not self._native_refs_allowed([ref.model_copy(update={"reader": detected})]):
             return
         sessions = [*list(self._manifest.sessions), ref]
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
@@ -993,24 +998,30 @@ class ProjectStore(QObject):
         self.append_log(f"_Not added: {names}: {exc}_\n")
         self.sessionRefused.emit(str(getattr(exc, "subject", "") or session_ids[0]), str(exc))
 
-    def _refuse_bare_native(self, session_id: str, folder: Path) -> bool:
-        """Refuse a folder detected as a native 3-D file before it is listed: it needs ``unit``
-        (and ``fps``) that a bare add cannot supply, so it could only fail at its probe, and a
-        reader-less entry would be counted as a pixel session by the project rules."""
-        from track2data.core.errors import ImportError_
+    @staticmethod
+    def _detected_reader(folder: Path) -> str | None:
+        """The name of the reader *folder* is detected as (no file read in full), or None."""
         from track2data.readers import detect_reader
-        from track2data.readers.native3d import NATIVE_3D_READERS
 
         try:
             cls = detect_reader(folder)
         except Exception:
-            return False
-        if cls is None or cls.name not in NATIVE_3D_READERS:
+            return None
+        return None if cls is None else cls.name
+
+    def _refuse_bare_native(self, session_id: str, folder: Path, detected: str | None) -> bool:
+        """Refuse a folder detected as a native 3-D file before it is listed: it needs ``unit``
+        (and ``fps``) that a bare add cannot supply, so it could only fail at its probe, and a
+        reader-less entry would be counted as a pixel session by the project rules."""
+        from track2data.core.errors import ImportError_
+        from track2data.readers.native3d import NATIVE_3D_READERS
+
+        if detected is None or detected not in NATIVE_3D_READERS:
             return False
         self._refuse(
             [session_id],
             ImportError_(
-                f"{folder} is a native 3-D file ({cls.name}); it needs its length unit and "
+                f"{folder} is a native 3-D file ({detected}); it needs its length unit and "
                 "frame rate, which adding a bare folder cannot give",
                 code="NATIVE_3D_NEEDS_OPTIONS",
                 subject=session_id,
