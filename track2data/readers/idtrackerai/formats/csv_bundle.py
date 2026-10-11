@@ -23,6 +23,17 @@ import numpy as np
 from track2data.core.errors import ImportError_
 
 
+def _shape_error(message: str, subject: str) -> ImportError_:
+    return ImportError_(
+        message,
+        code="IDT_SHAPE_MISMATCH",
+        severity="error",
+        subject=subject,
+        remediation="Re-export the session, or check that trajectories.csv and "
+        "id_probabilities.csv come from the same run.",
+    )
+
+
 def load_csv_bundle(csv_dir: Path) -> dict[str, Any]:
     """
     Read the trajectories_csv/ directory and return a normaliser-ready dict.
@@ -52,26 +63,37 @@ def load_csv_bundle(csv_dir: Path) -> dict[str, Any]:
             remediation="The CSV bundle must contain at least trajectories.csv.",
         )
 
-    # Load trajectories: first column = frame index, remaining = x_1, y_1, x_2, y_2, …
+    # Load trajectories: x_1, y_1, x_2, y_2, ... with an optional leading time column.
+    # idtracker.ai omits that column when it could not read the video's frame rate, so the
+    # column count decides: 2k columns are k animals, 2k+1 carry a leading time/frame column.
     traj_data = np.genfromtxt(traj_csv, delimiter=",", skip_header=1)
     if traj_data.ndim == 1:
         traj_data = traj_data.reshape(1, -1)
-    n_frames = traj_data.shape[0]
-    xy_cols = traj_data[:, 1:]  # drop frame column
-    # Reshape (N, M*2) → (N, M, 2)
-    n_coord_cols = xy_cols.shape[1]
-    n_animals = n_coord_cols // 2
+    n_frames, n_cols = traj_data.shape
+    xy_cols = traj_data[:, 1:] if n_cols % 2 == 1 else traj_data
+    if xy_cols.shape[1] == 0:
+        raise _shape_error(f"{traj_csv.name} holds no coordinate columns.", str(traj_csv))
+    n_animals = xy_cols.shape[1] // 2
+    # Reshape (N, M*2) -> (N, M, 2)
     trajectories = xy_cols.reshape(n_frames, n_animals, 2)
 
     payload: dict[str, Any] = {"trajectories": trajectories}
 
-    # id_probabilities.csv
+    # id_probabilities.csv: one column per animal, same optional leading time column.
     prob_csv = csv_dir / "id_probabilities.csv"
     if prob_csv.exists():
         prob_data = np.genfromtxt(prob_csv, delimiter=",", skip_header=1)
         if prob_data.ndim == 1:
             prob_data = prob_data.reshape(1, -1)
-        payload["id_probabilities"] = prob_data[:, 1:]  # drop frame column → (N, M)
+        if prob_data.shape[1] == n_animals + 1:
+            prob_data = prob_data[:, 1:]
+        if prob_data.shape != (n_frames, n_animals):
+            raise _shape_error(
+                f"{prob_csv.name} has shape {prob_data.shape} but {traj_csv.name} holds "
+                f"{n_frames} frames of {n_animals} animals.",
+                str(prob_csv),
+            )
+        payload["id_probabilities"] = prob_data
 
     # attributes.json — merge into payload (provides version, fps, etc.)
     attr_file = csv_dir / "attributes.json"

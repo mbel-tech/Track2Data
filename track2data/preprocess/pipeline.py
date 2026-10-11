@@ -20,6 +20,7 @@ from track2data.preprocess.kinematics import compute_kinematics
 from track2data.preprocess.smoothing import smooth_trajectories
 from track2data.preprocess.timeline_expand import bridge_gaps, lay_out, plan_expansion
 from track2data.preprocess.validate import validate_coverage
+from track2data.preprocess.z_axis import clean_z
 
 
 def _replaced_mask(before: np.ndarray, after: np.ndarray) -> np.ndarray:
@@ -170,6 +171,9 @@ def run(
     _checkpoint("smoothing")
     xy, step = smooth_trajectories(xy, config.smoothing)
     report.steps.append(step)
+    if z_rows is not None:
+        # the vertical axis follows the horizontal one through the same gap-fill and smoothing
+        z_rows = clean_z(z_rows, config.gap_fill, config.smoothing, expansion)
 
     # 5. Coverage validation
     _checkpoint("coverage validation")

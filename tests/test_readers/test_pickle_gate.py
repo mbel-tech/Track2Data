@@ -132,7 +132,7 @@ def test_reader_refuses_a_pickle_only_folder(
     with pytest.raises(ImportError_) as exc:
         read_session(folder)
 
-    assert exc.value.code == "IDT_FORMAT_AMBIGUOUS"
+    assert exc.value.code == "IDT_PICKLE_REFUSED"
     # The message has to name consent as the cause, or the user is left
     # thinking their file is corrupt.
     assert "IDT_PICKLE_REFUSED" in str(exc.value)
