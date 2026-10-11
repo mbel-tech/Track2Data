@@ -924,10 +924,10 @@ class PreprocessedSession:
     depth_outside_mask: np.ndarray | None = None
     # (n_rows, n_animals) absolute vertical coordinate of a native 3-D session, in the
     # session's coordinate unit, laid out on the same rows as ``xy`` (NaN on inserted rows).
-    # None for every other session. It is the file's raw coordinate: identity-switch correction,
-    # jump replacement, gap fill and smoothing change ``xy`` but never touch ``z``, so it is
-    # only valid for single-animal sources (native files are one animal) and 3-D speeds mix
-    # smoothed xy with unsmoothed z.
+    # None for every other session. It is the file's coordinate cleaned like ``xy``: blanked
+    # where a jump was replaced, then bridged, gap-filled and smoothed with the same settings
+    # (preprocess/z_axis.py). Identity-switch correction never touches it, so it is only valid
+    # for single-animal sources (native files are one animal).
     z: np.ndarray | None = None
     # (n_animals,) int: the top session's animal index of each fused animal (fusion keeps only
     # the fish in the pair's fish map, so fused position k is not top animal k). None otherwise.
