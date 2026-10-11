@@ -129,3 +129,24 @@ def test_assemble_native_session_rejects_bad_input(over) -> None:
 
 def test_assemble_native_session_accepts_gap_intervals() -> None:
     assert _assemble(tracking_intervals=[(0, 2), (5, 7)]).tracking_intervals == [(0, 2), (5, 7)]
+
+
+def test_union_keypoints_and_frame_intervals() -> None:
+    from track2data.readers.native3d import frame_intervals, union_keypoints
+
+    assert union_keypoints([["a", "b"], ["c", "a"], []]) == ("a", "b", "c")
+    assert union_keypoints([]) == ()
+    assert frame_intervals(np.array([0, 1, 2])) is None
+    assert frame_intervals(np.array([0, 1, 4, 5])) == [(0, 2), (4, 6)]
+    assert frame_intervals(np.array([3, 4])) == [(3, 5)]
+
+
+def test_read_header_lines_is_whole_lines_and_bounded(tmp_path) -> None:
+    from track2data.readers.peek import read_header_lines
+
+    path = tmp_path / "f.csv"
+    path.write_bytes(b"\xef\xbb\xbf" + b"x" * 200_000 + b"\r\nsecond\nthird")
+    first, second = read_header_lines(path, 2) or []
+    assert len(first) == 200_000 and second == "second"
+    assert read_header_lines(path, 2, limit=100_000) is None  # past the cap: undetected
+    assert read_header_lines(tmp_path / "missing.csv", 1) is None

@@ -10,32 +10,38 @@ proposes no unit. A point that could not be triangulated is written as ``0, 0, 0
 a row whose x, y *and* z are all exactly 0 is missing, while a single 0 is a real coordinate.
 
 Frames missing from the first column are not filled: the stored rows are the frames the file has,
-and the gaps become ``tracking_intervals``. The parsing of the body is shared with the 2-D reader.
+and the gaps become ``tracking_intervals``. The table body has its own parser and its own error
+codes (``DLC3D_*``), so a problem in a 3-D file is never reported as a DeepLabCut (2-D) one.
 """
 
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
+import pandas as pd
 
 from track2data.core.errors import DataValidationError, ImportError_
 from track2data.core.ids import default_session_id
 from track2data.core.models import Session
-from track2data.readers.anipose import _intervals
 from track2data.readers.assemble import assemble_native_session, build_keypoints, skeleton_fits
 from track2data.readers.base import SessionReader
-from track2data.readers.deeplabcut import _Header, _read_table
 from track2data.readers.detection import Confidence, Detection, SessionCandidate
 from track2data.readers.index import ScanIndex
-from track2data.readers.native3d import convert_units, native_parameters, reduce_native
+from track2data.readers.native3d import (
+    convert_units,
+    frame_intervals,
+    native_parameters,
+    reduce_native,
+    with_keypoint_choices,
+)
 from track2data.readers.params import ReaderParameter, resolve_options
-from track2data.readers.peek import Peeker
+from track2data.readers.peek import Peeker, read_header_lines
 
-_HEAD_BYTES = 65_536
 _AXES = ("x", "y", "z")
 
 
@@ -43,9 +49,10 @@ _AXES = ("x", "y", "z")
 class _Layout:
     """The header of a DLC-3D table."""
 
-    header: _Header  # in the 2-D reader's shape, so its table parser can be reused
+    width: int  # number of data columns (every column after the frame number)
     keypoints: tuple[str, ...]  # body parts with an x, y and z column, in file order
     columns: dict[str, tuple[int, int, int]]  # body part -> data-column index of x, y, z
+    duplicates: tuple[tuple[str, str], ...] = ()  # (body part, axis) given by several columns
 
 
 def _parse_header(lines: list[str]) -> _Layout | None:
@@ -60,29 +67,28 @@ def _parse_header(lines: list[str]) -> _Layout | None:
     bodyparts = (rows[1] + [""] * width)[:width]
     coords = [c.strip().lower() for c in rows[2]]
     position: dict[tuple[str, str], int] = {}
+    repeated: list[tuple[str, str]] = []
     for j in range(1, width):
-        position.setdefault((bodyparts[j].strip(), coords[j]), j - 1)
+        key = (bodyparts[j].strip(), coords[j])
+        if key in position:
+            if key[0] and key[1] in _AXES and key not in repeated:
+                repeated.append(key)
+        else:
+            position[key] = j - 1
     names = list(dict.fromkeys(bodyparts[j].strip() for j in range(1, width)))
     keypoints = tuple(n for n in names if n and all((n, a) in position for a in _AXES))
     if not keypoints or "likelihood" in coords:
         return None  # no complete x, y, z triple; or a 2-D table that happens to carry a z
     columns = {n: (position[(n, "x")], position[(n, "y")], position[(n, "z")]) for n in keypoints}
-    scorer_row = rows[0] + [""] * (width - len(rows[0]))
-    header = _Header(
-        depth=3,
-        columns=tuple(("", bodyparts[j].strip(), coords[j]) for j in range(1, width)),
-        scorer=scorer_row[1].strip() if width > 1 else "",
+    duplicates = tuple(key for key in repeated if key[0] in keypoints)
+    return _Layout(
+        width=width - 1, keypoints=keypoints, columns=columns, duplicates=duplicates
     )
-    return _Layout(header=header, keypoints=keypoints, columns=columns)
 
 
 def _header_of(path: Path) -> _Layout | None:
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read(_HEAD_BYTES)
-    except OSError:
-        return None
-    return _parse_header(data.decode("utf-8-sig", errors="replace").splitlines()[:4])
+    lines = read_header_lines(path, 3)  # whole lines, however many body parts the header names
+    return _parse_header(lines) if lines else None
 
 
 def _files_in(path: Path) -> list[Path]:
@@ -128,7 +134,7 @@ class DeepLabCut3DReader(SessionReader):
         for entry in index.walk():
             if entry.is_dir or entry.suffix != ".csv" or entry.cloud_only:
                 continue
-            lines = peek.text_lines(entry.path, 3)
+            lines = peek.header_lines(entry.path, 3)
             layout = _parse_header(lines) if lines else None
             if layout is not None:
                 found.append((entry.path, layout))
@@ -191,12 +197,8 @@ class DeepLabCut3DReader(SessionReader):
 
 
 def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
-    """The class's options with the keypoint choices the scanned files make possible."""
-    shared = [k for k in layouts[0].keypoints if all(k in lay.keypoints for lay in layouts)]
-    return tuple(
-        spec.model_copy(update={"choices": tuple(shared)}) if spec.name == "keypoint" else spec
-        for spec in DeepLabCut3DReader.parameters
-    )
+    """The class's options with the keypoints of every scanned file as the choices."""
+    return with_keypoint_choices(DeepLabCut3DReader.parameters, [lay.keypoints for lay in layouts])
 
 
 def _not_a_dlc3d_file(path: Path) -> ImportError_:
@@ -209,11 +211,79 @@ def _not_a_dlc3d_file(path: Path) -> ImportError_:
     )
 
 
+@dataclass
+class _Table:
+    frames: np.ndarray  # (R,) int frame number per data row
+    values: np.ndarray  # (R, C) float, NaN = empty cell
+
+
+def _read_table(path: Path, layout: _Layout) -> _Table:
+    """The frame numbers and data cells of a DLC-3D file (what follows its 3 header rows)."""
+    reexport = "The file may be damaged or edited; re-export it from DeepLabCut 3-D."
+    if layout.duplicates:
+        shown = ", ".join(f"{bp} {axis}" for bp, axis in layout.duplicates)
+        raise _error(
+            "DLC3D_DUPLICATE_COLUMN",
+            f"{path.name}: DeepLabCut 3-D columns appear more than once ({shown}).",
+            "Each body part needs exactly one x, one y and one z column; " + reexport,
+            str(path),
+        )
+    try:
+        text = path.read_bytes().decode("utf-8-sig", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise _error(
+            "DLC3D_UNREADABLE",
+            f"{path.name} is not valid text ({exc.reason}); it is not a readable "
+            "DeepLabCut 3-D table.",
+            "The file may be damaged; re-export it from DeepLabCut 3-D.",
+            str(path),
+        ) from None
+    body = text.splitlines()[3:]
+    if not body:
+        return _Table(np.empty(0, dtype=np.int64), np.empty((0, layout.width)))
+    try:
+        df = pd.read_csv(io.StringIO("\n".join(body)), header=None, index_col=0, dtype=str)
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
+        raise _error(
+            "DLC3D_UNREADABLE",
+            f"{path.name} could not be parsed as a DeepLabCut 3-D table: {exc}",
+            "The file may be damaged; re-export it from DeepLabCut 3-D.",
+            str(path),
+        ) from None
+    frames = pd.to_numeric(pd.Series(df.index, dtype=str), errors="coerce").to_numpy()
+    if (
+        not np.isfinite(frames).all()
+        or (frames != np.floor(frames)).any()
+        or (frames < 0).any()
+        or len(np.unique(frames)) != len(frames)
+    ):
+        raise _error(
+            "DLC3D_BAD_FRAME_INDEX",
+            f"{path.name}: in a DeepLabCut 3-D table the first column must hold each frame "
+            "number once, as a whole number of 0 or more.",
+            reexport,
+            str(path),
+        )
+    numeric = df.apply(pd.to_numeric, errors="coerce")
+    if (numeric.isna() & df.notna()).to_numpy().any():
+        raise _error(
+            "DLC3D_BAD_VALUE",
+            f"{path.name} has cells that are not numbers (DeepLabCut 3-D table).",
+            reexport,
+            str(path),
+        )
+    values = numeric.to_numpy(dtype=np.float64)
+    if values.shape[1] < layout.width:  # a short table: pad the missing columns as empty
+        pad = ((0, 0), (0, layout.width - values.shape[1]))
+        values = np.pad(values, pad, constant_values=np.nan)
+    return _Table(frames.astype(np.int64), values[:, : layout.width])
+
+
 def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any]) -> Session:
     """The session for one file. ``raw_xy``/``raw_z`` follow ``vertical_axis`` and ``flip``; the
     stored skeleton keeps the file's axes (converted to the target unit, not permuted or flipped).
     """
-    table = _read_table(path, layout.header)
+    table = _read_table(path, layout)
     if len(table.frames) == 0:
         raise DataValidationError(
             f"{path.name} holds no frames.",
@@ -255,7 +325,7 @@ def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any
         vertical_axis=opts["vertical_axis"],
         flip=bool(opts["flip"]),
         keypoints=keypoints,
-        tracking_intervals=_intervals(frames),
+        tracking_intervals=frame_intervals(frames),
         trajectory_source=path,
         trajectory_format="deeplabcut_3d_csv",
     )

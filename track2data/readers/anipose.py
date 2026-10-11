@@ -33,11 +33,16 @@ from track2data.readers.assemble import assemble_native_session, build_keypoints
 from track2data.readers.base import SessionReader
 from track2data.readers.detection import Confidence, Detection, SessionCandidate
 from track2data.readers.index import ScanIndex
-from track2data.readers.native3d import convert_units, native_parameters, reduce_native
+from track2data.readers.native3d import (
+    convert_units,
+    frame_intervals,
+    native_parameters,
+    reduce_native,
+    with_keypoint_choices,
+)
 from track2data.readers.params import ProposedValue, ReaderParameter, resolve_options
-from track2data.readers.peek import Peeker
+from track2data.readers.peek import Peeker, read_header_lines
 
-_HEAD_BYTES = 65_536
 _FRAME_COLUMN = "fnum"
 
 
@@ -76,12 +81,7 @@ def _parse_header(line: str | None) -> _Layout | None:
 
 
 def _header_of(path: Path) -> _Layout | None:
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read(_HEAD_BYTES)
-    except OSError:
-        return None
-    lines = data.decode("utf-8-sig", errors="replace").splitlines()
+    lines = read_header_lines(path, 1)  # the whole header line, however many keypoints it names
     return _parse_header(lines[0] if lines else None)
 
 
@@ -125,7 +125,7 @@ class AniposeReader(SessionReader):
         for entry in index.walk():
             if entry.is_dir or entry.suffix != ".csv" or entry.cloud_only:
                 continue
-            lines = peek.text_lines(entry.path, 1)
+            lines = peek.header_lines(entry.path, 1)
             layout = _parse_header(lines[0] if lines else None)
             if layout is not None:
                 found.append((entry.path, layout))
@@ -190,12 +190,8 @@ class AniposeReader(SessionReader):
 
 
 def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
-    """The class's options with the keypoint choices the scanned files make possible."""
-    shared = [k for k in layouts[0].keypoints if all(k in lay.keypoints for lay in layouts)]
-    return tuple(
-        spec.model_copy(update={"choices": tuple(shared)}) if spec.name == "keypoint" else spec
-        for spec in AniposeReader.parameters
-    )
+    """The class's options with the keypoints of every scanned file as the choices."""
+    return with_keypoint_choices(AniposeReader.parameters, [lay.keypoints for lay in layouts])
 
 
 def _not_a_pose_3d_file(path: Path) -> ImportError_:
@@ -242,17 +238,6 @@ def _read_table(path: Path, layout: _Layout) -> pd.DataFrame:
             str(path),
         )
     return numeric
-
-
-def _intervals(frames: np.ndarray) -> list[tuple[int, int]] | None:
-    """[start, end) runs of consecutive frame numbers, or None for frames 0..N-1 with no gap."""
-    breaks = np.flatnonzero(np.diff(frames) != 1) + 1
-    starts = np.concatenate(([0], breaks))
-    ends = np.concatenate((breaks, [len(frames)]))
-    runs = [(int(frames[s]), int(frames[e - 1]) + 1) for s, e in zip(starts, ends, strict=True)]
-    if len(runs) == 1 and runs[0][0] == 0:
-        return None
-    return runs
 
 
 def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any]) -> Session:
@@ -328,7 +313,7 @@ def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any
         vertical_axis=opts["vertical_axis"],
         flip=bool(opts["flip"]),
         keypoints=keypoints,
-        tracking_intervals=_intervals(frames),
+        tracking_intervals=frame_intervals(frames),
         trajectory_source=path,
         trajectory_format="anipose_pose3d_csv",
     )

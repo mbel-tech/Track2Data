@@ -17,6 +17,7 @@ are added with the first reader that needs them.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,43 @@ from typing import Any
 import numpy as np
 
 from track2data.readers.index import _CLOUD_ONLY, ScanBudget, ScanIndex
+
+_log = logging.getLogger(__name__)
+
+#: The most a header read takes to get its whole lines. A table with thousands of keypoints has a
+#: header line of hundreds of kilobytes; past this the file is treated as not recognised.
+MAX_HEADER_BYTES = 8 * 1024 * 1024
+_FIRST_CHUNK = 65_536
+
+
+def read_header_lines(path: Path, n: int, limit: int = MAX_HEADER_BYTES) -> list[str] | None:
+    """The first *n* **complete** text lines of a file (BOM stripped, any line ending, bad bytes
+    replaced), never a partial one; fewer if the file has fewer lines.
+
+    Reads in growing chunks until *n* lines are ended or the file is. If *n* lines do not fit in
+    *limit* bytes, logs one line and returns None (undetected). None as well when the file cannot
+    be opened.
+    """
+    chunk = _FIRST_CHUNK
+    data = b""
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                more = handle.read(chunk)
+                data += more
+                text = data.decode("utf-8-sig", errors="replace")
+                parts = text.splitlines(keepends=True)
+                ended = [len(part.splitlines()[0]) != len(part) for part in parts if part]
+                if sum(ended) >= n or not more:
+                    return text.splitlines()[:n]
+                if len(data) >= limit:
+                    _log.info(
+                        "%s: header is longer than %d bytes; not recognised", path.name, limit
+                    )
+                    return None
+                chunk = min(chunk * 2, limit)
+    except OSError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -110,6 +148,14 @@ class Peeker:
         if data is None:
             return None
         return data.decode("utf-8-sig", errors="replace").splitlines()[:n]
+
+    def header_lines(self, path: Path, n: int) -> list[str] | None:
+        """The first *n* complete lines (see :func:`read_header_lines`), however long they are
+        up to the header cap, rather than the peek size. One peek."""
+        path = Path(path)
+        if not self._allowed(path):
+            return None
+        return read_header_lines(path, n)
 
     def hdf5_root(self, path: Path, strings: tuple[str, ...] = ()) -> Hdf5Root | None:
         """The top level of an HDF5 file, read-only; None if it cannot be read.
