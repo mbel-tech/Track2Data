@@ -1094,5 +1094,5 @@ def test_cli_list_metrics_names_the_requirement_of_the_3d_metrics() -> None:
     out = CliRunner().invoke(cli, ["list-metrics"]).output
     rows = {line.split()[0]: line for line in out.splitlines() if line[:3] in {"IL-", "GL-"}}
     for mid in ("IL-16", "IL-17", "GL-16"):
-        assert "fused 3-D + cm scale" in rows[mid]
+        assert "fused 3-D or native 3-D, cm scale" in rows[mid]
     assert "fused 3-D" not in rows["IL-1"]

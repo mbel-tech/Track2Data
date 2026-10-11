@@ -240,7 +240,7 @@ def list_metrics(level: str | None) -> None:
     # where they find out which metrics a declared view switches on.
     def _view_text(m: Any) -> str:
         if getattr(m, "requires_depth_scale", False):
-            return "fused 3-D + cm scale"
+            return "fused 3-D or native 3-D, cm scale"
         return required_views_text(m) or "any"
 
     view_w = max(len("VIEW"), *(len(_view_text(m)) for m in metrics))

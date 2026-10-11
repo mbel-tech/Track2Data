@@ -107,6 +107,9 @@ class SessionProvenance:
     # Pose trackers: which keypoint stood for the animal (Session.keypoints.selection, plus
     # n_keypoints). None for a tracker with one point per animal.
     keypoint_selection: dict[str, Any] | None = None
+    # Native 3-D files (Anipose, DLC-3D): {"source_unit", "target_unit", "vertical_axis", "flip",
+    # "water_column": {"surface_z", "floor_z"} | None}. None for a session with a pixel frame.
+    native_3d: dict[str, Any] | None = None
 
 
 @dataclass

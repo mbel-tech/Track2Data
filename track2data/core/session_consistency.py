@@ -90,6 +90,9 @@ class SessionSummary:
     # with fewer than two usable clicks: no estimate, not zero error.
     length_calibration_n: int = 0
     length_calibration_rel_sd: float | None = None
+    # False for a native 3-D session: it has no image frame, so width_px/height_px (0) say
+    # nothing and must not be compared or reported as a resolution.
+    has_pixel_frame: bool = True
 
     @property
     def duration_s(self) -> float:
@@ -139,6 +142,7 @@ class SessionSummary:
             has_body_length=session.body_length_px is not None,
             length_calibration_n=cal_n,
             length_calibration_rel_sd=cal_rel_sd,
+            has_pixel_frame=session.has_pixel_frame,
         )
 
 
@@ -222,7 +226,9 @@ def heterogeneity_warnings(summaries: Sequence[SessionSummary]) -> list[str]:
             "centimetre measure are different quantities; do not pool them."
         )
 
-    resolution_groups = _group_by(summaries, lambda s: (s.width_px, s.height_px))
+    resolution_groups = _group_by(
+        [s for s in summaries if s.has_pixel_frame], lambda s: (s.width_px, s.height_px)
+    )
     if len(resolution_groups) > 1:
         warnings.append(
             "Sessions were recorded at different video resolutions: "
@@ -335,8 +341,8 @@ def sessions_table(
             "n_frames": s.n_frames,
             "duration_s": s.duration_s,
             "n_animals": s.n_animals,
-            "width_px": s.width_px,
-            "height_px": s.height_px,
+            "width_px": s.width_px if s.has_pixel_frame else None,
+            "height_px": s.height_px if s.has_pixel_frame else None,
             "calibration_mode": s.calibration_mode,
             "length_unit": s.length_unit,
             "px_per_cm": s.px_per_cm,

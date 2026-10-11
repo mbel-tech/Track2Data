@@ -23,6 +23,22 @@ from track2data.zones.geometry import roi_area_px2
 
 logger = logging.getLogger(__name__)
 
+#: Said when a session with no pixel frame (native 3-D) has no zones: the arena is the extent of
+#: the tracked positions, not a video frame.
+NO_PIXEL_FRAME_ARENA_WARNING = (
+    "no pixel frame: the arena was taken from the extent of the tracked positions"
+)
+
+
+def _position_extent(psess: PreprocessedSession) -> tuple[float, float, float, float] | None:
+    """``(x_min, y_min, x_max, y_max)`` of the finite tracked positions, or None without any."""
+    xy = np.asarray(psess.xy, dtype=np.float64).reshape(-1, 2)
+    finite = xy[np.isfinite(xy).all(axis=1)]
+    if finite.size == 0:
+        return None
+    lo, hi = finite.min(axis=0), finite.max(axis=0)
+    return float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])
+
 
 def derive_metric_params(
     metric_id: str, psess: PreprocessedSession, zone_set: ZoneSet
@@ -133,6 +149,15 @@ def _derive_il3(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]
         geometry = _arena_geometry_by_name(main_rois)
         largest = max(main_rois, key=roi_area_px2).name
         centre, radius = geometry[largest]
+    elif not psess.session.has_pixel_frame:
+        extent = _position_extent(psess)
+        logger.warning("IL-3: %s", NO_PIXEL_FRAME_ARENA_WARNING)
+        if extent is None:
+            return {"arena_warning": NO_PIXEL_FRAME_ARENA_WARNING}
+        x0, y0, x1, y1 = extent
+        geometry = {}
+        centre = [(x0 + x1) / 2.0, (y0 + y1) / 2.0]
+        radius = min(x1 - x0, y1 - y0) / 2.0
     else:
         video = psess.session.video
         geometry = {}
@@ -167,12 +192,15 @@ def _derive_il3(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]
             ),
         )
 
-    return {
+    result: dict[str, Any] = {
         "centre": centre,
         "arena_radius": radius,
         "centres": centres,
         "arena_radii": radii,
     }
+    if not main_rois and not psess.session.has_pixel_frame:
+        result["arena_warning"] = NO_PIXEL_FRAME_ARENA_WARNING
+    return result
 
 
 def _derive_il14(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any]:
@@ -198,6 +226,14 @@ def _derive_il14(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any
         }
         largest = max(areas_by_name, key=lambda n: areas_by_name[n])
         session_vertices = vertices_by_name[largest]
+    elif not psess.session.has_pixel_frame:
+        extent = _position_extent(psess)
+        logger.warning("IL-14: %s", NO_PIXEL_FRAME_ARENA_WARNING)
+        if extent is None:
+            return {"arena_warning": NO_PIXEL_FRAME_ARENA_WARNING}
+        x0, y0, x1, y1 = extent
+        vertices_by_name = {}
+        session_vertices = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
     else:
         video = psess.session.video
         vertices_by_name = {}
@@ -215,10 +251,13 @@ def _derive_il14(psess: PreprocessedSession, zone_set: ZoneSet) -> dict[str, Any
         vertices = vertices_by_name[name] if name is not None else session_vertices
         polygons.append(list(vertices))
 
-    return {
+    result: dict[str, Any] = {
         "arena_polygon_vertices": session_vertices,
         "arena_polygon_vertices_per_animal": polygons,
     }
+    if not main_rois and not psess.session.has_pixel_frame:
+        result["arena_warning"] = NO_PIXEL_FRAME_ARENA_WARNING
+    return result
 
 
 def _derive_z2(zone_set: ZoneSet) -> dict[str, Any]:

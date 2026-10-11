@@ -71,6 +71,7 @@ class ReadmeExporter(Exporter):
         ]
 
         readme_lines += self._provenance_lines(p.provenance)
+        readme_lines += self._native_3d_lines(p.provenance)
         readme_lines += self._camera_view_lines(p.provenance)
         if p.fusion is not None:
             readme_lines += self._fusion_lines(p.fusion)
@@ -172,6 +173,33 @@ class ReadmeExporter(Exporter):
                 lines.append(f"| Water column | rows {top:g} to {bottom:g} px ({source}) |")
         lines.append("")
         return lines
+
+    @staticmethod
+    def _native_3d_lines(p: SessionProvenance) -> list[str]:
+        """The native 3-D block: how a session read from an Anipose or DLC-3D file became
+        positions in the project's unit. Written for native sessions only."""
+        n = p.native_3d
+        if not n:
+            return []
+        wc = n.get("water_column")
+        unit = n.get("target_unit") or p.length_unit_label
+        if wc:
+            water = f"surface z {wc['surface_z']:g} {unit}, floor z {wc['floor_z']:g} {unit}"
+        else:
+            water = "*(not set)*"
+        return [
+            "## Native 3-D source",
+            "",
+            "| Field | Value |",
+            "|-------|-------|",
+            f"| Reader | `{p.reader}` |",
+            f"| File unit | {n.get('source_unit') or '*(not recorded)*'} |",
+            f"| Project unit | {unit} |",
+            f"| Vertical axis | {n.get('vertical_axis') or '*(not recorded)*'} |",
+            f"| Flipped | {n.get('flip', False)} |",
+            f"| Water column | {water} |",
+            "",
+        ]
 
     @staticmethod
     def _fusion_lines(f: FusionRunInfo) -> list[str]:
@@ -340,10 +368,17 @@ class ReadmeExporter(Exporter):
             f"| Tracked without identification | {_tri(p.track_wo_identities)} |",
             f"| Treated as identity-free | {p.identity_free_effective} "
             f"({p.identity_free_source}) |",
-            _calibration_row(
-                p,
-                unconfirmed="**not confirmed** -- check the physical unit before "
-                f"trusting any *_{p.length_unit_label} column",
+            # a native 3-D file has no pixels: its unit is in the "Native 3-D source" block
+            *(
+                []
+                if p.native_3d
+                else [
+                    _calibration_row(
+                        p,
+                        unconfirmed="**not confirmed** -- check the physical unit before "
+                        f"trusting any *_{p.length_unit_label} column",
+                    )
+                ]
             ),
             "",
         ]

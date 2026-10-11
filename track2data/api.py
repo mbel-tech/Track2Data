@@ -1099,6 +1099,24 @@ class Engine:
             cfg["kinematics"] = self._manifest.preprocess.kinematics.model_dump()
         return cfg
 
+    def native_3d_provenance(self, session: Session) -> dict[str, Any] | None:
+        """What the export README says about a native 3-D file: the file's unit and the
+        project's, the vertical axis, the flip and the water column (None when not set); None for
+        a session that has a pixel frame."""
+        if session.has_pixel_frame:
+            return None
+        attrs = dict((session.raw_attrs or {}).get("native_3d") or {})
+        wc = self._manifest.calibration.water_column
+        return {
+            "source_unit": attrs.get("source_unit"),
+            "target_unit": attrs.get("target_unit") or session.coordinate_unit,
+            "vertical_axis": attrs.get("vertical_axis"),
+            "flip": bool(attrs.get("flip", False)),
+            "water_column": (
+                {"surface_z": wc.surface_z, "floor_z": wc.floor_z} if wc is not None else None
+            ),
+        }
+
     def identity_free_for(
         self, session: Session, explicit: bool | None = None
     ) -> bool:
@@ -1746,6 +1764,7 @@ class Engine:
             keypoint_selection=(
                 session.keypoints.provenance() if session.keypoints is not None else None
             ),
+            native_3d=self.native_3d_provenance(session),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,
             trajectory_variant=session.trajectory_variant,

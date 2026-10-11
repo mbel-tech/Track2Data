@@ -40,6 +40,7 @@ from track2data.core.models import (
     SessionRef,
     ViewPair,
     ViewRole,
+    WaterColumn,
     ZoneSet,
 )
 from track2data.core.progress import CancellationToken, OperationCancelled
@@ -462,6 +463,15 @@ class ProjectStore(QObject):
             return
         self._manifest = self._manifest.model_copy(update={"calibration": cfg})
         self.calibrationChanged.emit()
+
+    def update_water_column(self, water_column: WaterColumn | None) -> None:
+        """Set (or, with None, clear) the water column of a native 3-D project's calibration."""
+        if self._manifest is None:
+            return
+        current = self._manifest.calibration
+        if current.water_column == water_column:
+            return
+        self.update_calibration(current.model_copy(update={"water_column": water_column}))
 
     def update_zones(self, zone_set: ZoneSet) -> None:
         if self._manifest is None:

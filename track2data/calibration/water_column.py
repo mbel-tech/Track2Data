@@ -3,11 +3,13 @@
 Public API
 ----------
 apply_water_column  -- derive psess.depth from psess.z, the surface and the floor
+parse_water_column  -- the two typed values of the Calibration page as a WaterColumn or an error
 """
 
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import numpy as np
 
@@ -38,3 +40,28 @@ def apply_water_column(psess: PreprocessedSession, wc: WaterColumn) -> Preproces
         depth_outside_mask=outside,
         depth_outside=outside.sum(axis=0).astype(int),
     )
+
+
+def parse_water_column(surface: str, floor: str) -> tuple[WaterColumn | None, str | None]:
+    """The water column typed as text, as ``(column, error)``.
+
+    Both texts empty, or either one, gives ``(None, None)``: no column (the way to clear it).
+    Otherwise a value that is not a finite number, or a floor equal to the surface, gives
+    ``(None, message)`` where the message names the field; a valid pair gives the column (the
+    floor may lie on either side of the surface).
+    """
+    texts = {"surface z": surface.strip(), "floor z": floor.strip()}
+    if not all(texts.values()):
+        return None, None
+    values: dict[str, float] = {}
+    for name, text in texts.items():
+        try:
+            value = float(text)
+        except ValueError:
+            return None, f"{name} is not a number"
+        if not math.isfinite(value):
+            return None, f"{name} must be a finite number"
+        values[name] = value
+    if values["surface z"] == values["floor z"]:
+        return None, "floor z must differ from surface z"
+    return WaterColumn(surface_z=values["surface z"], floor_z=values["floor z"]), None

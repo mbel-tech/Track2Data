@@ -64,7 +64,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from track2data.core.models import PanelRect
+from track2data.core.models import PanelRect, Session
 from ui.store.quality_grid import SessionQuality, assess_session, count_verdicts
 from ui.widgets.dataframe_table import clear_table, populate_table
 from ui.widgets.dots import level_icon
@@ -79,9 +79,17 @@ class TrajectoryData:
     xy: np.ndarray
     fps: float
     background: Path | None
-    size: tuple[float, float]
+    size: tuple[float, float] | None
     crop: PanelRect | None = None
     title: str | None = None  # the run unit's id, for a fused pair
+
+
+def _frame_size(session: Session) -> tuple[float, float] | None:
+    """The video frame in pixels, or None when there is none (a native 3-D session): the view
+    then sizes itself from the positions."""
+    if not session.pixel_size_known:
+        return None
+    return float(session.video.width_px), float(session.video.height_px)
 
 
 def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> TrajectoryData:
@@ -97,7 +105,7 @@ def load_trajectory_data(manifest, session_id: str, cache_dir: Path | None) -> T
         xy=psess.xy,
         fps=video.fps,
         background=psess.session.background_image_path,
-        size=(float(video.width_px), float(video.height_px)),
+        size=_frame_size(psess.session),
         crop=ref.panel,
     )
 
@@ -127,7 +135,7 @@ def load_fused_trajectory_data(
         xy=psess.xy,
         fps=video.fps,
         background=psess.session.background_image_path,
-        size=(float(video.width_px), float(video.height_px)),
+        size=_frame_size(psess.session),
         crop=refs[top_id].panel,
         title=unit_id,
     )

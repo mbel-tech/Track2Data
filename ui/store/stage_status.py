@@ -34,6 +34,10 @@ def _missing_water_column(manifest: ProjectManifest) -> list[str]:
     """
     if manifest.mode.dimension == "3d" or manifest.scene.camera_view != "side":
         return []  # a 3-D project takes its depth from the fusion, not from zones
+    from track2data.readers.native3d import manifest_native_3d
+
+    if manifest_native_3d(manifest):
+        return []  # a native 3-D project takes its depth from the water column on Calibration
     sel = manifest.metrics
     needing = view_dependent_metrics(
         [*sel.individual, *sel.group, *sel.zone], "side", _get_metric
