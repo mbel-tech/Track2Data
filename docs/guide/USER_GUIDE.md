@@ -430,7 +430,7 @@ tank, draw stacked secondary zones and use the zone metrics (Z-1 to Z-9).
 ### Water column (native 3-D files)
 
 A native 3-D project shows a **WATER COLUMN** group with two fields, **Surface z** and **Floor z**:
-where the water surface and the floor lie on the file's vertical axis, in the project's length unit
+where the water surface and the floor lie on the file's own vertical axis (as the file writes it, before any **flip**; Track2Data applies each session's flip itself), in the project's length unit
 (either order is accepted; they must be finite and different). You enter them; Track2Data does not
 estimate them from the data. With both set, each session gets a depth (0 at the surface, 1 at the
 floor, `(z - surface) / (floor - surface)`) and a water height (`|floor - surface|`), which is what

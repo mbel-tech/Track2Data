@@ -24,13 +24,21 @@ def apply_water_column(psess: PreprocessedSession, wc: WaterColumn) -> Preproces
     ``depth_outside``), never clipped. A non-finite z (NaN or +/-inf) is missing: NaN depth,
     not counted. ``depth_height_cm`` is the column height
     ``abs(floor_z - surface_z)`` (the file's z is already in the project's length unit).
+
+    The column is entered on the file's own vertical axis. The reader has already negated ``z``
+    for a session read with ``flip``, so for such a session both values are negated here: the
+    same physical fish gets the same depth with or without the flip.
     """
     if psess.z is None:
         return psess
     z = np.asarray(psess.z, dtype=np.float64)
-    span = float(wc.floor_z) - float(wc.surface_z)
+    surface, floor = float(wc.surface_z), float(wc.floor_z)
+    native = (getattr(psess.session, "raw_attrs", None) or {}).get("native_3d") or {}
+    if native.get("flip"):
+        surface, floor = -surface, -floor
+    span = floor - surface
     with np.errstate(invalid="ignore"):
-        frac = (z - float(wc.surface_z)) / span
+        frac = (z - surface) / span
         outside = np.isfinite(frac) & ((frac < 0.0) | (frac > 1.0))
     depth = np.where(outside | ~np.isfinite(frac), np.nan, frac)
     return dataclasses.replace(

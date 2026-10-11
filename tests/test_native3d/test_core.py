@@ -78,6 +78,21 @@ def test_apply_water_column_reversed() -> None:
     assert out.depth_height_cm == 20.0
 
 
+def test_water_column_is_on_the_files_axis_whatever_the_flip() -> None:
+    """The same physical fish (3 below a surface at 0, floor at 20 down) written with z up and no
+    flip, or with z down and flip, gets the same depth for the same entered column."""
+    up = _psess_with_z([-3.0, -10.0])
+    up.session.raw_attrs = {"native_3d": {"flip": False}}
+    down = _psess_with_z([3.0 * -1, -10.0])  # the reader negated the file's +3, +10
+    down.session.raw_attrs = {"native_3d": {"flip": True}}
+    # file axis for the flipped file: surface 0, floor +20 (down), values +3 and +10
+    flipped = apply_water_column(down, WaterColumn(surface_z=0.0, floor_z=20.0))
+    plain = apply_water_column(up, WaterColumn(surface_z=0.0, floor_z=-20.0))
+    assert flipped.depth is not None and plain.depth is not None
+    np.testing.assert_allclose(flipped.depth[:, 0], [0.15, 0.5])
+    np.testing.assert_allclose(plain.depth[:, 0], flipped.depth[:, 0])
+
+
 def test_apply_water_column_without_z_is_unchanged() -> None:
     psess = _make_psess(_make_session(n_frames=3, n_animals=1))
     assert apply_water_column(psess, WaterColumn(surface_z=0, floor_z=1)) is psess
