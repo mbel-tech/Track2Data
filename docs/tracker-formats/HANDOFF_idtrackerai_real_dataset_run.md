@@ -16,6 +16,21 @@ FishTank 4.0.9 pickled dict) go through `scan`, `add`, `validate` and `run` and 
 project file has been edited by hand**. Straight from the command line, with the options the software itself
 tells the user to give, none of them runs. The three things that stop a user are in section 4 (items 1-3).
 
+## 1b. Follow-up: items 1-3 fixed (same branch, PR #146)
+
+After this run, items 1-3 of section 4 were fixed and the flow re-run with only documented flags, no hand-edited project
+file (h5, no-fps CSV, MoveR pickled dict: `new`, `add --option width_px=... height_px=... [fps=...] [--allow-pickle]`,
+`validate`, `run`; all exit 0). Sections 3 and 4 below describe the state **before** the fix and stay as the record.
+
+- Item 1: `IDTrackerAiReader.discover()` and the `trajectories/` subfolder hint now pass `parameters=cls.parameters`, so
+  `add --option` (and the confirm dialog) know `fps`, `width_px`, `height_px`.
+- Item 2: `track2data add --allow-pickle` sets `security.allow_pickle_trajectories` on the project and prints a warning
+  that the file executes code on load. Without the flag the setting is untouched.
+- Item 3: `validate` now also probes every session (`Engine.session_read_issues`, cheap probe path) and reports what `run`
+  would fail on, together with the other issues, even when no metric is selected. The GUI's pre-flight is unchanged.
+- Tests: `tests/test_cli/test_idtrackerai_bare_export.py` (7). Still open: items 4-8 (one error at a time, flat folders,
+  all-NaN cm columns, the repeatable CLI runner, smaller points).
+
 ## 2. Method
 
 For each dataset: copy the cached, sha256-pinned fixture into `<session>/trajectories/<export>` (the only layout
