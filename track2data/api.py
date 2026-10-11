@@ -1390,8 +1390,9 @@ class Engine:
         the block ends (also on an error or a cancellation). ``run()`` opens it, so a run logs
         "IL-16 skipped for 12 sessions: ..." once instead of once per session; a direct
         ``compute_metrics`` call outside a run still logs its own skip at once. A nested scope
-        joins the outer one. Worker processes of a parallel run each have their own engine and
-        scope, so they log per worker."""
+        joins the outer one. A parallel run (``n_workers > 1``) does not benefit: its workers
+        call ``_run_one_unit`` directly and never open the scope, so they log per session and the
+        parent logs nothing for these skips (as before the aggregation)."""
         if self._skip_tally is not None:
             yield
             return

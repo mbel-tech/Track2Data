@@ -113,7 +113,7 @@ class DeepLabCut3DReader(SessionReader):
     """DeepLabCut-3D triangulated tables (CSV): one session per file."""
 
     name = "deeplabcut_3d"
-    display_name: ClassVar[str] = "DeepLabCut 3-D (triangulated CSV)"
+    display_name: ClassVar[str] = "DeepLabCut 3D (triangulated CSV)"
     verification = "synthetic_only"
     coordinate_frame = "physical_unaligned"
     provides_native_3d: ClassVar[bool] = True
