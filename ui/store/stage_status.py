@@ -43,6 +43,23 @@ def _missing_water_column(manifest: ProjectManifest) -> list[str]:
     return []
 
 
+def _native_calibration_issues(manifest: ProjectManifest) -> list[str] | None:
+    """What keeps a native 3-D project's calibration from running, by the rule validate uses
+    (``native_setup_issues``), with each session's unit from its saved ``target_unit``; None for
+    any other project."""
+    from track2data.api import native_setup_issues
+    from track2data.readers.native3d import manifest_native_3d, ref_target_unit
+
+    if manifest.mode.dimension == "3d" or not manifest_native_3d(manifest):
+        return None
+    units = {
+        ref.session_id: unit
+        for ref in manifest.sessions
+        if (unit := ref_target_unit(ref)) is not None
+    }
+    return native_setup_issues(manifest, units)
+
+
 PAGE_NAMES = [
     "Project", "Sessions", "Calibration", "Zones", "Metadata",
     "Preprocessing", "Metrics", "Processing", "Preview", "Export",
@@ -93,7 +110,14 @@ def compute_stage_statuses(
 
     # Calibration
     cal = manifest.calibration
-    if cal.mode == "scalar" and not (cal.px_per_cm and cal.px_per_cm > 0):
+    native_issues = _native_calibration_issues(manifest)
+    if native_issues is not None:
+        out[_CALIB] = (
+            StageInfo("blocked", native_issues[0])
+            if native_issues
+            else StageInfo("valid", f"Mode: {cal.mode}.")
+        )
+    elif cal.mode == "scalar" and not (cal.px_per_cm and cal.px_per_cm > 0):
         out[_CALIB] = StageInfo("blocked", "Enter a positive pixels-per-cm value.")
     elif cal.mode == "session" and not cal.length_unit_confirmed_by_user:
         out[_CALIB] = StageInfo("blocked", "Confirm the length unit of your sessions.")

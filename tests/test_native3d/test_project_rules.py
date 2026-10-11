@@ -1,4 +1,7 @@
-"""A native 3-D project: who may join it, its calibration, and which metrics it offers."""
+"""A native 3-D project: who may join it, its calibration, and which metrics it offers.
+
+The Qt halves (store, screens, stage status) are in test_project_rules_ui.py.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +13,13 @@ import pytest
 
 from tests.test_api import _make_psess, _make_session
 from tests.test_readers.native3d_files import write_anipose_csv
-from track2data.api import NATIVE_3D_NEEDS_SESSION_CALIBRATION, Engine
-from track2data.core.errors import ImportError_
+from track2data.api import (
+    NATIVE_3D_NEEDS_SESSION_CALIBRATION,
+    NATIVE_3D_UNIT_NOT_CONFIRMED,
+    Engine,
+    native_unit_issue,
+)
+from track2data.core.errors import CalibrationError, ImportError_
 from track2data.core.models import (
     CalibrationConfig,
     MetricSelection,
@@ -113,24 +121,81 @@ def test_first_native_import_sets_calibration() -> None:
     assert cal.length_unit_confirmed_by_user is True
 
 
-def test_first_native_import_through_import_ref(tmp_path: Path) -> None:
-    path = write_anipose_csv(tmp_path / "pose.csv", ["head"], 5)
-    ref = SessionRef(
-        session_id="n1",
-        folder=path,
-        sha256="",
-        reader="anipose",
-        reader_options={"fps": 50.0, "unit": "mm", "target_unit": "m"},
+def _file_ref(tmp_path: Path, session_id: str, target: str | None = "cm") -> SessionRef:
+    path = write_anipose_csv(tmp_path / f"{session_id}.csv", ["head"], 5)
+    options: dict = {"fps": 50.0, "unit": "mm"}
+    if target is not None:
+        options["target_unit"] = target
+    return SessionRef(
+        session_id=session_id, folder=path, sha256="", reader="anipose", reader_options=options
     )
-    engine = Engine(_manifest([ref]))
+
+
+def test_import_ref_is_read_only_on_the_manifest(tmp_path: Path) -> None:
+    ref = _file_ref(tmp_path, "n1", "m")
+    manifest = _manifest([ref])
+    engine = Engine(manifest)
     session = engine.import_ref(ref)
     assert session.coordinate_unit == "m"
+    assert engine.manifest is manifest
+
+
+def test_import_sessions_sets_up_a_native_project(tmp_path: Path) -> None:
+    refs = [_file_ref(tmp_path, "a", "mm"), _file_ref(tmp_path, "b", "mm")]
+    engine = Engine(_manifest(refs))
+    engine.import_sessions()
     cal = engine.manifest.calibration
     assert (cal.mode, cal.length_unit_label, cal.length_unit_confirmed_by_user) == (
         "session",
-        "m",
+        "mm",
         True,
     )
+
+
+@pytest.mark.parametrize("unit", ["cm", "mm"])
+def test_a_batch_of_two_native_files_sets_the_calibration(unit: str) -> None:
+    engine = Engine(_manifest([_ref("a"), _ref("b")]))
+    engine.set_up_native_import([_native("a", unit=unit), _native("b", unit=unit)])
+    cal = engine.manifest.calibration
+    assert (cal.mode, cal.length_unit_label, cal.length_unit_confirmed_by_user) == (
+        "session",
+        unit,
+        True,
+    )
+
+
+def test_a_batch_with_two_targets_is_refused() -> None:
+    engine = Engine(_manifest([_ref("a"), _ref("b")]))
+    with pytest.raises(ImportError_) as info:
+        engine.set_up_native_import([_native("a", unit="cm"), _native("b", unit="mm")])
+    assert info.value.code == "NATIVE_3D_UNIT_MISMATCH"
+    assert "'cm'" in str(info.value) and "'mm'" in str(info.value)
+    assert engine.manifest.calibration.mode == "bodylength"
+
+
+def test_a_mixed_batch_is_refused() -> None:
+    engine = Engine(_manifest([]))
+    with pytest.raises(ImportError_) as info:
+        engine.set_up_native_import([_native("a"), _make_session("p1")])
+    assert info.value.code == "NATIVE_3D_MIXED"
+    assert "'a'" in str(info.value) and "p1" in str(info.value)
+    assert engine.manifest.calibration.mode == "bodylength"
+
+
+def test_a_batch_into_a_calibrated_native_project_with_another_target_is_refused() -> None:
+    engine = Engine(_manifest([_ref("n1"), _ref("a"), _ref("b")], calibration=SESSION_CM))
+    with pytest.raises(ImportError_) as info:
+        engine.set_up_native_import([_native("a", unit="mm"), _native("b", unit="mm")])
+    assert info.value.code == "NATIVE_3D_UNIT_MISMATCH"
+    assert "'mm'" in str(info.value) and "'cm'" in str(info.value)
+    assert engine.manifest.calibration == SESSION_CM
+
+
+def test_a_batch_into_a_calibrated_native_project_with_its_target_changes_nothing() -> None:
+    manifest = _manifest([_ref("n1"), _ref("a"), _ref("b")], calibration=SESSION_CM)
+    engine = Engine(manifest)
+    engine.set_up_native_import([_native("a"), _native("b")])
+    assert engine.manifest is manifest
 
 
 def test_registering_an_already_set_native_project_changes_nothing() -> None:
@@ -201,15 +266,77 @@ def test_validate_requires_session_mode() -> None:
     assert NATIVE_3D_NEEDS_SESSION_CALIBRATION not in issues
 
 
-def test_a_native_session_is_calibrated_by_its_own_unit_whatever_the_mode() -> None:
-    scalar = CalibrationConfig(mode="scalar", px_per_cm=10.0)
-    engine = Engine(_manifest([_ref("n1")], calibration=scalar))
-    psess = engine.preprocess(_native("n1"))
-    assert psess.px_per_cm == 1.0
-    assert engine._resolve_px_per_cm(_native("n1")) == 1.0
+@pytest.mark.parametrize(
+    "calibration",
+    [CalibrationConfig(mode="scalar", px_per_cm=10.0), CalibrationConfig(mode="bodylength")],
+)
+def test_a_native_session_in_another_mode_is_refused(calibration: CalibrationConfig) -> None:
+    engine = Engine(_manifest([_ref("n1")], calibration=calibration, individual=("IL-1",)))
+    with pytest.raises(CalibrationError) as info:
+        engine.preprocess(_native("n1"))
+    assert info.value.code == "NATIVE_3D_NEEDS_SESSION_CALIBRATION"
+    assert "Session" in info.value.remediation and "Calibration page" in info.value.remediation
+    psess = Engine(_manifest([_ref("n1")], calibration=SESSION_CM)).preprocess(_native("n1"))
+    with pytest.raises(CalibrationError) as info:
+        engine.compute_metrics(psess)
+    assert info.value.code == "NATIVE_3D_NEEDS_SESSION_CALIBRATION"
     # a pixel session in a scalar project keeps the scalar scale
+    scalar = CalibrationConfig(mode="scalar", px_per_cm=10.0)
     pixel = Engine(_manifest([_ref("p1", None)], calibration=scalar))
     assert pixel._resolve_px_per_cm(_make_session("p1")) == 10.0
+
+
+def test_t2d_run_refuses_a_native_session_in_another_mode(tmp_path: Path) -> None:
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+    from track2data.core.manifest import write as write_manifest
+
+    project = tmp_path / "p.t2d.json"
+    write_manifest(_manifest([_file_ref(tmp_path, "n1")], individual=("IL-1",)), project)
+    out = CliRunner().invoke(cli, ["run", str(project), "-o", str(tmp_path / "out")])
+    assert out.exit_code != 0
+    assert "NATIVE_3D_NEEDS_SESSION_CALIBRATION" in out.output
+
+
+# ── validate: each native set-up problem is its own readable error ───────────
+
+
+@pytest.mark.parametrize("n_sessions", [1, 2])
+def test_validate_reports_a_hand_edited_label_and_confirmation(
+    tmp_path: Path, n_sessions: int
+) -> None:
+    refs = [_file_ref(tmp_path, f"n{i}") for i in range(n_sessions)]
+    ids = ", ".join(r.session_id for r in refs)
+    label_mm = SESSION_CM.model_copy(update={"length_unit_label": "mm"})
+    manifest = _manifest(refs, calibration=label_mm, individual=("IL-1",))
+    engine = Engine(manifest)
+    before = manifest.project_hash()
+    issues = engine.validate()
+    assert native_unit_issue("mm", "cm", ids) in issues
+    assert not any("could not be read" in issue for issue in issues)
+    assert engine.manifest.project_hash() == before
+    engine.run(tmp_path / "out")
+    assert engine.manifest.project_hash() == before
+
+    unconfirmed = SESSION_CM.model_copy(update={"length_unit_confirmed_by_user": False})
+    manifest = _manifest(refs, calibration=unconfirmed, individual=("IL-1",))
+    engine = Engine(manifest)
+    issues = engine.validate()
+    assert NATIVE_3D_UNIT_NOT_CONFIRMED in issues
+    assert not any("could not be read" in issue for issue in issues)
+    assert engine.manifest.project_hash() == manifest.project_hash()
+
+
+def test_validate_reports_a_mixed_project(tmp_path: Path) -> None:
+    refs = [_file_ref(tmp_path, "n1"), _ref("p1", "idtrackerai")]
+    issues = Engine(_manifest(refs, calibration=SESSION_CM, individual=("IL-1",))).validate()
+    assert any("NATIVE_3D_MIXED" in issue or "pixel-tracked" in issue for issue in issues)
+
+
+def test_a_correct_native_project_validates(tmp_path: Path) -> None:
+    refs = [_file_ref(tmp_path, "n1"), _file_ref(tmp_path, "n2", None)]
+    assert Engine(_manifest(refs, calibration=SESSION_CM, individual=("IL-1",))).validate() == []
 
 
 # ── availability ─────────────────────────────────────────────────────────────
@@ -239,8 +366,7 @@ def test_native_project_offers_the_three_3d_metrics() -> None:
     assert set(THREE_D_IDS) <= set(results)
 
 
-def test_il15_needs_the_water_column_in_a_native_project(qtbot) -> None:
-    pytest.importorskip("PySide6")
+def test_il15_needs_the_water_column_in_a_native_project() -> None:
     manifest = _manifest([_ref("n1")], calibration=SESSION_CM, individual=("IL-15",))
     engine = Engine(manifest)
     assert engine.skipped_metrics(False) == {"IL-15": NEEDS_WATER_COLUMN_REASON}
@@ -258,18 +384,6 @@ def test_il15_needs_the_water_column_in_a_native_project(qtbot) -> None:
         individual=["IL-1", "IL-15"]
     )}))
     assert both._view_selection_notes() == [f"IL-15 will be skipped: {NEEDS_WATER_COLUMN_REASON}."]
-
-    from ui.metrics_screen import MetricsScreen
-    from ui.store.project_store import ProjectStore
-
-    store = ProjectStore()
-    store._manifest = manifest
-    screen = MetricsScreen(store=store)
-    qtbot.addWidget(screen)
-    table = screen._ind_table
-    row = next(r for r in range(table.rowCount()) if table.item(r, 0).data(256) == "IL-15")
-    tip = table.item(row, 0).toolTip()
-    assert tip == NEEDS_WATER_COLUMN_REASON[0].upper() + NEEDS_WATER_COLUMN_REASON[1:] + "."
 
 
 def test_il15_available_with_the_water_column() -> None:
@@ -314,60 +428,6 @@ def test_2d_and_fused_projects_unchanged() -> None:
     assert no_scale["IL-16"] == NEEDS_FUSED_REASON
 
 
-# ── the GUI's add path goes through the same Engine function ─────────────────
-
-
-def _store_with(manifest: ProjectManifest):
-    pytest.importorskip("PySide6")
-    from ui.store.project_store import ProjectStore
-
-    store = ProjectStore()
-    store._manifest = manifest
-    return store
-
-
-def test_the_store_registers_a_probed_native_session(qtbot) -> None:
-    store = _store_with(_manifest([_ref("n1")]))
-    store._identity_probes["task-1"] = "n1"
-    store._new_session_ids.add("n1")
-    changed: list[bool] = []
-    store.calibrationChanged.connect(lambda: changed.append(True))
-    store._on_identity_probe_finished("task-1", _native("pose", unit="mm"))
-    cal = store.manifest.calibration
-    assert (cal.mode, cal.length_unit_label, cal.length_unit_confirmed_by_user) == (
-        "session",
-        "mm",
-        True,
-    )
-    assert changed and store.session_facts("n1") is not None
-
-
-def test_the_store_removes_a_refused_session_and_says_why(qtbot) -> None:
-    store = _store_with(_manifest([_ref("p1", "idtrackerai"), _ref("n1")]))
-    store._identity_probes["task-1"] = "n1"
-    store._new_session_ids.add("n1")
-    logged: list[str] = []
-    refused: list[tuple[str, str]] = []
-    store.runLogAppended.connect(logged.append)
-    store.sessionRefused.connect(lambda sid, msg: refused.append((sid, msg)))
-    store._on_identity_probe_finished("task-1", _native("pose"))
-    assert [ref.session_id for ref in store.manifest.sessions] == ["p1"]
-    assert store.session_facts("n1") is None
-    assert refused and refused[0][0] == "n1" and "NATIVE_3D_MIXED" in refused[0][1]
-    assert any("NATIVE_3D_MIXED" in line for line in logged)
-    assert store.manifest.calibration.mode == "bodylength"
-
-
-def test_reopening_a_project_does_not_register_again(qtbot) -> None:
-    """A probe of a session already in the project (open_project) changes nothing."""
-    manifest = _manifest([_ref("n1")], calibration=CalibrationConfig(mode="scalar"))
-    store = _store_with(manifest)
-    store._identity_probes["task-1"] = "n1"
-    store._on_identity_probe_finished("task-1", _native("pose"))
-    assert store.manifest.calibration.mode == "scalar"
-    assert [ref.session_id for ref in store.manifest.sessions] == ["n1"]
-
-
 # ── the CLI's add path ───────────────────────────────────────────────────────
 
 
@@ -380,23 +440,45 @@ def _cli_add(project: Path, root: Path, *extra: str):
     return CliRunner().invoke(cli, [*args, *extra])
 
 
-def test_cli_add_sets_the_calibration_of_a_native_project(tmp_path: Path) -> None:
+@pytest.mark.parametrize("n_files", [1, 2])
+@pytest.mark.parametrize("unit", ["cm", "mm"])
+def test_cli_add_sets_the_calibration_of_a_native_project(
+    tmp_path: Path, unit: str, n_files: int
+) -> None:
     from track2data.core.manifest import read as read_manifest
     from track2data.core.manifest import write as write_manifest
 
     root = tmp_path / "pose"
     root.mkdir()
-    write_anipose_csv(root / "fish1.csv", ["head"], 5)
+    for i in range(n_files):
+        write_anipose_csv(root / f"fish{i}.csv", ["head"], 5)
     project = tmp_path / "p.t2d.json"
     write_manifest(_manifest([]), project)
-    out = _cli_add(project, root, "--option", "target_unit=mm")
+    out = _cli_add(project, root, "--option", f"target_unit={unit}")
     assert out.exit_code == 0, out.output
-    cal = read_manifest(project).calibration
+    manifest = read_manifest(project)
+    assert len(manifest.sessions) == n_files
+    cal = manifest.calibration
     assert (cal.mode, cal.length_unit_label, cal.length_unit_confirmed_by_user) == (
         "session",
-        "mm",
+        unit,
         True,
     )
+
+
+def test_cli_add_refuses_another_target_in_a_calibrated_native_project(tmp_path: Path) -> None:
+    from track2data.core.manifest import write as write_manifest
+
+    root = tmp_path / "pose"
+    root.mkdir()
+    write_anipose_csv(root / "fish1.csv", ["head"], 5)
+    write_anipose_csv(root / "fish2.csv", ["head"], 5)
+    project = tmp_path / "p.t2d.json"
+    write_manifest(_manifest([_ref("n0")], calibration=SESSION_CM), project)
+    before = project.read_bytes()
+    out = _cli_add(project, root, "--option", "target_unit=mm")
+    assert out.exit_code != 0 and "NATIVE_3D_UNIT_MISMATCH" in out.output
+    assert project.read_bytes() == before
 
 
 def test_cli_add_refuses_native_files_in_a_pixel_project(tmp_path: Path) -> None:

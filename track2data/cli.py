@@ -554,6 +554,9 @@ def add(
     The same steps as the app: the suggestion is shown, you can amend it (--reader, --option,
     --exclude, --rename), and nothing is added until you confirm (or pass --yes). The reader
     and its options are saved on each session, so the project never has to guess again.
+
+    Native 3-D files (Anipose, DLC-3D) are read in full before they are added, so the project
+    rules can check them and set the project's length unit; one unreadable file stops the add.
     """
     from track2data.api import Engine
     from track2data.core.errors import Track2DataError
@@ -619,12 +622,14 @@ def add(
         }
     )
     if manifest_native_3d(updated):
-        # Native 3-D files involved: import the new sessions so the engine's one rule checks
-        # them (no mixing, one unit) and the first one sets the project's calibration.
+        # Native 3-D files involved: the engine's add entry point checks the batch (no mixing,
+        # one unit; first from the saved options, then on the files read in full) and, for a
+        # project that had no native session, sets its calibration. A file that cannot be read
+        # stops the add too.
         engine = Engine(updated)
         try:
-            for ref in refs:
-                engine.import_ref(ref)
+            engine.check_native_refs(refs)
+            engine.set_up_native_import([engine.read_ref(ref) for ref in refs])
         except Track2DataError as exc:
             click.echo(f"[error] {exc}", err=True)
             sys.exit(1)

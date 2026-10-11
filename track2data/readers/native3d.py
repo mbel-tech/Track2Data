@@ -36,6 +36,10 @@ _RATIO_TO_MM: dict[str, Fraction] = {
 }
 
 UNITS: tuple[str, ...] = tuple(UNIT_FACTORS_M)
+
+#: The ``target_unit`` option's default: the project length unit a file is converted to when the
+#: user chose none.
+DEFAULT_TARGET_UNIT = "cm"
 AXES: tuple[str, ...] = ("x", "y", "z")
 
 
@@ -46,6 +50,15 @@ def manifest_native_3d(manifest: Any) -> bool:
     kinds (``Engine.register_native_import`` refuses it), so one native session decides it.
     """
     return any(ref.reader in NATIVE_3D_READERS for ref in manifest.sessions)
+
+
+def ref_target_unit(ref: Any) -> str | None:
+    """The unit a native entry's file is converted to, from its saved options (None for an entry
+    of another reader). Confirmed entries save only the options that were given, so a missing
+    one is the default."""
+    if ref.reader not in NATIVE_3D_READERS:
+        return None
+    return str(ref.reader_options.get("target_unit") or DEFAULT_TARGET_UNIT)
 
 
 def convert_units(values: np.ndarray, unit: str, target: str) -> np.ndarray:
@@ -104,7 +117,7 @@ def native_parameters(unit_default: str | None) -> tuple[ReaderParameter, ...]:
             name="target_unit",
             label="Project length unit",
             kind="choice",
-            default="cm",
+            default=DEFAULT_TARGET_UNIT,
             choices=UNITS,
             help="Coordinates are converted to this unit when read. Every session of a project "
             "must use the same one.",
