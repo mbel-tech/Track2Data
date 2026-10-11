@@ -19,7 +19,8 @@ def apply_water_column(psess: PreprocessedSession, wc: WaterColumn) -> Preproces
 
     ``depth = (z - surface_z) / (floor_z - surface_z)``, so the floor may lie on either side of
     the surface. A z outside the column gives NaN and is counted (``depth_outside_mask``,
-    ``depth_outside``), never clipped. ``depth_height_cm`` is the column height
+    ``depth_outside``), never clipped. A non-finite z (NaN or +/-inf) is missing: NaN depth,
+    not counted. ``depth_height_cm`` is the column height
     ``abs(floor_z - surface_z)`` (the file's z is already in the project's length unit).
     """
     if psess.z is None:
@@ -29,7 +30,7 @@ def apply_water_column(psess: PreprocessedSession, wc: WaterColumn) -> Preproces
     with np.errstate(invalid="ignore"):
         frac = (z - float(wc.surface_z)) / span
         outside = np.isfinite(frac) & ((frac < 0.0) | (frac > 1.0))
-    depth = np.where(outside, np.nan, frac)
+    depth = np.where(outside | ~np.isfinite(frac), np.nan, frac)
     return dataclasses.replace(
         psess,
         depth=depth,

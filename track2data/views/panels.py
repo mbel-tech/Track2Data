@@ -160,10 +160,10 @@ def keep_animals(session: Session, keep: list[int]) -> Session:
     """Return the session reduced to the animals at the indices ``keep`` (in that order).
 
     Every per-animal field is filtered together: ``n_animals``, identity labels and colours,
-    ``id_probabilities``, ``body_length_px``, ``raw_xy`` and the pose skeleton. Whole-frame
-    coordinates are left alone. Per-animal data whose length does not match the animal count is
-    dropped, as are the tables that cannot be cut by animal (``bbox_table``, ``bbox_summary``,
-    ``identities_groups``, ``fragments``). The input session is never modified.
+    ``id_probabilities``, ``body_length_px``, ``raw_xy``, ``raw_z`` and the pose skeleton.
+    Whole-frame coordinates are left alone. Per-animal data whose length does not match the
+    animal count is dropped, as are the tables that cannot be cut by animal (``bbox_table``,
+    ``bbox_summary``, ``identities_groups``, ``fragments``). The input session is never modified.
     """
     n = session.raw_xy.shape[1]
     update: dict[str, Any] = {
@@ -187,6 +187,12 @@ def keep_animals(session: Session, keep: list[int]) -> Session:
     ip = session.id_probabilities
     update["id_probabilities"] = (
         np.asarray(ip)[:, keep] if ip is not None and np.asarray(ip).shape[1] == n else None
+    )
+    rz = session.raw_z
+    update["raw_z"] = (
+        np.asarray(rz, dtype=np.float64)[:, keep]
+        if rz is not None and np.asarray(rz).ndim == 2 and np.asarray(rz).shape[1] == n
+        else None
     )
     kp = session.keypoints
     if kp is not None and kp.xy.shape[1] != n:
