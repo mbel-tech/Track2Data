@@ -28,8 +28,12 @@ file (h5, no-fps CSV, MoveR pickled dict: `new`, `add --option width_px=... heig
   that the file executes code on load. Without the flag the setting is untouched.
 - Item 3: `validate` now also probes every session (`Engine.session_read_issues`, cheap probe path) and reports what `run`
   would fail on, together with the other issues, even when no metric is selected. The GUI's pre-flight is unchanged.
-- Tests: `tests/test_cli/test_idtrackerai_bare_export.py` (7). Still open: items 4-8 (one error at a time, flat folders,
-  all-NaN cm columns, the repeatable CLI runner, smaller points).
+- Tests: `tests/test_cli/test_idtrackerai_bare_export.py` (7).
+- Item 7 done: `tests/real_samples/test_idtrackerai_cli_run.py` (9 tests, `-m contract`) drives `new`, `add`, `validate`, `run`
+  through the CLI on the cached fixtures (h5, CSV bundle, no-fps CSV, MoveR pickled dict) and checks the output file set,
+  frames x animals row counts, h5-vs-CSV agreement, the `validate` refusal without options/consent, and that the input folder
+  is unchanged. The 464k-frame FishTank file is not in it (not in the fixture manifest; ~100 s).
+  Still open: items 4, 5, 6 and 8 (one error at a time, flat folders, all-NaN cm columns, smaller points).
 
 ## 2. Method
 
