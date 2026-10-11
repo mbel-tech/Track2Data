@@ -505,3 +505,30 @@ def test_run_scopes_the_skip_log(monkeypatch, caplog) -> None:
     assert len(records) == 1
     assert "2 sessions" in records[0].getMessage()
     assert engine._skip_tally is None
+
+
+@pytest.mark.parametrize("failure", ["raises", "cancelled"])
+def test_run_flushes_the_skip_tally_when_it_raises_or_is_cancelled(
+    monkeypatch, caplog, failure
+) -> None:
+    from track2data.core.progress import OperationCancelled
+
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS"]))
+    exc = OperationCancelled() if failure == "cancelled" else RuntimeError("boom")
+
+    def fake_run(plan, out_dir, exporters, progress, n_workers, cancel_check):
+        for i in range(2):
+            fused = _with_depth(_make_psess(_make_session(f"s{i}", n_frames=10, n_animals=2)))
+            fused.px_per_cm = None
+            engine.compute_metrics(fused)
+        raise exc
+
+    monkeypatch.setattr(engine, "_run", fake_run)
+    monkeypatch.setattr(engine, "_checked_plan", lambda: object())
+    with caplog.at_level(logging.WARNING, logger="track2data.api"), pytest.raises(type(exc)):
+        engine.run("out")
+    records = [r for r in caplog.records if "IL-DS" in r.getMessage()]
+    assert len(records) == 1
+    assert "2 sessions" in records[0].getMessage()
+    assert engine._skip_tally is None

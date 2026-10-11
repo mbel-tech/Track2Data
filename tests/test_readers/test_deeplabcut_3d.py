@@ -263,7 +263,6 @@ def test_a_2d_table_with_z_and_likelihood_is_not_claimed_by_dlc3d(tmp_path: Path
 
 
 def test_the_3d_readers_texts_all_say_deeplabcut_3d(tmp_path: Path) -> None:
-    assert "DeepLabCut 3-D" in DeepLabCut3DReader.display_name
     plain = tmp_path / "notes.csv"
     plain.write_text("a,b\n1,2\n")
     with pytest.raises(Track2DataError) as err:
@@ -282,3 +281,9 @@ def test_the_3d_readers_texts_all_say_deeplabcut_3d(tmp_path: Path) -> None:
     with pytest.raises(Track2DataError) as err:
         read(empty)
     assert "DeepLabCut 3-D" in err.value.remediation
+
+
+def test_display_name_is_exported_provenance_and_must_not_change() -> None:
+    # display_name is exported as source_software (README, manifest.json, PROJECT_SUMMARY.md,
+    # run log); changing it would change the exports of existing native DLC-3D projects.
+    assert DeepLabCut3DReader.display_name == "DeepLabCut 3D (triangulated CSV)"
