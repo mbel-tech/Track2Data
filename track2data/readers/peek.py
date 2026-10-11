@@ -27,6 +27,7 @@ from typing import Any
 
 import numpy as np
 
+from track2data.core.errors import DataValidationError
 from track2data.readers.index import _CLOUD_ONLY, ScanBudget, ScanIndex
 
 _log = logging.getLogger(__name__)
@@ -37,14 +38,9 @@ MAX_HEADER_BYTES = 8 * 1024 * 1024
 _FIRST_CHUNK = 65_536
 
 
-def read_header_lines(path: Path, n: int, limit: int = MAX_HEADER_BYTES) -> list[str] | None:
-    """The first *n* **complete** text lines of a file (BOM stripped, any line ending, bad bytes
-    replaced), never a partial one; fewer if the file has fewer lines.
-
-    Reads in growing chunks until *n* lines are ended or the file is. If *n* lines do not fit in
-    *limit* bytes, logs one line and returns None (undetected). None as well when the file cannot
-    be opened.
-    """
+def _scan_header(path: Path, n: int, limit: int) -> tuple[list[str] | None, bool]:
+    """``(lines, too_long)``: the first *n* complete lines, or ``(None, True)`` when they do not
+    fit in *limit* bytes, or ``(None, False)`` when the file cannot be opened."""
     chunk = _FIRST_CHUNK
     data = b""
     try:
@@ -56,15 +52,45 @@ def read_header_lines(path: Path, n: int, limit: int = MAX_HEADER_BYTES) -> list
                 parts = text.splitlines(keepends=True)
                 ended = [len(part.splitlines()[0]) != len(part) for part in parts if part]
                 if sum(ended) >= n or (not more and len(data) < limit):
-                    return text.splitlines()[:n]
+                    return text.splitlines()[:n], False
                 if len(data) >= limit:
-                    _log.info(
-                        "%s: header is longer than %d bytes; not recognised", path.name, limit
-                    )
-                    return None
+                    return None, True
                 chunk = min(chunk * 2, limit)
     except OSError:
-        return None
+        return None, False
+
+
+def read_header_lines(path: Path, n: int, limit: int = MAX_HEADER_BYTES) -> list[str] | None:
+    """The first *n* **complete** text lines of a file (BOM stripped, any line ending, bad bytes
+    replaced), never a partial one; fewer if the file has fewer lines.
+
+    Reads in growing chunks until *n* lines are ended or the file is. If *n* lines do not fit in
+    *limit* bytes, logs one line and returns None (undetected). None as well when the file cannot
+    be opened.
+    """
+    lines, too_long = _scan_header(path, n, limit)
+    if too_long:
+        _log.info("%s: header is longer than %d bytes; not recognised", path.name, limit)
+    return lines
+
+
+def header_too_long(path: Path, n: int, limit: int = MAX_HEADER_BYTES) -> bool:
+    """True when the first *n* lines of the file do not fit in *limit* bytes (the case
+    :func:`read_header_lines` reports as None), so a reader can say so instead of "not a table"."""
+    return _scan_header(path, n, limit)[1]
+
+
+def header_too_long_error(path: Path, what: str) -> DataValidationError:
+    """The error for a file whose header exceeds the cap, named after the format *what*."""
+    megabytes = MAX_HEADER_BYTES // (1024 * 1024)
+    return DataValidationError(
+        f"{path.name}: the header is longer than the {megabytes} MB a {what} header may "
+        "take, so the file was not recognised.",
+        code="HEADER_TOO_LONG",
+        subject=str(path),
+        remediation="Check that this is a real tracker export; a header this long is usually a "
+        "wrong file or a table written without line breaks.",
+    )
 
 
 @dataclass(frozen=True)

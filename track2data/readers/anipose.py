@@ -41,7 +41,12 @@ from track2data.readers.native3d import (
     with_keypoint_choices,
 )
 from track2data.readers.params import ProposedValue, ReaderParameter, resolve_options
-from track2data.readers.peek import Peeker, read_header_lines
+from track2data.readers.peek import (
+    Peeker,
+    header_too_long,
+    header_too_long_error,
+    read_header_lines,
+)
 
 _FRAME_COLUMN = "fnum"
 
@@ -53,6 +58,7 @@ class _Layout:
     columns: tuple[str, ...]
     keypoints: tuple[str, ...]  # those with a complete x, y, z triple, in file order
     scored: bool  # every keypoint also has a ``_score`` column
+    duplicates: tuple[str, ...] = ()  # x/y/z column names of a keypoint that appear twice
 
 
 def _parse_header(line: str | None) -> _Layout | None:
@@ -77,7 +83,16 @@ def _parse_header(line: str | None) -> _Layout | None:
     if not names:
         return None
     scored = all(f"{n}_score" in present for n in names)
-    return _Layout(columns=columns, keypoints=tuple(names), scored=scored)
+    wanted = {f"{n}_{axis}" for n in names for axis in "xyz"}
+    seen: set[str] = set()
+    repeated: list[str] = []
+    for column in columns:
+        if column in seen and column in wanted and column not in repeated:
+            repeated.append(column)
+        seen.add(column)
+    return _Layout(
+        columns=columns, keypoints=tuple(names), scored=scored, duplicates=tuple(repeated)
+    )
 
 
 def _header_of(path: Path) -> _Layout | None:
@@ -133,9 +148,15 @@ class AniposeReader(SessionReader):
             return []
         sessions = tuple(
             SessionCandidate(
-                session_id=default_session_id(path, is_file=True), source=path, files=(path,)
+                session_id=default_session_id(path, is_file=True),
+                source=path,
+                files=(path,),
+                warnings=tuple(
+                    f"duplicate column {name}: the file will be refused when read"
+                    for name in layout.duplicates
+                ),
             )
-            for path, _ in found
+            for path, layout in found
         )
         layouts = [layout for _, layout in found]
         evidence = (
@@ -194,7 +215,9 @@ def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
     return with_keypoint_choices(AniposeReader.parameters, [lay.keypoints for lay in layouts])
 
 
-def _not_a_pose_3d_file(path: Path) -> ImportError_:
+def _not_a_pose_3d_file(path: Path) -> DataValidationError:
+    if path.is_file() and header_too_long(path, 1):
+        return header_too_long_error(path, "Anipose pose-3d")
     return _error(
         "ANIPOSE_NOT_A_POSE_3D_FILE",
         f"{path} is not an Anipose pose-3d table.",
@@ -205,6 +228,13 @@ def _not_a_pose_3d_file(path: Path) -> ImportError_:
 
 
 def _read_table(path: Path, layout: _Layout) -> pd.DataFrame:
+    if layout.duplicates:
+        raise _error(
+            "ANIPOSE_DUPLICATE_COLUMN",
+            f"{path.name}: Anipose columns appear more than once ({', '.join(layout.duplicates)}).",
+            "Each keypoint needs exactly one x, one y and one z column; re-export it from Anipose.",
+            str(path),
+        )
     try:
         text = path.read_bytes().decode("utf-8-sig", errors="strict")
         df = pd.read_csv(io.StringIO(text), dtype=str)

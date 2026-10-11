@@ -273,7 +273,8 @@ def test_a_legacy_pixel_entry_is_not_printed_as_none() -> None:
         engine.check_native_refs([_ref("p2", None)])
     message = str(info.value)
     assert info.value.code == "NATIVE_3D_MIXED"
-    assert "'p2' is a pixel-tracked session," in message and "None" not in message
+    assert "'p2' is not a native 3-D file (no native reader recognised it)" in message
+    assert "None" not in message
 
 
 def test_native_refused_in_a_fused_3d_project() -> None:
@@ -680,3 +681,16 @@ def test_the_library_log_record_keeps_the_neutral_text(
     with caplog.at_level(logging.WARNING, logger="track2data.api"):
         engine.compute_metrics(_native_psess(engine))
     assert any(NEEDS_WATER_COLUMN_REASON in r.getMessage() for r in caplog.records)
+
+
+def test_undetected_folder_into_a_native_project_message() -> None:
+    engine = Engine(_manifest([_ref("n1")], calibration=SESSION_CM))
+    with pytest.raises(ImportError_) as info:
+        engine.check_native_refs([_ref("p2", None)])
+    message = str(info.value)
+    assert info.value.code == "NATIVE_3D_MIXED"
+    assert "'p2' is not a native 3-D file (no native reader recognised it)" in message
+    assert "pixel-tracked" not in message.split("and this project")[0]
+    with pytest.raises(ImportError_) as info:
+        engine.check_native_refs([_ref("p3", "deeplabcut")])
+    assert "'p3' is a pixel-tracked session (deeplabcut)" in str(info.value)

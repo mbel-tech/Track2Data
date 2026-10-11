@@ -70,13 +70,18 @@ def _refuse_3d_sensitivity(engine: Engine) -> None:
 # ── CLI group ─────────────────────────────────────────────────────────────────
 
 
-class _CliFormatter(logging.Formatter):
-    """Formats a record as usual, then words the availability reasons for the command line."""
+class _ReasonFormatter(logging.Formatter):
+    """Wraps a handler's formatter: formats a record as it did, then words the availability
+    reasons for the command line."""
+
+    def __init__(self, inner: logging.Formatter | None = None) -> None:
+        super().__init__()
+        self._inner = inner or logging.Formatter()
 
     def format(self, record: logging.LogRecord) -> str:
         from track2data.metrics.availability import reason_for_cli
 
-        return reason_for_cli(super().format(record))
+        return reason_for_cli(self._inner.format(record))
 
 
 @click.group()
@@ -86,7 +91,6 @@ def cli(verbose: bool) -> None:
     """Track2Data — headless pipeline runner."""
     level = logging.DEBUG if verbose else logging.INFO
     root = logging.getLogger()
-    before = list(root.handlers)
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
@@ -95,8 +99,8 @@ def cli(verbose: bool) -> None:
     # The console says "calibration settings", not "Calibration page" (there is none here); the
     # library's own log text, the README and the Metrics screen stay as they are.
     for handler in root.handlers:
-        if handler not in before and handler.formatter is not None:
-            handler.setFormatter(_CliFormatter(handler.formatter._fmt, handler.formatter.datefmt))
+        if not isinstance(handler.formatter, _ReasonFormatter):
+            handler.setFormatter(_ReasonFormatter(handler.formatter))
 
 
 # ── run ───────────────────────────────────────────────────────────────────────

@@ -40,7 +40,12 @@ from track2data.readers.native3d import (
     with_keypoint_choices,
 )
 from track2data.readers.params import ReaderParameter, resolve_options
-from track2data.readers.peek import Peeker, read_header_lines
+from track2data.readers.peek import (
+    Peeker,
+    header_too_long,
+    header_too_long_error,
+    read_header_lines,
+)
 
 _AXES = ("x", "y", "z")
 
@@ -142,9 +147,15 @@ class DeepLabCut3DReader(SessionReader):
             return []
         sessions = tuple(
             SessionCandidate(
-                session_id=default_session_id(path, is_file=True), source=path, files=(path,)
+                session_id=default_session_id(path, is_file=True),
+                source=path,
+                files=(path,),
+                warnings=tuple(
+                    f"duplicate column {bp} {axis}: the file will be refused when read"
+                    for bp, axis in layout.duplicates
+                ),
             )
-            for path, _ in found
+            for path, layout in found
         )
         evidence = (
             f"{len(found)} file(s) with a DeepLabCut 3-D header "
@@ -201,7 +212,9 @@ def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
     return with_keypoint_choices(DeepLabCut3DReader.parameters, [lay.keypoints for lay in layouts])
 
 
-def _not_a_dlc3d_file(path: Path) -> ImportError_:
+def _not_a_dlc3d_file(path: Path) -> DataValidationError:
+    if path.is_file() and header_too_long(path, 3):
+        return header_too_long_error(path, "DeepLabCut 3-D")
     return _error(
         "DLC3D_NOT_A_3D_FILE",
         f"{path} is not a DeepLabCut 3-D table.",
