@@ -13,6 +13,7 @@ from track2data.calibration.water_column import apply_water_column
 from track2data.core.models import (
     CalibrationConfig,
     GapFillCfg,
+    JumpCfg,
     PreprocessConfig,
     Session,
     VideoInfo,
@@ -218,3 +219,20 @@ def test_fuse_refuses_native_3d_sessions() -> None:
         target.session = target.session.model_copy(update={"has_pixel_frame": False})
         with pytest.raises(FusionError, match="native 3-D sessions have no views to fuse"):
             fuse(top, side, pair, same_video=False)
+
+
+def test_a_replaced_jump_also_blanks_z() -> None:
+    n = 40
+    session = _session_z(None, n)
+    xy = np.zeros((n, 1, 2))
+    xy[:, 0, 0] = np.arange(n) * 0.1 + 0.05 * np.sin(np.arange(n) * 1.7)
+    xy[:, 0, 1] = 0.05 * np.cos(np.arange(n) * 2.3)
+    xy[20, 0] = (500.0, 500.0)  # a glitch far beyond any plausible step
+    session.raw_xy = xy
+    config = PreprocessConfig(jump=JumpCfg(method="sd_multiple", sd_mult=3.0))
+    out = run(session, config)
+    assert out.jump_replaced is not None and out.jump_replaced[20, 0]
+    assert out.z is not None
+    assert np.isnan(out.z[20, 0])
+    assert np.isfinite(out.z[10, 0]) and out.z[10, 0] == session.raw_z[10, 0]
+    assert session.raw_z[20, 0] == 120.0  # the session's own array is untouched

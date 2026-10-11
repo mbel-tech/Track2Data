@@ -139,6 +139,10 @@ def run(
         xy, config.jump, velocity_threshold_px_frame=session.velocity_threshold_px_frame
     )
     jump_replaced = _replaced_mask(before_jumps, xy)
+    if z_rows is not None:
+        # a triangulation glitch is 3-D: the replaced position has no trustworthy z either, and
+        # a 3-D step needs all three coordinates
+        z_rows[jump_replaced] = np.nan
     report.steps.append(step)
 
     # 3. Identity-switch correction

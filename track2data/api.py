@@ -599,7 +599,8 @@ class Engine:
         if pixels and native_before:
             first = pixels[0]
             raise ImportError_(
-                f"Session {first.session_id!r} is a pixel-tracked session ({first.reader}), "
+                f"Session {first.session_id!r} is a pixel-tracked session"
+                f"{f' ({first.reader})' if first.reader else ''}, "
                 f"and this project holds native 3-D sessions ({', '.join(native_before)})",
                 code="NATIVE_3D_MIXED",
                 subject=first.session_id,

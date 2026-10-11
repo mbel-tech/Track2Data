@@ -267,6 +267,15 @@ def test_native_into_pixel_project_and_back_are_refused() -> None:
     assert "'p1'" in message and "native 3-D" in message and "pixel" in message
 
 
+def test_a_legacy_pixel_entry_is_not_printed_as_none() -> None:
+    engine = Engine(_manifest([_ref("n1")], calibration=SESSION_CM))
+    with pytest.raises(ImportError_) as info:
+        engine.check_native_refs([_ref("p2", None)])
+    message = str(info.value)
+    assert info.value.code == "NATIVE_3D_MIXED"
+    assert "'p2' is a pixel-tracked session," in message and "None" not in message
+
+
 def test_native_refused_in_a_fused_3d_project() -> None:
     engine = Engine(_manifest([_ref("n1")], dimension="3d"))
     with pytest.raises(ImportError_) as info:
