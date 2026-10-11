@@ -71,9 +71,8 @@ NEEDS_WATER_COLUMN_REASON = (
     "needs the water column (surface and floor z) on the Calibration page"
 )
 #: The same reason as the command line says it (there is no Calibration page there).
-_WATER_COLUMN_CLI_REASON = (
-    "needs the water column (surface and floor z) on the calibration settings "
-    "(`calibration.water_column` in the project)"
+_WATER_COLUMN_CLI_REASON = NEEDS_WATER_COLUMN_REASON.replace(
+    "Calibration page", "calibration settings (`calibration.water_column` in the project)"
 )
 
 

@@ -70,17 +70,33 @@ def _refuse_3d_sensitivity(engine: Engine) -> None:
 # ── CLI group ─────────────────────────────────────────────────────────────────
 
 
+class _CliFormatter(logging.Formatter):
+    """Formats a record as usual, then words the availability reasons for the command line."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        from track2data.metrics.availability import reason_for_cli
+
+        return reason_for_cli(super().format(record))
+
+
 @click.group()
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable DEBUG-level logging.")
 def cli(verbose: bool) -> None:
     """Track2Data — headless pipeline runner."""
     level = logging.DEBUG if verbose else logging.INFO
+    root = logging.getLogger()
+    before = list(root.handlers)
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
         datefmt="%H:%M:%S",
     )
+    # The console says "calibration settings", not "Calibration page" (there is none here); the
+    # library's own log text, the README and the Metrics screen stay as they are.
+    for handler in root.handlers:
+        if handler not in before and handler.formatter is not None:
+            handler.setFormatter(_CliFormatter(handler.formatter._fmt, handler.formatter.datefmt))
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -258,6 +274,7 @@ def list_metrics(level: str | None) -> None:
         click.echo(
             f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {view:<{view_w}}  {label}"
         )
+    click.echo()
     click.echo(
         "Availability also depends on the project (3-D data, cm scale, pixel frame, number of "
         "animals): run `track2data validate PROJECT` to see what a project will skip."

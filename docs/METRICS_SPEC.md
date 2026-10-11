@@ -649,6 +649,8 @@ info-button modal (§6).
 
 ### 4.4 Cohesion & collective motion
 
+Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availability note under 4.3.
+
 #### GL-3 — Polarisation
 
 | Field | Value |
@@ -849,6 +851,8 @@ info-button modal (§6).
 | **Supporting references** | Pitcher 1973, Anim. Behav. 21(4):673-686 (the three-dimensional structure of schools in the minnow, Phoxinus phoxinus) (DOI: 10.1016/S0003-3472(73)80091-0); Krause & Ruxton 2002, Living in Groups (Oxford University Press) (DOI: 10.1093/oso/9780198508175.001.0001) |
 
 ### 4.5 Identity-free variants
+
+Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availability note under 4.3.
 
 `Metric.requires_identity` is not documentation: `Engine.compute_metrics`
 refuses to compute a ❌ metric for a session that was tracked without
