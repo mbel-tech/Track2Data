@@ -661,9 +661,8 @@ def add(
         }
     )
     if allow_pickle and not manifest.security.allow_pickle_trajectories:
-        updated = updated.model_copy(
-            update={"security": manifest.security.model_copy(update={"allow_pickle_trajectories": True})}
-        )
+        trusted = manifest.security.model_copy(update={"allow_pickle_trajectories": True})
+        updated = updated.model_copy(update={"security": trusted})
         click.echo(
             "[warn] --allow-pickle: this project may now load pickled trajectory files, which "
             "executes code from the file. Only add data you trust.",
