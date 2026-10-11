@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 from track2data.calibration.session_unit import session_scale
 from track2data.calibration.water_column import parse_water_column
 from track2data.core.models import SceneConfig, WaterColumn
-from track2data.readers.native3d import manifest_native_3d
+from track2data.readers.native3d import NATIVE_3D_READERS, manifest_native_3d
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.mode_banner import ModeBanner
 
@@ -56,6 +56,10 @@ _IDT_INFO = (
 _OTHER_INFO = (
     "Only idtracker.ai records a calibration. For this tracker's files, Session calibration "
     'uses the scale you gave when importing them ("Scale (pixels per cm)").'
+)
+_NATIVE_INFO = (
+    "Native 3-D files are already in physical units. Track2Data converted them to the project's "
+    "unit when reading them, so Session calibration is the mode to use."
 )
 _NO_SCALE_TIP = (
     "None of these sessions carries a calibration. idtracker.ai sessions record one in the "
@@ -612,6 +616,9 @@ class CalibrationScreen(QWidget):
             all_facts.append(facts)
             if facts is None:
                 text = f"{ref.session_id} — checking…"
+            elif facts.reader in NATIVE_3D_READERS:
+                unit = self._store.manifest.calibration.length_unit_label
+                text = f"{ref.session_id} — in {unit} (converted when read)"
             elif (scale := self._scale_of(facts)) is not None:
                 many = len(facts.calibration_ratios)
                 how = (
@@ -628,8 +635,13 @@ class CalibrationScreen(QWidget):
 
         known = [f for f in all_facts if f is not None]
         has_idt = any(_is_idtrackerai(f.reader) for f in known)
-        has_other = any(not _is_idtrackerai(f.reader) for f in known)
-        if has_other and not has_idt:
+        has_native = any(f.reader in NATIVE_3D_READERS for f in known)
+        has_other = any(
+            not _is_idtrackerai(f.reader) and f.reader not in NATIVE_3D_READERS for f in known
+        )
+        if has_native and not has_idt and not has_other:
+            self._session_info.setText(_NATIVE_INFO)
+        elif has_other and not has_idt:
             self._session_info.setText(_OTHER_INFO)
         elif has_other:
             self._session_info.setText(_IDT_INFO + " " + _OTHER_INFO)

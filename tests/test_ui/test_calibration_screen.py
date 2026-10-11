@@ -456,3 +456,34 @@ def test_measure_on_frame_passes_the_sessions_panel_to_the_ruler(
     qtbot.addWidget(screen)
     screen._measure_btn.click()
     assert seen["crop"] == panel
+
+
+def test_native_3d_sessions_are_described_as_converted_not_as_a_pixel_scale(
+    qtbot, tmp_path: Path
+) -> None:
+    from track2data.core.models import SessionRef
+    from ui.calibration_screen import _NATIVE_INFO, CalibrationScreen
+    from ui.store.session_facts import SessionFacts
+
+    store = _make_store(tmp_path)
+    store.update_sessions(
+        [
+            SessionRef(
+                session_id="fish", folder=tmp_path / "a", sha256="", reader="anipose",
+                reader_options={"fps": 25.0, "unit": "mm", "target_unit": "cm"},
+            )
+        ]
+    )
+    store._session_facts["fish"] = SessionFacts(
+        session_id="fish", reader="anipose", fps=25.0, n_frames=100, n_animals=1,
+        width_px=0, height_px=0, has_stable_identities=True,
+        track_wo_identities=False, idtrackerai_version=None,
+        length_unit=1.0, setup_points=None, roi_list=None, has_body_length=False,
+        background_image_path=None,
+    )
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+    rows = [screen._readiness_list.item(i).text() for i in range(screen._readiness_list.count())]
+    assert rows == ["fish — in cm (converted when read)"]
+    assert screen._session_info.text() == _NATIVE_INFO
+    assert "pixels per cm" not in screen._session_info.text()

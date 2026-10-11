@@ -594,20 +594,40 @@ class Engine:
         )
         if natives and (pixel_before or pixels):
             first = natives[0]
-            others = [*pixel_before, *(f.session_id for f in pixels)]
+            others = [
+                *((r.session_id, r.reader) for r in existing if r.reader not in NATIVE_3D_READERS),
+                *((f.session_id, f.reader) for f in pixels),
+            ]
+            tracked = [i for i, reader in others if reader]
+            unread = [i for i, reader in others if not reader]
+            parts: list[str] = []
+            if tracked:
+                parts.append(
+                    f"{', '.join(repr(o) for o in tracked)} pixel-tracked "
+                    f"({'is' if len(tracked) == 1 else 'are'} in this project or added with it)"
+                )
+            if unread:
+                parts.append(
+                    f"{', '.join(repr(o) for o in unread)} "
+                    f"{'is' if len(unread) == 1 else 'are'} not a native 3-D file "
+                    "(no native reader recognised it)"
+                )
             raise ImportError_(
                 f"Session {first.session_id!r} is a native 3-D session ({first.reader}), and "
-                f"{', '.join(repr(o) for o in others)} pixel-tracked "
-                f"({'is' if len(others) == 1 else 'are'} in this project or added with it)",
+                + " and ".join(parts),
                 code="NATIVE_3D_MIXED",
                 subject=first.session_id,
                 remediation=remedy,
             )
         if pixels and native_before:
             first = pixels[0]
+            what = (
+                f"is a pixel-tracked session ({first.reader})"
+                if first.reader
+                else "is not a native 3-D file (no native reader recognised it)"
+            )
             raise ImportError_(
-                f"Session {first.session_id!r} is a pixel-tracked session"
-                f"{f' ({first.reader})' if first.reader else ''}, "
+                f"Session {first.session_id!r} {what}, "
                 f"and this project holds native 3-D sessions ({', '.join(native_before)})",
                 code="NATIVE_3D_MIXED",
                 subject=first.session_id,
@@ -1412,6 +1432,31 @@ class Engine:
             return parts[0] if parts else pd.DataFrame()
         return pd.concat(non_empty, ignore_index=True)
 
+    def _with_whole_session_z_speed(
+        self, psess: PreprocessedSession, skipped: Any
+    ) -> PreprocessedSession:
+        """*psess* with ``z_speed`` set from the whole session's Z, when a metric needs it.
+
+        Runs before any window is cut, so a binned run slices the series with the session (as it
+        does the kinematics) instead of re-estimating the derivative inside each bin. Only when a
+        selected, not skipped metric has ``uses_kinematics_cfg`` (IL-17) and the session has a Z
+        and a cm scale (fused and native 3-D alike); otherwise *psess* is returned unchanged.
+        The caller's session is not modified.
+        """
+        from track2data.metrics import get
+        from track2data.metrics.geometry3d import vertical_speed
+
+        sel = self._manifest.metrics
+        wanted = False
+        for mid in (*sel.individual, *sel.group, *sel.zone):
+            cls = get(mid)
+            if cls is not None and cls.uses_kinematics_cfg and mid not in skipped:
+                wanted = True
+        if not wanted:
+            return psess
+        vz = vertical_speed(psess, self._manifest.preprocess.kinematics)
+        return psess if vz is None else dataclasses.replace(psess, z_speed=vz)
+
     def _log_depth_scale_skip(self, metric_id: str, reason: str, session_id: str) -> None:
         """Log (or, inside :meth:`_aggregated_skip_log`, tally) one depth-scale metric skip."""
         if self._skip_tally is not None:
@@ -1530,6 +1575,8 @@ class Engine:
                 )
             for mid in sorted(depth_ids):
                 self._log_depth_scale_skip(mid, view_skipped[mid], psess.session_id)
+
+        psess = self._with_whole_session_z_speed(psess, skipped)
 
         bin_seconds = self._bin_seconds()
         windows = None

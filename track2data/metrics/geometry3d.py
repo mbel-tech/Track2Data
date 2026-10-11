@@ -11,7 +11,27 @@ from __future__ import annotations
 
 import numpy as np
 
-from track2data.core.models import PreprocessedSession
+from track2data.core.models import KinematicsCfg, PreprocessedSession
+
+
+def vertical_speed(psess: PreprocessedSession, kin_cfg: KinematicsCfg | dict) -> np.ndarray | None:
+    """``(n_frames, n_animals)`` vertical speed (cm/s, unsigned) of the session's Z, or None.
+
+    The single implementation of IL-17's vertical part: the pipeline's own derivative
+    (``compute_kinematics``) applied to ``[Z, 0]`` (Z from :func:`vertical_cm`), so the speed is
+    ``|vz|``, NaN wherever Z is or the estimator has no value. The Engine calls it once on the
+    whole session and slices the result with the windows; ``Speed3D`` calls it only when the
+    session carries no precomputed series. None without a Z or without the cm scale.
+    """
+    from track2data.core.models import KinematicsCfg
+    from track2data.preprocess.kinematics import compute_kinematics
+
+    z = vertical_cm(psess)
+    if z is None or psess.px_per_cm is None:
+        return None
+    kcfg = KinematicsCfg.model_validate(kin_cfg or {})
+    zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
+    return compute_kinematics(zz, psess.fps, kcfg).speed_px_s
 
 
 def vertical_cm(psess: PreprocessedSession) -> np.ndarray | None:

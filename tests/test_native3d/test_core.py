@@ -126,6 +126,15 @@ def test_slice_psess_slices_z() -> None:
     np.testing.assert_array_equal(sliced.z[:, 0], [2.0, 3.0, 4.0])
 
 
+def test_slice_psess_slices_z_speed() -> None:
+    psess = _psess_with_z(np.arange(10.0))
+    psess.z_speed = np.arange(10.0).reshape(-1, 1) * 2.0
+    sliced = slice_psess(psess, 2, 5)
+    assert sliced.z_speed is not None
+    np.testing.assert_array_equal(sliced.z_speed[:, 0], [4.0, 6.0, 8.0])
+    assert slice_psess(_psess_with_z(np.arange(10.0)), 2, 5).z_speed is None
+
+
 def _native(z_value, **kw):
     psess = _make_psess(_make_session(n_frames=3, n_animals=1))
     psess.xy = np.tile(np.array([80.0, 40.0]), (3, 1, 1))

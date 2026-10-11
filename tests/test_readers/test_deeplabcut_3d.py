@@ -288,3 +288,32 @@ def test_display_name_is_exported_provenance_and_must_not_change() -> None:
     # display_name is exported as source_software (README, manifest.json, PROJECT_SUMMARY.md,
     # run log); changing it would change the exports of existing native DLC-3D projects.
     assert DeepLabCut3DReader.display_name == "DeepLabCut 3D (triangulated CSV)"
+
+
+def test_overlong_header_read_says_so(tmp_path: Path) -> None:
+    from track2data.readers.peek import MAX_HEADER_BYTES
+
+    path = tmp_path / "wide.csv"
+    path.write_text("scorer," + "s," * (9 * 1024 * 1024 // 2) + "\nbodyparts,a\ncoords,x\n0,1\n")
+    assert path.stat().st_size > MAX_HEADER_BYTES
+    assert not DeepLabCut3DReader.detect(path)  # detection stays False
+    with pytest.raises(Track2DataError) as err:
+        read(path)
+    assert err.value.code == "HEADER_TOO_LONG"
+    assert "wide.csv" in str(err.value) and "8 MB" in str(err.value)
+
+
+def test_discover_warns_about_a_duplicate_column(tmp_path: Path) -> None:
+    path = tmp_path / "d.csv"
+    path.write_text(
+        "scorer,s,s,s,s\nbodyparts,a,a,a,a\ncoords,x,y,z,x\n0,1,2,3,4\n1,2,3,4,5\n"
+    )
+    (group,) = scan([tmp_path]).groups
+    (detection,) = group.detections
+    (candidate,) = detection.sessions
+    assert candidate.warnings == ("duplicate column a x: the file will be refused when read",)
+    other = tmp_path / "clean"
+    other.mkdir()
+    write_dlc3d_csv(other / "c.csv", KPS, 3)
+    (group,) = scan([other]).groups
+    assert group.detections[0].sessions[0].warnings == ()

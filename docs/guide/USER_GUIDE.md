@@ -328,6 +328,13 @@ before relying on them.
   other two axes become the horizontal plane in cyclic order after the vertical one (`z`: x, y; `x`: y, z;
   `y`: z, x), which keeps the plane right-handed seen from above, so headings and turn directions have the
   same sense whichever axis the file calls up. `flip` reverses the vertical axis only.
+Figure 4 shows the confirm step for an Anipose file.
+
+<figure>
+<img src="images/02-sessions-confirm-native-3d.png" alt="The confirm step for an Anipose file, with the frame rate, unit, project length unit and vertical axis options">
+<figcaption><b>Figure 4.</b> The confirm step for an Anipose file: Frame rate and Unit of the coordinates in the file are required, the rest are optional.</figcaption>
+</figure>
+
 - **Units are converted when the file is read**, from `unit` to `target_unit`. The first native file
   you add sets the project's calibration for you: **Session calibration**, the unit label set to the
   target unit and marked confirmed. Files added later must use the same target unit; a different one
@@ -356,12 +363,12 @@ when it is added, so one unreadable file stops the add.
 
 ## 3. Calibration
 
-Calibration decides which units distances and speeds are reported in. Figure 4 shows the default,
+Calibration decides which units distances and speeds are reported in. Figure 5 shows the default,
 **Body length** mode.
 
 <figure>
 <img src="images/03-calibration-body-length.png" alt="Body length calibration">
-<figcaption><b>Figure 4.</b> Calibration in Body length mode, with a summary of the body lengths read from your sessions.</figcaption>
+<figcaption><b>Figure 5.</b> Calibration in Body length mode, with a summary of the body lengths read from your sessions.</figcaption>
 </figure>
 
 | Mode | Use it when | Reports |
@@ -385,7 +392,7 @@ you. A third click starts the measurement over.
 
 <figure>
 <img src="images/03-calibration-custom.png" alt="Custom calibration">
-<figcaption><b>Figure 5.</b> Custom calibration: click both ends of an object of known length to fill in the scale.</figcaption>
+<figcaption><b>Figure 6.</b> Custom calibration: click both ends of an object of known length to fill in the scale.</figcaption>
 </figure>
 
 If a mode is incomplete (no scale, or an unconfirmed unit) the stage shows ✗ and **Next** is
@@ -394,11 +401,11 @@ disabled until you fix it.
 ### Session calibration: where each tracker's scale comes from
 
 Only some trackers record a scale. The **ⓘ** button beside the description opens a short note on
-what each tracker in your project records, with links to its documentation. Figure 6 shows the mode.
+what each tracker in your project records, with links to its documentation. Figure 7 shows the mode.
 
 <figure>
 <img src="images/03-calibration-session.png" alt="Session calibration">
-<figcaption><b>Figure 6.</b> Session calibration: the unit, the choice between several calibrations, the confirmation and each session's readiness.</figcaption>
+<figcaption><b>Figure 7.</b> Session calibration: the unit, the choice between several calibrations, the confirmation and each session's readiness.</figcaption>
 </figure>
 
 | Tracker | Where the scale comes from |
@@ -452,10 +459,18 @@ water column IL-15 is greyed out ("needs the water column (surface and floor z) 
 page"); IL-16 and IL-17 do not need it, because z is already absolute; they use the column only to leave out
 samples outside it.
 
+Figure 8 shows the fields.
+
+<figure>
+<img src="images/03-calibration-water-column.png" alt="The Calibration screen of a native 3-D project, with the Water column group below the per-session readiness list">
+<figcaption><b>Figure 8.</b> The Water column group on the Calibration screen of a native 3-D project: Surface z and Floor z in the project's length unit.</figcaption>
+</figure>
+
 A native 3-D project must stay in **Session calibration** with the unit label equal to the target
 unit and confirmed; the project is blocked otherwise (`NATIVE_3D_NEEDS_SESSION_CALIBRATION`, or a
 message asking you to confirm the unit or to match the sessions' unit). The mode is set for you when
-you add the first file, and nothing else (import, validate, run) changes it.
+you add the first file, and nothing else (import, validate, run) changes it. The readiness list shows each native file as "in cm (converted when read)" (with your project unit)
+instead of a pixel scale.
 
 ## 4. Zones (optional)
 
@@ -468,7 +483,7 @@ one. You can:
 
 <figure>
 <img src="images/04-zones.png" alt="Zones list">
-<figcaption><b>Figure 7.</b> The zone list, with the import and load buttons.</figcaption>
+<figcaption><b>Figure 9.</b> The zone list, with the import and load buttons.</figcaption>
 </figure>
 
 ### Drawing zones
@@ -478,7 +493,7 @@ with their names.
 
 <figure>
 <img src="images/04-zones-canvas.png" alt="Zone canvas">
-<figcaption><b>Figure 8.</b> The zone canvas: saved zones are shaded and named, validator landmarks are blue.</figcaption>
+<figcaption><b>Figure 10.</b> The zone canvas: saved zones are shaded and named, validator landmarks are blue.</figcaption>
 </figure>
 
 | Tool | How |
@@ -505,7 +520,7 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 
 <figure>
 <img src="images/05-metadata.png" alt="Metadata screen">
-<figcaption><b>Figure 9.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
+<figcaption><b>Figure 11.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
 </figure>
 
 1. **Load metadata CSV…**. The first rows are previewed.
@@ -550,7 +565,7 @@ step has an **Enabled** box; the raw data is never overwritten.
 
 <figure>
 <img src="images/06-preprocessing.png" alt="Preprocessing screen">
-<figcaption><b>Figure 10.</b> The Preprocessing screen with the default settings.</figcaption>
+<figcaption><b>Figure 12.</b> The Preprocessing screen with the default settings.</figcaption>
 </figure>
 
 | Step | What it does |
@@ -584,7 +599,7 @@ went, not a measurement:
 
 <figure>
 <img src="images/06-preprocessing-identity-switch.png" alt="Identity switch correction">
-<figcaption><b>Figure 11.</b> The identity switch correction options (experimental, off by default).</figcaption>
+<figcaption><b>Figure 13.</b> The identity switch correction options (experimental, off by default).</figcaption>
 </figure>
 
 **Identity switch correction is experimental and off by default.** It reassigns identities from
@@ -601,7 +616,7 @@ Choose what to compute. Metrics are grouped on three tabs: **Individual** (per a
 
 <figure>
 <img src="images/07-metrics.png" alt="Metrics screen">
-<figcaption><b>Figure 12.</b> The Metrics screen, with search, presets and the three metric tabs.</figcaption>
+<figcaption><b>Figure 14.</b> The Metrics screen, with search, presets and the three metric tabs.</figcaption>
 </figure>
 
 - **Search** filters all tabs by name or ID (`speed`, `IL-2`). The line beneath says which tabs
@@ -635,7 +650,7 @@ zone assignment, metrics, export.
 
 <figure>
 <img src="images/08-processing.png" alt="Processing screen">
-<figcaption><b>Figure 13.</b> The Processing screen: one row per session, with status and duration.</figcaption>
+<figcaption><b>Figure 15.</b> The Processing screen: one row per session, with status and duration.</figcaption>
 </figure>
 
 - The table shows each session's status and duration. A failed session is marked *Failed* and does
@@ -758,8 +773,9 @@ keep measuring in the top-view plane.
   frames where the vertical speed exists it is at least IL-2's cm/s; IL-16 is at least IL-1 over the
   steps where the depth is also valid; GL-16 is at least GL-1 for a frame where both exist. Over
   whole sessions these do not have to hold, because the 3-D metrics leave out frames the 2-D ones keep.
-- **Time bins** work as for the 2-D metrics (each bin has its own value). In a binned run the vertical
-  speed is estimated inside each bin.
+- **Time bins** work as for the 2-D metrics (each bin has its own value). The vertical speed is
+  estimated once on the whole session and cut into the bins, like IL-2's speed, so a bin's first and
+  last frames carry the whole-session value.
 - **Limits.** Depth comes from a side camera at right angles to the top camera; there is no
   correction for refraction or parallax. Vertical speed as its own metric, 3-D inter-individual
   distance and cohesion are not included.
@@ -806,12 +822,12 @@ Choose a session and **Load trajectories** (it reuses the cache after a run). Th
 
 <figure>
 <img src="images/09-preview-trajectories.png" alt="Trajectories">
-<figcaption><b>Figure 14.</b> Trajectories with Raw + processed shown: the dashed grey line is a tracking jump that was removed.</figcaption>
+<figcaption><b>Figure 16.</b> Trajectories with Raw + processed shown: the dashed grey line is a tracking jump that was removed.</figcaption>
 </figure>
 
 - Drag the slider, or press ▶, to move through time. **Trail** sets how many past frames are drawn.
 - **Show ▸ Raw + processed** draws the raw path as a dashed grey line next to the processed one, so
-  you can see exactly what gap filling, jump removal and smoothing changed. In Figure 14 the
+  you can see exactly what gap filling, jump removal and smoothing changed. In Figure 16 the
   dashed line is a tracking jump that was removed.
 - **Zones** shows or hides the saved zones. The mouse wheel zooms.
 
@@ -824,7 +840,7 @@ Tick **Occupancy heatmap** to see where the animals spent their time (red = most
 
 <figure>
 <img src="images/09-preview-heatmap.png" alt="Heatmap">
-<figcaption><b>Figure 15.</b> The occupancy heatmap.</figcaption>
+<figcaption><b>Figure 17.</b> The occupancy heatmap.</figcaption>
 </figure>
 
 ### Diagnostics
@@ -835,7 +851,7 @@ changed.
 
 <figure>
 <img src="images/09-preview-diagnostics.png" alt="Diagnostics">
-<figcaption><b>Figure 16.</b> The Diagnostics tab.</figcaption>
+<figcaption><b>Figure 18.</b> The Diagnostics tab.</figcaption>
 </figure>
 
 ### Metrics
@@ -848,7 +864,7 @@ Tick the formats you want, choose where to write them, and press **Export**.
 
 <figure>
 <img src="images/10-export.png" alt="Export screen">
-<figcaption><b>Figure 17.</b> The Export screen, with the file receipt after an export.</figcaption>
+<figcaption><b>Figure 19.</b> The Export screen, with the file receipt after an export.</figcaption>
 </figure>
 
 1. Tick the formats you want.
@@ -878,7 +894,7 @@ After an export, the panel at the bottom gives ready-to-paste code for the files
 
 <figure>
 <img src="images/10-export-code.png" alt="Code snippets">
-<figcaption><b>Figure 18.</b> Ready-to-paste R and Python snippets for the files just written.</figcaption>
+<figcaption><b>Figure 20.</b> Ready-to-paste R and Python snippets for the files just written.</figcaption>
 </figure>
 
 See [Understanding the output files](#understanding-the-output-files) for what the columns mean.

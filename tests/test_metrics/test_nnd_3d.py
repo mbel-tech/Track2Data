@@ -200,6 +200,105 @@ def test_nnd3d_zero_animals_and_zero_frames_give_nan_without_warnings() -> None:
         assert row["n_skipped_frames_3d"] == shape[0]
 
 
+# ── Separator rows are not frames; body-length convention follows GL-1 ───────
+
+
+def _fused_with_separator(n_animals: int = 3, nan_real_row: int | None = None):
+    rng = np.random.default_rng(6)
+    pos = rng.uniform(0, 50, (7, n_animals, 3))
+    pos[3] = np.nan
+    if nan_real_row is not None:
+        pos[nan_real_row, 0, 0] = np.nan
+    psess = _fused(pos, body_length_cm=2.0)
+    sep = np.zeros(7, dtype=bool)
+    sep[3] = True
+    psess.separator_mask = sep
+    return psess
+
+
+def test_gl16_does_not_count_a_separator_row_as_skipped() -> None:
+    psess = _fused_with_separator()
+    row = _run(psess).iloc[0]
+    assert row["n_skipped_frames_3d"] == 0
+    # same mean as the session with the separator row cut out
+    psess.separator_mask = None
+    keep = np.arange(7) != 3
+    plain = _fused(
+        np.concatenate([psess.xy[keep] / PX_PER_CM, (psess.depth[keep] * HEIGHT_CM)[..., None]],
+                       axis=-1),
+        body_length_cm=2.0,
+    )
+    assert row["mean_nnd_3d_cm"] == pytest.approx(_run(plain).iloc[0]["mean_nnd_3d_cm"])
+
+
+def test_gl16_counts_real_nan_rows_only() -> None:
+    assert _run(_fused_with_separator(nan_real_row=5)).iloc[0]["n_skipped_frames_3d"] == 1
+
+
+def test_gl16_one_animal_reports_real_rows() -> None:
+    row = _run(_fused_with_separator(n_animals=1)).iloc[0]
+    assert row["n_skipped_frames_3d"] == 6
+
+
+def test_gl16_sessions_without_separators_are_unchanged() -> None:
+    rng = np.random.default_rng(9)
+    pos = rng.uniform(0, 50, (20, 3, 3))
+    psess = _fused(pos, body_length_cm=2.5)
+    pos_cm = np.concatenate([psess.xy / PX_PER_CM, (psess.depth * HEIGHT_CM)[..., None]], axis=-1)
+    from scipy.spatial import cKDTree
+
+    vals = [cKDTree(f).query(f, k=2)[0][:, 1].mean() for f in pos_cm]
+    row = _run(psess).iloc[0]
+    assert psess.separator_mask is None and row["n_skipped_frames_3d"] == 0
+    assert row["mean_nnd_3d_cm"] == pytest.approx(np.mean(vals), rel=1e-12)
+    assert row["mean_nnd_3d_bl"] == pytest.approx(np.mean(vals) / 2.5, rel=1e-12)
+
+
+def test_gl16_bl_matches_gl1_convention() -> None:
+    psess = _fused(_three_fish())
+    psess.body_length_px = np.array([10.0, 0.0, 20.0])
+    row = _run(psess).iloc[0]
+    expected = row["mean_nnd_3d_cm"] / (np.mean([10.0, 0.0, 20.0]) / PX_PER_CM)
+    assert row["mean_nnd_3d_bl"] == pytest.approx(expected, rel=1e-12)
+    for bad in ([0.0, 0.0, 0.0], [np.nan] * 3, [-5.0, 1.0, 1.0]):
+        psess.body_length_px = np.array(bad)
+        assert np.isnan(_run(psess).iloc[0]["mean_nnd_3d_bl"])
+
+
+def test_gl16_bl_is_exactly_the_old_value_for_ordinary_sessions() -> None:
+    rng = np.random.default_rng(11)
+    for px_per_cm in (7.3, 3.17, 11.9):
+        pos = rng.uniform(0, 50, (12, 3, 3))
+        psess = _fused(pos)
+        psess.px_per_cm = px_per_cm
+        for how in ("px", "cm"):
+            lengths = rng.uniform(1.0, 30.0, 3)
+            if how == "px":
+                psess.body_length_px, psess.body_length_cm = lengths, None
+            else:
+                psess.body_length_px, psess.body_length_cm = None, lengths
+            row = _run(psess).iloc[0]
+            old_bl = float(np.nanmean(psess.body_length_in_px() / px_per_cm))  # old formula
+            assert row["mean_nnd_3d_bl"] == row["mean_nnd_3d_cm"] / old_bl
+
+
+def test_gl16_bl_zero_negative_and_inf_lengths_follow_gl1() -> None:
+    psess = _fused(_three_fish())
+    cm = _run(psess).iloc[0]["mean_nnd_3d_cm"]
+    for lengths, mean_px in (([-5.0, 10.0, 20.0], 25.0 / 3), ([np.inf, 1.0, 1.0], np.inf)):
+        psess.body_length_px = np.array(lengths)
+        got = _run(psess).iloc[0]["mean_nnd_3d_bl"]
+        assert got == cm / (mean_px / PX_PER_CM)
+
+
+def test_gl16_all_infinite_lengths_give_gl1s_result() -> None:
+    psess = _fused(_three_fish())
+    psess.body_length_px = np.array([np.inf, np.inf, np.nan])
+    g16 = _run(psess).iloc[0]["mean_nnd_3d_bl"]
+    g1 = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_bl"]
+    assert g16 == g1 == 0.0
+
+
 def test_frac_frames_used_is_the_share_of_frames_with_every_animal_in_3d() -> None:
     psess = _fused(_three_fish(10))
     psess.depth[[2, 7], 1] = np.nan  # two frames lose one fish's depth

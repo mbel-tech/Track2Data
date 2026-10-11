@@ -17,7 +17,7 @@ import pandas as pd
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
-from track2data.metrics.geometry3d import body_length_cm, positions_cm, vertical_cm
+from track2data.metrics.geometry3d import body_length_cm, positions_cm, vertical_speed
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -2021,19 +2021,14 @@ class Speed3D(Metric):
         ``cfg["kinematics"]`` (a ``KinematicsCfg`` or its dict) is the estimator the pipeline
         used; the Engine supplies it, and the default ``KinematicsCfg()`` applies without it.
         """
-        from track2data.core.models import KinematicsCfg
-        from track2data.preprocess.kinematics import compute_kinematics
-
         speed_3d: np.ndarray | None = None
         scale = session.px_per_cm
-        z_cm = vertical_cm(session)  # inside the water column when one is set
-        if z_cm is not None and scale is not None:
-            kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
-            z = z_cm
-            # compute_kinematics differentiates an (n, animals, 2) array; [Z, 0] makes its
-            # speed |vz|, with the second component NaN wherever Z is.
-            zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
-            vz = compute_kinematics(zz, session.fps, kcfg).speed_px_s
+        # The Engine precomputes the whole-session series (sliced with the session); a direct
+        # compute() call estimates it on its own session.
+        vz = session.z_speed
+        if vz is None:
+            vz = vertical_speed(session, (cfg or {}).get("kinematics") or {})
+        if vz is not None and scale is not None:
             vh = session.kinematics.speed_px_s / float(scale)
             speed_3d = np.sqrt(vh**2 + vz**2)  # NaN where either is NaN
 
