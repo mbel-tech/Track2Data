@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 
     from track2data.core.models import PreprocessedSession
 
+#: The vertical columns of the per-frame table (see ``depth_columns``).
+VERTICAL_COLUMNS: tuple[str, ...] = ("z_cm", "depth_fraction", "depth_cm")
+
+
 def depth_columns(psess: PreprocessedSession) -> dict[str, np.ndarray]:
     """``{column: flat values}`` for the vertical columns of *psess*'s per-frame table.
 
