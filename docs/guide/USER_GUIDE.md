@@ -321,7 +321,10 @@ before relying on them.
   `target_unit` (the project's length unit, default `cm`), `keypoint` (which keypoint stands for the
   animal; never an average), `likelihood_cutoff` (Anipose only, applied to the `_score` columns; it
   needs a score for every keypoint, otherwise set it to 0), `vertical_axis` (`x`, `y` or `z`, default
-  `z`: which axis of the file points up), `flip` (tick when it points down) and `keep_skeleton`.
+  `z`: which axis of the file points up), `flip` (tick when it points down) and `keep_skeleton`. The
+  other two axes become the horizontal plane in cyclic order after the vertical one (`z`: x, y; `x`: y, z;
+  `y`: z, x), which keeps the plane right-handed seen from above, so headings and turn directions have the
+  same sense whichever axis the file calls up. `flip` reverses the vertical axis only.
 - **Units are converted when the file is read**, from `unit` to `target_unit`. The first native file
   you add sets the project's calibration for you: **Session calibration**, the unit label set to the
   target unit and marked confirmed. Files added later must use the same target unit; a different one

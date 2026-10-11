@@ -89,11 +89,18 @@ def convert_units(values: np.ndarray, unit: str, target: str) -> np.ndarray:
 
 
 def horizontal_axes(vertical_axis: str) -> tuple[int, int]:
-    """The two file axes that are not vertical, in file order."""
+    """The two file axes that are not vertical, in cyclic order after the vertical one.
+
+    ``z`` gives ``(x, y)``, ``x`` gives ``(y, z)`` and ``y`` gives ``(z, x)``. In that order the
+    first axis crossed with the second is the vertical axis, so the plane is right-handed seen
+    from above: a counterclockwise turn stays one, and the signed headings and turn directions
+    keep their sense whichever axis the file calls vertical. (File order would give ``(x, z)``
+    for ``y``, a mirror image.)
+    """
     if vertical_axis not in AXES:
         raise ValueError(f"vertical_axis must be one of {list(AXES)}, got {vertical_axis!r}")
-    first, second = (i for i in range(3) if AXES[i] != vertical_axis)
-    return first, second
+    up = AXES.index(vertical_axis)
+    return (up + 1) % 3, (up + 2) % 3
 
 
 def union_keypoints(keypoint_sets: Iterable[Sequence[str]]) -> tuple[str, ...]:
