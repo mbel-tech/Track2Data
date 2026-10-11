@@ -155,20 +155,25 @@ class _ImportFact:
     reader: str | None
     native: bool
     unit: str | None
+    vertical_axis: str | None = None
 
     @classmethod
     def of_session(cls, session: Session) -> _ImportFact:
-        from track2data.readers.native3d import NATIVE_3D_READERS
+        from track2data.readers.native3d import DEFAULT_VERTICAL_AXIS, NATIVE_3D_READERS
 
         native = session.reader in NATIVE_3D_READERS or not session.has_pixel_frame
-        return cls(session.session_id, session.reader, native, session.coordinate_unit)
+        attrs = (session.raw_attrs or {}).get("native_3d") or {}
+        axis = str(attrs.get("vertical_axis") or DEFAULT_VERTICAL_AXIS) if native else None
+        return cls(session.session_id, session.reader, native, session.coordinate_unit, axis)
 
     @classmethod
     def of_ref(cls, ref: SessionRef) -> _ImportFact:
-        from track2data.readers.native3d import ref_target_unit
+        from track2data.readers.native3d import ref_target_unit, ref_vertical_axis
 
         unit = ref_target_unit(ref)
-        return cls(ref.session_id, ref.reader, unit is not None, unit)
+        return cls(
+            ref.session_id, ref.reader, unit is not None, unit, ref_vertical_axis(ref)
+        )
 
 
 def _view_note(psess: PreprocessedSession) -> str:
@@ -612,6 +617,28 @@ class Engine:
             return None
         cfg = self._manifest.calibration
         first = natives[0]
+        # One water column serves every session, so they must share the vertical axis it is
+        # entered on (flip may differ: it is compensated per session).
+        from track2data.readers.native3d import ref_vertical_axis
+
+        axes = [
+            (r.session_id, ref_vertical_axis(r))
+            for r in existing
+            if r.reader in NATIVE_3D_READERS
+        ]
+        axes += [(f.session_id, f.vertical_axis) for f in natives]
+        axis_ref = axes[0]
+        for other_id, other_axis in axes[1:]:
+            if other_axis != axis_ref[1]:
+                raise ImportError_(
+                    f"Sessions {axis_ref[0]!r} and {other_id!r} have different vertical axes, "
+                    f"{axis_ref[1]!r} and {other_axis!r}; the project's water column is entered "
+                    "on one axis",
+                    code="NATIVE_3D_AXIS_MISMATCH",
+                    subject=other_id,
+                    remediation=f"Add it again with vertical_axis = {axis_ref[1]!r}, or add the "
+                    "files to projects of their own.",
+                )
         for other in natives[1:]:
             if other.unit != first.unit:
                 raise ImportError_(

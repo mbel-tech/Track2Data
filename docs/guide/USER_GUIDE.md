@@ -325,8 +325,10 @@ before relying on them.
 - **Units are converted when the file is read**, from `unit` to `target_unit`. The first native file
   you add sets the project's calibration for you: **Session calibration**, the unit label set to the
   target unit and marked confirmed. Files added later must use the same target unit; a different one
-  is refused (`NATIVE_3D_UNIT_MISMATCH`, naming both units). The `_cm` column suffix is nominal, as for
-  any project calibrated in another unit; the run's `README.md` names the real unit.
+  is refused (`NATIVE_3D_UNIT_MISMATCH`, naming both units). They must also share the **vertical
+  axis**, because one water column serves every session: a file read with another `vertical_axis` is
+  refused (`NATIVE_3D_AXIS_MISMATCH`, naming both axes); `flip` may differ. The `_cm` column suffix is
+  nominal, as for any project calibrated in another unit; the run's `README.md` names the real unit.
 - **No mixing.** A project holds pixel-tracked sessions or native 3-D sessions, not both, and native
   files cannot join a 3-D (fused) project: the add is refused with `NATIVE_3D_MIXED`, naming the
   session and both kinds.
