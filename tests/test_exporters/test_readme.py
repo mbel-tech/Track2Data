@@ -557,3 +557,74 @@ class TestCameraViewProvenance:
         ReadmeExporter().write(_from(minimal_payload, camera_view="side"), tmp_path)
         data = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
         assert data["run_metadata"]["session_provenance"]["camera_view"] == "side"
+
+
+
+# ── units, user-supplied options, empty identity slots ────────────────────────
+
+
+def _render_readme(payload: ExportPayload, out: Path) -> str:
+    ReadmeExporter().write(payload, out)
+    return (out / "README.md").read_text(encoding="utf-8")
+
+
+def _with_calibration(payload: ExportPayload, mode: str, px_per_cm: float | None = None) -> None:
+    payload.manifest_json = json.dumps(
+        {"calibration": {"mode": mode, "px_per_cm": px_per_cm}, "project_name": "MyProject"}
+    )
+
+
+class TestUnitsNote:
+    def test_bodylength_mode_says_why_the_cm_columns_are_empty(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        _with_calibration(minimal_payload, "bodylength")
+        text = _render_readme(minimal_payload, tmp_path)
+        assert "## Units" in text
+        assert "_cm" in text and "empty" in text and "scalar" in text
+
+    def test_scalar_mode_with_a_scale_has_no_such_note(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        _with_calibration(minimal_payload, "scalar", 12.5)
+        assert "## Units" not in _render_readme(minimal_payload, tmp_path)
+
+
+class TestSuppliedReaderOptions:
+    def test_idtrackerai_readme_lists_options_the_user_gave(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.provenance.reader = "idtrackerai"
+        minimal_payload.provenance.reader_options = {"width_px": 640, "fps": 25.0}
+        text = _render_readme(minimal_payload, tmp_path)
+        assert "fps=25.0" in text and "width_px=640" in text
+        assert "not recorded in the files" in text
+
+    def test_no_options_no_row(self, minimal_payload: ExportPayload, tmp_path: Path) -> None:
+        minimal_payload.provenance.reader = "idtrackerai"
+        assert "not recorded in the files" not in _render_readme(minimal_payload, tmp_path)
+
+
+class TestEmptyIdentitySlots:
+    def test_slots_that_are_almost_all_missing_are_listed(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        n = 20
+        nan = float("nan")
+        minimal_payload.fish_by_frame = pd.DataFrame(
+            {
+                "individual_id": [0] * n + [1] * n + [2] * n,
+                "frame": list(range(n)) * 3,
+                "x_px": [1.0] * n + [nan] * 19 + [1.0] + [nan] * n,
+                "y_px": [1.0] * n + [nan] * 19 + [1.0] + [nan] * n,
+            }
+        )
+        text = _render_readme(minimal_payload, tmp_path)
+        assert "## Identity slots with little data" in text
+        section = text.split("## Identity slots with little data")[1].split("\n## ")[0]
+        assert "| 1 |" in section and "| 2 |" in section and "| 0 |" not in section
+
+    def test_a_well_covered_session_has_no_such_section(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        assert "Identity slots with little data" not in _render_readme(minimal_payload, tmp_path)

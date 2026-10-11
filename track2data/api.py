@@ -2774,7 +2774,7 @@ class Engine:
         session (the cheap ``probe`` path, not a full read): the CLI's ``validate`` runs it,
         the GUI does not on each edit. It reports what ``run`` would fail on for that
         session: a missing video size or frame rate, a pickle without consent, a reader
-        that is not installed. The message carries the error code and its fix.
+        that is not installed. The message carries the error code, subject and fix.
         """
         from track2data.core.errors import Track2DataError
 
@@ -2792,8 +2792,7 @@ class Engine:
                         allow_pickle=allow_pickle,
                     )
             except Track2DataError as exc:
-                fix = f" Fix: {exc.remediation}" if getattr(exc, "remediation", None) else ""
-                issues.append(f"session '{ref.session_id}': {exc}{fix}")
+                issues.append(f"session '{ref.session_id}': {exc}")
             except Exception as exc:  # a reader's own failure is still a reason not to run
                 issues.append(f"session '{ref.session_id}': cannot be read: {exc}")
         return issues
