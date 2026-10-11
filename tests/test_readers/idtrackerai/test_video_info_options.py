@@ -41,7 +41,7 @@ def test_without_options_or_session_json_it_is_still_refused(tmp_path: Path) -> 
     with pytest.raises(DataValidationError) as err:
         read_session(_bare(tmp_path))
     assert err.value.code == "IDT_DICT_MISSING_KEY"
-    assert "option 'fps'" in (err.value.remediation or "")
+    assert "'fps'" in (err.value.remediation or "")
 
 
 def test_session_json_wins_over_options(tmp_path: Path) -> None:

@@ -42,6 +42,7 @@ BUILDERS = {
     ),
     "dlc_3d": lambda r: _write(r / "trial_3d.csv", DLC_3D_MULTI),
     "fictrac": lambda r: _write(r / "fictrac-20240101.dat", FICTRAC),
+    "idtrackerai_flat": lambda r: _write(r / "run1" / "trajectories.h5"),
 }
 
 
@@ -202,3 +203,17 @@ def test_a_wide_multi_animal_3d_table_is_still_named(tmp_path: Path) -> None:
     _write(tmp_path / "wide_3d.csv", "\n".join(rows) + "\n")
     (found,) = scan([tmp_path]).recognised
     assert found.key == "dlc_3d" and found.example.name == "wide_3d.csv"
+
+
+def test_a_flat_idtrackerai_csv_folder_is_named_too(tmp_path: Path) -> None:
+    _write(tmp_path / "run1" / "trajectories_csv" / "trajectories.csv", "x1,y1\n1,2\n")
+    (found,) = scan([tmp_path]).recognised
+    assert found.key == "idtrackerai_flat" and found.count == 1
+    assert "trajectories/" in found.remediation
+
+
+def test_idtrackerai_files_inside_a_trajectories_folder_are_not_named_flat(tmp_path: Path) -> None:
+    """The nested layout is a session the reader claims; it must never be reported as misplaced."""
+    _write(tmp_path / "s1" / "trajectories" / "trajectories.h5")
+    result = scan([tmp_path])
+    assert result.groups and result.recognised == ()
