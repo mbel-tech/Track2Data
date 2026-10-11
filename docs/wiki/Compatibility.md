@@ -1,6 +1,6 @@
 # Compatibility
 
-**Applies to:** Track2Data v0.1.0 and `main` as of 2026-10-09. Reader support changes
+**Applies to:** Track2Data v0.1.0 and `main` as of 2026-10-11. Reader support changes
 between releases; the [changelog](https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md)
 is authoritative.
 

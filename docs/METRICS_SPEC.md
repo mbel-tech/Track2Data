@@ -400,7 +400,7 @@ info-button modal (§6).
 | **Manuscript label** | Vertical position (depth in the water column) |
 | **Level** | Individual; trial summary |
 | **Priority** | Optional |
-| **Inputs** | `PreprocessedSession.xy` (the y column); the water column, derived per session from the main zones (never user-supplied); `px_per_cm` when calibrated |
+| **Inputs** | `PreprocessedSession.xy` (the y column); the water column, derived per session from the main zones, or, for a native 3-D file (Anipose, DeepLabCut 3-D), entered by the user as surface z and floor z on the Calibration page and applied to the absolute z (`depth_extent_source` = `water_column`); `px_per_cm` when calibrated |
 | **Required preprocessing** | Zone assignment is not needed; main-level zones must exist. The project's **camera view must be set to side view** (Calibration screen) or the metric is skipped and the run records why |
 | **Formula** | `T`, `B` = top and bottom image rows of the main zones (`T < B`); `d[t,k] = (y[t,k] − T) / (B − T)` for frames with `T ≤ y[t,k] ≤ B`; `mean_depth_fraction`, `median_depth_fraction` and `sd_depth_fraction` (n − 1) over those frames; `mean_depth_cm = mean(y − T) / px_per_cm`; `frac_outside_extent` = share of non-NaN frames with `y < T` or `y > B` |
 | **Output columns** | `individual_id`, `mean_depth_fraction`, `median_depth_fraction`, `sd_depth_fraction`, `mean_depth_cm`, `frac_outside_extent`, `depth_extent_source` |
@@ -418,7 +418,7 @@ info-button modal (§6).
 | **Manuscript label** | Total distance travelled in 3-D |
 | **Level** | Individual; trial summary |
 | **Priority** | Optional |
-| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session |
+| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session; for a native 3-D file, `PreprocessedSession.xy` and the absolute `PreprocessedSession.z` in the project unit (no tank height, no water column needed) |
 | **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
 | **Formula** | `Σ_t ‖P[t+1, k] − P[t, k]‖` over frame pairs where both positions are finite, with `P = (x_px / px_per_cm, y_px / px_per_cm, depth · tank_height_cm)` |
 | **Output columns** | `individual_id`, `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` |
@@ -435,7 +435,7 @@ info-button modal (§6).
 | **Manuscript label** | Locomotor speed in 3-D |
 | **Level** | Individual; trial summary |
 | **Priority** | Optional |
-| **Inputs** | `PreprocessedSession.kinematics.speed_px_s`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session; the pipeline's `KinematicsCfg` |
+| **Inputs** | `PreprocessedSession.kinematics.speed_px_s`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session (for a native 3-D file, the absolute `PreprocessedSession.z` in place of `depth · tank_height_cm`); the pipeline's `KinematicsCfg` |
 | **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
 | **Formula** | `v3[t, k] = sqrt(vh² + vz²)` with `vh = speed_px_s[t, k] / px_per_cm` (identical to the horizontal part of IL-2 in cm/s) and `vz` the vertical speed in cm/s of `Z = depth · tank_height_cm`, from the same estimator and window as the pipeline's kinematics (Savitzky-Golay by default, forward difference when the project selects it); mean/median/max over frames where both `vh` and `vz` are finite |
 | **Output columns** | `individual_id`, `mean_speed_3d_cm_s`, `median_speed_3d_cm_s`, `max_speed_3d_cm_s`, `mean_speed_3d_bl_s` |
