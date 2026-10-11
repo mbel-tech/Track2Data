@@ -777,6 +777,10 @@ class MainWindow(QMainWindow):
                 plan_lines += skipped_lines(state.plan)
         else:
             issues = engine.validate()
+            # What `track2data validate` also reports: a session the run could not open (a bare
+            # idtracker.ai export added without its video size, a pickle without consent).
+            # Validate is an explicit action, so opening each session is affordable here.
+            issues += engine.session_read_issues()
         plan_text = "\n\n" + "\n".join(plan_lines) if plan_lines else ""
         if plan_lines:
             self._store.append_log(
