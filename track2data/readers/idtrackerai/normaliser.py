@@ -40,6 +40,17 @@ _UNCALIBRATED_SENTINEL = -1.0
 _OPTION_NAMES = {"frames_per_second": "fps", "width": "width_px", "height": "height_px"}
 
 
+def _missing_remediation(missing: list[str]) -> str:
+    options = ", ".join(f"'{_OPTION_NAMES[m]}'" for m in missing)
+    label = "option" if len(missing) == 1 else "options"
+    return (
+        f"Ensure the session's trajectory file or session.json carries a valid value for "
+        f"{', '.join(missing)}, or give the reader {label} {options} "
+        "(`track2data add --option NAME=VALUE`, or the confirm dialog); it cannot be safely "
+        "defaulted."
+    )
+
+
 class Normaliser:
     def __init__(self, folder: Path) -> None:
         self._folder = Path(folder)
@@ -80,16 +91,7 @@ class Normaliser:
         quality = self._extract_quality(payload)
         version = payload.get("version") or meta.get("version")
         raw_attrs = self._collect_unknown_keys(payload)
-        fps = self._require_positive_number(
-            "frames_per_second", payload.get("frames_per_second"), meta.get("frames_per_second"),
-            given.get("frames_per_second"),
-        )
-        width = int(self._require_positive_number(
-            "width", payload.get("width"), meta.get("width"), given.get("width"),
-        ))
-        height = int(self._require_positive_number(
-            "height", payload.get("height"), meta.get("height"), given.get("height"),
-        ))
+        fps, width, height = self._resolve_video_info(payload, meta, given)
         video_paths = payload.get("video_paths") or meta.get("video_paths") or []
         video_path = self._resolve_video_path(video_paths)
         if video_paths and video_path is None:
@@ -261,6 +263,44 @@ class Normaliser:
             )
         return arr
 
+    @classmethod
+    def _resolve_video_info(
+        cls, payload: dict[str, Any], meta: dict[str, Any], given: dict[str, Any]
+    ) -> tuple[float, int, int]:
+        """fps, width and height, or one error naming every one of them that is missing.
+
+        A bare export lacks them together, so reporting the first would cost three failed runs.
+        """
+        found: dict[str, float] = {}
+        missing: list[str] = []
+        for key in ("frames_per_second", "width", "height"):
+            try:
+                found[key] = cls._require_positive_number(
+                    key, payload.get(key), meta.get(key), given.get(key)
+                )
+            except DataValidationError:
+                missing.append(key)
+        if missing:
+            if len(missing) == 1:
+                raise DataValidationError(
+                    f"{missing[0]} is missing or invalid in both the trajectory payload "
+                    "and session.json.",
+                    code="IDT_DICT_MISSING_KEY",
+                    severity="error",
+                    subject=missing[0],
+                    remediation=_missing_remediation(missing),
+                )
+            names = ", ".join(missing[:-1]) + f" and {missing[-1]}"
+            raise DataValidationError(
+                f"{names} are missing or invalid in both the trajectory payload and "
+                "session.json.",
+                code="IDT_DICT_MISSING_KEY",
+                severity="error",
+                subject=missing[0],
+                remediation=_missing_remediation(missing),
+            )
+        return found["frames_per_second"], int(found["width"]), int(found["height"])
+
     @staticmethod
     def _require_positive_number(
         field_name: str, primary: Any, fallback: Any, last_resort: Any = None
@@ -371,7 +411,10 @@ class Normaliser:
         text = version if isinstance(version, str) else ""
         major = text.split(".", 1)[0].lstrip("v")
         if major not in ("5", "6"):
-            logger.warning(
+            # 4.x dicts are known to read (real files from two labs); that is news, not a
+            # problem. Anything else, or no version at all, stays a warning.
+            log = logger.info if major == "4" else logger.warning
+            log(
                 "IDT_VERSION_UNKNOWN: %s: idtracker.ai version %r is not a "
                 "known 5.x/6.x release; field semantics were verified only "
                 "against those.",

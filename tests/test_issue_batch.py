@@ -441,3 +441,21 @@ def test_summary_from_session_reads_the_clicks(tiny_real_session: Path) -> None:
     )
     summ = SessionSummary.from_session(s, calibration_mode="session")
     assert summ.length_calibration_n == 2 and summ.length_calibration_rel_sd > 0.1
+
+
+def test_a_pickled_4x_export_notes_its_version_without_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """4.x dicts are known to read (two real files); the version note is information there."""
+    import numpy as np
+
+    d = tmp_path / "s" / "trajectories"
+    d.mkdir(parents=True)
+    payload = {"trajectories": np.ones((20, 2, 2)), "frames_per_second": 25.0, "version": "4.0.9"}
+    np.save(d / "trajectories.npy", payload, allow_pickle=True)
+    with caplog.at_level(logging.INFO):
+        read_session(
+            tmp_path / "s", allow_pickle=True, options={"width_px": 100, "height_px": 100}
+        )
+    records = [r for r in caplog.records if "IDT_VERSION_UNKNOWN" in r.getMessage()]
+    assert records and all(r.levelno == logging.INFO for r in records)

@@ -75,6 +75,8 @@ class ReadmeExporter(Exporter):
         readme_lines += self._camera_view_lines(p.provenance)
         if p.fusion is not None:
             readme_lines += self._fusion_lines(p.fusion)
+        readme_lines += _units_lines(p.manifest_json)
+        readme_lines += _sparse_slot_lines(p.fish_by_frame)
 
         readme_lines += [
             "## Metrics computed",
@@ -335,6 +337,11 @@ class ReadmeExporter(Exporter):
                 "identity (no per-identity blob-layer data) |"
             )
 
+        if p.reader_options:
+            lines.append(
+                f"| Reader options (given by the user, not recorded in the files) | "
+                f"{_options_cell(p.reader_options)} |"
+            )
         lines.append(
             f"| Last validated | {p.last_validated or '*(never opened in the Validator)*'} |"
         )
@@ -403,6 +410,58 @@ _VERIFICATION = {
 }
 
 _CHOSEN_BY = {"detected": "detected automatically", "user": "chosen by the user"}
+
+
+#: A slot with more than this share of its frames missing gets a line in the README.
+_SPARSE_SLOT_SHARE = 0.9
+
+
+def _units_lines(manifest_json: str) -> list[str]:
+    """Say why the centimetre columns are empty when the project calibrates by body length.
+
+    That mode fills the ``*_bl`` (body lengths) and ``*_px`` columns and leaves ``*_cm`` empty
+    on purpose: no pixels-per-cm value is set. Nothing else in the output says so.
+    """
+    try:
+        calibration = json.loads(manifest_json).get("calibration") or {}
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return []
+    if calibration.get("mode") != "bodylength":
+        return []
+    return [
+        "## Units",
+        "",
+        "Calibration is 'bodylength': distances and speeds are given in pixels (`*_px`) and in "
+        "body lengths (`*_bl`). The centimetre columns (`*_cm`) are empty (NaN) because no "
+        "pixels-per-cm value is set. For centimetres choose 'scalar' calibration and give "
+        "pixels per cm, or 'session' calibration where the tracker records its own length unit.",
+        "",
+    ]
+
+
+def _sparse_slot_lines(fish_by_frame: object) -> list[str]:
+    """List identity slots that are almost always missing (idtracker.ai allocates slots up
+    front, so a run with fewer animals than slots leaves some empty)."""
+    df = fish_by_frame
+    column = next((c for c in ("x_px", "x") if c in getattr(df, "columns", ())), None)
+    if column is None or "individual_id" not in df.columns or len(df) == 0:
+        return []
+    share = df[column].isna().groupby(df["individual_id"]).mean()
+    sparse = share[share > _SPARSE_SLOT_SHARE]
+    if sparse.empty:
+        return []
+    lines = [
+        "## Identity slots with little data",
+        "",
+        f"These slots have a position in fewer than {1 - _SPARSE_SLOT_SHARE:.0%} of their frames; "
+        "their metrics are mostly NaN.",
+        "",
+        "| Slot | Frames missing |",
+        "|------|----------------|",
+    ]
+    lines += [f"| {slot} | {value:.1%} |" for slot, value in sparse.items()]
+    lines.append("")
+    return lines
 
 
 def _is_idtracker(p: SessionProvenance) -> bool:
