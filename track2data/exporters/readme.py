@@ -7,6 +7,8 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
+
 from track2data.core.runplan import FusionRunInfo
 from track2data.exporters.base import Exporter, ExportPayload, SessionProvenance
 from track2data.metrics.availability import view_label
@@ -439,11 +441,11 @@ def _units_lines(manifest_json: str) -> list[str]:
     ]
 
 
-def _sparse_slot_lines(fish_by_frame: object) -> list[str]:
+def _sparse_slot_lines(fish_by_frame: pd.DataFrame) -> list[str]:
     """List identity slots that are almost always missing (idtracker.ai allocates slots up
     front, so a run with fewer animals than slots leaves some empty)."""
     df = fish_by_frame
-    column = next((c for c in ("x_px", "x") if c in getattr(df, "columns", ())), None)
+    column = next((c for c in ("x_px", "x") if c in df.columns), None)
     if column is None or "individual_id" not in df.columns or len(df) == 0:
         return []
     share = df[column].isna().groupby(df["individual_id"]).mean()
