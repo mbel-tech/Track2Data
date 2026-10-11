@@ -628,3 +628,89 @@ class TestEmptyIdentitySlots:
         self, minimal_payload: ExportPayload, tmp_path: Path
     ) -> None:
         assert "Identity slots with little data" not in _render_readme(minimal_payload, tmp_path)
+
+
+# ── columns that are entirely NaN ─────────────────────────────────────────────
+
+_NAN = float("nan")
+
+
+def _section(text: str) -> str:
+    assert "## Columns with no values" in text
+    return text.split("## Columns with no values")[1].split("\n## ")[0]
+
+
+def _row(section: str, key: str) -> str:
+    return next(line for line in section.splitlines() if key in line)
+
+
+class TestColumnsWithNoValues:
+    def test_each_empty_diagnostic_column_gets_the_reason_for_its_metric(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.diagnostic_metrics = {
+            "D-7": pd.DataFrame({"session_id": ["s1"], "fragment_length_median": [_NAN]}),
+            "D-2": pd.DataFrame({"session_id": ["s1"], "estimated_accuracy": [_NAN]}),
+            "D-3": pd.DataFrame({"session_id": ["s1"], "id_prob_median": [_NAN]}),
+            "D-6": pd.DataFrame({"session_id": ["s1"], "number_of_error_frames": [_NAN]}),
+            "D-12": pd.DataFrame({"session_id": ["s1"], "silhouette_score": [_NAN]}),
+            "D-15": pd.DataFrame({"session_id": ["s1"], "n_corrected_frames": [_NAN]}),
+        }
+        section = _section(_render_readme(minimal_payload, tmp_path))
+        assert "list_of_fragments.json" in _row(section, "fragment_length_median")
+        assert "fraction_identified" in _row(section, "estimated_accuracy")
+        assert "id_probabilities" in _row(section, "id_prob_median")
+        assert "session.json" in _row(section, "number_of_error_frames")
+        assert "silhouette" in _row(section, "silhouette_score")
+        assert "list_of_blobs" in _row(section, "n_corrected_frames")
+
+    def test_a_column_with_any_value_is_not_listed(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.individual_metrics = {
+            "IL-5": pd.DataFrame(
+                {"individual_id": [0, 1], "partial": [_NAN, 2.0], "empty": [_NAN, _NAN]}
+            )
+        }
+        section = _section(_render_readme(minimal_payload, tmp_path))
+        assert "`empty`" in section and "partial" not in section
+
+    def test_a_metric_without_a_known_reason_gets_the_generic_one(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.group_metrics = {"GL-5": pd.DataFrame({"session_id": ["s1"], "m": [_NAN]})}
+        section = _section(_render_readme(minimal_payload, tmp_path))
+        assert "no valid values in this session (all frames NaN after preprocessing)" in section
+
+    def test_cm_columns_point_to_the_units_section_under_bodylength(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        _with_calibration(minimal_payload, "bodylength")
+        minimal_payload.individual_metrics = {
+            "IL-1": pd.DataFrame(
+                {"individual_id": [0], "path_length_cm": [_NAN], "mean_speed_cm_s": [_NAN]}
+            )
+        }
+        text = _render_readme(minimal_payload, tmp_path)
+        assert "## Units" in text
+        assert "Units" in _row(_section(text), "path_length_cm")
+        assert "Units" in _row(_section(text), "mean_speed_cm_s")
+
+    def test_nothing_empty_nothing_written(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        assert "Columns with no values" not in _render_readme(minimal_payload, tmp_path)
+
+    def test_a_table_with_no_rows_is_not_reported_as_empty(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.individual_metrics = {"IL-2": pd.DataFrame({"individual_id": [], "v": []})}
+        assert "Columns with no values" not in _render_readme(minimal_payload, tmp_path)
+
+    def test_text_columns_are_not_mistaken_for_empty(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.diagnostic_metrics = {
+            "D-15": pd.DataFrame({"n_corrected_frames": [1.0], "note": [""]})
+        }
+        assert "Columns with no values" not in _render_readme(minimal_payload, tmp_path)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -79,6 +80,7 @@ class ReadmeExporter(Exporter):
             readme_lines += self._fusion_lines(p.fusion)
         readme_lines += _units_lines(p.manifest_json)
         readme_lines += _sparse_slot_lines(p.fish_by_frame)
+        readme_lines += _empty_column_lines(p)
 
         readme_lines += [
             "## Metrics computed",
@@ -464,6 +466,79 @@ def _sparse_slot_lines(fish_by_frame: pd.DataFrame) -> list[str]:
     lines += [f"| {slot} | {value:.1%} |" for slot, value in sparse.items()]
     lines.append("")
     return lines
+
+
+_FRAGMENTS_REASON = (
+    "needs preprocessing/list_of_fragments.json, which a bare trajectory export lacks"
+)
+
+#: Why a diagnostic's columns can be entirely NaN, keyed by metric id. Each reason was checked
+#: against where the metric reads its input (``metrics/diagnostic.py`` and the idtracker.ai reader).
+_EMPTY_COLUMN_REASONS = {
+    "D-2": "the trajectory file records no estimated_accuracy or fraction_identified",
+    "D-3": "the export has no id_probabilities",
+    "D-5": "the trajectory file records no fraction_identified",
+    "D-6": "needs session.json (number_of_error_frames), which a bare trajectory export lacks",
+    "D-7": _FRAGMENTS_REASON,
+    "D-8": _FRAGMENTS_REASON,
+    "D-9": _FRAGMENTS_REASON,
+    "D-12": (
+        "the trajectory file records no silhouette_score or fragment_connectivity "
+        "(idtracker.ai writes them only to some exports)"
+    ),
+    "D-13": _FRAGMENTS_REASON,
+    "D-14": _FRAGMENTS_REASON,
+    "D-15": (
+        "needs the tracker's blob table (preprocessing/list_of_blobs.pickle), which is read only "
+        "when the project enables blob diagnostics and allows pickle loading"
+    ),
+}
+_GENERIC_EMPTY_REASON = "no valid values in this session (all frames NaN after preprocessing)"
+
+
+def _empty_column_lines(p: ExportPayload) -> list[str]:
+    """List the metric columns that hold no value at all, each with the reason it can be empty.
+
+    Only columns that are NaN in every row of a non-empty table count; a column with a single
+    value is not listed. The reason comes from the metric id, except ``*_cm`` columns, which the
+    Units section explains.
+    """
+    try:
+        calibration = json.loads(p.manifest_json).get("calibration") or {}
+        bodylength = calibration.get("mode") == "bodylength"
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        bodylength = False
+
+    rows: list[str] = []
+    for tables in (p.individual_metrics, p.group_metrics, p.zone_metrics, p.diagnostic_metrics):
+        for mid, df in tables.items():
+            if len(df) == 0:
+                continue
+            by_reason: dict[str, list[str]] = {}
+            for column in df.columns:
+                if not df[column].isna().all():
+                    continue
+                if bodylength and re.search(r"_cm(_s)?$", str(column)):
+                    reason = "empty on purpose under body-length calibration; see the Units section"
+                else:
+                    reason = _EMPTY_COLUMN_REASONS.get(mid, _GENERIC_EMPTY_REASON)
+                by_reason.setdefault(reason, []).append(f"`{column}`")
+            rows += [
+                f"| {mid} | {', '.join(columns)} | {reason} |"
+                for reason, columns in by_reason.items()
+            ]
+    if not rows:
+        return []
+    return [
+        "## Columns with no values",
+        "",
+        "These metric columns are NaN in every row of this run.",
+        "",
+        "| Metric | Columns | Why |",
+        "|--------|---------|-----|",
+        *rows,
+        "",
+    ]
 
 
 def _is_idtracker(p: SessionProvenance) -> bool:

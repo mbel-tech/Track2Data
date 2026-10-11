@@ -111,3 +111,36 @@ def test_add_allow_pickle_records_the_consent_in_the_project(
 def test_add_without_the_flag_leaves_consent_off(pickled_root: Path, project: Path) -> None:
     invoke("add", str(project), str(pickled_root), "--yes")
     assert read_manifest(project).security.allow_pickle_trajectories is False
+
+
+def test_pickle_refusal_also_asks_for_the_video_size_when_none_is_given(
+    pickled_root: Path, project: Path
+) -> None:
+    # The pickle must be opened to know whether it records a size, and that is refused
+    # without consent, so the refusal itself has to say what else a bare file may need.
+    assert invoke("add", str(project), str(pickled_root), "--yes").exit_code == 0
+    out = invoke("validate", str(project))
+    assert out.exit_code == 1
+    assert "IDT_PICKLE_REFUSED" in out.output
+    assert "usually record no video size" in out.output
+    assert "width_px" in out.output and "height_px" in out.output
+
+
+def test_pickle_refusal_does_not_ask_for_a_size_that_was_given(
+    pickled_root: Path, project: Path
+) -> None:
+    size = ["--option=width_px=640", "--option=height_px=480"]
+    assert invoke("add", str(project), str(pickled_root), "--yes", *size).exit_code == 0
+    out = invoke("validate", str(project))
+    assert "IDT_PICKLE_REFUSED" in out.output
+    assert "usually record no video size" not in out.output
+
+
+def test_pickle_refusal_does_not_ask_for_a_size_session_json_records(
+    pickled_root: Path, project: Path
+) -> None:
+    (pickled_root / "session.json").write_text('{"width": 640, "height": 480}')
+    assert invoke("add", str(project), str(pickled_root), "--yes").exit_code == 0
+    out = invoke("validate", str(project))
+    assert "IDT_PICKLE_REFUSED" in out.output
+    assert "usually record no video size" not in out.output
