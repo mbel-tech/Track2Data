@@ -274,9 +274,12 @@ needed.* until you set the pair up, and **Set up fusion…** opens the editor fo
 
 - The editor shows the side view with two lines you can drag: the **water surface** and the **tank
   floor**. The same two rows can be typed. Enter the **tank height** in cm (the water depth between the
-  lines; 20 cm to start with), which gives the side view its scale.
+  lines; 20 cm to start with), which gives the side view its scale. If the side camera is mounted
+  upside down, tick **The side view is upside down**: the lower line then is the water surface, and the
+  labels of the lines and rows follow.
 - **Shared horizontal axis** says which top-view axis (x or y) the side view's left-right direction
-  follows; tick **Flip** if it runs the other way.
+  follows; tick **Flip** if it runs the other way. A line under them reminds you that these two only
+  check that the views agree and do not change the fused positions.
 - **Frame offset** shifts the side recording against the top one, in frames (side = top + offset). With
   the layout "One video, two panels" it is hidden and fixed at 0. **Suggest offset** looks for the shift
   that makes the two views agree best, within ±5 seconds around 0 only; it needs a calibrated top view
@@ -441,9 +444,13 @@ where the water surface and the floor lie on the file's own vertical axis (as th
 estimate them from the data. With both set, each session gets a depth (0 at the surface, 1 at the
 floor, `(z - surface) / (floor - surface)`) and a water height (`|floor - surface|`), which is what
 **IL-15** needs. A position outside the column (above the surface or below the floor) has no depth:
-it is left empty and counted in IL-15's `frac_outside_extent`, never clipped to the edge. Without the
+it is left empty and counted in IL-15's `frac_outside_extent`, never clipped to the edge, and it is
+also left out of IL-16 and IL-17 (the step touching it is dropped). The same surface and floor
+apply to every session, so the files must share a vertical axis and an origin (the origin cannot be
+checked from the files). Without the
 water column IL-15 is greyed out ("needs the water column (surface and floor z) on the Calibration
-page"); IL-16 and IL-17 do not need it, because z is already absolute.
+page"); IL-16 and IL-17 do not need it, because z is already absolute; they use the column only to leave out
+samples outside it.
 
 A native 3-D project must stay in **Session calibration** with the unit label equal to the target
 unit and confirmed; the project is blocked otherwise (`NATIVE_3D_NEEDS_SESSION_CALIBRATION`, or a
@@ -678,7 +685,9 @@ What the files contain, for a fused unit:
 - The per-frame table (`master_fish_by_frame.csv`, the Feather file and the Excel sheet) has two more
   columns, `depth_fraction` (0 = water surface, 1 = tank floor) and `depth_cm` (the fraction times the
   tank height; empty when the height is unknown). A frame where the position or the depth is missing
-  has both empty. The wide CSV also writes `master_fish_by_frame.csv` for a 3-D run, so its depth is not lost. Where the fused frames jump (a frame one of
+  has both empty. Two flag columns, `depth_interpolated` and `depth_jump_replaced`, are True where the
+  depth rests on a side-view position that preprocessing gap-filled or replaced after a jump (the depth
+  is kept, not blanked; report how much of a result rests on such frames). The wide CSV also writes `master_fish_by_frame.csv` for a 3-D run, so its depth is not lost. Where the fused frames jump (a frame one of
   the views lacks), the track keeps a break, as for a 2-D session tracked in separate intervals: no
   row is written for the missing frames, and path length and the other frame-to-frame metrics do not
   bridge the gap.
@@ -720,7 +729,7 @@ keep measuring in the top-view plane.
 |---|---|---|
 | **IL-16** 3-D Distance Travelled | `path_length_3d_cm`, `path_length_3d_bl`, `n_valid_steps` | cm, body lengths, count |
 | **IL-17** 3-D Speed (mean / median / max) | `mean_speed_3d_cm_s`, `median_speed_3d_cm_s`, `max_speed_3d_cm_s`, `mean_speed_3d_bl_s` | cm/s, body lengths/s |
-| **GL-16** 3-D Nearest-Neighbour Distance | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames_3d` | cm, body lengths, frames |
+| **GL-16** 3-D Nearest-Neighbour Distance | `mean_nnd_3d_cm`, `median_nnd_3d_cm`, `mean_nnd_3d_bl`, `n_skipped_frames_3d`, `frac_frames_used_3d` | cm, body lengths, frames, fraction |
 
 - **Positions in cm.** x and y are the top view's pixels divided by its scale; the depth is the
   depth fraction times the **tank height** of the pair's fusion settings. Distances are straight
@@ -742,7 +751,7 @@ keep measuring in the top-view plane.
 - **Gaps give empty values, never 0.** A step (IL-16) needs a valid x, y and depth at both of its
   frames; `n_valid_steps` says how many were used. IL-17 uses the frames where the horizontal and the
   vertical speed both exist. GL-16 skips a frame where any fish lacks x, y or depth and counts it in
-  `n_skipped_frames_3d`. An animal (or a group) with nothing valid is empty. IL-16 and IL-17 need
+  `n_skipped_frames_3d`; `frac_frames_used_3d` is the share of real frames it used. GL-1 and GL-16 can use different frames (GL-16 also needs every depth), so `mean_nnd_3d_cm` is not like-for-like with `mean_nnd_cm` when that share is low. An animal (or a group) with nothing valid is empty. IL-16 and IL-17 need
   identities, as IL-1 and IL-2 do; GL-16 does not.
 - **IL-17** takes the horizontal speed from the same speed as IL-2 and the vertical speed from the
   depth with the same speed estimator as the rest of the run. Over the
@@ -761,9 +770,11 @@ column. Example: a fish that moves (3, 4, 12) mm per frame in an Anipose file at
 read as cm, steps hypot(0.3, 0.4, 1.2) = 1.3 cm per frame, so 10 steps give an IL-16 of 13 cm and an
 IL-17 of 1.3 x 25 = 32.5 cm/s; its 2-D metrics measure the horizontal steps of 0.5 cm (IL-1 5 cm, IL-2
 12.5 cm/s). **GL-16 is not offered for native files** (it needs two animals in one session and a file holds one), and neither is any other group metric ("needs several animals in one session; a native 3-D file holds one animal"). **IL-3, IL-9, IL-10 and IL-14 are not offered either** ("uses a pixel-sized default and the project's native 3-D files have no pixel frame"): their default thresholds are in pixels and would silently change with the project unit. The Metrics screen greys them out, `validate` and the run `README.md` list the reason. IL-15 appears once the water column is set.
-The per-frame table has no z column (z is exported only through the metrics); with a water column it
-carries `depth_fraction` and `depth_cm` as for a fused unit. The run's `README.md` has a **Native 3-D
-source** section (reader, file unit, project unit, vertical axis, flip, water column or its absence).
+The per-frame table has a `z_cm` column, the file's own vertical coordinate after the same gap filling
+and smoothing as x and y (so IL-16 can be reproduced from `x_cm`, `y_cm` and `z_cm`); with a water
+column it also carries `depth_fraction` and `depth_cm` as for a fused unit. The run's `README.md` has a
+**Native 3-D source** section (reader, file unit, project unit, vertical axis, flip, water column or its
+absence) and, with a water column, a row **Samples outside the water column** with the count left out.
 
 Limits of native 3-D files: one animal per file; no mixing with pixel sessions; the unit you give
 must be the one of the calibration board (a wrong one scales everything); no refraction correction;
