@@ -1,7 +1,7 @@
 # Tracker output formats: research notes and rollout inputs
 
-Inputs for the multi-tracker import work (scan, detect, confirm, read). The four
-research files below are third-party notes, kept **byte-identical** to the copies
+Inputs for the multi-tracker import work (scan, detect, confirm, read). The research
+files below are third-party notes and data, kept **byte-identical** to the copies
 supplied. Do not edit them in place: re-copy the file, then update its pin in
 `tests/test_docs_tracker_formats.py` and its row here (a test keeps the two in step).
 
@@ -10,7 +10,12 @@ supplied. Do not edit them in place: re-copy the file, then update its pin in
 | `animal_tracking_output_formats.md` | The per-tool description of output layouts. This is the 2026-10-07 12:57 revision, which corrects the earlier copy and is canonical | `4b683240…` |
 | `animal_tracking_formats_table.csv` | One-row-per-tool summary table. It predates the corrections above (see below) | `9c9f3df7…` |
 | `importer_priority.csv` | Importer priority by recent citation share. Seven importers cover 80.5 % of animal-tracker citations, and the rollout follows this order | `b4307f31…` |
-| `tracker_test_datasets.csv` | Public datasets for each importer, with licence and what was verified. The provenance record for every fixture | `195247aa…` |
+| `tracker_test_datasets.csv` | Public datasets for each importer, with licence and what was verified. The provenance record for every fixture. The 41-row revision of 2026-10-11. Its Track2Data sentences ("main @7052e9b … fails with …") describe the code before the fixes of #146, #151 and #154; what Track2Data does now is in `idtrackerai_track2data_runs.csv` | `136bf05e…` |
+| `fishtank_idtracker_survey.csv` | Per-file survey of the 22 FishTank idtracker.ai files (version, fps, shape, NaN share, sha256 of each zip); row 39 of the dataset CSV cites it | `ad90fcc5…` |
+
+Ours, not pinned: `idtrackerai_track2data_runs.csv` records which of the dataset CSV's idtracker.ai rows
+Track2Data has run, how, with which test, and with what caveat (placeholder video sizes, manual runs).
+A test keeps it keyed to the dataset CSV. Update it whenever a row is run or a test is added.
 
 Not copied here: the reader fixture-test suite (`t2d_reader_fixture_tests.zip`)
 lives in `tests/real_samples/`, because it is test code, not documentation.
