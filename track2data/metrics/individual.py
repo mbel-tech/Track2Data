@@ -1632,6 +1632,12 @@ class WallDistanceThigmotaxis(Metric):
 _OUTSIDE_EXTENT_WARN = 0.05
 
 
+def _has_zone_extent(cfg: dict | None) -> bool:
+    column = (cfg or {}).get("water_column") or {}
+    top, bottom = column.get("top_px"), column.get("bottom_px")
+    return top is not None and bottom is not None and bottom > top
+
+
 class VerticalPosition(Metric):
     """IL-15 — Depth in the water column, from a side-view recording.
 
@@ -1731,6 +1737,9 @@ class VerticalPosition(Metric):
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         if session.depth is not None:
             return self._compute_fused(session)
+        if session.z is not None and not _has_zone_extent(cfg):
+            # a native 3-D session has no zones; the missing piece is the water column
+            cfg = {"water_column": {"source": "none:no_water_column"}}
         return self._compute_zones(session, cfg)
 
     def _compute_fused(self, session: PreprocessedSession) -> pd.DataFrame:

@@ -673,7 +673,7 @@ What the files contain, for a fused unit:
 - The per-frame table (`master_fish_by_frame.csv`, the Feather file and the Excel sheet) has two more
   columns, `depth_fraction` (0 = water surface, 1 = tank floor) and `depth_cm` (the fraction times the
   tank height; empty when the height is unknown). A frame where the position or the depth is missing
-  has both empty. The wide CSV has no per-frame table. Where the fused frames jump (a frame one of
+  has both empty. The wide CSV also writes `master_fish_by_frame.csv` for a 3-D run, so its depth is not lost. Where the fused frames jump (a frame one of
   the views lacks), the track keeps a break, as for a 2-D session tracked in separate intervals: no
   row is written for the missing frames, and path length and the other frame-to-frame metrics do not
   bridge the gap.
@@ -840,7 +840,7 @@ Tick the formats you want, choose where to write them, and press **Export**.
    | Format | Files |
    |---|---|
    | CSV Long | `master_fish_by_frame.csv`, `trial_activity_summary.csv`, `group_dynamics_summary.csv` |
-   | CSV Wide | `trial_summary_wide.csv` |
+   | CSV Wide | `trial_summary_wide.csv` (plus `master_fish_by_frame.csv` when the run has `z_cm` or depth columns) |
    | Excel | `Track2Data_<project>.xlsx` (one sheet per table) |
    | Feather | `master_fish_by_frame.feather`, `trial_activity_summary.feather` |
    | README | provenance record (always written alongside the others) |

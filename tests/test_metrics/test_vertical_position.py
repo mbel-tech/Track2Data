@@ -329,3 +329,11 @@ def test_binned_fused_il15_counts_outside_per_bin(caplog) -> None:
     assert fr == pytest.approx([0.0, 300 / 1500, 0.0, 0.0])
     warned = [r for r in caplog.records if "IL-15" in r.getMessage()]
     assert len(warned) == 1  # only the bin whose own fraction exceeds the threshold
+
+
+def test_a_native_session_without_a_water_column_says_the_water_column_is_missing() -> None:
+    session = _psess(np.full(10, 400.0))
+    session.z = np.linspace(0.0, 5.0, 10).reshape(10, 1)
+    row = VerticalPosition().compute(session, None).iloc[0]
+    assert np.isnan(row["mean_depth_fraction"])
+    assert row["depth_extent_source"] == "none:no_water_column"

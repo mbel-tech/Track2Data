@@ -151,3 +151,48 @@ class TestCsvWideExporter:
         # metric_id should not be a meaningful data column in the wide format
         # (may be absent or have only one unique value per row)
         # Just ensure no crash; it's acceptable if not present
+
+
+# ── the per-frame table accompanies a 3-D run ─────────────────────────────────
+
+
+def _vertical_frames(column: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "session_id": ["sess1"] * 3,
+            "individual_id": [0, 0, 0],
+            "frame": [0, 1, 2],
+            "x_cm": [0.0, 1.0, 2.0],
+            column: [1.5, 2.5, float("nan")],
+        }
+    )
+
+
+class TestPerFrameTableForVerticalData:
+    @pytest.mark.parametrize("column", ["z_cm", "depth_fraction", "depth_cm"])
+    def test_writes_the_per_frame_table_when_it_has_a_vertical_column(
+        self, tmp_path: Path, column: str
+    ) -> None:
+        payload = _make_payload()
+        payload.fish_by_frame = _vertical_frames(column)
+        paths = CsvWideExporter().write(payload, tmp_path)
+        assert {p.name for p in paths} == {"trial_summary_wide.csv", "master_fish_by_frame.csv"}
+        frame = pd.read_csv(tmp_path / "master_fish_by_frame.csv")
+        assert list(frame.columns) == list(payload.fish_by_frame.columns)
+        assert frame[column].isna().sum() == 1
+
+    def test_is_byte_identical_to_the_long_exporters_file(self, tmp_path: Path) -> None:
+        from track2data.exporters.csv_long import CsvLongExporter
+
+        payload = _make_payload()
+        payload.fish_by_frame = _vertical_frames("z_cm")
+        CsvWideExporter().write(payload, tmp_path / "wide")
+        CsvLongExporter().write(payload, tmp_path / "long")
+        assert (tmp_path / "wide" / "master_fish_by_frame.csv").read_bytes() == (
+            tmp_path / "long" / "master_fish_by_frame.csv"
+        ).read_bytes()
+
+    def test_a_2d_run_still_writes_only_the_summary(self, tmp_path: Path) -> None:
+        paths = CsvWideExporter().write(_make_payload(), tmp_path)
+        assert [p.name for p in paths] == ["trial_summary_wide.csv"]
+        assert not (tmp_path / "master_fish_by_frame.csv").exists()
