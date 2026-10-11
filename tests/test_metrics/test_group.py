@@ -444,10 +444,52 @@ def test_gl1_body_length_ratio_is_unchanged_for_every_length_pattern() -> None:
         (10.0, 0.0): 2.0, (0.0, 0.0): np.nan, (-5.0, -5.0): np.nan, (-5.0, 10.0): 4.0,
         (np.nan, 10.0): 1.0, (np.nan, np.nan): np.nan, (np.inf, 1.0): 0.0,
         (-np.inf, 1.0): np.nan, (np.inf, -np.inf): np.nan,
+        (np.inf, np.nan): 0.0, (np.inf, np.inf): 0.0,
     }
     for lengths, want in old.items():
         psess = make_psess(xy=xy.copy(), body_length_px=np.array(lengths))
-        with warnings.catch_warnings():
+        with warnings.catch_warnings(), np.errstate(invalid="ignore"):  # inf - inf, as before
             warnings.simplefilter("error", RuntimeWarning)
             got = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_bl"]
         assert (np.isnan(got) and np.isnan(want)) or got == want, lengths
+
+
+def test_gl1_body_length_overflowing_cm_lengths_are_unchanged() -> None:
+    xy = np.zeros((5, 2, 2))
+    xy[:, 1, 0] = 10.0
+    psess = make_psess(xy=xy, px_per_cm=7.3, body_length_cm=np.array([1e308, 1e308]))
+    with np.errstate(over="ignore"):  # 1e308 * 7.3 overflows to inf, as it always did
+        got = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_bl"]
+    assert got == 0.0
+
+
+def test_gl1_body_length_ratio_matches_the_previous_implementation_on_random_sessions() -> None:
+    import warnings
+
+    rng = np.random.default_rng(2024)
+    specials = [np.nan, np.inf, -np.inf, 0.0, -3.0, 1e308]
+    for _ in range(1500):
+        n_animals = int(rng.integers(2, 5))
+        xy = rng.uniform(0, 100, (6, n_animals, 2))
+        lengths = np.where(
+            rng.random(n_animals) < 0.4,
+            rng.choice(specials, n_animals),
+            rng.uniform(1.0, 30.0, n_animals),
+        )
+        px_per_cm = float(rng.choice([1.0, 7.3, 2.5]))
+        as_cm = bool(rng.random() < 0.5)
+        psess = make_psess(
+            xy=xy,
+            px_per_cm=px_per_cm,
+            body_length_cm=lengths if as_cm else None,
+            body_length_px=None if as_cm else lengths,
+        )
+        with warnings.catch_warnings(), np.errstate(all="ignore"):
+            warnings.simplefilter("ignore")
+            mean_nnd = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_px"]
+            bl_all = psess.body_length_in_px()  # previous implementation, verbatim
+            mean_bl_px = float(np.nanmean(bl_all)) if bl_all is not None else np.nan
+            old = mean_nnd / mean_bl_px if mean_bl_px > 0 and not np.isnan(mean_nnd) else np.nan
+        with np.errstate(all="ignore"):
+            got = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_bl"]
+        assert (np.isnan(got) and np.isnan(old)) or got == old, (lengths, px_per_cm, as_cm)

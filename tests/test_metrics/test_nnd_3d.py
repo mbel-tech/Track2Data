@@ -289,3 +289,11 @@ def test_gl16_bl_zero_negative_and_inf_lengths_follow_gl1() -> None:
         psess.body_length_px = np.array(lengths)
         got = _run(psess).iloc[0]["mean_nnd_3d_bl"]
         assert got == cm / (mean_px / PX_PER_CM)
+
+
+def test_gl16_all_infinite_lengths_give_gl1s_result() -> None:
+    psess = _fused(_three_fish())
+    psess.body_length_px = np.array([np.inf, np.inf, np.nan])
+    g16 = _run(psess).iloc[0]["mean_nnd_3d_bl"]
+    g1 = NearestNeighbourDistance().compute(psess).iloc[0]["mean_nnd_bl"]
+    assert g16 == g1 == 0.0

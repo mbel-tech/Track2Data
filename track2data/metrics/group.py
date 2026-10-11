@@ -160,10 +160,11 @@ class NearestNeighbourDistance(Metric):
         )
         bl_all = session.body_length_in_px()
         # Same rule as GL-16's mean_nnd_3d_bl (which averages in cm); keep the two in step.
-        # The isfinite guard only avoids nanmean's all-NaN warning; the value stays NaN.
+        # The all-NaN guard only avoids nanmean's "Mean of empty slice" warning (the value is
+        # NaN either way); infinite lengths pass through exactly as before.
         mean_bl_px = (
             float(np.nanmean(bl_all))
-            if bl_all is not None and np.isfinite(np.asarray(bl_all, dtype=float)).any()
+            if bl_all is not None and not np.isnan(np.asarray(bl_all, dtype=float)).all()
             else np.nan
         )
         row["mean_nnd_bl"] = (
@@ -279,7 +280,7 @@ class NearestNeighbourDistance3D(Metric):
         mean_bl = np.nan
         if bl_px is not None and px_per_cm is not None:
             bl_cm = np.asarray(bl_px, dtype=np.float64) / px_per_cm
-            if np.isfinite(bl_cm).any():
+            if not np.isnan(bl_cm).all():  # nanmean warns only when every entry is NaN
                 mean_bl = float(np.nanmean(bl_cm))
         mean_nnd_bl = mean_nnd / mean_bl if mean_bl > 0 and not np.isnan(mean_nnd) else np.nan
 
