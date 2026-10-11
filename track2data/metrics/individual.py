@@ -1989,9 +1989,14 @@ class Speed3D(Metric):
 
         speed_3d: np.ndarray | None = None
         height, scale = session.depth_height_cm, session.px_per_cm
-        if session.depth is not None and height is not None and scale is not None:
+        z_cm: np.ndarray | None = None
+        if session.z is not None:  # a native 3-D file: z is already absolute, in the project unit
+            z_cm = np.asarray(session.z, dtype=np.float64)
+        elif session.depth is not None and height is not None:
+            z_cm = np.asarray(session.depth, dtype=np.float64) * float(height)
+        if z_cm is not None and scale is not None:
             kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
-            z = np.asarray(session.depth, dtype=np.float64) * float(height)
+            z = z_cm
             # compute_kinematics differentiates an (n, animals, 2) array; [Z, 0] makes its
             # speed |vz|, with the second component NaN wherever Z is.
             zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
