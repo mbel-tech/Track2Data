@@ -320,19 +320,87 @@ def test_precomputed_z_speed_is_used_when_present() -> None:
     assert row["max_speed_3d_cm_s"] == np.nanmax(expected)
 
 
-def test_whole_session_iL17_is_unchanged() -> None:  # noqa: N802
+def _seeded_fused(kcfg: KinematicsCfg):
+    """Seeded two-animal fused track with an x/y gap (finite depth) and a depth gap."""
+    rng = np.random.default_rng(20261011)
+    n = 120
+    t = np.arange(n, dtype=float)
+    pos = np.zeros((n, 2, 3))
+    for k in range(2):
+        pos[:, k, 0] = np.cumsum(rng.normal(0.4, 0.3, n))
+        pos[:, k, 1] = np.cumsum(rng.normal(0.0, 0.3, n))
+        pos[:, k, 2] = 60 + 20 * np.sin(t / 9.0 + k) + np.cumsum(rng.normal(0, 0.4, n))
+    pos[30:34, 0, :2] = np.nan
+    pos[70:73, 1, 2] = np.nan
+    return _fused(pos, kcfg=kcfg)
+
+
+# (mean, median, max) per animal produced by the code before IL-17 used a precomputed series
+# (5799178~1), on _seeded_fused.
+_OLD_IL17 = {
+    "savgol": [
+        (40.02410495798584, 43.76816657992043, 64.70894210370179),
+        (34.743342910391156, 36.033716279115204, 61.76882120826629),
+    ],
+    "forward_difference": [
+        (41.636852817038736, 42.63615359292312, 77.09759102340973),
+        (36.598683220214184, 35.622211341832205, 73.79758399916882),
+    ],
+}
+
+
+@pytest.mark.parametrize("method", ["savgol", "forward_difference"])
+def test_whole_session_iL17_is_unchanged(method: str) -> None:  # noqa: N802
     from tests.test_api import _make_manifest
     from track2data.api import Engine
     from track2data.core.models import ProjectMode
 
-    pos = _curved(60)
-    psess = _fused(pos)
-    old = _run(psess)  # no precomputed series: the previous behaviour
+    kcfg = KinematicsCfg(method=method)  # type: ignore[arg-type]
+    psess = _seeded_fused(kcfg)
     manifest = _make_manifest()
     manifest.mode = ProjectMode(dimension="3d", layout="two_videos")
+    manifest.preprocess.kinematics = kcfg
     manifest.metrics.individual = ["IL-17"]
     manifest.metrics.group = []
     manifest.metrics.zone = []
     manifest.metrics.diagnostic = []
-    new = Engine(manifest).compute_metrics(psess, identity_free=False)["IL-17"]
-    pd.testing.assert_frame_equal(new, old, check_exact=True)
+    cols = ["mean_speed_3d_cm_s", "median_speed_3d_cm_s", "max_speed_3d_cm_s"]
+    engine = Engine(manifest).compute_metrics(psess, identity_free=False)["IL-17"]
+    direct = _run(psess, {"kinematics": kcfg.model_dump()})
+    for df in (engine, direct):
+        np.testing.assert_array_equal(df[cols].to_numpy(), np.array(_OLD_IL17[method]))
+
+
+def _engine_for(individual: list[str]):
+    from tests.test_api import _make_manifest
+    from track2data.api import Engine
+    from track2data.core.models import ProjectMode
+
+    manifest = _make_manifest()
+    manifest.mode = ProjectMode(dimension="3d", layout="two_videos")
+    manifest.metrics.individual = individual
+    manifest.metrics.group = []
+    manifest.metrics.zone = []
+    manifest.metrics.diagnostic = []
+    return Engine(manifest)
+
+
+def test_z_speed_helper_returns_the_same_object_without_a_kinematics_metric() -> None:
+    psess = _seeded_fused(KinematicsCfg())
+    assert _engine_for(["IL-2"])._with_whole_session_z_speed(psess, set()) is psess
+
+
+def test_z_speed_helper_returns_the_same_object_when_il17_is_skipped() -> None:
+    psess = _seeded_fused(KinematicsCfg())
+    assert _engine_for(["IL-17"])._with_whole_session_z_speed(psess, {"IL-17"}) is psess
+
+
+def test_z_speed_helper_sets_the_series_on_a_copy() -> None:
+    psess = _seeded_fused(KinematicsCfg())
+    engine = _engine_for(["IL-17"])
+    out = engine._with_whole_session_z_speed(psess, set())
+    assert out is not psess
+    assert out.z_speed is not None and out.z_speed.shape == (120, 2)
+    assert psess.z_speed is None  # the caller's session is not modified
+    engine.compute_metrics(psess, identity_free=False)
+    assert psess.z_speed is None
