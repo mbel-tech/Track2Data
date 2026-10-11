@@ -378,3 +378,58 @@ class TestNNMatchedSpeed:
         psess = make_psess(n_animals=3)
         df = NNMatchedSpeed().compute(psess)
         assert len(df) == 1
+
+
+# ── GL-1: separator rows are not frames ───────────────────────────────────────
+
+
+def _with_separator(n_animals: int = 2, nan_real_row: int | None = None):
+    """3 frames + 1 separator row + 3 frames; real rows finite unless *nan_real_row* is set."""
+    rng = np.random.default_rng(5)
+    xy = rng.uniform(0, 100, (7, n_animals, 2))
+    xy[3] = np.nan
+    if nan_real_row is not None:
+        xy[nan_real_row, 0] = np.nan
+    psess = make_psess(xy=xy, px_per_cm=2.0, body_length_px=np.full(n_animals, 10.0))
+    sep = np.zeros(7, dtype=bool)
+    sep[3] = True
+    psess.separator_mask = sep
+    return psess
+
+
+def test_gl1_does_not_count_a_separator_row_as_skipped() -> None:
+    psess = _with_separator()
+    row = NearestNeighbourDistance().compute(psess).iloc[0]
+    assert row["n_skipped_frames"] == 0
+    real = psess.xy[~psess.separator_mask]
+    expected = np.mean([np.linalg.norm(f[0] - f[1]) for f in real])
+    assert row["mean_nnd_px"] == pytest.approx(expected)
+
+
+def test_gl1_counts_real_nan_rows_only() -> None:
+    row = NearestNeighbourDistance().compute(_with_separator(nan_real_row=5)).iloc[0]
+    assert row["n_skipped_frames"] == 1
+
+
+def test_gl1_one_animal_reports_real_rows() -> None:
+    row = NearestNeighbourDistance().compute(_with_separator(n_animals=1)).iloc[0]
+    assert row["n_skipped_frames"] == 6
+
+
+def test_gl1_sessions_without_separators_are_unchanged() -> None:
+    rng = np.random.default_rng(8)
+    xy = rng.uniform(0, 100, (20, 3, 2))
+    xy[4, 1] = np.nan
+    psess = make_psess(xy=xy, px_per_cm=2.0, body_length_px=np.full(3, 10.0))
+    assert psess.separator_mask is None
+    row = NearestNeighbourDistance().compute(psess).iloc[0]
+    from scipy.spatial import cKDTree
+
+    vals = []
+    for f in xy:
+        if np.isnan(f).any():
+            continue
+        vals.append(cKDTree(f).query(f, k=2)[0][:, 1].mean())
+    assert row["n_skipped_frames"] == 1
+    assert row["mean_nnd_px"] == pytest.approx(np.mean(vals), rel=1e-12)
+    assert row["median_nnd_px"] == pytest.approx(np.median(vals), rel=1e-12)
