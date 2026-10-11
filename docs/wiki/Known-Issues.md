@@ -1,6 +1,6 @@
 # Known issues
 
-**Last reviewed:** 2026-10-08, against v0.1.0 and `main`.
+**Last reviewed:** 2026-10-11, against v0.1.0 and `main` (1c9e828).
 
 What is currently wrong, missing, or in flux. Fixed items are removed from this page and
 live in the
@@ -83,6 +83,35 @@ video pixels, and should be redrawn.
 **A required option is never defaulted.** If the files do not record something a reader
 needs — frame rate is the common case — you get `READER_OPTION_MISSING` and must supply it.
 A guessed frame rate would corrupt every speed and path-length value instead.
+
+## 3-D data
+
+**3-D assumes one right-angle camera pair and no optics correction.** A fused project
+combines a top and a side view as if both were orthographic: the side view's horizontal
+scale comes from the tank height (square pixels, no perspective), there is no refraction or
+parallax correction, and its vertical axis is image y, so a rotated side camera cannot be
+described. A wrong tank height scales every vertical distance. A side camera mounted upside
+down is supported (tick **The side view is upside down** in the Fusion dialog).
+
+**A fused depth is kept, and flagged, when it rests on a reconstructed side position.** Where
+the side view was gap-filled or jump-replaced, `depth_interpolated` or `depth_jump_replaced`
+is True in the per-frame table; the depth itself is not blanked. Report how much of a 3-D
+result rests on flagged frames. Native 3-D files are cleaned like x and y: `z` is gap-filled
+and smoothed with the same settings, so the smoothing window changes IL-16 and IL-17.
+
+**GL-1 and GL-16 can use different frames.** Both skip a frame when an animal is missing, but
+GL-16 also needs a depth for every animal, so missing depth leaves it on fewer, cleaner
+frames and biases `mean_nnd_3d_cm` upward against `mean_nnd_cm`. Read `frac_frames_used_3d`
+before comparing the two.
+
+**The native water column is one surface and floor for the whole project.** Native files in
+a project must share a vertical axis (a mix is refused at import) and an origin (this cannot
+be checked from the files, so check it yourself). Samples outside the column are left out of
+IL-15, IL-16, IL-17 and GL-16, never clipped, and the run `README.md` counts them.
+
+**`flip` reverses the vertical axis only, which also mirrors the view from above.** For a
+native file, headings and the sign of `left_right_turn_bias` change with it. The horizontal
+plane itself is right-handed for every `vertical_axis`.
 
 ## Output and performance
 
