@@ -695,3 +695,24 @@ def test_a_native_file_added_with_readerless_refs_says_not_a_native_file() -> No
     assert "'p0' pixel-tracked (is in this project or added with it)" in message
     assert "'p2' is not a native 3-D file (no native reader recognised it)" in message
     assert "None" not in message
+
+
+def test_list_metrics_names_what_a_native_3d_project_rules_out() -> None:
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+    from track2data.metrics.availability import (
+        NEEDS_PIXEL_FRAME_REASON,
+        NEEDS_SEVERAL_ANIMALS_REASON,
+        NEEDS_WATER_COLUMN_REASON,
+        reason_for_cli,
+    )
+
+    out = " ".join(CliRunner().invoke(cli, ["list-metrics"]).output.split())
+    assert "Not offered in a native 3-D project" in out
+    assert f"IL-3, IL-9, IL-10, IL-14: {NEEDS_PIXEL_FRAME_REASON}" in out
+    assert "GL-1, GL-2" in out and NEEDS_SEVERAL_ANIMALS_REASON in out
+    assert f"IL-15: {reason_for_cli(NEEDS_WATER_COLUMN_REASON)}" in out
+    # only the metrics listed are named
+    zone = CliRunner().invoke(cli, ["list-metrics", "--level", "zone"]).output
+    assert "Not offered in a native 3-D project" not in zone

@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Clearer native 3-D wording on the command line.** `track2data validate` and `run` name the project setting (`calibration.water_column`) instead of the Calibration page when IL-15 waits for the water column; the Metrics screen and the run `README.md` keep their text. `track2data list-metrics` ends with a line saying that availability also depends on the project (3-D data, cm scale, pixel frame, number of animals) and pointing to `validate`. `track2data add --yes` prints a `check:` line for every required option the reader proposed rather than you gave (for example `unit=mm` for Anipose). `docs/METRICS_SPEC.md` gains an Availability note on IL-3, IL-9, IL-10, IL-14 and the group metrics for native 3-D projects.
+- **Clearer native 3-D wording on the command line.** `track2data validate` and `run` name the project setting (`calibration.water_column`) instead of the Calibration page when IL-15 waits for the water column; the Metrics screen and the run `README.md` keep their text. `track2data list-metrics` ends with a line saying that availability also depends on the project (3-D data, cm scale, pixel frame, number of animals) and pointing to `validate`, and, above that line, lists what a native 3-D project rules out (IL-3, IL-9, IL-10, IL-14, IL-15 until the water column is given, and every group metric) with the same reasons as the Metrics screen. `track2data add --yes` prints a `check:` line for every required option the reader proposed rather than you gave (for example `unit=mm` for Anipose). `docs/METRICS_SPEC.md` gains an Availability note on IL-3, IL-9, IL-10, IL-14 and the group metrics for native 3-D projects.
 
 ### Fixed
 

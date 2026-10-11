@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -240,6 +241,30 @@ def _natural_sort_key(metric_cls: type[Metric]) -> tuple[str, int]:
     return (prefix, int(number))
 
 
+def _native_3d_unavailability(metrics: list[type[Metric]]) -> list[str]:
+    """One ``IDs: reason`` line per reason a native 3-D project rules *metrics* out.
+
+    Asked of ``availability.unavailable_reason`` with a native stand-in and no water column, so
+    the wording is the Metrics screen's and ``validate``'s (rewritten for the command line).
+    """
+    from track2data.metrics.availability import reason_for_cli, unavailable_reason
+
+    stand_in = {
+        "dimension": "3d",
+        "calibration_mode": "session",
+        "has_depth": True,
+        "px_per_cm": 1.0,
+        "depth_height_cm": 1.0,
+        "native_3d": True,
+    }
+    by_reason: dict[str, list[str]] = {}
+    for m in metrics:
+        reason = unavailable_reason(m, "top", has_depth=False, depth_scale=stand_in)
+        if reason is not None:
+            by_reason.setdefault(reason, []).append(m.id)
+    return [f"{', '.join(ids)}: {reason_for_cli(reason)}" for reason, ids in by_reason.items()]
+
+
 @cli.command("list-metrics")
 @click.option("--level", default=None,
               type=click.Choice(["individual", "group", "zone", "diagnostic"]),
@@ -289,6 +314,12 @@ def list_metrics(level: str | None) -> None:
         click.echo(
             f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {view:<{view_w}}  {label}"
         )
+    native_lines = _native_3d_unavailability(metrics)
+    if native_lines:
+        click.echo()
+        click.echo("Not offered in a native 3-D project (Anipose, DeepLabCut 3-D):")
+        for line in native_lines:
+            click.echo(textwrap.fill(line, 100, initial_indent="  ", subsequent_indent="      "))
     click.echo()
     click.echo(
         "Availability also depends on the project (3-D data, cm scale, pixel frame, number of "
