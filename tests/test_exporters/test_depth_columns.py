@@ -333,3 +333,21 @@ def test_single_video_layout_records_offset_zero(tmp_path: Path) -> None:
     assert meta["run_metadata"]["fusion"]["fusion_frame_offset"] == 0
     sessions = pd.read_csv(out / "sessions.csv")
     assert set(sessions.fusion_frame_offset) == {0}
+
+
+def test_quality_threshold_clears_the_depth_provenance_flags_with_the_depth(tmp_path: Path) -> None:
+    manifest = build_scene(tmp_path / "data")
+    manifest.metrics.quality_threshold = 0.5
+    engine = Engine(manifest)
+    psess = engine.fuse_pair(manifest.view_pairs[0]).psess
+    psess.depth_interpolated = np.ones(psess.depth.shape, dtype=bool)
+    psess.depth_jump_replaced = np.ones(psess.depth.shape, dtype=bool)
+    prob = np.ones((psess.n_frames, psess.n_animals))
+    prob[30, 0] = 0.1
+    psess.id_probabilities_rows = prob
+    df = engine.build_fish_by_frame(psess)
+    low = df[(df.individual_id == 0) & (df.frame == 30)].iloc[0]
+    assert np.isnan(low.depth_fraction)
+    assert not low.depth_interpolated and not low.depth_jump_replaced
+    assert df.depth_interpolated.dtype == bool
+    assert df.depth_interpolated.sum() == len(df) - 1

@@ -1703,6 +1703,10 @@ class Engine:
                 if c in df.columns
             ]
             df.loc[below, masked_cols] = np.nan
+            # flags describe a depth that is now blank; a boolean cannot be NaN
+            for flag in ("depth_interpolated", "depth_jump_replaced"):
+                if flag in df.columns:
+                    df.loc[below, flag] = False
 
         self._attach_metadata(
             df, psess, self.identity_free_for(psess.session, identity_free)

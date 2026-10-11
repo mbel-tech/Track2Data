@@ -49,6 +49,8 @@ def depth_columns(psess: PreprocessedSession) -> dict[str, np.ndarray]:
     * ``depth_fraction`` / ``depth_cm`` -- depth below the surface, when a depth exists (a fused
       session, or a native one with a water column). ``depth_cm`` is NaN when the tank height
       is unknown.
+    * ``depth_interpolated`` / ``depth_jump_replaced`` -- booleans beside a fused depth, True
+      where it rests on a side-view position the pipeline gap-filled or replaced.
 
     Row order is the table's (frame-major, animal-minor). Every value is NaN where the animal's
     position is NaN. Empty for a 2-D session.
@@ -68,6 +70,12 @@ def depth_columns(psess: PreprocessedSession) -> dict[str, np.ndarray]:
         cm = fraction * height if height is not None else np.full_like(fraction, np.nan)
         out["depth_fraction"] = fraction
         out["depth_cm"] = cm
+        for name, flag in (
+            ("depth_interpolated", psess.depth_interpolated),
+            ("depth_jump_replaced", psess.depth_jump_replaced),
+        ):
+            if flag is not None:
+                out[name] = np.asarray(flag, dtype=bool).reshape(-1)
     return out
 
 
