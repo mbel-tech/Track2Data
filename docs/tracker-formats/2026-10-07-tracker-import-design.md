@@ -407,9 +407,10 @@ the horizontal one, chosen by `vertical_axis` (default `z`) and `flip`; and z is
   a row is missing only when x, y **and** z are all exactly 0 (or any of them is not finite),
   a single 0 is a real coordinate. The unit is the calibration board's; the reader proposes
   none, so `unit` must be given. No `likelihood_cutoff` option. One animal per file: a
-  multi-animal table (four header rows, an `individuals` row) is not detected by this reader and
-  the scan gives no notice for it either, because the old `dlc_3d` entry of `readers/recognise.py` was removed when this
-  reader landed.
+  multi-animal table (four header rows, an `individuals` row) is not detected by this reader;
+  a narrowed `dlc_3d` entry of `readers/recognise.py` names it (and a table without full x, y, z
+  triples) as one Track2Data cannot read yet, while the single-animal tables the reader takes are
+  not reported.
 
 ### P6 TRex `.npz` (cases `trex_new_export`, `trex_old_export`)
 

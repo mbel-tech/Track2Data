@@ -1110,19 +1110,23 @@ checks. *No mixing:* `NATIVE_3D_MIXED` (native with pixel sessions, or native in
 and `NATIVE_3D_UNIT_MISMATCH` (two target units); `fuse()` refuses native sessions. *z.*
 `Session.raw_z` and `PreprocessedSession.z`, row-aligned with `xy`, not smoothed, interpolated
 or permuted by identity fixes; `has_pixel_frame False`, `coordinate_unit`, `video.width_px = height_px = 0`
-(zones and background disabled, the IL-3 and IL-14 arena from the data extent with a warning).
+(zones and background disabled; the data-extent arena fallback of IL-3 and IL-14 is kept but not reachable, because those metrics are not offered).
 `geometry3d.positions_cm` and IL-17 take Z from `z` when present, otherwise `depth * depth_height_cm`.
 *IL-15* needs the water column (`CalibrationConfig.water_column`: `surface_z`, `floor_z`, finite, different,
 either order): `depth = (z - surface_z) / (floor_z - surface_z)`, `depth_height_cm = |floor_z - surface_z|`,
 values outside [0, 1] and non-finite z become NaN and are counted, never clipped; without it the
 reason is "needs the water column (surface and floor z) on the Calibration page". *Outputs.* z is not
 exported in the per-frame table (only through the metrics); with a water column the table carries the
-depth columns; the run README has a "Native 3-D source" section. Pixel-frame outputs are unchanged,
-except that `manifest.json` carries the new empty `water_column` and `native_3d` keys and `project_hash`
-changes once (the new field is part of the manifest). *Recognition.* The `dlc_3d` entry of
-`readers/recognise.py` ("unreadable format") was removed because the reader now reads those files;
-a multi-animal DeepLabCut 3-D table (an extra `individuals` header row) is not detected by this reader
-and so gets no notice.
+depth columns; the run README has a "Native 3-D source" section. Pixel-frame outputs are unchanged
+byte for byte: `water_column` is left out of the serialised manifest while None, so `project_hash`, the
+cache key and `manifest.json` do not change, and the provenance `native_3d` key exists only for a native
+session (golden values computed from fc5b2fc). IL-15's `depth_extent_source` is `water_column` there.
+*The water column* is entered on the file's own axis; `apply_water_column` negates both values for a
+session read with `flip`. *Not offered in a native project* (`availability.unavailable_reason`): IL-3,
+IL-9, IL-10, IL-14 (pixel-sized defaults would silently change with `target_unit`) and every group metric
+(one animal per file). *Recognition.* The `dlc_3d` entry of `readers/recognise.py` was narrowed: it names a
+multi-animal DeepLabCut 3-D table (an extra `individuals` header row) or one without full x, y, z triples,
+and never a table the reader takes.
 
 **Rationale:** A wrong unit silently scales every speed, so the unit is a required option and the
 calibration is set once, by the add, and only checked afterwards; a run that rewrote the project
@@ -1131,7 +1135,7 @@ unit in the whole pipeline and lets the existing "session" calibration (`length_
 carry it with no new path. Keeping z absolute (not a fraction) means the 3-D metrics need no tank
 height; the water column is an explicit entry because estimating the surface from the data would hide
 an error. Missing-as-all-zero keeps a real zero coordinate that a per-axis rule would erase.
-*Limits.* One animal per file (so GL-16 is empty: it needs two animals in a session); no mixing with
+*Limits.* One animal per file (so no group metric, GL-16 included, is offered); no mixing with
 pixel sessions; the board unit must be confirmed by the user; no refraction correction; the water
 column is entered, not estimated; no z column in the per-frame table; formats are read from synthetic
 files only.

@@ -139,14 +139,21 @@ code does.
 - **IL-17 reads `z`.** The first build left IL-17 on `depth * height`, so a native session without the
   water column got NaN; found by the end-to-end test and fixed. IL-15 outside values, and non-finite z,
   are NaN and counted.
-- **GL-16 is empty for native files** (one animal per file; the metric needs two in a session), with every
-  frame counted in `n_skipped_frames_3d`.
-- **The unreadable-format notice for DLC-3D was removed** from `readers/recognise.py`: the reader now
-  reads those files. A multi-animal DLC-3D table (extra `individuals` header row) is not detected and
-  gets no notice.
-- **Provenance and outputs.** `project_hash` changes once for every project (the manifest gained
-  `calibration.water_column`); `manifest.json` carries empty `water_column` and `native_3d` keys for pixel
-  projects. Nothing else in a pixel project's output changed (a golden README test pins it).
+- **GL-16 is not offered for native files** (one animal per file; the metric needs two in a session).
+- **The unreadable-format notice for DLC-3D was narrowed** in `readers/recognise.py`: the single-animal
+  tables the reader takes are no longer reported, while a multi-animal table (extra `individuals` header
+  row) or one without full x, y, z triples is still named as one that cannot be read yet.
+- **Metrics not offered in a native project** (one reason each, through `availability.unavailable_reason`):
+  IL-3, IL-9, IL-10 and IL-14 (pixel-sized defaults would silently change with `target_unit`; the
+  data-extent arena fallback is kept but not reachable in a run) and every group metric, GL-16 included
+  (one animal per file).
+- **The water column is on the file's axis.** For a session read with `flip`, `apply_water_column` negates
+  both values, so the same physical fish gets the same depth with or without flip.
+- **Provenance and outputs.** `calibration.water_column` is left out of the serialised manifest while it
+  is None (and so out of `project_hash`, the cache key and `manifest.json`), and the provenance
+  `native_3d` key only appears for a native session: a pixel project hashes, caches and serialises exactly
+  as before (golden values from fc5b2fc). IL-15's `depth_extent_source` is `water_column` for native
+  sessions. A replaced jump also blanks z.
 - **UI.** Zones and background are disabled for native projects; the trajectories preview frames the data
   from its extent; the Calibration screen shows the **WATER COLUMN** group (Surface z, Floor z) for
   native projects only; the GUI add refuses a batch that would break the rules before listing it.
