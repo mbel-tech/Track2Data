@@ -230,13 +230,18 @@ def test_il15_with_the_water_column_counts_the_outside_values(
     assert _value(two, "IL-15", "mean_depth_fraction") == pytest.approx(0.74, abs=1e-9)
     assert _value(two, "IL-15", "mean_depth_cm") == pytest.approx(14.8, abs=1e-9)
     assert _value(two, "IL-15", "frac_outside_extent") == pytest.approx(2 / 11, abs=1e-12)
-    assert _value(two, "IL-16", "path_length_3d_cm") == pytest.approx(PATH_CM, abs=1e-9)
-    # the speed uses the absolute z, so outside-the-column frames keep their 3-D speed
+    # the water column also bounds the 3-D metrics: the two frames below the floor are out of the
+    # path (8 of the 10 steps remain, 1.3 cm each) and have no speed; the rest is unchanged
+    assert _value(two, "IL-16", "path_length_3d_cm") == pytest.approx(8 * STEP_CM, abs=1e-9)
     assert _value(two, "IL-17", "mean_speed_3d_cm_s") == pytest.approx(SPEED_CM_S, abs=1e-9)
+    assert _value(two, "IL-17", "max_speed_3d_cm_s") == pytest.approx(SPEED_CM_S, abs=1e-9)
+    # fish1 has nothing outside, so it keeps the full path
+    assert _value(one, "IL-16", "path_length_3d_cm") == pytest.approx(PATH_CM, abs=1e-9)
     frames = pd.read_csv(tmp_path / "o" / "fish2" / "master_fish_by_frame.csv")
     depth = frames["depth_fraction"].to_numpy()
     assert np.isnan(depth[9:]).all() and np.isfinite(depth[:9]).all()
-    assert "z" not in frames.columns
+    # the exported z_cm is the file's own coordinate, outside samples included
+    np.testing.assert_allclose(frames["z_cm"].to_numpy()[9:], [20.8, 22.0], atol=1e-9)
 
 
 def test_a_reversed_water_column_gives_the_same_depth_cm(project: Path, tmp_path: Path) -> None:
