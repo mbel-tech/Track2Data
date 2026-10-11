@@ -152,20 +152,6 @@ cameras see a point, `bp_score`/`bp_error`/`bp_ncams` become NaN. There is no in
 column: one subject per file.
 Source: [`anipose/triangulate.py`](https://github.com/lambdaloop/anipose/blob/master/anipose/triangulate.py), [`compute_angles.py`](https://github.com/lambdaloop/anipose/blob/master/anipose/compute_angles.py).
 
-*Track2Data:* read by the `anipose` reader (P5, synthetic files only). It needs `fps` and `unit`
-(the file states neither), converts to a project unit, and reads one animal per file.
-
-### 1.4a DeepLabCut 3-D (triangulated tables)
-DeepLabCut's 3-D mode writes a CSV with the same three header rows as the 2-D output (`scorer`,
-`bodyparts`, `coords`), but with `x`, `y`, `z` per body part and no `likelihood`; the first column
-is the frame number. The coordinates are in the unit of the calibration board used to triangulate.
-A body part that could not be triangulated is written as `0, 0, 0` (or left empty), so 0 means
-missing only when all three coordinates are 0. There is no individual column: one subject per file.
-
-*Track2Data:* read by the `deeplabcut_3d` reader (P5, built from this layout with synthetic files
-only; there is no real sample). It proposes no unit, so `unit` must be given. A multi-animal 3-D
-table (with an `individuals` header row) is not detected and the scan gives no notice for it.
-
 ### 1.5 DANNCE (3D markerless, multi-camera)
 Python, MIT, <https://github.com/spoonsso/dannce>
 

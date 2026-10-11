@@ -399,6 +399,8 @@ the horizontal one, chosen by `vertical_axis` (default `z`) and `flip`; and z is
 - **From the user.** fps (200 in the sample, not stored) and the plane (default x,y).
   Board units (mm) mean native-unit mode with no pixel frame. z is kept in
   `Session.keypoints` (D = 3).
+- **Anipose layout, Track2Data notes.** One subject per file; units are the calibration
+  board's (typically mm), which the file does not state.
 - **DLC-3D** (`deeplabcut_3d`). The triangulated table of DeepLabCut's 3-D mode: three header
   rows (`scorer`, `bodyparts`, `coords`) with `x`, `y`, `z` per body part, no likelihood, the
   frame number in the first column. A body part that could not be triangulated is `0, 0, 0`:
