@@ -455,3 +455,53 @@ def test_a_view_reason_is_not_classified_as_a_depth_scale_one(monkeypatch) -> No
     assert engine._depth_scale_ids(
         {"IL-DS": "needs a fused 3-D session", "IL-SIDE": "needs a side view recording"}
     ) == {"IL-DS"}
+
+
+def test_depth_scale_skip_warning_is_logged_once_per_run(monkeypatch, caplog) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS", "IL-1"]))
+    reason = "needs a cm scale for the top view"
+    with caplog.at_level(logging.WARNING, logger="track2data.api"), engine._aggregated_skip_log():
+        for i in range(3):
+            fused = _with_depth(_make_psess(_make_session(f"s{i}", n_frames=10, n_animals=2)))
+            fused.px_per_cm = None
+            results = engine.compute_metrics(fused)
+            # the per-session record is untouched by the aggregation
+            assert engine.build_payload(fused, results).skipped_metrics == {"IL-DS": reason}
+        assert not [r for r in caplog.records if "IL-DS" in r.getMessage()]
+    records = [r for r in caplog.records if "IL-DS" in r.getMessage()]
+    assert len(records) == 1
+    text = records[0].getMessage()
+    assert "3 sessions" in text
+    assert reason in text
+    assert all(s in text for s in ("s0", "s1", "s2"))
+
+
+def test_depth_scale_skip_warning_outside_a_run_is_logged_per_call(monkeypatch, caplog) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS"]))
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    fused.px_per_cm = None
+    with caplog.at_level(logging.WARNING, logger="track2data.api"):
+        engine.compute_metrics(fused)
+    assert len([r for r in caplog.records if "IL-DS" in r.getMessage()]) == 1
+
+
+def test_run_scopes_the_skip_log(monkeypatch, caplog) -> None:
+    _register_depth_scale_metric(monkeypatch)
+    engine = Engine(_manifest_3d_cal("scalar", ["IL-DS"]))
+
+    def fake_run(plan, out_dir, exporters, progress, n_workers, cancel_check):
+        for i in range(2):
+            fused = _with_depth(_make_psess(_make_session(f"s{i}", n_frames=10, n_animals=2)))
+            fused.px_per_cm = None
+            engine.compute_metrics(fused)
+
+    monkeypatch.setattr(engine, "_run", fake_run)
+    monkeypatch.setattr(engine, "_checked_plan", lambda: object())
+    with caplog.at_level(logging.WARNING, logger="track2data.api"):
+        engine.run("out")
+    records = [r for r in caplog.records if "IL-DS" in r.getMessage()]
+    assert len(records) == 1
+    assert "2 sessions" in records[0].getMessage()
+    assert engine._skip_tally is None

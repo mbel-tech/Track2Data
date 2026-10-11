@@ -189,11 +189,16 @@ def keep_animals(session: Session, keep: list[int]) -> Session:
         np.asarray(ip)[:, keep] if ip is not None and np.asarray(ip).shape[1] == n else None
     )
     rz = session.raw_z
-    update["raw_z"] = (
-        np.asarray(rz, dtype=np.float64)[:, keep]
-        if rz is not None and np.asarray(rz).ndim == 2 and np.asarray(rz).shape[1] == n
-        else None
-    )
+    z_matches = rz is not None and np.asarray(rz).ndim == 2 and np.asarray(rz).shape[1] == n
+    if rz is not None and not z_matches:
+        logger.warning(
+            "Session %s: raw_z has shape %s, which does not match its %d animal(s); "
+            "the vertical coordinate is dropped.",
+            session.session_id,
+            tuple(np.asarray(rz).shape),
+            n,
+        )
+    update["raw_z"] = np.asarray(rz, dtype=np.float64)[:, keep] if z_matches else None
     kp = session.keypoints
     if kp is not None and kp.xy.shape[1] != n:
         update["keypoints"] = None  # cannot be matched to the animals: dropped, not guessed

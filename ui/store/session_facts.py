@@ -100,7 +100,8 @@ class SessionFacts:
 
     @property
     def pixel_size_known(self) -> bool:
-        """As Session.pixel_size_known: a real, positive video frame size in pixels."""
+        """Whether the video frame size in pixels is real and positive (False for a native 3-D
+        session, which has no image frame, and for a reader that could not read the size)."""
         return self.has_pixel_frame and self.width_px > 0 and self.height_px > 0
 
     @classmethod

@@ -542,3 +542,141 @@ def test_cli_add_refuses_native_files_in_a_pixel_project(tmp_path: Path) -> None
     assert out.exit_code != 0
     assert "NATIVE_3D_MIXED" in out.output
     assert project.read_bytes() == before
+
+
+# ── wording: CLI skip lines, list-metrics footer, add check line, spec ────────
+
+
+def test_reason_for_cli_rewrites_only_the_water_column_reason() -> None:
+    from track2data.metrics.availability import (
+        DEPTH_SCALE_REASONS,
+        NEEDS_PIXEL_FRAME_REASON,
+        reason_for_cli,
+    )
+
+    text = reason_for_cli(NEEDS_WATER_COLUMN_REASON)
+    assert "Calibration page" not in text
+    assert "calibration settings (`calibration.water_column` in the project)" in text
+    # the Metrics screen text is untouched
+    assert NEEDS_WATER_COLUMN_REASON.endswith("on the Calibration page")
+    for reason in DEPTH_SCALE_REASONS - {NEEDS_WATER_COLUMN_REASON}:
+        assert reason_for_cli(reason) == reason
+    assert reason_for_cli(NEEDS_PIXEL_FRAME_REASON) == NEEDS_PIXEL_FRAME_REASON
+    # also inside a longer line that quotes it
+    assert reason_for_cli(f"IL-15: {NEEDS_WATER_COLUMN_REASON}.") == f"IL-15: {text}."
+
+
+def test_cli_skip_line_for_il15_names_the_project_setting(tmp_path: Path) -> None:
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+    from track2data.core.manifest import write as write_manifest
+
+    root = tmp_path / "pose"
+    root.mkdir()
+    write_anipose_csv(root / "fish1.csv", ["head"], 5)
+    refs = [_file_ref(tmp_path, "n1", None)]
+    manifest = _manifest(refs, calibration=SESSION_CM, individual=("IL-1", "IL-15"))
+    project = tmp_path / "p.t2d.json"
+    write_manifest(manifest, project)
+    out = CliRunner().invoke(cli, ["validate", str(project)])
+    assert "calibration.water_column" in out.output
+    assert "Calibration page" not in out.output
+
+
+def test_list_metrics_footer_points_to_validate() -> None:
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+
+    out = CliRunner().invoke(cli, ["list-metrics"])
+    assert out.exit_code == 0, out.output
+    lines = out.output.rstrip("\n").splitlines()
+    assert lines[-2] == ""
+    assert lines[-1].startswith("Availability also depends on the project")
+    assert "t2d validate" in lines[-1] or "track2data validate" in lines[-1]
+    for word in ("3-D data", "cm scale", "pixel frame", "number of animals"):
+        assert word in lines[-1]
+    assert lines[0].split()[:4] == ["ID", "LEVEL", "IDENTITY", "VIEW"]
+    assert any(line.startswith("IL-3 ") for line in lines)
+
+
+def test_add_yes_prints_a_check_line_for_proposed_unit(tmp_path: Path) -> None:
+    from click.testing import CliRunner
+
+    from track2data.cli import cli
+    from track2data.core.manifest import write as write_manifest
+
+    root = tmp_path / "pose"
+    root.mkdir()
+    write_anipose_csv(root / "fish1.csv", ["head"], 5)
+    project = tmp_path / "p.t2d.json"
+    write_manifest(_manifest([]), project)
+    proposed = CliRunner().invoke(
+        cli, ["add", str(project), str(root), "--yes", "--option", "fps=50"]
+    )
+    assert proposed.exit_code == 0, proposed.output
+    assert (
+        "check: unit=mm (proposed by the reader; override with --option unit=...)"
+        in proposed.output
+    )
+    project2 = tmp_path / "q.t2d.json"
+    write_manifest(_manifest([]), project2)
+    given = _cli_add(project2, root)
+    assert given.exit_code == 0, given.output
+    assert "check:" not in given.output
+
+
+def test_metrics_spec_documents_native_unavailability() -> None:
+    from track2data.metrics.availability import (
+        NEEDS_PIXEL_FRAME_REASON,
+        NEEDS_SEVERAL_ANIMALS_REASON,
+    )
+
+    text = (Path(__file__).resolve().parents[2] / "docs" / "METRICS_SPEC.md").read_text(
+        encoding="utf-8"
+    )
+    assert NEEDS_PIXEL_FRAME_REASON in text
+    assert NEEDS_SEVERAL_ANIMALS_REASON in text
+    for metric_id in ("IL-3", "IL-9", "IL-10", "IL-14"):
+        start = text.index(f"#### {metric_id} ")
+        section = text[start : text.index("\n#### ", start + 1)]
+        assert "**Availability**" in section and NEEDS_PIXEL_FRAME_REASON in section
+
+
+def test_t2d_run_logs_the_cli_wording_for_the_water_column(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    from track2data.core.manifest import write as write_manifest
+    from track2data.metrics.availability import reason_for_cli
+
+    assert reason_for_cli(NEEDS_WATER_COLUMN_REASON) != NEEDS_WATER_COLUMN_REASON
+    project = tmp_path / "p.t2d.json"
+    manifest = _manifest(
+        [_file_ref(tmp_path, "n1", None)], calibration=SESSION_CM, individual=("IL-1", "IL-15")
+    )
+    write_manifest(manifest, project)
+    done = subprocess.run(
+        [sys.executable, "-m", "track2data", "run", str(project), "-o", str(tmp_path / "out")],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert done.returncode == 0, done.stderr
+    skip = [ln for ln in done.stderr.splitlines() if "Skipping metric IL-15" in ln]
+    assert skip and "calibration.water_column" in skip[0]
+    assert "Calibration page" not in skip[0]
+    # the README keeps the neutral text
+    readmes = list((tmp_path / "out").rglob("README.md"))
+    assert any(NEEDS_WATER_COLUMN_REASON in r.read_text(encoding="utf-8") for r in readmes)
+
+
+def test_the_library_log_record_keeps_the_neutral_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    manifest = _manifest([_ref("n1")], calibration=SESSION_CM, individual=("IL-1", "IL-15"))
+    engine = Engine(manifest)
+    with caplog.at_level(logging.WARNING, logger="track2data.api"):
+        engine.compute_metrics(_native_psess(engine))
+    assert any(NEEDS_WATER_COLUMN_REASON in r.getMessage() for r in caplog.records)

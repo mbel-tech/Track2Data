@@ -212,6 +212,7 @@ info-button modal (§6).
 | **Assumptions** | Arena is roughly circular or a centre point is meaningful |
 | **Warnings** | For non-circular arenas, "centre-distance" is interpretable only with a clearly defined origin. In a non-circular (e.g. rectangular) arena, centre-distance is not monotonic in distance-to-wall — a corner-hugging animal can score the same centre-distance as one near a wall's midpoint; see **IL-14** for the wall-distance-specific measure. |
 | **Parameters** | `inner_radius_fraction` (float, default 0.5). `centre` / `arena_radius` / `centres` / `arena_radii` are `derived=True` and cannot be overridden. |
+| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 > **Where the centre comes from.** It is derived in
 > `track2data/metrics/derived.py`, not supplied by the user — a value
@@ -339,6 +340,7 @@ info-button modal (§6).
 | **Parameters** | `bin_size_px` (float, px, default 20.0) |
 | **Reference** | Eilam & Golani 1989, Behav. Brain Res. 34(3):199-211 (home base behavior of rats exploring a novel environment) — DOI [10.1016/S0166-4328(89)80102-0](https://doi.org/10.1016/S0166-4328(89)80102-0) |
 | **Supporting references** | Freund et al. 2013, Science 340(6133):756-759 (emergence of individuality in genetically identical mice) (DOI: 10.1126/science.1235294) |
+| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 #### IL-10 — Roaming entropy
 
@@ -357,6 +359,7 @@ info-button modal (§6).
 | **Parameters** | `bin_size_px` (float, px, default 20.0) |
 | **Reference** | Freund et al. 2013, Science 340(6133):756-759 (emergence of individuality in genetically identical mice) — DOI [10.1126/science.1235294](https://doi.org/10.1126/science.1235294) |
 | **Supporting references** | Eilam & Golani 1989, Behav. Brain Res. 34(3):199-211 (home base behavior of rats exploring a novel environment) (DOI: 10.1016/S0166-4328(89)80102-0) |
+| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 #### IL-11 — Circular statistics of heading
 
@@ -392,6 +395,7 @@ info-button modal (§6).
 | **Parameters** | `arena_polygon_vertices` / `arena_polygon_vertices_per_animal` are `derived=True` and cannot be overridden. `wall_contact_threshold_px` (float, px, default 20.0). |
 | **Reference** | Simon et al. 1994, Behav. Brain Res. 61(1):59-64 (thigmotaxis as an index of anxiety in mice) — DOI [10.1016/0166-4328(94)90008-6](https://doi.org/10.1016/0166-4328(94)90008-6) |
 | **Supporting references** | Schnorr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish) (DOI: 10.1016/j.bbr.2011.12.016); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031) |
+| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 #### IL-15 — Vertical position (depth)
 
@@ -610,6 +614,8 @@ info-button modal (§6).
 
 ### 4.3 Social spacing
 
+**Availability (native 3-D projects).** Every group metric (`GL-*`) is unavailable in a native 3-D project (Anipose, DeepLabCut 3-D files): "needs several animals in one session; a native 3-D file holds one animal". The Metrics screen greys them out with that reason, and `validate` and the run `README.md` list it.
+
 #### GL-1 — Nearest-neighbour distance (NND)
 
 | Field | Value |
@@ -642,6 +648,8 @@ info-button modal (§6).
 | **Supporting references** | Miller & Gerlai 2007, Behav. Brain Res. 184(2):157-166 (quantification of shoaling behaviour in zebrafish) (DOI: 10.1016/j.bbr.2007.07.007); Delcourt & Poncin 2012, Rev. Fish Biol. Fish. 22(3):595-619 (shoals and schools: back to the heuristic definitions and quantitative references) (DOI: 10.1007/s11160-012-9260-z) |
 
 ### 4.4 Cohesion & collective motion
+
+Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availability note under 4.3.
 
 #### GL-3 — Polarisation
 
@@ -843,6 +851,8 @@ info-button modal (§6).
 | **Supporting references** | Pitcher 1973, Anim. Behav. 21(4):673-686 (the three-dimensional structure of schools in the minnow, Phoxinus phoxinus) (DOI: 10.1016/S0003-3472(73)80091-0); Krause & Ruxton 2002, Living in Groups (Oxford University Press) (DOI: 10.1093/oso/9780198508175.001.0001) |
 
 ### 4.5 Identity-free variants
+
+Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availability note under 4.3.
 
 `Metric.requires_identity` is not documentation: `Engine.compute_metrics`
 refuses to compute a ❌ metric for a session that was tracked without

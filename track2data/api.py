@@ -32,7 +32,7 @@ import logging
 import multiprocessing
 import queue as queue_mod
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from functools import cached_property
 from pathlib import Path
@@ -294,6 +294,8 @@ class Engine:
         # (session_id, identity_free) -> per-animal metadata, so its warnings
         # are logged once per session rather than once per result frame.
         self._individual_metadata: dict[tuple[str, bool], dict[int, dict[str, Any]]] = {}
+        # (metric_id, reason) -> session ids, while an aggregated-skip scope is open (run()).
+        self._skip_tally: dict[tuple[str, str], list[str]] | None = None
 
     @property
     def manifest(self) -> ProjectManifest:
@@ -1374,6 +1376,42 @@ class Engine:
             return parts[0] if parts else pd.DataFrame()
         return pd.concat(non_empty, ignore_index=True)
 
+    def _log_depth_scale_skip(self, metric_id: str, reason: str, session_id: str) -> None:
+        """Log (or, inside :meth:`_aggregated_skip_log`, tally) one depth-scale metric skip."""
+        if self._skip_tally is not None:
+            self._skip_tally.setdefault((metric_id, reason), []).append(session_id)
+            return
+        logger.warning("Skipping metric %s for session %s: %s.", metric_id, session_id, reason)
+
+    @contextlib.contextmanager
+    def _aggregated_skip_log(self) -> Iterator[None]:
+        """Collect the depth-scale skip warnings of every :meth:`compute_metrics` call inside
+        the block and log one line per ``(metric, reason)`` with the sessions it affected when
+        the block ends (also on an error or a cancellation). ``run()`` opens it, so a run logs
+        "IL-16 skipped for 12 sessions: ..." once instead of once per session; a direct
+        ``compute_metrics`` call outside a run still logs its own skip at once. A nested scope
+        joins the outer one. Worker processes of a parallel run each have their own engine and
+        scope, so they log per worker."""
+        if self._skip_tally is not None:
+            yield
+            return
+        self._skip_tally = {}
+        try:
+            yield
+        finally:
+            tally, self._skip_tally = self._skip_tally, None
+            for (metric_id, reason), sessions in sorted(tally.items()):
+                if len(sessions) == 1:
+                    logger.warning(
+                        "Skipping metric %s for session %s: %s.", metric_id, sessions[0], reason
+                    )
+                    continue
+                shown = ", ".join(sessions[:5]) + (", ..." if len(sessions) > 5 else "")
+                logger.warning(
+                    "%s skipped for %d sessions (%s): %s.",
+                    metric_id, len(sessions), shown, reason,
+                )
+
     def compute_metrics(
         self,
         psess: PreprocessedSession,
@@ -1454,12 +1492,7 @@ class Engine:
                     _view_note(psess),
                 )
             for mid in sorted(depth_ids):
-                logger.warning(
-                    "Skipping metric %s for session %s: %s.",
-                    mid,
-                    psess.session_id,
-                    view_skipped[mid],
-                )
+                self._log_depth_scale_skip(mid, view_skipped[mid], psess.session_id)
 
         bin_seconds = self._bin_seconds()
         windows = None
@@ -2052,7 +2085,8 @@ class Engine:
             self._check_plan(plan)
         previous_check, self._cancel_check = self._cancel_check, cancel_check
         try:
-            return self._run(plan, out_dir, exporters, progress, n_workers, cancel_check)
+            with self._aggregated_skip_log():
+                return self._run(plan, out_dir, exporters, progress, n_workers, cancel_check)
         finally:
             self._cancel_check = previous_check
 

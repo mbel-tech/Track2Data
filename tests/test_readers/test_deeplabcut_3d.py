@@ -127,7 +127,7 @@ def test_multi_frame_index_from_the_first_column(tmp_path: Path) -> None:
     bad = write_dlc3d_csv(tmp_path / "dup.csv", ["a"], [0, 1, 1])
     with pytest.raises(Track2DataError) as err:
         read(bad)
-    assert err.value.code == "DLC_BAD_FRAME_INDEX"
+    assert err.value.code == "DLC3D_BAD_FRAME_INDEX"
 
 
 def test_session_flags(tmp_path: Path) -> None:
@@ -184,3 +184,101 @@ def test_empty_file_and_ambiguous_folder(tmp_path: Path) -> None:
     with pytest.raises(Track2DataError) as err2:
         read(tmp_path)
     assert err2.value.code == "SESSION_AMBIGUOUS"
+
+
+def test_header_longer_than_the_peek_is_still_detected(tmp_path: Path) -> None:
+    names = [f"part-{i:05d}" for i in range(2500)]  # three columns each: > 64 KB of header
+    path = write_dlc3d_csv(tmp_path / "wide.csv", names, 2)
+    assert len(path.read_text().splitlines()[1]) > 65_536
+    assert DeepLabCut3DReader.detect(path)
+    (group,) = scan([tmp_path]).groups
+    (detection,) = group.detections
+    assert detection.reader == "deeplabcut_3d"
+    keypoint = next(p for p in detection.parameters if p.name == "keypoint")
+    assert keypoint.choices == tuple(names)
+    assert read(path, keypoint=names[-1]).raw_xy.shape == (2, 1, 2)
+
+
+def test_keypoint_choices_are_the_union_when_files_share_none(tmp_path: Path) -> None:
+    write_dlc3d_csv(tmp_path / "a.csv", ["nose", "tail"], 3)
+    write_dlc3d_csv(tmp_path / "b.csv", ["fin", "eye"], 3)
+    (group,) = scan([tmp_path]).groups
+    (detection,) = group.detections
+    keypoint = next(p for p in detection.parameters if p.name == "keypoint")
+    assert keypoint.choices == ("nose", "tail", "fin", "eye")
+    with pytest.raises(Track2DataError) as err:
+        read(tmp_path / "a.csv", keypoint="fin")
+    assert err.value.code == "READER_OPTION_INVALID"
+
+
+@pytest.mark.parametrize("bad", ["dup", "negative", "text"])
+def test_dlc3d_frame_index_errors_say_deeplabcut_3d(tmp_path: Path, bad: str) -> None:
+    frames: list = {"dup": [0, 1, 1], "negative": [-1, 0, 1], "text": [0, 1, 2]}[bad]
+    path = write_dlc3d_csv(tmp_path / "f.csv", ["a"], frames)
+    if bad == "text":
+        path.write_text(path.read_text().replace("\n2,", "\nsecond,"))
+    with pytest.raises(Track2DataError) as err:
+        read(path)
+    assert err.value.code == "DLC3D_BAD_FRAME_INDEX"
+    assert "DeepLabCut 3-D" in str(err.value) and not err.value.code.startswith("DLC_")
+    assert "DeepLabCut 3-D" in err.value.remediation
+
+
+def test_dlc3d_bad_value_and_unreadable_have_their_own_codes(tmp_path: Path) -> None:
+    path = write_dlc3d_csv(tmp_path / "v.csv", ["a"], 3)
+    lines = path.read_text().splitlines()
+    lines[4] = lines[4].replace("11.0", "oops")  # frame 1, a cell that is not a number
+    path.write_text("\n".join(lines) + "\n")
+    with pytest.raises(Track2DataError) as err:
+        read(path)
+    assert err.value.code == "DLC3D_BAD_VALUE" and "DeepLabCut 3-D" in str(err.value)
+    broken = write_dlc3d_csv(tmp_path / "u.csv", ["a"], 3)
+    broken.write_bytes(broken.read_bytes() + b"\xff\xfe\n")
+    with pytest.raises(Track2DataError) as err:
+        read(broken)
+    assert err.value.code == "DLC3D_UNREADABLE" and "DeepLabCut 3-D" in str(err.value)
+
+
+def test_dlc3d_duplicate_column_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "d.csv"
+    path.write_text(
+        "scorer,s,s,s,s\nbodyparts,a,a,a,a\ncoords,x,y,z,x\n0,1,2,3,4\n1,2,3,4,5\n"
+    )
+    assert DeepLabCut3DReader.detect(path)  # still recognised; the read explains the problem
+    with pytest.raises(Track2DataError) as err:
+        read(path)
+    assert err.value.code == "DLC3D_DUPLICATE_COLUMN"
+    assert "a x" in str(err.value)
+
+
+def test_a_2d_table_with_z_and_likelihood_is_not_claimed_by_dlc3d(tmp_path: Path) -> None:
+    path = tmp_path / "t.csv"
+    path.write_text(
+        "scorer,s,s,s,s\nbodyparts,a,a,a,a\ncoords,x,y,z,likelihood\n0,1,2,3,0.9\n1,2,3,4,0.9\n"
+    )
+    assert not DeepLabCut3DReader.detect(path)
+    assert readers.detect_reader(path) is DeepLabCutReader
+    (group,) = scan([tmp_path]).groups
+    assert [d.reader for d in group.detections] == ["deeplabcut"]
+
+
+def test_the_3d_readers_texts_all_say_deeplabcut_3d(tmp_path: Path) -> None:
+    assert "DeepLabCut 3-D" in DeepLabCut3DReader.display_name
+    plain = tmp_path / "notes.csv"
+    plain.write_text("a,b\n1,2\n")
+    with pytest.raises(Track2DataError) as err:
+        read(plain)
+    assert err.value.code == "DLC3D_NOT_A_3D_FILE"
+    assert "DeepLabCut 3-D" in str(err.value) and "DeepLabCut 3-D" in err.value.remediation
+    folder = tmp_path / "two"
+    folder.mkdir()
+    write_dlc3d_csv(folder / "a.csv", ["a"], 3)
+    write_dlc3d_csv(folder / "b.csv", ["a"], 3)
+    with pytest.raises(Track2DataError) as err:
+        read(folder)
+    assert err.value.code == "SESSION_AMBIGUOUS" and "DeepLabCut 3-D" in str(err.value)
+    empty = tmp_path / "empty.csv"
+    empty.write_text("scorer,s,s,s\nbodyparts,a,a,a\ncoords,x,y,z\n")
+    with pytest.raises(Track2DataError) as err:
+        read(empty)
+    assert "DeepLabCut 3-D" in err.value.remediation

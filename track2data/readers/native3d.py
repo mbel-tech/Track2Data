@@ -11,6 +11,7 @@ one (Anipose proposes mm) but never fills it in on its own.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from fractions import Fraction
 from typing import Any
 
@@ -83,6 +84,39 @@ def horizontal_axes(vertical_axis: str) -> tuple[int, int]:
         raise ValueError(f"vertical_axis must be one of {list(AXES)}, got {vertical_axis!r}")
     first, second = (i for i in range(3) if AXES[i] != vertical_axis)
     return first, second
+
+
+def union_keypoints(keypoint_sets: Iterable[Sequence[str]]) -> tuple[str, ...]:
+    """Every keypoint of any scanned file, in first-seen order: the ``keypoint`` choices.
+
+    A keypoint a given file lacks is refused when that file is read (``READER_OPTION_INVALID``,
+    naming the file's own keypoints), so the union never hides a file's keypoints and is empty
+    only when no file has one.
+    """
+    return tuple(dict.fromkeys(name for names in keypoint_sets for name in names))
+
+
+def with_keypoint_choices(
+    specs: Sequence[ReaderParameter], keypoint_sets: Iterable[Sequence[str]]
+) -> tuple[ReaderParameter, ...]:
+    """*specs* with the ``keypoint`` option's choices set to the union of *keypoint_sets*."""
+    choices = union_keypoints(keypoint_sets)
+    return tuple(
+        spec.model_copy(update={"choices": choices}) if spec.name == "keypoint" else spec
+        for spec in specs
+    )
+
+
+def frame_intervals(frames: np.ndarray) -> list[tuple[int, int]] | None:
+    """[start, end) runs of consecutive frame numbers (sorted, unique), or None for frames
+    0..N-1 with no gap."""
+    breaks = np.flatnonzero(np.diff(frames) != 1) + 1
+    starts = np.concatenate(([0], breaks))
+    ends = np.concatenate((breaks, [len(frames)]))
+    runs = [(int(frames[s]), int(frames[e - 1]) + 1) for s, e in zip(starts, ends, strict=True)]
+    if len(runs) == 1 and runs[0][0] == 0:
+        return None
+    return runs
 
 
 def native_parameters(unit_default: str | None) -> tuple[ReaderParameter, ...]:

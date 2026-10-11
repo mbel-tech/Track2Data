@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   top-view tracks of each fused pair. 2D projects behave exactly as before. The project fingerprint (`project_hash`, printed in the
   run README and log) of existing projects changes once, because the new `mode` setting is part of it.
 
+### Changed
+
+- **Clearer native 3-D wording on the command line.** `track2data validate` and `run` name the project setting (`calibration.water_column`) instead of the Calibration page when IL-15 waits for the water column; the Metrics screen and the run `README.md` keep their text. `track2data list-metrics` ends with a line saying that availability also depends on the project (3-D data, cm scale, pixel frame, number of animals) and pointing to `validate`. `track2data add --yes` prints a `check:` line for every required option the reader proposed rather than you gave (for example `unit=mm` for Anipose). `docs/METRICS_SPEC.md` gains an Availability note on IL-3, IL-9, IL-10, IL-14 and the group metrics for native 3-D projects.
+
 ### Fixed
 
 - **Native 3-D files: the vertical axis is now preprocessed like the horizontal plane.** `z` was laid out and then left raw, so a smoothed x/y was combined with an unsmoothed z in IL-16 and IL-17 and no setting could reduce the vertical share of the 3-D path. It now goes through the same steps and settings as x/y: blanked where a jump was replaced, bridged across tracking intervals, gap-filled (same `max_gap_frames`, same limits) and smoothed (same method, window and polyorder). On a synthetic helix with 2 mm noise (true 3-D path 251.5 cm, true vertical path 15.96 cm) the vertical contribution to IL-16 was 129.14 cm at every smoothing setting; it is now 60.09 cm at window 5 (default) and 16.49 cm at window 41, and IL-16 is 275.78 cm and 252.06 cm (was 307.66 and 294.20). **Native 3-D IL-16 and `max_speed_3d_cm_s` will be lower than before on noisy files**; the sensitivity sweep now varies the vertical half too. Cached preprocessing is rebuilt once (cache schema 7); `project_hash` is unchanged.

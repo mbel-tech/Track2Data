@@ -105,6 +105,7 @@ def correct_switches(
     xy: np.ndarray,
     cfg: IdSwitchCfg,
     swap_boundaries: set[int] | None = None,
+    has_z: bool = False,
 ) -> tuple[np.ndarray, PPStepResult]:
     """Correct identity switches in multi-animal trajectory data.
 
@@ -141,6 +142,10 @@ def correct_switches(
         the permutation it licenses applies from *b* onward. When ``None``,
         every frame is a candidate -- correct, but far more
         false-positive-prone, so prefer supplying it.
+    has_z:
+        The session also carries a vertical coordinate (native 3-D). It is never
+        re-labelled here, so with several animals it can end up on the wrong
+        identity; that is logged once per call.
 
     Returns
     -------
@@ -166,6 +171,14 @@ def correct_switches(
         if swap_boundaries
         else "geometry alone, with no fragment boundaries to constrain it",
     )
+
+    if has_z:
+        logger.warning(
+            "Identity-switch correction re-labels x and y only; the 3-D z coordinate of this "
+            "session (%d animals) is left as read, so it can end up on the wrong identity. "
+            "Identity-switch correction is meant for a single animal's z, or sessions without z.",
+            n_animals,
+        )
 
     identity = np.arange(n_animals)
 

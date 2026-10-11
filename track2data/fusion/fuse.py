@@ -111,7 +111,8 @@ def fuse(
     for view in (top, side):
         if not view.session.has_pixel_frame:
             raise FusionError(
-                f"session {view.session.session_id}: native 3-D sessions have no views to fuse"
+                f"session {view.session.session_id} has no pixel frame "
+                "(a native 3-D session has no views to fuse)"
             )
     if abs(top.fps - side.fps) > FPS_TOLERANCE * max(top.fps, side.fps):
         raise FusionError(f"frame rates differ: {top.fps:g} vs {side.fps:g} fps")

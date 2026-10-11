@@ -220,3 +220,31 @@ def test_anipose_skeleton_keeps_the_file_axes(tmp_path: Path) -> None:
     assert s.raw_z is not None and s.keypoints is not None
     np.testing.assert_array_equal(s.raw_z[:, 0], [-2, -5])
     np.testing.assert_array_equal(s.keypoints.xy[:, 0, 0, :], xyz[:, 0, :])
+
+
+def test_header_longer_than_the_peek_is_still_detected(tmp_path: Path) -> None:
+    """A header line past the 64 KB peek is read whole, not cut mid-column (no misparse)."""
+    names = [f"keypoint-{i:05d}" for i in range(2500)]  # ~ 6 columns x 2500 x 17 bytes > 64 KB
+    path = write_anipose_csv(tmp_path / "wide.csv", names, 2)
+    assert len(path.read_text().splitlines()[0]) > 65_536
+    assert AniposeReader.detect(path)
+    (group,) = scan([tmp_path]).groups
+    (detection,) = group.detections
+    assert detection.reader == "anipose"
+    keypoint = next(p for p in detection.parameters if p.name == "keypoint")
+    assert keypoint.choices == tuple(names)  # the last keypoint (past 64 KB) is there too
+    s = read(path, keypoint=names[-1])
+    assert s.raw_xy.shape == (2, 1, 2)
+
+
+def test_keypoint_choices_are_the_union_when_files_share_none(tmp_path: Path) -> None:
+    write_anipose_csv(tmp_path / "a.csv", ["nose", "tail"], 3)
+    write_anipose_csv(tmp_path / "b.csv", ["fin", "eye"], 3)
+    (group,) = scan([tmp_path]).groups
+    (detection,) = group.detections
+    keypoint = next(p for p in detection.parameters if p.name == "keypoint")
+    assert keypoint.choices == ("nose", "tail", "fin", "eye")
+    with pytest.raises(Track2DataError) as err:  # the per-file check stays
+        read(tmp_path / "a.csv", keypoint="fin")
+    assert err.value.code == "READER_OPTION_INVALID"
+    assert "nose" in err.value.remediation and "tail" in err.value.remediation

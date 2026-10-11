@@ -189,3 +189,12 @@ def test_binned_means_average_to_the_whole_session_mean() -> None:
              for w in windows]
     assert parts == pytest.approx([1.0, 3.0, 5.0, 7.0])
     assert np.mean(parts) == pytest.approx(whole)
+
+
+def test_nnd3d_zero_animals_and_zero_frames_give_nan_without_warnings() -> None:
+    for shape in ((5, 0, 3), (0, 3, 3), (0, 0, 3)):
+        psess = _fused(np.zeros(shape))
+        row = _run(psess).iloc[0]
+        assert list(_run(psess).columns) == COLUMNS
+        assert np.isnan(row[STATS].astype(float)).all()
+        assert row["n_skipped_frames_3d"] == shape[0]

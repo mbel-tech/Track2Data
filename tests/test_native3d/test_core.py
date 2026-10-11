@@ -218,7 +218,8 @@ def test_fuse_refuses_native_3d_sessions() -> None:
         top, side, pair = make_pair()
         target = top if which == "top" else side
         target.session = target.session.model_copy(update={"has_pixel_frame": False})
-        with pytest.raises(FusionError, match="native 3-D sessions have no views to fuse"):
+        message = r"has no pixel frame \(a native 3-D session has no views to fuse\)"
+        with pytest.raises(FusionError, match=message):
             fuse(top, side, pair, same_video=False)
 
 

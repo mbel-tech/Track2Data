@@ -186,3 +186,19 @@ def test_a_single_animal_3d_table_is_read_not_reported(tmp_path: Path) -> None:
     result = scan([tmp_path])
     assert result.recognised == ()
     assert [g.best.reader for g in result.groups] == ["deeplabcut_3d"]
+
+
+def test_a_wide_multi_animal_3d_table_is_still_named(tmp_path: Path) -> None:
+    """A header line past the 64 KB peek still gets the 'not single-animal' notice."""
+    n = 3000
+    rows = [
+        "scorer," + ",".join(["s"] * (3 * n)),
+        "individuals," + ",".join(["animal"] * (3 * n)),
+        "bodyparts," + ",".join(f"part-{i:05d}" for i in range(n) for _ in range(3)),
+        "coords," + ",".join(["x", "y", "z"] * n),
+        "0," + ",".join(["1"] * (3 * n)),
+    ]
+    assert len(rows[2]) > 65_536
+    _write(tmp_path / "wide_3d.csv", "\n".join(rows) + "\n")
+    (found,) = scan([tmp_path]).recognised
+    assert found.key == "dlc_3d" and found.example.name == "wide_3d.csv"

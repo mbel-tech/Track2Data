@@ -728,9 +728,19 @@ def test_finished_run_rows_survive_a_plan_change_and_checking_is_shown(
 
 
 def _hold_lane(store) -> threading.Event:
-    """Occupy the run lane with a task that ignores cancellation until released."""
+    """Occupy the run lane with a task that ignores cancellation until released.
+
+    Returns only once the task is running: a task still queued when a test cancels everything
+    is cancelled without ever holding the lane, which changes what the test counts."""
     gate = threading.Event()
-    store.tasks.submit(lambda: gate.wait(5))
+    running = threading.Event()
+
+    def hold() -> None:
+        running.set()
+        gate.wait(5)
+
+    store.tasks.submit(hold)
+    assert running.wait(3), "the lane-holding task never started"
     return gate
 
 

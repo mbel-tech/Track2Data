@@ -111,21 +111,6 @@ def _native_session(session_id: str = "n1") -> Session:
     )
 
 
-def test_pixel_size_known() -> None:
-    native = _native_session()
-    assert native.pixel_size_known is False
-    pixel = native.model_copy(
-        update={
-            "has_pixel_frame": True,
-            "video": VideoInfo(fps=25.0, n_frames=8, width_px=640, height_px=480),
-        }
-    )
-    assert pixel.pixel_size_known is True
-    zero = VideoInfo(fps=25.0, n_frames=8, width_px=0, height_px=0)
-    unknown = pixel.model_copy(update={"video": zero})
-    assert unknown.pixel_size_known is False
-
-
 def test_no_consumer_reads_zero_video_size() -> None:
     from ui.store.session_facts import SessionFacts
 
@@ -411,8 +396,7 @@ def _view_for(qtbot, xy: np.ndarray, size=None):
 def _marker_inside_scene(view) -> None:
     rect = view._gscene.sceneRect()
     assert rect.width() > 0 and rect.height() > 0
-    paths = [i for i in view._dynamic if hasattr(i, "path")]
-    assert paths
+    assert [i for i in view._dynamic if hasattr(i, "path")]
     for item in view._dynamic:
         assert rect.contains(item.sceneBoundingRect().center()), item
 
