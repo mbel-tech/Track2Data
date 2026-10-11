@@ -129,7 +129,7 @@ def test_the_difference_report_names_files_and_changed_lines() -> None:
 
 def _files(root: Path) -> dict[str, bytes]:
     return {
-        str(p.relative_to(root)): _STAMP.sub(b"<time>", p.read_bytes())
+        p.relative_to(root).as_posix(): _STAMP.sub(b"<time>", p.read_bytes())
         for p in sorted(root.rglob("*"))
         if p.is_file()
     }
