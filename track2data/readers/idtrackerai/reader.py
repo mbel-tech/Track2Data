@@ -79,6 +79,7 @@ def _trajectories_subfolder_hint(
                     "the session is its parent folder",
                 ),
                 sessions=(SessionCandidate(session_id=default_session_id(parent), source=parent),),
+                parameters=cls.parameters,
                 verification=cls.verification,
             )
     return None
@@ -170,6 +171,7 @@ class IDTrackerAiReader(SessionReader):
                         f"holding {', '.join(artefacts)}",
                     ),
                     sessions=tuple(sessions),
+                    parameters=cls.parameters,
                     verification=cls.verification,
                 )
             ]
