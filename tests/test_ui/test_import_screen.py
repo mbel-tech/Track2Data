@@ -885,3 +885,17 @@ def test_facts_measure_coverage_from_missing_positions() -> None:
     xy[1, 1, 0] = np.nan  # a lost x alone also counts as missing
     assert _tracked_coverage(xy) == 0.9
     assert _tracked_coverage(np.zeros((0, 2, 2))) is None
+
+
+def test_a_refused_session_is_explained_in_a_warning(qtbot, tmp_path: Path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    screen = ImportScreen(store=store)
+    qtbot.addWidget(screen)
+    shown: list[tuple] = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a))
+    store.sessionRefused.emit("n1", "[NATIVE_3D_MIXED] no")
+    assert shown and shown[0][1] == "Session not added" and "NATIVE_3D_MIXED" in shown[0][2]

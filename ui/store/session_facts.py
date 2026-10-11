@@ -95,6 +95,13 @@ class SessionFacts:
     # Pixels per unit of each usable Validator length calibration (idtracker.ai sessions may hold
     # several); empty when the tracker records none. Lets the screen show the mean or median.
     calibration_ratios: tuple[float, ...] = ()
+    # False for a native 3-D session: no image frame, width_px/height_px are 0 and mean nothing.
+    has_pixel_frame: bool = True
+
+    @property
+    def pixel_size_known(self) -> bool:
+        """As Session.pixel_size_known: a real, positive video frame size in pixels."""
+        return self.has_pixel_frame and self.width_px > 0 and self.height_px > 0
 
     @classmethod
     def from_session(cls, session: Session) -> SessionFacts:
@@ -129,4 +136,5 @@ class SessionFacts:
             video_path=session.video.path,
             tracked_coverage=_tracked_coverage(session.raw_xy),
             calibration_ratios=tuple(calibration_ratios(session.length_calibrations)),
+            has_pixel_frame=session.has_pixel_frame,
         )

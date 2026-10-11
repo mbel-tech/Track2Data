@@ -12,6 +12,7 @@ signals from. app/state.py keeps a deprecated re-export for compatibility.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -39,6 +40,7 @@ from track2data.core.models import (
     SessionRef,
     ViewPair,
     ViewRole,
+    WaterColumn,
     ZoneSet,
 )
 from track2data.core.progress import CancellationToken, OperationCancelled
@@ -118,6 +120,15 @@ def _is_duplicate(ref: SessionRef, existing: Sequence[SessionRef]) -> bool:
     )
 
 
+@dataclass
+class _AddBatch:
+    """Sessions added together, and what their probes returned so far."""
+
+    ids: list[str]
+    done: set[str] = field(default_factory=set)
+    sessions: dict[str, Any] = field(default_factory=dict)
+
+
 class ProjectStore(QObject):
     """
     Reactive project state container.
@@ -167,6 +178,10 @@ class ProjectStore(QObject):
     scanProgress  = Signal(str, object)   # task_id, ProgressEvent
     scanFinished  = Signal(str, object)   # task_id, ScanResult-or-exception
     scanCancelled = Signal(str)           # task_id
+    # A session just added could not join the project (Engine.register_native_import refused
+    # it: native 3-D and pixel sessions mixed, or another unit). It has been removed again;
+    # carries (session_id, message).
+    sessionRefused = Signal(str, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -181,6 +196,11 @@ class ProjectStore(QObject):
         # The window flushes/saves before either Project-screen or menu replacement.
         self.prepare_project_change: Callable[[], bool] | None = None
         self._identity_probes: dict[str, str] = {}  # task_id -> session_id
+        # Batches of sessions added in this store whose probes have not all finished. When the
+        # last one does, the batch goes through Engine.set_up_native_import (the add entry point
+        # every add path shares). A reopened project's sessions were set up when they were
+        # added, so their probes do not ask again.
+        self._pending_batches: list[_AddBatch] = []
         self._scans: set[str] = set()  # task ids of scans whose result is still wanted
         # Derived cache, never persisted -- see ui/store/session_facts.py's
         # module docstring for why this lives here and not on SessionRef.
@@ -373,6 +393,7 @@ class ProjectStore(QObject):
         self._cancel_pending_probes()
         self._cancel_pending_scans()
         self._session_facts.clear()
+        self._pending_batches.clear()
         now = datetime.now(tz=UTC)
         self._manifest = ProjectManifest(
             project_name=name,
@@ -403,6 +424,7 @@ class ProjectStore(QObject):
         self._cancel_pending_probes()
         self._cancel_pending_scans()
         self._session_facts.clear()
+        self._pending_batches.clear()
         self._manifest = manifest
         self._project_dir = t2d_path.parent
         self._manifest_path = Path(t2d_path)
@@ -441,6 +463,15 @@ class ProjectStore(QObject):
             return
         self._manifest = self._manifest.model_copy(update={"calibration": cfg})
         self.calibrationChanged.emit()
+
+    def update_water_column(self, water_column: WaterColumn | None) -> None:
+        """Set (or, with None, clear) the water column of a native 3-D project's calibration."""
+        if self._manifest is None:
+            return
+        current = self._manifest.calibration
+        if current.water_column == water_column:
+            return
+        self.update_calibration(current.model_copy(update={"water_column": water_column}))
 
     def update_zones(self, zone_set: ZoneSet) -> None:
         if self._manifest is None:
@@ -828,6 +859,7 @@ class ProjectStore(QObject):
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
 
+        self._pending_batches.append(_AddBatch([session_id]))
         self._submit_probe(session_id, folder)
 
     def _submit_probe(self, session_id: str, folder: Path) -> None:
@@ -905,8 +937,11 @@ class ProjectStore(QObject):
             added.append(ref)
         if not added:
             return []
+        if not self._native_refs_allowed(added):
+            return []
         self._manifest = self._manifest.model_copy(update={"sessions": [*existing, *added]})
         self.sessionsChanged.emit()
+        self._pending_batches.append(_AddBatch([ref.session_id for ref in added]))
         for ref in added:
             self._submit_probe(ref.session_id, ref.folder)
         return added
@@ -918,8 +953,10 @@ class ProjectStore(QObject):
         if self._manifest is None or all(
             r.session_id != session_id for r in self._manifest.sessions
         ):
+            self._settle_batches(session_id, None)
             return  # split or removed while the probe ran
         if isinstance(result, Exception):
+            self._settle_batches(session_id, None)
             self.append_log(f"_Identity probe failed for `{session_id}`: {result}_\n")
             if _is_pickle_refusal(result):
                 # Not a broken folder -- a folder whose only trajectory format
@@ -936,6 +973,8 @@ class ProjectStore(QObject):
                 self.pickleConsentRequired.emit(session_id, folder)
             return
         result = self._apply_session_panel(session_id, result)
+        if not self._settle_batches(session_id, result):
+            return  # its batch was refused and removed
         self._set_session_identity(
             session_id, result.has_stable_identities, result.track_wo_identities
         )
@@ -945,6 +984,71 @@ class ProjectStore(QObject):
         # ui/store/session_facts.py).
         self._session_facts[session_id] = SessionFacts.from_session(result)
         self.sessionFactsChanged.emit()
+
+    def _refuse(self, session_ids: Sequence[str], exc: Exception) -> None:
+        """Log and announce that *session_ids* could not join the project."""
+        names = ", ".join(f"`{sid}`" for sid in session_ids)
+        self.append_log(f"_Not added: {names}: {exc}_\n")
+        self.sessionRefused.emit(str(getattr(exc, "subject", "") or session_ids[0]), str(exc))
+
+    def _native_refs_allowed(self, refs: Sequence[SessionRef]) -> bool:
+        """Check a batch about to be added with the engine's rule, from the saved reader names
+        and options, so a refused file is never listed (Engine.check_native_refs)."""
+        from track2data.api import Engine
+        from track2data.core.errors import ImportError_
+
+        if self._manifest is None:
+            return False
+        try:
+            Engine(self._manifest).check_native_refs(refs)
+        except ImportError_ as exc:
+            self._refuse([ref.session_id for ref in refs], exc)
+            return False
+        return True
+
+    def _settle_batches(self, session_id: str, session: Any | None) -> bool:
+        """Record that *session_id*'s probe finished (*session* None: it failed or the entry is
+        gone), set up every batch whose probes have all finished, and return whether
+        *session_id* is still in the project."""
+        for batch in self._pending_batches:
+            if session_id in batch.ids:
+                batch.done.add(session_id)
+                if session is not None:
+                    batch.sessions[session_id] = session.model_copy(
+                        update={"session_id": session_id}
+                    )
+        for batch in list(self._pending_batches):
+            present = self._present_ids()
+            if all(sid in batch.done or sid not in present for sid in batch.ids):
+                self._pending_batches.remove(batch)
+                self._set_up_batch(batch, present)
+        return session_id in self._present_ids()
+
+    def _present_ids(self) -> set[str]:
+        return {r.session_id for r in self._manifest.sessions} if self._manifest else set()
+
+    def _set_up_batch(self, batch: _AddBatch, present: set[str]) -> None:
+        """Engine.set_up_native_import on a finished batch: take the calibration it sets, or
+        remove the whole batch when it is refused (the re-check on the files as read)."""
+        from track2data.api import Engine
+        from track2data.core.errors import ImportError_
+
+        if self._manifest is None:
+            return
+        sessions = [s for sid, s in batch.sessions.items() if sid in present]
+        engine = Engine(self._manifest)
+        try:
+            engine.set_up_native_import(
+                sessions, unread_ids=[sid for sid in batch.ids if sid not in batch.sessions]
+            )
+        except ImportError_ as exc:
+            ids = [sid for sid in batch.ids if sid in present]
+            self.update_sessions([r for r in self._manifest.sessions if r.session_id not in ids])
+            self._refuse(ids, exc)
+            return
+        if engine.manifest is not self._manifest:
+            self._manifest = engine.manifest
+            self.calibrationChanged.emit()
 
     def _apply_session_panel(self, session_id: str, session: Any) -> Any:
         """Cut a probed session to its panel, if the session has one.

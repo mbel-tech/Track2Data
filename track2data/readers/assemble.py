@@ -302,3 +302,98 @@ def assemble_session(
         trajectory_format=trajectory_format,
         length_unit=None if length_unit is None else float(length_unit),
     )
+
+
+def assemble_native_session(
+    *,
+    session_id: str,
+    folder: Path,
+    reader: str,
+    fps: float,
+    raw_xy: np.ndarray,
+    raw_z: np.ndarray,
+    source_unit: str,
+    target_unit: str,
+    vertical_axis: str,
+    flip: bool,
+    keypoints: KeypointData | None,
+    tracking_intervals: list[tuple[int, int]] | None,
+    trajectory_source: Path | None,
+    trajectory_format: str,
+) -> Session:
+    """A native 3-D ``Session``: positions in a length unit, an absolute ``z``, no pixel frame.
+
+    *raw_xy* ``(F, 1, 2)`` (the horizontal plane) and *raw_z* ``(F, 1)`` are already in
+    *target_unit*; *source_unit* is the file's unit and is only recorded (``raw_attrs``). Kept apart
+    from :func:`assemble_session`, which refuses a frame size below 1 pixel: a native session has
+    none, so ``video`` is a placeholder with the frame rate and count and ``length_unit`` is 1.0
+    (one coordinate unit is one project unit).
+
+    Raises ``DataValidationError`` (code ``READER_OUTPUT_INVALID``) for a bad frame rate, shapes
+    that disagree, or tracking intervals that do not cover exactly the stored frames.
+    """
+    if not (isinstance(fps, int | float) and math.isfinite(fps) and fps > 0):
+        raise _invalid(
+            "fps",
+            f"Frame rate {fps!r} is not a positive number.",
+            "Give the frame rate of the video.",
+        )
+    arr = np.asarray(raw_xy)
+    if arr.ndim != 3 or arr.shape[2] != 2:
+        raise _invalid(
+            "raw_xy",
+            f"Positions must be (frames, animals, 2), got shape {arr.shape}.",
+            "This looks like the wrong kind of file for this reader.",
+        )
+    n_frames, n_animals = int(arr.shape[0]), int(arr.shape[1])
+    if n_frames == 0 or n_animals == 0:
+        raise _invalid(
+            "raw_xy", "The file holds no frames or no animals.", "Check that it is complete."
+        )
+    z = np.asarray(raw_z)
+    if z.shape != (n_frames, n_animals):
+        raise _invalid(
+            "raw_z",
+            f"The vertical coordinate must be {(n_frames, n_animals)}, got shape {z.shape}.",
+            "This is a bug in the reader; please report it.",
+        )
+    if keypoints is not None and keypoints.xy.shape[:2] != (n_frames, n_animals):
+        raise _invalid(
+            "keypoints",
+            "The stored skeleton does not match the positions.",
+            "This is a bug in the reader; please report it.",
+        )
+    if tracking_intervals is not None:
+        covered = sum(max(0, end - start) for start, end in tracking_intervals)
+        if covered != n_frames:
+            raise _invalid(
+                "tracking_intervals",
+                f"Tracking intervals cover {covered} frames but there are {n_frames}.",
+                "Intervals are [start, end) and must add up to the number of frames.",
+            )
+    return Session(
+        session_id=session_id,
+        folder=Path(folder),
+        reader=reader,
+        video=VideoInfo(fps=float(fps), n_frames=n_frames, width_px=0, height_px=0),
+        n_animals=n_animals,
+        trajectory_variant="with_gaps",
+        has_stable_identities=True,
+        raw_xy=to_nan(arr),
+        raw_z=to_nan(z),
+        tracking_intervals=None if tracking_intervals is None else list(tracking_intervals),
+        keypoints=keypoints,
+        trajectory_source=trajectory_source,
+        trajectory_format=trajectory_format,
+        length_unit=1.0,
+        has_pixel_frame=False,
+        coordinate_unit=target_unit,
+        raw_attrs={
+            "native_3d": {
+                "source_unit": source_unit,
+                "target_unit": target_unit,
+                "vertical_axis": vertical_axis,
+                "flip": bool(flip),
+            }
+        },
+    )

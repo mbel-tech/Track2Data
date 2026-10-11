@@ -56,6 +56,11 @@ from ui.widgets.mode_banner import ModeBanner
 from ui.widgets.weak_slot import weak_slot
 from ui.widgets.zone_canvas import ZoneCanvas, polygon_area
 
+#: Shown instead of the tools when the project's sessions have no pixel frame.
+NATIVE_ZONES_NOTICE = (
+    "This project's sessions have no pixel frame (native 3-D); zones are not available."
+)
+
 #: Minimum vertices for a valid polygon.
 _MIN_ZONE_VERTICES = 3
 _ZONE_HINT = "Select a zone to see its shape. Drag its white handles to reshape it."
@@ -73,12 +78,15 @@ class ZonesScreen(QWidget):
             store.zonesChanged.connect(self._refresh_mismatch_warning)
             store.projectChanged.connect(self._refresh_list)
             store.projectChanged.connect(self._refresh_session_combo)
+            store.projectChanged.connect(self._refresh_native_state)
             store.sessionsChanged.connect(self._refresh_session_combo)
+            store.sessionsChanged.connect(self._refresh_native_state)
             store.sessionFactsChanged.connect(self._refresh_mismatch_warning)
             store.sessionFactsChanged.connect(self._refresh_landmarks)
             store.sessionFactsChanged.connect(self._refresh_canvas)
         self._refresh_session_combo()
         self._refresh_list()
+        self._refresh_native_state()
 
     # ── build ──────────────────────────────────────────────────────────────
 
@@ -108,6 +116,12 @@ class ZonesScreen(QWidget):
 
         if self._store is not None:
             root.addWidget(ModeBanner(self._store))
+
+        self._native_notice = QLabel(NATIVE_ZONES_NOTICE)
+        self._native_notice.setWordWrap(True)
+        self._native_notice.setProperty("role", "warn")
+        self._native_notice.setVisible(False)
+        root.addWidget(self._native_notice)
 
         picker_row = QHBoxLayout()
         picker_row.setSpacing(10)
@@ -270,6 +284,24 @@ class ZonesScreen(QWidget):
 
         self._session_combo.currentTextChanged.connect(self._refresh_landmarks)
         self._session_combo.currentTextChanged.connect(self._refresh_canvas)
+        # everything that draws, edits or loads zones; disabled for a native 3-D project
+        self._zone_controls: list[QWidget] = [
+            self._session_combo, canvas_card, pane, self._custom_point_btn, self._undo_btn,
+            self._fit_btn, *self._tool_buttons.values(),
+        ]
+
+    def _is_native(self) -> bool:
+        """Whether the project's sessions have no pixel frame (read from native 3-D files)."""
+        from track2data.readers.native3d import manifest_native_3d
+
+        manifest = self._store.manifest if self._store is not None else None
+        return manifest is not None and manifest_native_3d(manifest)
+
+    def _refresh_native_state(self) -> None:
+        native = self._is_native()
+        self._native_notice.setVisible(native)
+        for widget in self._zone_controls:
+            widget.setEnabled(not native)
 
     # ── slots: CSV load/clear ────────────────────────────────────────────
 
@@ -411,7 +443,7 @@ class ZonesScreen(QWidget):
         mismatched = []
         for ref in self._store.manifest.sessions:
             facts = self._store.session_facts(ref.session_id)
-            if facts is None:
+            if facts is None or not facts.has_pixel_frame:
                 continue
             if facts.width_px != sw or facts.height_px != sh:
                 mismatched.append(ref.session_id)
@@ -482,12 +514,12 @@ class ZonesScreen(QWidget):
         if zones.rois or self._store is None:
             return {}
         facts = self._store.session_facts(self._session_combo.currentText())
-        if facts is None or facts.width_px <= 0 or facts.height_px <= 0:
+        if facts is None or not facts.pixel_size_known:
             return {}
         return {"source_width_px": facts.width_px, "source_height_px": facts.height_px}
 
     def _save_zone(self) -> None:
-        if self._store is None or self._store.manifest is None:
+        if self._store is None or self._store.manifest is None or self._is_native():
             return
         name = self._zone_name_edit.text().strip()
         if not name:

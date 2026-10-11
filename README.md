@@ -31,6 +31,12 @@ It is a desktop application and a Python engine you can drive headlessly for bat
                                             → export              sessions.csv
 ```
 
+**Reads** idtracker.ai (6.x and v5), DeepLabCut (CSV, also Lightning Pose), SLEAP
+(analysis HDF5), Ctrax (raw `.mat`), `trx.mat`, and two native 3-D formats, Anipose
+`pose-3d` CSV and DeepLabCut 3-D tables (positions in physical units; the 3-D metrics
+the 3-D metrics IL-16 and IL-17 run on them, and IL-15 once you give the water column; GL-16 does not, because a native file holds one animal). Run
+`track2data list-readers` for the list and the options each reader needs.
+
 **Individual** — distance travelled, speed, acceleration, tortuosity,
 freezing bouts, thigmotaxis, turn rate, home-base use.
 **Group** — nearest-neighbour and inter-individual distance, polarisation,

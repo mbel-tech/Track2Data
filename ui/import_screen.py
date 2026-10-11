@@ -127,6 +127,7 @@ class ImportScreen(QWidget):
             store.scanProgress.connect(self._on_scan_progress)
             store.scanFinished.connect(self._on_scan_finished)
             store.scanCancelled.connect(self._on_scan_cancelled)
+            store.sessionRefused.connect(self._on_session_refused)
         # A screen built against a store that already has sessions (e.g.
         # navigating back to this page) must show them immediately, not
         # only after the next signal -- the constructor never called
@@ -553,6 +554,10 @@ class ImportScreen(QWidget):
             self._store.set_video_path(session_id, Path(chosen))
         except (OSError, KeyError) as exc:
             QMessageBox.warning(self, "Locate video", str(exc))
+
+    def _on_session_refused(self, session_id: str, message: str) -> None:
+        """A session just added could not join the project and was removed again: say why."""
+        QMessageBox.warning(self, "Session not added", message)
 
     @staticmethod
     def _coverage_level(coverage: float) -> str:

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QMessageBox,
     QPushButton,
@@ -40,7 +41,9 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.calibration.session_unit import session_scale
-from track2data.core.models import SceneConfig
+from track2data.calibration.water_column import parse_water_column
+from track2data.core.models import SceneConfig, WaterColumn
+from track2data.readers.native3d import manifest_native_3d
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.mode_banner import ModeBanner
 
@@ -197,12 +200,16 @@ class CalibrationScreen(QWidget):
         # The camera view is not a calibration: it has its own commit, so a calibration that is
         # unchanged (and returns early) or blocked can never swallow it.
         self._view_auto = AutoCommit(self._apply_scene, self)
+        # The water column (native 3-D projects) is its own field of the calibration.
+        self._water_auto = AutoCommit(self._apply_water_column, self)
+        self._water_shown: WaterColumn | None = None
         self._build_ui()
         if store is not None:
             store.calibrationChanged.connect(self._on_calibration_changed)
             store.projectChanged.connect(self._on_calibration_changed)
             store.sceneChanged.connect(self._on_calibration_changed)
             store.sessionsChanged.connect(self._refresh_readiness)
+            store.sessionsChanged.connect(self._refresh_water_group)
             store.sessionFactsChanged.connect(self._refresh_readiness)
         self._on_calibration_changed()
 
@@ -333,6 +340,43 @@ class CalibrationScreen(QWidget):
 
         root.addWidget(self._session_widget)
 
+        # ── water column (native 3-D projects only) ──────────────────────
+        self._water_group = QWidget()
+        water_layout = QVBoxLayout(self._water_group)
+        water_layout.setContentsMargins(0, 0, 0, 0)
+        water_layout.setSpacing(6)
+        water_title = QLabel("WATER COLUMN")
+        water_title.setObjectName("SectionLabel")
+        water_layout.addWidget(water_title)
+        water_help = QLabel(
+            "Where the water surface and the floor lie on the file's vertical axis. Depth "
+            "(0 at the surface, 1 at the floor) and the vertical-position metrics need both. "
+            "Leave one empty for none."
+        )
+        water_help.setProperty("role", "muted")
+        water_help.setWordWrap(True)
+        water_layout.addWidget(water_help)
+        water_form = QFormLayout()
+        water_form.setContentsMargins(0, 0, 0, 0)
+        self._surface_edit = QLineEdit()
+        self._surface_edit.setPlaceholderText("e.g. 0")
+        self._surface_edit.setAccessibleName("Surface z")
+        self._floor_edit = QLineEdit()
+        self._floor_edit.setPlaceholderText("e.g. 25")
+        self._floor_edit.setAccessibleName("Floor z")
+        self._surface_label = QLabel("Surface z")
+        self._floor_label = QLabel("Floor z")
+        water_form.addRow(self._surface_label, self._surface_edit)
+        water_form.addRow(self._floor_label, self._floor_edit)
+        water_layout.addLayout(water_form)
+        self._water_error = QLabel("")
+        self._water_error.setProperty("role", "warn")
+        self._water_error.setWordWrap(True)
+        self._water_error.setVisible(False)
+        water_layout.addWidget(self._water_error)
+        self._water_group.setVisible(False)
+        root.addWidget(self._water_group)
+
         # ── camera view ───────────────────────────────────────────────────
         view_label = QLabel("CAMERA VIEW")
         view_label.setObjectName("SectionLabel")
@@ -369,11 +413,57 @@ class CalibrationScreen(QWidget):
         self._confirm_check.toggled.connect(self._auto.trigger)
         self._view_combo.currentIndexChanged.connect(self._update_view_help)
         self._view_combo.currentIndexChanged.connect(self._view_auto.trigger)
+        self._surface_edit.textChanged.connect(self._water_auto.trigger)
+        self._floor_edit.textChanged.connect(self._water_auto.trigger)
 
     def flush(self) -> None:
         """Commit any pending edit now (called when the screen is left)."""
         self._auto.flush()
         self._view_auto.flush()
+        self._water_auto.flush()
+
+    # ── water column ───────────────────────────────────────────────────────
+
+    def _apply_water_column(self) -> None:
+        """Write the typed surface and floor z to the calibration, or say which one is wrong.
+
+        Either field empty clears the column; an invalid pair is refused (nothing is written).
+        """
+        if self._store is None or self._store.manifest is None:
+            return
+        column, error = parse_water_column(self._surface_edit.text(), self._floor_edit.text())
+        self._water_error.setText(error or "")
+        self._water_error.setVisible(bool(error))
+        if error:
+            return
+        self._water_shown = column
+        self._store.update_water_column(column)
+
+    def _refresh_water_group(self) -> None:
+        """Show the fields for a native 3-D project, labelled with the project's unit."""
+        manifest = self._store.manifest if self._store is not None else None
+        native = manifest is not None and manifest_native_3d(manifest)
+        self._water_group.setVisible(native)
+        if manifest is None or not native:
+            return
+        unit = manifest.calibration.length_unit_label
+        self._surface_label.setText(f"Surface z ({unit})")
+        self._floor_label.setText(f"Floor z ({unit})")
+
+    def _show_stored_water_column(self) -> None:
+        """Put the stored column in the fields when it changed elsewhere (not on each of the
+        user's own keystrokes, which would erase a value that is still being typed)."""
+        manifest = self._store.manifest if self._store is not None else None
+        stored = manifest.calibration.water_column if manifest is not None else None
+        if stored == self._water_shown:
+            return
+        self._water_shown = stored
+        for edit, value in (
+            (self._surface_edit, stored.surface_z if stored else None),
+            (self._floor_edit, stored.floor_z if stored else None),
+        ):
+            edit.setText("" if value is None else f"{value:.10g}")
+        self._water_error.setVisible(False)
 
     # ── slots ──────────────────────────────────────────────────────────────
 
@@ -436,7 +526,7 @@ class CalibrationScreen(QWidget):
             self._store.update_scene(scene)
 
     def _on_calibration_changed(self) -> None:
-        with self._auto.suppressed(), self._view_auto.suppressed():
+        with self._auto.suppressed(), self._view_auto.suppressed(), self._water_auto.suppressed():
             self._populate()
 
     def _populate(self) -> None:
@@ -461,6 +551,8 @@ class CalibrationScreen(QWidget):
             )
         self._update_mode_visibility()
         self._refresh_readiness()
+        self._refresh_water_group()
+        self._show_stored_water_column()
 
     def _measure_on_frame(self) -> None:
         """Open the two-point ruler on the first session with facts and, if
@@ -473,7 +565,8 @@ class CalibrationScreen(QWidget):
                 facts = self._store.session_facts(ref.session_id)
                 if facts is not None:
                     background = facts.background_image_path
-                    size = (float(facts.width_px), float(facts.height_px))
+                    if facts.pixel_size_known:
+                        size = (float(facts.width_px), float(facts.height_px))
                     crop = ref.panel
                     break
         dialog = RulerDialog(background, size, parent=self, crop=crop)

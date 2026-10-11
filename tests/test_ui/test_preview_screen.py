@@ -729,7 +729,7 @@ def test_load_fused_trajectory_data_uses_fuse_pair(tmp_path: Path, monkeypatch) 
         raw_xy_aligned=xy * 2, xy=xy,
         session=SimpleNamespace(
             video=SimpleNamespace(fps=25.0, width_px=640, height_px=480),
-            background_image_path=None,
+            background_image_path=None, has_pixel_frame=True,
         ),
     )
     pairs: list = []

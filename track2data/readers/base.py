@@ -55,6 +55,9 @@ class SessionReader(ABC):
     #: ``fraction_identified``). The D-5 identity-stability diagnostic is built on it, so for a
     #: tracker without one the diagnostic reports "not assessed" instead of "weak".
     provides_identification_quality: ClassVar[bool] = False
+    #: Whether the reader produces native 3-D sessions (positions in a length unit with an
+    #: absolute ``z`` and no pixel frame). The names are in ``readers/native3d.NATIVE_3D_READERS``.
+    provides_native_3d: ClassVar[bool] = False
 
     @classmethod
     @abstractmethod

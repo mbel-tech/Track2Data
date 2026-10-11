@@ -93,8 +93,11 @@ def run(
     # intervals as adjacent frames. None for a session whose rows already are its frames.
     expansion = plan_expansion(session, config.gap_fill, bridge_allowed=bridge_allowed)
     raw_rows = id_prob_rows = None
+    z_rows: np.ndarray | None = None if session.raw_z is None else session.raw_z.copy()
     if expansion is not None:
         raw_rows = lay_out(expansion, session.raw_xy)
+        if session.raw_z is not None:
+            z_rows = lay_out(expansion, session.raw_z)
         if session.id_probabilities is not None:
             id_prob_rows = lay_out(expansion, session.id_probabilities)
         xy = raw_rows.copy()
@@ -136,6 +139,10 @@ def run(
         xy, config.jump, velocity_threshold_px_frame=session.velocity_threshold_px_frame
     )
     jump_replaced = _replaced_mask(before_jumps, xy)
+    if z_rows is not None:
+        # a triangulation glitch is 3-D: the replaced position has no trustworthy z either, and
+        # a 3-D step needs all three coordinates
+        z_rows[jump_replaced] = np.nan
     report.steps.append(step)
 
     # 3. Identity-switch correction
@@ -189,5 +196,6 @@ def run(
         kinematics=kinematics,
         report=report,
         jump_replaced=jump_replaced,
+        z=z_rows,
         **extra,
     )

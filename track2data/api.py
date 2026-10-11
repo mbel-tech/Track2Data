@@ -78,6 +78,104 @@ logger = logging.getLogger(__name__)
 
 _BIN_COLUMNS = ("bin_index", "bin_start_s", "bin_end_s")
 
+#: The validation issue of a native 3-D project whose calibration is not "session": its
+#: coordinates are already in the project unit (``length_unit = 1.0``), which only "session"
+#: calibration reads.
+NATIVE_3D_NEEDS_SESSION_CALIBRATION = (
+    "A native 3-D project needs session calibration: its sessions are already in the project's "
+    "length unit. Set the calibration mode to 'session' on the Calibration screen."
+)
+
+
+#: A native 3-D project whose length unit was never confirmed (validate and the stage status).
+NATIVE_3D_UNIT_NOT_CONFIRMED = (
+    "Confirm the length unit of this native 3-D project on the Calibration screen."
+)
+
+
+def native_unit_issue(label: str, unit: str, session_ids: str) -> str:
+    """The validation issue of native 3-D sessions in *unit* in a project labelled *label*."""
+    return (
+        f"The project's length unit is {label!r}, but these native 3-D sessions are in "
+        f"{unit!r}: {session_ids}. Set the length unit to {unit!r} on the Calibration screen, "
+        f"or add them again with target_unit = {label!r}."
+    )
+
+
+def native_setup_issues(manifest: ProjectManifest, units: dict[str, str]) -> list[str]:
+    """What keeps a native 3-D project from running: calibration mode not "session", the unit
+    not confirmed, or sessions (*units*: id -> unit) in another unit than the label. Shared by
+    :meth:`Engine.validation_issues` (units read from the files) and the stage status (units
+    from the saved options), so the two agree."""
+    cfg = manifest.calibration
+    if cfg.mode != "session":
+        return [NATIVE_3D_NEEDS_SESSION_CALIBRATION]
+    issues: list[str] = []
+    if not cfg.length_unit_confirmed_by_user:
+        issues.append(NATIVE_3D_UNIT_NOT_CONFIRMED)
+    by_unit: dict[str, list[str]] = {}
+    for sid, unit in units.items():
+        if unit != cfg.length_unit_label:
+            by_unit.setdefault(unit, []).append(sid)
+    issues.extend(
+        native_unit_issue(cfg.length_unit_label, unit, ", ".join(ids))
+        for unit, ids in by_unit.items()
+    )
+    return issues
+
+
+def native_mixing_issue(manifest: ProjectManifest) -> str | None:
+    """The validation issue of a project whose entries mix native 3-D and pixel sessions (or
+    put native ones in a fused 3-D project), from the saved reader names; None when it does
+    not."""
+    from track2data.readers.native3d import NATIVE_3D_READERS
+
+    native = [r.session_id for r in manifest.sessions if r.reader in NATIVE_3D_READERS]
+    if not native:
+        return None
+    if manifest.mode.dimension == "3d":
+        return (
+            f"Native 3-D sessions ({', '.join(native)}) cannot be in a 3-D project of top and "
+            "side pixel recordings to be fused; remove them."
+        )
+    pixel = [r.session_id for r in manifest.sessions if r.reader not in NATIVE_3D_READERS]
+    if not pixel:
+        return None
+    return (
+        "A project holds either pixel-tracked or native 3-D sessions, and this one has both "
+        f"(native 3-D: {', '.join(native)}; pixel-tracked: {', '.join(pixel)}); remove one kind."
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _ImportFact:
+    """What the native project rules need to know about a session being imported."""
+
+    session_id: str
+    reader: str | None
+    native: bool
+    unit: str | None
+
+    @classmethod
+    def of_session(cls, session: Session) -> _ImportFact:
+        from track2data.readers.native3d import NATIVE_3D_READERS
+
+        native = session.reader in NATIVE_3D_READERS or not session.has_pixel_frame
+        return cls(session.session_id, session.reader, native, session.coordinate_unit)
+
+    @classmethod
+    def of_ref(cls, ref: SessionRef) -> _ImportFact:
+        from track2data.readers.native3d import ref_target_unit
+
+        unit = ref_target_unit(ref)
+        return cls(ref.session_id, ref.reader, unit is not None, unit)
+
+
+def _view_note(psess: PreprocessedSession) -> str:
+    """What the log adds after a session's camera view: why it is top-view, if it is forced."""
+    if psess.z is not None:
+        return " (a native 3-D session)"
+    return " (a fused session)" if psess.depth is not None else ""
 
 
 def _with_bin_columns(df: Any, window: Any | None) -> Any:
@@ -397,11 +495,153 @@ class Engine:
         Trajectory formats that execute code on load are refused unless this project has
         opted in via ``security.allow_pickle_trajectories``. A folder that also carries an h5
         or csv trajectory imports normally either way -- the reader falls through to it.
+
+        A folder read on its own is not a project entry (no entry id to check it against), so
+        the project rules of :meth:`register_native_import` are checked by :meth:`import_ref`.
         """
         session = read_session(
             Path(folder), allow_pickle=self._manifest.security.allow_pickle_trajectories
         )
         return self._apply_import_settings(session)
+
+    # ── native 3-D project rules ───────────────────────────────────────────
+    #
+    # A project holds pixel sessions (including fused pairs) or native 3-D sessions, never both,
+    # and a fused 3-D project (dimension "3d") holds no native session: NATIVE_3D_MIXED. A
+    # project has one length unit: NATIVE_3D_UNIT_MISMATCH. One rule (_native_rule) serves the
+    # add paths, which also set the project up (set_up_native_import, check_native_refs), and
+    # every import (check_native_import), which only checks.
+
+    def set_up_native_import(
+        self, sessions: Sequence[Session], *, unread_ids: Sequence[str] = ()
+    ) -> None:
+        """The add entry point: check a batch of sessions being added, and set the project up.
+
+        Every add path calls it once per batch: ``t2d add`` and the GUI's add path (when the
+        batch's probes have finished). :meth:`import_sessions` does not: it reads entries that
+        are already in the project, so it only checks them. Each session carries the id
+        it has in the project; the batch's entries may already be in the manifest, since the
+        project "before the batch" is every entry with another id. Mixing and units are checked
+        across that project and within the batch. Only when the project had no native session
+        before the batch does a native batch set ``calibration.mode = "session"``,
+        ``length_unit_label`` to the batch's unit and confirm it; otherwise its unit must be the
+        project's label. A batch that changes nothing keeps the manifest object.
+
+        *unread_ids* are entries added in the same batch that could not be read: they are not
+        part of the project "before the batch" either.
+        """
+        update = self._native_rule(
+            [_ImportFact.of_session(s) for s in sessions], set_up=True, batch_ids=unread_ids
+        )
+        if update is not None:
+            cfg = self._manifest.calibration
+            self._manifest = self._manifest.model_copy(
+                update={"calibration": cfg.model_copy(update=update)}
+            )
+
+    def register_native_import(self, session: Session) -> None:
+        """:meth:`set_up_native_import` for a batch of one session."""
+        self.set_up_native_import([session])
+
+    def check_native_refs(self, refs: Sequence[SessionRef]) -> None:
+        """The rule of :meth:`set_up_native_import` on entries not read yet, changing nothing.
+
+        Decided from the saved reader names and ``target_unit`` options, so a batch the
+        project will refuse is refused before any entry is added. The batch is checked again
+        on the sessions once they are read.
+        """
+        self._native_rule([_ImportFact.of_ref(r) for r in refs], set_up=True)
+
+    def check_native_import(self, session: Session) -> None:
+        """The read-only check of every import (:meth:`import_ref`): no mixing, and a native
+        session in the project's unit once that unit is confirmed. Never changes the manifest;
+        :meth:`validation_issues` reports a project that is not set up."""
+        self._native_rule([_ImportFact.of_session(session)], set_up=False)
+
+    def _native_rule(
+        self, batch: list[_ImportFact], *, set_up: bool, batch_ids: Sequence[str] = ()
+    ) -> dict[str, Any] | None:
+        """Raise when *batch* may not join the project; else the calibration update the add
+        makes (*set_up*), or None."""
+        from track2data.readers.native3d import NATIVE_3D_READERS
+
+        in_batch = {*batch_ids, *(f.session_id for f in batch)}
+        existing = [r for r in self._manifest.sessions if r.session_id not in in_batch]
+        native_before = [r.session_id for r in existing if r.reader in NATIVE_3D_READERS]
+        pixel_before = [r.session_id for r in existing if r.reader not in NATIVE_3D_READERS]
+        natives = [f for f in batch if f.native]
+        pixels = [f for f in batch if not f.native]
+        if natives and self._manifest.mode.dimension == "3d":
+            first = natives[0]
+            raise ImportError_(
+                f"Session {first.session_id!r} is a native 3-D session ({first.reader}), and "
+                "this is a 3-D project of top and side pixel recordings to be fused",
+                code="NATIVE_3D_MIXED",
+                subject=first.session_id,
+                remediation="Add native 3-D files to a 2-D project of their own; a fused 3-D "
+                "project holds pixel sessions only.",
+            )
+        remedy = (
+            "A project holds either pixel-tracked or native 3-D sessions; add these to a "
+            "project of their own."
+        )
+        if natives and (pixel_before or pixels):
+            first = natives[0]
+            others = [*pixel_before, *(f.session_id for f in pixels)]
+            raise ImportError_(
+                f"Session {first.session_id!r} is a native 3-D session ({first.reader}), and "
+                f"{', '.join(repr(o) for o in others)} pixel-tracked "
+                f"({'is' if len(others) == 1 else 'are'} in this project or added with it)",
+                code="NATIVE_3D_MIXED",
+                subject=first.session_id,
+                remediation=remedy,
+            )
+        if pixels and native_before:
+            first = pixels[0]
+            raise ImportError_(
+                f"Session {first.session_id!r} is a pixel-tracked session"
+                f"{f' ({first.reader})' if first.reader else ''}, "
+                f"and this project holds native 3-D sessions ({', '.join(native_before)})",
+                code="NATIVE_3D_MIXED",
+                subject=first.session_id,
+                remediation=remedy,
+            )
+        if not natives:
+            return None
+        cfg = self._manifest.calibration
+        first = natives[0]
+        for other in natives[1:]:
+            if other.unit != first.unit:
+                raise ImportError_(
+                    f"Sessions {first.session_id!r} and {other.session_id!r} were converted to "
+                    f"different units, {first.unit!r} and {other.unit!r}; a project has one "
+                    "length unit",
+                    code="NATIVE_3D_UNIT_MISMATCH",
+                    subject=other.session_id,
+                    remediation="Add them with the same target_unit.",
+                )
+        unit = first.unit
+        label = cfg.length_unit_label
+        compare = bool(native_before) if set_up else cfg.length_unit_confirmed_by_user
+        if compare and unit != label:
+            raise ImportError_(
+                f"Session {first.session_id!r} was converted to {unit!r}, but this project's "
+                f"length unit is {label!r}",
+                code="NATIVE_3D_UNIT_MISMATCH",
+                subject=first.session_id,
+                remediation=f"Add it again with target_unit = {label!r}, or set the project's "
+                "length unit on the Calibration screen.",
+            )
+        if not set_up or native_before:
+            return None
+        wanted = {
+            "mode": "session",
+            "length_unit_label": unit,
+            "length_unit_confirmed_by_user": True,
+        }
+        if all(getattr(cfg, key) == value for key, value in wanted.items()):
+            return None
+        return wanted
 
     def _apply_import_settings(self, session: Session) -> Session:
         """Settings that act on a freshly read session: blob-derived body lengths, tracker
@@ -480,7 +720,19 @@ class Engine:
         self._manifest = self._manifest.model_copy(update={"video_overrides": overrides})
 
     def import_ref(self, ref: SessionRef) -> Session:
-        """Import the session a manifest entry describes.
+        """Import the session a manifest entry describes, and check it may be in this project.
+
+        :meth:`read_ref`, then :meth:`check_native_import` (read-only: a native 3-D session
+        mixed with pixel ones, or in another unit than the project's confirmed one, is
+        refused; the manifest is never changed here, so a run or a validation cannot rewrite
+        the project).
+        """
+        session = self.read_ref(ref)
+        self.check_native_import(session)
+        return session
+
+    def read_ref(self, ref: SessionRef) -> Session:
+        """Read the session a manifest entry describes, without the project checks.
 
         An entry that records its reader replays that choice, with its saved options, instead of
         detecting again. One that does not (a manifest from before readers could be chosen) is
@@ -561,6 +813,9 @@ class Engine:
                     message=f"Importing {ref.session_id}",
                 ),
             )
+            # Each entry is checked read-only (import_ref). Nothing is set up here: every entry
+            # was in the project before the call, so none is an add, and a project that is not
+            # set up stays so (validate says why) rather than being rewritten.
             sessions.append(self.import_ref(ref))
         return sessions
 
@@ -709,6 +964,24 @@ class Engine:
         )
         return self.apply_calibration_and_zones(psess)
 
+    def _require_native_session_mode(self, session: Session) -> None:
+        """Refuse a native 3-D session (no pixel frame) in a project not in session
+        calibration: its coordinates are already in the project unit, and another mode would
+        turn them into wrong numbers. Raised at preprocess and compute time, so ``t2d run``
+        (which does not stop on validation issues) refuses it too."""
+        if session.has_pixel_frame or self._manifest.calibration.mode == "session":
+            return
+        from track2data.core.errors import CalibrationError
+
+        raise CalibrationError(
+            f"Session {session.session_id!r} is a native 3-D session, and this project's "
+            f"calibration mode is {self._manifest.calibration.mode!r}: "
+            + NATIVE_3D_NEEDS_SESSION_CALIBRATION,
+            code="NATIVE_3D_NEEDS_SESSION_CALIBRATION",
+            subject=session.session_id,
+            remediation="Set calibration to Session on the Calibration page.",
+        )
+
     def apply_calibration_and_zones(
         self, psess: PreprocessedSession
     ) -> PreprocessedSession:
@@ -720,6 +993,7 @@ class Engine:
         re-implementation of it that could drift.
         """
         session = psess.session
+        self._require_native_session_mode(session)
         # The tracker's own body length is calibration-independent, so *_bl
         # metrics work whichever mode is chosen. Body-length calibration below
         # then applies its own validation on top of the same values. Done here
@@ -750,6 +1024,11 @@ class Engine:
                 # they wanted per-session calibration.
                 from track2data.calibration.session_unit import apply_session_calibration
                 psess = apply_session_calibration(psess, cfg)
+
+            # A native 3-D session's depth comes from its water column, once that is known.
+            if cfg.water_column is not None and psess.z is not None:
+                from track2data.calibration.water_column import apply_water_column
+                psess = apply_water_column(psess, cfg.water_column)
 
             # Zone assignment.
             zone_set = self._manifest.zones
@@ -820,6 +1099,24 @@ class Engine:
             # The estimator the pipeline used for ``psess.kinematics`` (not user-settable here).
             cfg["kinematics"] = self._manifest.preprocess.kinematics.model_dump()
         return cfg
+
+    def native_3d_provenance(self, session: Session) -> dict[str, Any] | None:
+        """What the export README says about a native 3-D file: the file's unit and the
+        project's, the vertical axis, the flip and the water column (None when not set); None for
+        a session that has a pixel frame."""
+        if session.has_pixel_frame:
+            return None
+        attrs = dict((session.raw_attrs or {}).get("native_3d") or {})
+        wc = self._manifest.calibration.water_column
+        return {
+            "source_unit": attrs.get("source_unit"),
+            "target_unit": attrs.get("target_unit") or session.coordinate_unit,
+            "vertical_axis": attrs.get("vertical_axis"),
+            "flip": bool(attrs.get("flip", False)),
+            "water_column": (
+                {"surface_z": wc.surface_z, "floor_z": wc.floor_z} if wc is not None else None
+            ),
+        }
 
     def identity_free_for(
         self, session: Session, explicit: bool | None = None
@@ -899,9 +1196,9 @@ class Engine:
         return self._manifest.scene.camera_view
 
     def camera_view_for_psess(self, psess: PreprocessedSession) -> CameraView:
-        """The view metrics are gated on for *psess*: a fused session (it has a depth) is
-        top-view, anything else is read from its session."""
-        if psess.depth is not None:
+        """The view metrics are gated on for *psess*: a fused session (it has a depth) and a
+        native 3-D one (it has a ``z``) are top-view, anything else is read from its session."""
+        if psess.depth is not None or psess.z is not None:
             return "top"
         return self.camera_view_for(psess.session)
 
@@ -973,7 +1270,9 @@ class Engine:
     ) -> dict[str, str]:
         """Selected metric ids the camera view rules out, mapped to the reason. With *psess* the
         view is that session's (a fused one is top-view) and a depth metric is allowed when it
-        has depth."""
+        has depth. A native 3-D session (a ``z``) has 3-D data; its depth is the water
+        column's. A native session without *psess* is answered from the manifest, which knows
+        the water column."""
         from track2data.metrics import get
         from track2data.metrics.availability import (
             manifest_depth_scale,
@@ -988,7 +1287,7 @@ class Engine:
         ]
         scale = manifest_depth_scale(self._manifest)
         if psess is None:
-            if session is None:
+            if session is None or not session.has_pixel_frame:
                 view, has_depth = manifest_view(self._manifest)
                 return view_skipped_metrics(
                     selected, view, get, has_depth=has_depth, depth_scale=scale
@@ -997,10 +1296,12 @@ class Engine:
                 selected, self.camera_view_for(session), get, depth_scale=scale
             )
         scale.update(
-            has_depth=psess.depth is not None,
+            has_depth=psess.depth is not None or psess.z is not None,
             px_per_cm=psess.px_per_cm,
             depth_height_cm=psess.depth_height_cm,
         )
+        if psess.z is not None:
+            scale.update(dimension="3d", native_3d=True)
         return view_skipped_metrics(
             selected,
             self.camera_view_for_psess(psess),
@@ -1109,6 +1410,7 @@ class Engine:
         """
         if self._manifest.mode.dimension == "3d" and getattr(psess, "depth", None) is None:
             raise ValueError("3-D projects compute fused sessions only")
+        self._require_native_session_mode(psess.session)
 
         from track2data.metrics.diagnostic import compute_all_diagnostics
 
@@ -1149,7 +1451,7 @@ class Engine:
                     ", ".join(sorted(view_only)),
                     psess.session_id,
                     self.camera_view_for_psess(psess),
-                    " (a fused session)" if psess.depth is not None else "",
+                    _view_note(psess),
                 )
             for mid in sorted(depth_ids):
                 logger.warning(
@@ -1463,6 +1765,7 @@ class Engine:
             keypoint_selection=(
                 session.keypoints.provenance() if session.keypoints is not None else None
             ),
+            native_3d=self.native_3d_provenance(session),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,
             trajectory_variant=session.trajectory_variant,
@@ -2389,6 +2692,8 @@ class Engine:
         pair is ``"session X: not in a fusable pair"``; those sessions are left out of the run,
         the others still run.
         """
+        from track2data.readers.native3d import manifest_native_3d
+
         issues: list[str] = []
         notes: list[str] = []
         if self._manifest.mode.dimension == "3d":
@@ -2411,7 +2716,13 @@ class Engine:
         if not self._manifest.sessions:
             issues.append("No sessions imported.")
         cfg = self._manifest.calibration
-        if cfg.mode == "scalar" and (cfg.px_per_cm is None or cfg.px_per_cm <= 0):
+        native = self._manifest.mode.dimension != "3d" and manifest_native_3d(self._manifest)
+        mixing = native_mixing_issue(self._manifest)
+        if mixing is not None:
+            issues.append(mixing)
+        if native:
+            issues.extend(self._native_setup_issues())
+        elif cfg.mode == "scalar" and (cfg.px_per_cm is None or cfg.px_per_cm <= 0):
             issues.append("Scalar calibration selected but px_per_cm is not set.")
         elif cfg.mode == "session":
             issues.extend(self._session_calibration_issues())
@@ -2624,6 +2935,31 @@ class Engine:
         return [
             f"{mid} will be skipped: {reason}." for mid, reason in sorted(view.items())
         ]
+
+    def _native_setup_issues(self) -> list[str]:
+        """:func:`native_setup_issues` for this project, with each native session's unit read
+        from its file (:meth:`read_ref`, without the import checks, so a session in another
+        unit is reported here by name rather than as unreadable). Replaces the session
+        calibration check for a native project: its sessions' scale is 1.0 by construction."""
+        from track2data.readers.native3d import NATIVE_3D_READERS
+
+        if self._manifest.calibration.mode != "session":
+            return native_setup_issues(self._manifest, {})
+        units: dict[str, str] = {}
+        unreadable: list[str] = []
+        for ref in self._manifest.sessions:
+            if ref.reader not in NATIVE_3D_READERS:
+                continue
+            try:
+                session = self.read_ref(ref)
+            except Exception:
+                unreadable.append(ref.session_id)
+                continue
+            units[ref.session_id] = session.coordinate_unit or ""
+        issues = native_setup_issues(self._manifest, units)
+        if unreadable:
+            issues.append("These native 3-D sessions could not be read: " + ", ".join(unreadable))
+        return issues
 
     def _session_calibration_issues(self) -> list[str]:
         """Fail loudly, name the sessions: for 'session' calibration

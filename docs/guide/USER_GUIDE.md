@@ -299,6 +299,53 @@ a pair is set up, the Views step in the sidebar shows a warning "Fusion setup ne
 not block Next. A pair with fusion settings that fuses without error is run as one fused session; see
 [Running a 3-D project](#running-a-3-d-project).
 
+### Native 3-D files (Anipose, DeepLabCut 3-D)
+
+Some trackers deliver 3-D positions directly, in physical units and with a vertical axis, so there
+is nothing to pair or fuse. Track2Data reads two of them:
+
+| Software | Files | Reader id |
+|---|---|---|
+| **Anipose** | `pose-3d` CSV (`<keypoint>_x`, `_y`, `_z`, ..., `fnum`) | `anipose` |
+| **DeepLabCut 3-D** | the triangulated table (three header rows, `x`, `y`, `z` per body part) | `deeplabcut_3d` |
+
+Both readers were written from the published layouts and tested on synthetic files only (they are
+marked *synthetic only* in the confirm step); compare a few positions with the tracker's own output
+before relying on them.
+
+- **Leave Analysis type on 2D.** A native 3-D project is an ordinary 2-D project whose sessions come
+  from these readers. It has no Views or Fusion step.
+- **Options in the confirm step.** `fps` and `unit` are required and never guessed: the files record
+  neither, and a wrong unit scales every distance and speed. Anipose proposes `mm` (the usual board
+  unit) but you must confirm it; DeepLabCut 3-D proposes nothing. The other options are
+  `target_unit` (the project's length unit, default `cm`), `keypoint` (which keypoint stands for the
+  animal; never an average), `likelihood_cutoff` (Anipose only, applied to the `_score` columns; it
+  needs a score for every keypoint, otherwise set it to 0), `vertical_axis` (`x`, `y` or `z`, default
+  `z`: which axis of the file points up), `flip` (tick when it points down) and `keep_skeleton`.
+- **Units are converted when the file is read**, from `unit` to `target_unit`. The first native file
+  you add sets the project's calibration for you: **Session calibration**, the unit label set to the
+  target unit and marked confirmed. Files added later must use the same target unit; a different one
+  is refused (`NATIVE_3D_UNIT_MISMATCH`, naming both units). The `_cm` column suffix is nominal, as for
+  any project calibrated in another unit; the run's `README.md` names the real unit.
+- **No mixing.** A project holds pixel-tracked sessions or native 3-D sessions, not both, and native
+  files cannot join a 3-D (fused) project: the add is refused with `NATIVE_3D_MIXED`, naming the
+  session and both kinds.
+- **One animal per file.** Neither format has an animal axis; several animals are several files,
+  hence several sessions.
+- **Missing values.** Anipose: an empty cell (NaN) in x, y and z together. DeepLabCut 3-D: a row where
+  x, y and z are all exactly 0; a single 0 is a real coordinate. A gap in Anipose's `fnum` is not
+  filled: the session stores the frames the file has and records the gaps as tracking intervals.
+- **Horizontal plane and vertical axis.** The two axes that are not vertical become x and y for the
+  2-D metrics (IL-1, IL-2 and the rest); the vertical one is the absolute z. z is not smoothed or
+  interpolated.
+- **Zones and background are not available** (there is no video frame). The metrics that need
+  an arena or a pixel-sized threshold (IL-3, IL-9, IL-10, IL-14) and all group metrics are not offered
+  (see [3-D metrics](#3-d-metrics)).
+
+From the command line: `track2data add PROJECT FOLDER --option unit=mm --option fps=25` (add
+`--option target_unit=cm --option vertical_axis=y` as needed). Every native file is read in full
+when it is added, so one unreadable file stops the add.
+
 ## 3. Calibration
 
 Calibration decides which units distances and speeds are reported in. Figure 4 shows the default,
@@ -380,6 +427,23 @@ For depth, draw a **main** zone from the waterline to the floor on the Zones scr
 is the surface and the bottom edge the floor; Track2Data never substitutes the video frame, so with
 no main zone the depth columns are empty and say why. For time in the upper or lower part of the
 tank, draw stacked secondary zones and use the zone metrics (Z-1 to Z-9).
+
+### Water column (native 3-D files)
+
+A native 3-D project shows a **WATER COLUMN** group with two fields, **Surface z** and **Floor z**:
+where the water surface and the floor lie on the file's own vertical axis (as the file writes it, before any **flip**; Track2Data applies each session's flip itself), in the project's length unit
+(either order is accepted; they must be finite and different). You enter them; Track2Data does not
+estimate them from the data. With both set, each session gets a depth (0 at the surface, 1 at the
+floor, `(z - surface) / (floor - surface)`) and a water height (`|floor - surface|`), which is what
+**IL-15** needs. A position outside the column (above the surface or below the floor) has no depth:
+it is left empty and counted in IL-15's `frac_outside_extent`, never clipped to the edge. Without the
+water column IL-15 is greyed out ("needs the water column (surface and floor z) on the Calibration
+page"); IL-16 and IL-17 do not need it, because z is already absolute.
+
+A native 3-D project must stay in **Session calibration** with the unit label equal to the target
+unit and confirmed; the project is blocked otherwise (`NATIVE_3D_NEEDS_SESSION_CALIBRATION`, or a
+message asking you to confirm the unit or to match the sessions' unit). The mode is set for you when
+you add the first file, and nothing else (import, validate, run) changes it.
 
 ## 4. Zones (optional)
 
@@ -685,6 +749,21 @@ keep measuring in the top-view plane.
 - **Limits.** Depth comes from a side camera at right angles to the top camera; there is no
   correction for refraction or parallax. Vertical speed as its own metric, 3-D inter-individual
   distance and cohesion are not included.
+
+**In a native 3-D project** the same three metrics run on the sessions' absolute z (no tank height,
+no fusion): the positions are `(x, y, z)` in the project's unit, and IL-16 and IL-17 need no water
+column. Example: a fish that moves (3, 4, 12) mm per frame in an Anipose file at 25 frames per second,
+read as cm, steps hypot(0.3, 0.4, 1.2) = 1.3 cm per frame, so 10 steps give an IL-16 of 13 cm and an
+IL-17 of 1.3 x 25 = 32.5 cm/s; its 2-D metrics measure the horizontal steps of 0.5 cm (IL-1 5 cm, IL-2
+12.5 cm/s). **GL-16 is not offered for native files** (it needs two animals in one session and a file holds one), and neither is any other group metric ("needs several animals in one session; a native 3-D file holds one animal"). **IL-3, IL-9, IL-10 and IL-14 are not offered either** ("uses a pixel-sized default and the project's native 3-D files have no pixel frame"): their default thresholds are in pixels and would silently change with the project unit. The Metrics screen greys them out, `validate` and the run `README.md` list the reason. IL-15 appears once the water column is set.
+The per-frame table has no z column (z is exported only through the metrics); with a water column it
+carries `depth_fraction` and `depth_cm` as for a fused unit. The run's `README.md` has a **Native 3-D
+source** section (reader, file unit, project unit, vertical axis, flip, water column or its absence).
+
+Limits of native 3-D files: one animal per file; no mixing with pixel sessions; the unit you give
+must be the one of the calibration board (a wrong one scales everything); no refraction correction;
+the water column is entered, not estimated; no zones or background image; no group metrics and no IL-3, IL-9, IL-10 or IL-14; a multi-animal DeepLabCut
+3-D table (with an `individuals` header row) is named by the scan as one it cannot read yet.
 
 Limits of this version:
 

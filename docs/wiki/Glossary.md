@@ -66,7 +66,7 @@ cleanup: see [[Statistics and Pseudoreplication]] and `track2data sensitivity`.
 | **Path length** | IL-1 | `path_length_px` / `_cm` / `_bl` — a *total*, so it scales with session duration |
 | **Speed** | IL-2 | `mean_speed_*`, `median_speed_*`, `max_speed_*` |
 | **Thigmotaxis** | IL-14, IL-3 | `mean_wall_distance_px`, `wall_contact_time_pct`; `time_in_centre_pct` |
-| **Depth (vertical position)** | IL-15 | `mean_depth_fraction`, `median_depth_fraction`, `sd_depth_fraction` (0 = water surface, 1 = tank floor), `mean_depth_cm`, `frac_outside_extent`, `depth_extent_source`. Needs a side view and a main zone from the waterline to the floor. Height above the floor is 1 − depth |
+| **Depth (vertical position)** | IL-15 | `mean_depth_fraction`, `median_depth_fraction`, `sd_depth_fraction` (0 = water surface, 1 = tank floor), `mean_depth_cm`, `frac_outside_extent`, `depth_extent_source`. Needs a side view and a main zone from the waterline to the floor, or, for a native 3-D file, the water column (surface z and floor z) entered on the Calibration page. Height above the floor is 1 − depth |
 | **Freezing / activity** | IL-4 | `active_fraction`, `freezing_fraction`, `threshold_px_s` |
 | **Bout** | IL-7, Z-3 | A run of consecutive frames meeting a criterion. `min_bout_frames_used` and `bout_criterion_effective` record the criterion actually applied — report it |
 | **Tortuosity** | IL-5 | `tortuosity` — path length ÷ net displacement |

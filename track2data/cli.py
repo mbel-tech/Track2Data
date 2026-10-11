@@ -240,7 +240,7 @@ def list_metrics(level: str | None) -> None:
     # where they find out which metrics a declared view switches on.
     def _view_text(m: Any) -> str:
         if getattr(m, "requires_depth_scale", False):
-            return "fused 3-D + cm scale"
+            return "fused 3-D or native 3-D, cm scale"
         return required_views_text(m) or "any"
 
     view_w = max(len("VIEW"), *(len(_view_text(m)) for m in metrics))
@@ -554,12 +554,16 @@ def add(
     The same steps as the app: the suggestion is shown, you can amend it (--reader, --option,
     --exclude, --rename), and nothing is added until you confirm (or pass --yes). The reader
     and its options are saved on each session, so the project never has to guess again.
+
+    Native 3-D files (Anipose, DLC-3D) are read in full before they are added, so the project
+    rules can check them and set the project's length unit; one unreadable file stops the add.
     """
     from track2data.api import Engine
     from track2data.core.errors import Track2DataError
     from track2data.core.manifest import write as manifest_write
     from track2data.readers.confirm import ConfirmDraft
     from track2data.readers.index import ScanBudget
+    from track2data.readers.native3d import manifest_native_3d
     from track2data.readers.params import parse_assignments
 
     manifest = _load_manifest(project)
@@ -617,6 +621,19 @@ def add(
             "updated_at": datetime.now(tz=UTC),
         }
     )
+    if manifest_native_3d(updated):
+        # Native 3-D files involved: the engine's add entry point checks the batch (no mixing,
+        # one unit; first from the saved options, then on the files read in full) and, for a
+        # project that had no native session, sets its calibration. A file that cannot be read
+        # stops the add too.
+        engine = Engine(updated)
+        try:
+            engine.check_native_refs(refs)
+            engine.set_up_native_import([engine.read_ref(ref) for ref in refs])
+        except Track2DataError as exc:
+            click.echo(f"[error] {exc}", err=True)
+            sys.exit(1)
+        updated = engine.manifest
     manifest_write(updated, Path(project))
     click.echo(f"Added {len(refs)} session(s) to {project}.")
 

@@ -1,6 +1,6 @@
 # Formats and Interoperability
 
-Track2Data reads idtracker.ai, DeepLabCut, SLEAP (analysis HDF5), Ctrax (raw `.mat`) and `trx.mat` output; [[Compatibility]] has the status of each (pre-1.0, see the [changelog](https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md)).
+Track2Data reads idtracker.ai, DeepLabCut, SLEAP (analysis HDF5), Ctrax (raw `.mat`), `trx.mat`, Anipose `pose-3d` CSV and DeepLabCut 3-D output; [[Compatibility]] has the status of each (pre-1.0, see the [changelog](https://github.com/mbel-tech/Track2Data/blob/main/CHANGELOG.md)).
 
 ## Headless commands
 

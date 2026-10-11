@@ -14,13 +14,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from track2data.core.runplan import FusionRunInfo, SkippedSession
@@ -168,6 +177,16 @@ class Session(BaseModel):
     # Verbatim unknown keys from the source trajectory dict.
     raw_attrs: dict[str, Any] | None = None
 
+    # ── native 3-D files ────────────────────────────────────────────────────
+    # False for a session read from a tool that reports positions in a length unit rather than
+    # in video pixels (Anipose, DLC-3D); such a session has no image frame.
+    has_pixel_frame: bool = True
+    # The unit of ``raw_xy`` and ``raw_z`` when ``has_pixel_frame`` is False; None otherwise.
+    coordinate_unit: str | None = None
+    # Shape (n_frames, n_animals), float64, NaN = missing: the absolute vertical coordinate in
+    # ``coordinate_unit``, row-aligned with ``raw_xy``. None for a 2-D or pixel session.
+    raw_z: np.ndarray | None = None
+
     # ── session.json fields (Fase 4) ────────────────────────────────────────
     # idtracker.ai's own authoritative count of frames with more blobs than
     # animals -- independent of any user-side inconsistent_frames.csv, and
@@ -249,6 +268,15 @@ class Session(BaseModel):
     @property
     def n_frames(self) -> int:
         return int(self.raw_xy.shape[0])
+
+    @property
+    def pixel_size_known(self) -> bool:
+        """Whether the video frame size in pixels is a real, positive size.
+
+        False for a native 3-D session (no image frame) and for a reader that could not read the
+        size; a consumer that needs the frame as a rectangle checks this first.
+        """
+        return self.has_pixel_frame and self.video.width_px > 0 and self.video.height_px > 0
 
     def coverage(self) -> np.ndarray:
         """Fraction of non-NaN frames per animal, shape (n_animals,)."""
@@ -363,6 +391,21 @@ class PreprocessConfig(BaseModel):
 # ── Calibration & zones ───────────────────────────────────────────────────────
 
 
+class WaterColumn(BaseModel):
+    """Where the surface and the floor sit on a native 3-D file's z axis (either order)."""
+
+    surface_z: float
+    floor_z: float
+
+    @model_validator(mode="after")
+    def _finite_and_distinct(self) -> WaterColumn:
+        if not (math.isfinite(self.surface_z) and math.isfinite(self.floor_z)):
+            raise ValueError("surface_z and floor_z must be finite numbers")
+        if self.surface_z == self.floor_z:
+            raise ValueError("surface_z and floor_z must differ")
+        return self
+
+
 class CalibrationConfig(BaseModel):
     # "session" reads each session's own length_unit (the validator's
     # px-to-real-unit ratio) directly -- see
@@ -396,6 +439,18 @@ class CalibrationConfig(BaseModel):
     # opt-in because docs/dev/EXTRACT_BBOXES_FIX.md measured a +27.8% bias in
     # the bbox-derived value it corrects, so switching changes *_cm numbers.
     body_length_source: Literal["session", "blobs"] = "session"
+    # Surface and floor of the water column in the native 3-D file's z coordinate; None until
+    # the user gives them. Derives ``depth`` for a native 3-D session.
+    water_column: WaterColumn | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_water_column(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Leave ``water_column`` out while it is None, so a project without one serialises, hashes
+        and keys its cache exactly as it did before the field existed."""
+        data: dict[str, Any] = handler(self)
+        if data.get("water_column") is None:
+            data.pop("water_column", None)
+        return data
 
 
 #: How the camera looked at the animals. "unknown" is the default and means nothing was declared,
@@ -867,6 +922,13 @@ class PreprocessedSession:
     # shape as ``depth`` and sliced with it, so a window can count its own outside samples;
     # ``depth_outside`` equals its sum over frames.
     depth_outside_mask: np.ndarray | None = None
+    # (n_rows, n_animals) absolute vertical coordinate of a native 3-D session, in the
+    # session's coordinate unit, laid out on the same rows as ``xy`` (NaN on inserted rows).
+    # None for every other session. It is the file's raw coordinate: identity-switch correction,
+    # jump replacement, gap fill and smoothing change ``xy`` but never touch ``z``, so it is
+    # only valid for single-animal sources (native files are one animal) and 3-D speeds mix
+    # smoothed xy with unsmoothed z.
+    z: np.ndarray | None = None
     # (n_animals,) int: the top session's animal index of each fused animal (fusion keeps only
     # the fish in the pair's fish map, so fused position k is not top animal k). None otherwise.
     source_animal_index: np.ndarray | None = None

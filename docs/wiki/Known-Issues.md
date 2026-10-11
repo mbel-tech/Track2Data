@@ -58,9 +58,9 @@ Those sessions are exported in pixels only. The run now says so instead of skipp
 calibration silently.
 
 **Only some trackers are readable.** idtracker.ai, DeepLabCut, SLEAP (analysis HDF5), Ctrax
-(raw `.mat`) and `trx.mat` are. A scan *names* formats it recognises but cannot read — SLEAP
+(raw `.mat`), `trx.mat`, Anipose `pose-3d` CSV and DeepLabCut 3-D tables are. A scan *names* formats it recognises but cannot read — SLEAP
 `.slp`, a `-v7.3` `trx.mat`, FlyTracker `-track.mat`, DANNCE, Multi-Worm Tracker `.blobs`,
-AnimalTA, DeepLabCut 3-D and FicTrac — and says what to export instead. See
+AnimalTA and FicTrac — and says what to export instead. See
 [[Formats and Interoperability]] and [[Compatibility]].
 
 **The `trx.mat` reader has not been checked against a real file.** It follows the documented

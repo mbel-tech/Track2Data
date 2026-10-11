@@ -1680,6 +1680,8 @@ class VerticalPosition(Metric):
             "PreprocessedSession.xy (the y column)",
             "cfg['water_column'] (derived per session from the main zones)",
             "PreprocessedSession.px_per_cm (optional)",
+            "native 3-D session: PreprocessedSession.depth, derived from the absolute z and the "
+            "water column entered on the Calibration page (surface z, floor z)",
         ],
         assumptions=[
             "The project declares a side camera view (Calibration screen); the top edge of "
@@ -1690,6 +1692,9 @@ class VerticalPosition(Metric):
             "Frames outside the column are dropped and counted, never clipped to the surface "
             "or floor",
             "Interpolated frames are included",
+            "A native 3-D file (Anipose, DeepLabCut 3-D) takes its depth from the absolute z "
+            "and the surface and floor z entered by the user (depth_extent_source = "
+            "water_column); positions outside that column are dropped and counted",
         ],
         warnings=[
             "No refraction or parallax correction: a fish near the front glass looks "
@@ -1750,7 +1755,8 @@ class VerticalPosition(Metric):
                 "sd_depth_fraction": np.nan,
                 "mean_depth_cm": np.nan,
                 "frac_outside_extent": np.nan,
-                "depth_extent_source": "fusion",
+                # a native 3-D session got its depth from the entered water column
+                "depth_extent_source": "water_column" if session.z is not None else "fusion",
             }
             # without the mask the outside share is unknown (NaN), never 0
             total = n_out + d.size if n_out is not None else 0
@@ -1851,21 +1857,24 @@ class PathLength3D(Metric):
     documentation = MetricDocumentation(
         definition=(
             "Total distance travelled by each individual through the water, in cm, from the "
-            "top view's horizontal position and the side view's depth of a fused 3-D session."
+            "top view's horizontal position and the side view's depth of a fused 3-D session, "
+            "or from the (x, y, z) positions of a native 3-D file (Anipose, DeepLabCut 3-D)."
         ),
         formula_plain=(
             "sum of ||P[t+1,k] - P[t,k]|| over frame pairs where both positions are finite, "
-            "with P = (x_px / px_per_cm, y_px / px_per_cm, depth * tank_height_cm)"
+            "with P = (x_px / px_per_cm, y_px / px_per_cm, depth * tank_height_cm) for a fused "
+            "session, or P = (x, y, z) in the project unit for a native 3-D file"
         ),
         inputs=[
             "PreprocessedSession.xy",
-            "PreprocessedSession.depth",
+            "PreprocessedSession.depth (fused) or PreprocessedSession.z (native 3-D file)",
             "PreprocessedSession.px_per_cm",
-            "PreprocessedSession.depth_height_cm",
+            "PreprocessedSession.depth_height_cm (fused only)",
         ],
         assumptions=[
             "The depth comes from a side camera at right angles to the top camera, and the "
-            "fusion's water column and tank height give the vertical scale",
+            "fusion's water column and tank height give the vertical scale; a native 3-D file "
+            "carries an absolute z in the project's length unit instead (no tank height)",
             "A step counts only when all three coordinates (x, y, depth) are finite at both "
             "of its frames; an animal with no such step reports NaN (cm and BL), never 0, and "
             "n_valid_steps says how many steps the length rests on",
@@ -1942,7 +1951,7 @@ class Speed3D(Metric):
         definition=(
             "Mean, median and maximum speed of each individual through the water, in cm/s, "
             "combining the top view's horizontal speed with the vertical speed of the side "
-            "view's depth in a fused 3-D session."
+            "view's depth in a fused 3-D session, or of the absolute z of a native 3-D file."
         ),
         formula_plain=(
             "per frame sqrt(vh^2 + vz^2), vh = kinematics.speed_px_s / px_per_cm, "
@@ -1951,9 +1960,9 @@ class Speed3D(Metric):
         ),
         inputs=[
             "PreprocessedSession.kinematics.speed_px_s",
-            "PreprocessedSession.depth",
+            "PreprocessedSession.depth (fused) or PreprocessedSession.z (native 3-D file)",
             "PreprocessedSession.px_per_cm",
-            "PreprocessedSession.depth_height_cm",
+            "PreprocessedSession.depth_height_cm (fused only)",
             "KinematicsCfg (the pipeline's estimator and window)",
         ],
         assumptions=[
@@ -1964,7 +1973,8 @@ class Speed3D(Metric):
             "where the estimator returns NaN for the vertical speed (the last frame of the "
             "forward-difference estimator, a depth segment too short for the window) the "
             "frame is left out, never counted as zero",
-            "The depth comes from a side camera at right angles to the top camera",
+            "The depth comes from a side camera at right angles to the top camera; a native "
+            "3-D file's vertical series is its absolute z (in the project unit)",
         ],
         warnings=[
             "Max speed is sensitive to remaining jump artefacts, and to depth noise, which "
@@ -1989,9 +1999,14 @@ class Speed3D(Metric):
 
         speed_3d: np.ndarray | None = None
         height, scale = session.depth_height_cm, session.px_per_cm
-        if session.depth is not None and height is not None and scale is not None:
+        z_cm: np.ndarray | None = None
+        if session.z is not None:  # a native 3-D file: z is already absolute, in the project unit
+            z_cm = np.asarray(session.z, dtype=np.float64)
+        elif session.depth is not None and height is not None:
+            z_cm = np.asarray(session.depth, dtype=np.float64) * float(height)
+        if z_cm is not None and scale is not None:
             kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
-            z = np.asarray(session.depth, dtype=np.float64) * float(height)
+            z = z_cm
             # compute_kinematics differentiates an (n, animals, 2) array; [Z, 0] makes its
             # speed |vz|, with the second component NaN wherever Z is.
             zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
