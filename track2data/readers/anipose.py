@@ -256,6 +256,9 @@ def _intervals(frames: np.ndarray) -> list[tuple[int, int]] | None:
 
 
 def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any]) -> Session:
+    """The session for one file. ``raw_xy``/``raw_z`` follow ``vertical_axis`` and ``flip``; the
+    stored skeleton keeps the file's axes (converted to the target unit, not permuted or flipped).
+    """
     table = _read_table(path, layout)
     if table.empty:
         raise DataValidationError(
@@ -295,6 +298,13 @@ def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any
             [table[f"{n}_score"].to_numpy(dtype=np.float64)[order] for n in names], axis=1
         )[:, None, :]  # (R, 1, K)
     cutoff = opts.get("likelihood_cutoff")
+    if cutoff and score is None:
+        raise DataValidationError(
+            "A score cutoff was set but not every keypoint has a _score column.",
+            code="READER_OPTION_INVALID",
+            subject="likelihood_cutoff",
+            remediation="Set the score cutoff to 0, or use a file with scores for every keypoint.",
+        )
     reduction, z = reduce_native(
         xyz,
         names,

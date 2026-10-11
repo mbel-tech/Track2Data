@@ -11,6 +11,8 @@ one (Anipose proposes mm) but never fills it in on its own.
 
 from __future__ import annotations
 
+from fractions import Fraction
+
 import numpy as np
 
 from track2data.readers.assemble import Reduction, reduce_keypoints, to_nan
@@ -23,6 +25,15 @@ NATIVE_3D_READERS: frozenset[str] = frozenset({"anipose", "deeplabcut_3d"})
 #: Length of one unit, in metres.
 UNIT_FACTORS_M: dict[str, float] = {"mm": 0.001, "cm": 0.01, "m": 1.0, "in": 0.0254}
 
+#: The same factors as exact ratios (relative to a millimetre), so a conversion is one integer
+#: multiplication and one division and 19 mm is exactly 1.9 cm.
+_RATIO_TO_MM: dict[str, Fraction] = {
+    "mm": Fraction(1),
+    "cm": Fraction(10),
+    "m": Fraction(1000),
+    "in": Fraction(254, 10),
+}
+
 UNITS: tuple[str, ...] = tuple(UNIT_FACTORS_M)
 AXES: tuple[str, ...] = ("x", "y", "z")
 
@@ -30,7 +41,8 @@ AXES: tuple[str, ...] = ("x", "y", "z")
 def convert_units(values: np.ndarray, unit: str, target: str) -> np.ndarray:
     """*values* given in *unit*, expressed in *target* (a new float64 array).
 
-    ``coordinate x factor(unit) / factor(target)``. Raises ``ValueError`` for an unknown unit.
+    ``coordinate x factor(unit) / factor(target)``, computed as an exact integer ratio (multiply by
+    the numerator, divide by the denominator). Raises ``ValueError`` for an unknown unit.
     """
     for name in (unit, target):
         if name not in UNIT_FACTORS_M:
@@ -38,7 +50,8 @@ def convert_units(values: np.ndarray, unit: str, target: str) -> np.ndarray:
     out = np.array(values, dtype=np.float64, copy=True)
     if unit == target:
         return out
-    return out * (UNIT_FACTORS_M[unit] / UNIT_FACTORS_M[target])
+    ratio = _RATIO_TO_MM[unit] / _RATIO_TO_MM[target]
+    return out * ratio.numerator / ratio.denominator
 
 
 def horizontal_axes(vertical_axis: str) -> tuple[int, int]:
@@ -141,6 +154,9 @@ def reduce_native(
     The reduction's ``raw_xy`` is the horizontal plane; ``z`` is the chosen keypoint's coordinate on
     the vertical axis, ``(F, A)``, negated when *flip*, and NaN wherever the position is missing
     (including below the cutoff).
+
+    Only ``raw_xy`` and ``z`` follow *vertical_axis* and *flip*. The stored skeleton (the caller's
+    ``xy3``) keeps the file's three axes as they are: not permuted and not flipped.
     """
     xyz = np.asarray(xy3)
     if xyz.ndim != 4 or xyz.shape[3] != 3:

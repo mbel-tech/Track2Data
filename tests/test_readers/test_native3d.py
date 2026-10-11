@@ -28,6 +28,13 @@ def test_convert_units_table() -> None:
         convert_units(v, "ft", "cm")
 
 
+def test_convert_units_is_exact_for_common_cases() -> None:
+    assert convert_units(np.array([19.0]), "mm", "cm")[0] == 1.9
+    assert convert_units(np.array([1.0]), "m", "cm")[0] == 100.0
+    assert convert_units(np.array([1.0]), "in", "mm")[0] == 25.4
+    assert convert_units(np.array([7.0]), "mm", "m")[0] == 0.007
+
+
 def test_horizontal_axes() -> None:
     assert horizontal_axes("z") == (0, 1)
     assert horizontal_axes("y") == (0, 2)

@@ -142,7 +142,7 @@ def test_anipose_requires_fps_and_unit(tmp_path: Path, missing: str) -> None:
 
 def test_anipose_session_flags(tmp_path: Path) -> None:
     path = write_anipose_csv(tmp_path / "f.csv", KPS, 6)
-    s = read(path, unit="in", target_unit="mm")
+    s = read(path, unit="in", target_unit="mm", keypoint="r-middle")
     assert s.has_pixel_frame is False and s.length_unit == 1.0
     assert s.coordinate_unit == "mm"
     assert s.video.width_px == 0 and s.video.height_px == 0
@@ -158,11 +158,9 @@ def test_anipose_session_flags(tmp_path: Path) -> None:
     assert AniposeReader.provides_native_3d
     assert AniposeReader.coordinate_frame == "physical_unaligned"
     assert AniposeReader.verification == "synthetic_only"
-    # inches to mm on the chosen keypoint (the best covered, here the central one)
-    assert s.keypoints is not None
-    k = s.keypoints.names.index(s.keypoints.selection.keypoint)
+    # inches to mm on keypoint "r-middle" (index 1 in the file): frame 2, axis z
     assert s.raw_z is not None
-    assert s.raw_z[2, 0] == pytest.approx((2 + 100.0 * k + 20) * 25.4, rel=1e-6)
+    assert s.raw_z[2, 0] == pytest.approx((2 + 100.0 + 20) * 25.4, rel=1e-6)
 
 
 def test_anipose_skeleton_can_be_dropped(tmp_path: Path) -> None:
@@ -201,3 +199,24 @@ def test_anipose_registered_and_discovered(tmp_path: Path) -> None:
     keypoint = next(p for p in det.parameters if p.name == "keypoint")
     assert keypoint.choices == tuple(KPS)
     assert det.verification == "synthetic_only"
+
+
+def test_anipose_cutoff_without_scores_is_refused(tmp_path: Path) -> None:
+    path = write_anipose_csv(tmp_path / "p.csv", ["a", "b"], 3)
+    text = path.read_text().replace("b_score", "b_other")
+    path.write_text(text)
+    assert AniposeReader.detect(path)
+    with pytest.raises(Track2DataError) as err:
+        read(path, likelihood_cutoff=0.5)
+    assert err.value.code == "READER_OPTION_INVALID" and err.value.subject == "likelihood_cutoff"
+    assert "0" in err.value.remediation
+    assert read(path, keypoint="a").raw_xy.shape == (3, 1, 2)  # no cutoff: fine
+
+
+def test_anipose_skeleton_keeps_the_file_axes(tmp_path: Path) -> None:
+    xyz = np.array([[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]]])
+    path = write_anipose_csv(tmp_path / "sk.csv", ["a"], 2, xyz=xyz)
+    s = read(path, target_unit="mm", vertical_axis="y", flip=True)
+    assert s.raw_z is not None and s.keypoints is not None
+    np.testing.assert_array_equal(s.raw_z[:, 0], [-2, -5])
+    np.testing.assert_array_equal(s.keypoints.xy[:, 0, 0, :], xyz[:, 0, :])
