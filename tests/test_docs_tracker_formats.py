@@ -28,7 +28,10 @@ PINNED = {
         "b4307f31271f0781e1c84086a6773b1209e22832041da793b71a3c04d0819a7c"
     ),
     "tracker_test_datasets.csv": (
-        "195247aaa0929773ab35a30a267699a06750167dc518675beca5f548ff4fc9d5"
+        "136bf05ee3ad49c4f8105aebf2c7a9be6dc022b265c3ccc1fd19d90b1cf0aecd"
+    ),
+    "fishtank_idtracker_survey.csv": (
+        "ad90fcc5af3e231fb5956a68f6f68e52f791a68a414b41ae84944542095d9b8d"
     ),
 }
 
@@ -62,3 +65,24 @@ def test_priority_file_still_sums_to_the_cumulative_share_the_plan_quotes() -> N
     assert sum(float(r["pct_of_animal_tracker_citations"]) for r in rows) == pytest.approx(
         80.5, abs=0.11
     )
+
+
+def test_the_run_record_lists_exactly_the_idtrackerai_rows_of_the_dataset_csv() -> None:
+    """idtrackerai_track2data_runs.csv is ours (not pinned); it stays keyed to the supplied rows."""
+    import csv
+
+    def rows(name: str) -> list[dict[str, str]]:
+        with (DOCS / name).open(newline="", encoding="utf8") as handle:
+            return list(csv.DictReader(handle))
+
+    all_rows = rows("tracker_test_datasets.csv")
+    supplied = [r["dataset"] for r in all_rows if r["priority_row"] == "idtracker.ai"]
+    recorded = rows("idtrackerai_track2data_runs.csv")
+    assert [r["dataset"] for r in recorded] == supplied
+    statuses = {"run_through_cli", "run_by_hand", "not_run"}
+    assert {r["track2data_status"] for r in recorded} <= statuses
+    for r in recorded:
+        if r["track2data_status"] == "run_through_cli":
+            assert r["test"].startswith("tests/real_samples/"), r["dataset"]
+            assert (DOCS.parents[1] / r["test"].split("::")[0]).is_file(), r["test"]
+

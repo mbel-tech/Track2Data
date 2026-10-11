@@ -33,7 +33,19 @@ file (h5, no-fps CSV, MoveR pickled dict: `new`, `add --option width_px=... heig
   through the CLI on the cached fixtures (h5, CSV bundle, no-fps CSV, MoveR pickled dict) and checks the output file set,
   frames x animals row counts, h5-vs-CSV agreement, the `validate` refusal without options/consent, and that the input folder
   is unchanged. The 464k-frame FishTank file is not in it (not in the fixture manifest; ~100 s).
-  Still open: items 4, 5, 6 and 8 (one error at a time, flat folders, all-NaN cm columns, smaller points).
+- Items 4, 5, 6 and 8 done in the same PR:
+  - 4: a bare export's missing fps / width / height are now reported in one error (and by `validate`) instead of one per run.
+    A pickle without consent is still reported before the video size (the file must be opened to know whether it records
+    one), but the refusal now says so: when neither `width_px`/`height_px` nor a `session.json` width/height is given, its
+    remediation (and so `validate`) adds that pickled files usually record no video size and to give both options. Nothing is
+    unpickled to find out, and the code stays `IDT_PICKLE_REFUSED`. Closed.
+  - 5: `scan` names a loose idtracker.ai export (`trajectories.h5/.npy/.parquet/.pickle` or a `trajectories_csv` folder outside
+    a `trajectories/` folder) and says to put it in `<name>/trajectories/`. It is still not claimed as a session.
+  - 6: the run README has a `## Units` section when calibration is 'bodylength', saying the `*_cm` columns are empty on purpose
+    and how to get centimetres. A `## Columns with no values` section now lists every other entirely-NaN metric column with a
+    reason keyed by metric id (D-2, D-3, D-5..D-9, D-12..D-15; anything else gets the generic "no valid values" reason). Closed.
+  - 8: the README lists reader options the user gave ("not recorded in the files"); it lists identity slots that are more than
+    90 % missing; `IDT_VERSION_UNKNOWN` is information, not a warning, for 4.x files.
 
 ## 2. Method
 

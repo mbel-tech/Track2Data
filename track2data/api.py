@@ -155,20 +155,25 @@ class _ImportFact:
     reader: str | None
     native: bool
     unit: str | None
+    vertical_axis: str | None = None
 
     @classmethod
     def of_session(cls, session: Session) -> _ImportFact:
-        from track2data.readers.native3d import NATIVE_3D_READERS
+        from track2data.readers.native3d import DEFAULT_VERTICAL_AXIS, NATIVE_3D_READERS
 
         native = session.reader in NATIVE_3D_READERS or not session.has_pixel_frame
-        return cls(session.session_id, session.reader, native, session.coordinate_unit)
+        attrs = (session.raw_attrs or {}).get("native_3d") or {}
+        axis = str(attrs.get("vertical_axis") or DEFAULT_VERTICAL_AXIS) if native else None
+        return cls(session.session_id, session.reader, native, session.coordinate_unit, axis)
 
     @classmethod
     def of_ref(cls, ref: SessionRef) -> _ImportFact:
-        from track2data.readers.native3d import ref_target_unit
+        from track2data.readers.native3d import ref_target_unit, ref_vertical_axis
 
         unit = ref_target_unit(ref)
-        return cls(ref.session_id, ref.reader, unit is not None, unit)
+        return cls(
+            ref.session_id, ref.reader, unit is not None, unit, ref_vertical_axis(ref)
+        )
 
 
 def _view_note(psess: PreprocessedSession) -> str:
@@ -632,6 +637,28 @@ class Engine:
             return None
         cfg = self._manifest.calibration
         first = natives[0]
+        # One water column serves every session, so they must share the vertical axis it is
+        # entered on (flip may differ: it is compensated per session).
+        from track2data.readers.native3d import ref_vertical_axis
+
+        axes = [
+            (r.session_id, ref_vertical_axis(r))
+            for r in existing
+            if r.reader in NATIVE_3D_READERS
+        ]
+        axes += [(f.session_id, f.vertical_axis) for f in natives]
+        axis_ref = axes[0]
+        for other_id, other_axis in axes[1:]:
+            if other_axis != axis_ref[1]:
+                raise ImportError_(
+                    f"Sessions {axis_ref[0]!r} and {other_id!r} have different vertical axes, "
+                    f"{axis_ref[1]!r} and {other_axis!r}; the project's water column is entered "
+                    "on one axis",
+                    code="NATIVE_3D_AXIS_MISMATCH",
+                    subject=other_id,
+                    remediation=f"Add it again with vertical_axis = {axis_ref[1]!r}, or add the "
+                    "files to projects of their own.",
+                )
         for other in natives[1:]:
             if other.unit != first.unit:
                 raise ImportError_(
@@ -1122,15 +1149,21 @@ class Engine:
             cfg["kinematics"] = self._manifest.preprocess.kinematics.model_dump()
         return cfg
 
-    def native_3d_provenance(self, session: Session) -> dict[str, Any] | None:
+    def native_3d_provenance(
+        self, session: Session, psess: PreprocessedSession | None = None
+    ) -> dict[str, Any] | None:
         """What the export README says about a native 3-D file: the file's unit and the
-        project's, the vertical axis, the flip and the water column (None when not set); None for
-        a session that has a pixel frame."""
+        project's, the vertical axis, the flip and the water column (None when not set), and with
+        a water column and *psess* the number of samples that fell outside it; None for a session
+        that has a pixel frame."""
         if session.has_pixel_frame:
             return None
         attrs = dict((session.raw_attrs or {}).get("native_3d") or {})
         wc = self._manifest.calibration.water_column
-        return {
+        outside = None
+        if wc is not None and psess is not None and psess.depth_outside is not None:
+            outside = int(sum(int(n) for n in psess.depth_outside))
+        provenance: dict[str, Any] = {
             "source_unit": attrs.get("source_unit"),
             "target_unit": attrs.get("target_unit") or session.coordinate_unit,
             "vertical_axis": attrs.get("vertical_axis"),
@@ -1139,6 +1172,9 @@ class Engine:
                 {"surface_z": wc.surface_z, "floor_z": wc.floor_z} if wc is not None else None
             ),
         }
+        if outside is not None:
+            provenance["outside_samples"] = outside
+        return provenance
 
     def identity_free_for(
         self, session: Session, explicit: bool | None = None
@@ -1850,7 +1886,7 @@ class Engine:
             keypoint_selection=(
                 session.keypoints.provenance() if session.keypoints is not None else None
             ),
-            native_3d=self.native_3d_provenance(session),
+            native_3d=self.native_3d_provenance(session, psess),
             idtrackerai_version=session.idtrackerai_version,
             trajectory_format=session.trajectory_format,
             trajectory_variant=session.trajectory_variant,
@@ -2825,7 +2861,7 @@ class Engine:
         session (the cheap ``probe`` path, not a full read): the CLI's ``validate`` runs it,
         the GUI does not on each edit. It reports what ``run`` would fail on for that
         session: a missing video size or frame rate, a pickle without consent, a reader
-        that is not installed. The message carries the error code and its fix.
+        that is not installed. The message carries the error code, subject and fix.
         """
         from track2data.core.errors import Track2DataError
 
@@ -2843,8 +2879,7 @@ class Engine:
                         allow_pickle=allow_pickle,
                     )
             except Track2DataError as exc:
-                fix = f" Fix: {exc.remediation}" if getattr(exc, "remediation", None) else ""
-                issues.append(f"session '{ref.session_id}': {exc}{fix}")
+                issues.append(f"session '{ref.session_id}': {exc}")
             except Exception as exc:  # a reader's own failure is still a reason not to run
                 issues.append(f"session '{ref.session_id}': cannot be read: {exc}")
         return issues

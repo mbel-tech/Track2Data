@@ -106,6 +106,24 @@ def _dlc_3d_unreadable(entry: IndexEntry, _index: ScanIndex, peek: Peeker) -> bo
     return False
 
 
+#: Files idtracker.ai writes into a session's ``trajectories/`` folder (``trajectories_csv`` is a
+#: folder). Found anywhere else they are a loose export, which no reader claims.
+_IDT_EXPORTS = {
+    "trajectories.h5", "trajectories.npy", "trajectories.parquet", "trajectories.pickle",
+}
+
+
+def _idtrackerai_flat(entry: IndexEntry, _index: ScanIndex, _peek: Peeker) -> bool:
+    """An idtracker.ai export outside a ``trajectories/`` folder (the layout the reader needs).
+
+    Public samples are shared this way, so the scan says what to do, not "nothing found".
+    The nested layout never gets here: those folders are claimed and skipped.
+    """
+    name = entry.name.lower()
+    ok = entry.is_dir if name == "trajectories_csv" else name in _IDT_EXPORTS and not entry.is_dir
+    return ok and entry.path.parent.name.lower() != "trajectories"
+
+
 FORMATS: tuple[RecognisedFormat, ...] = (
     RecognisedFormat(
         "sleap_slp",
@@ -156,6 +174,14 @@ FORMATS: tuple[RecognisedFormat, ...] = (
         "This is a DeepLabCut 3-D table that Track2Data cannot read yet: it has an individuals "
         "row, or a body part without all of x, y and z. Export one animal per table.",
         _dlc_3d_unreadable,
+    ),
+    RecognisedFormat(
+        "idtrackerai_flat",
+        "idtracker.ai export outside a session folder",
+        "This looks like an idtracker.ai trajectory export, but idtracker.ai writes it inside a "
+        "session's trajectories/ folder and that is where Track2Data looks. Put it in "
+        "<name>/trajectories/ (the folder above is then the session) and scan again.",
+        _idtrackerai_flat,
     ),
     RecognisedFormat(
         "fictrac",

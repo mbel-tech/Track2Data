@@ -501,7 +501,8 @@ class FusionSettings(BaseModel):
     ``frame_offset`` shifts the side clock against the top clock, in frames. The side view's
     horizontal axis follows ``horizontal_axis`` of the top view (optionally ``flip``ped).
     ``surface_row`` and ``floor_row`` are the water surface and tank floor, in side-view image
-    rows; ``tank_height_cm`` is the water depth between them, which sets the side view's scale.
+    rows, in either order (the surface is the larger row when the camera is upside down);
+    ``tank_height_cm`` is the water depth between them, which sets the side view's scale.
     """
 
     model_config = ConfigDict(allow_inf_nan=False)
@@ -514,9 +515,11 @@ class FusionSettings(BaseModel):
     tank_height_cm: float = Field(gt=0)
 
     @model_validator(mode="after")
-    def _surface_above_floor(self) -> FusionSettings:
-        if self.surface_row >= self.floor_row:
-            raise ValueError("surface_row must be above floor_row")
+    def _surface_and_floor_differ(self) -> FusionSettings:
+        # Either order is valid: a side camera mounted upside down, or seen through a mirror, has
+        # the surface at the larger image row. The depth then counts from that row.
+        if self.surface_row == self.floor_row:
+            raise ValueError("surface_row and floor_row must differ")
         return self
 
 
@@ -919,6 +922,12 @@ class PreprocessedSession:
     # is missing and on separator rows. A fused session's ``was_interpolated`` / ``jump_replaced``
     # describe the top view only, so these are the vertical axis's own. None for a session
     # without a fused depth (a native 3-D session marks its reconstructed z through xy).
+    # (n_frames, n_animals) bool, same shape as ``depth``: True where the side view had a position
+    # for that animal at that fused row, whether or not the top view did and whether or not it fell
+    # inside the water column. It is the denominator of IL-15's ``frac_outside_extent``: the share
+    # of the side view's own samples that lay outside the column, which must not shrink when the
+    # top view loses the fish. None for a session without a fused depth.
+    depth_side_valid: np.ndarray | None = None
     depth_interpolated: np.ndarray | None = None
     depth_jump_replaced: np.ndarray | None = None
     # (n_rows, n_animals) absolute vertical coordinate of a native 3-D session, in the

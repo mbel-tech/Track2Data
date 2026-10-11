@@ -33,7 +33,7 @@ OLD_SESSIONS_HEADER = (
 def _files(root: Path) -> dict[str, bytes]:
     """Every written file's bytes with the "generated at" stamps masked."""
     return {
-        str(p.relative_to(root)): _STAMP.sub(b"<time>", p.read_bytes())
+        p.relative_to(root).as_posix(): _STAMP.sub(b"<time>", p.read_bytes())
         for p in sorted(root.rglob("*"))
         if p.is_file()
     }

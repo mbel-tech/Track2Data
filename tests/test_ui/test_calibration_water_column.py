@@ -109,3 +109,10 @@ def test_mode_changes_keep_the_water_column(qtbot, tmp_path: Path) -> None:
     screen._radio_session.setChecked(True)
     screen.flush()
     assert store.manifest.calibration.water_column == WaterColumn(surface_z=0.0, floor_z=20.0)
+
+
+def test_the_water_column_help_says_one_column_serves_every_session(qtbot, tmp_path: Path) -> None:
+    screen = _screen(qtbot, _store(tmp_path))
+    text = screen._water_help.text()
+    assert "every session" in text and "origin" in text
+    assert "left out" in text  # the samples outside are excluded from the 3-D metrics too

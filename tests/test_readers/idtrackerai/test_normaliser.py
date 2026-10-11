@@ -556,3 +556,29 @@ class TestIdProbabilityShape:
 
         assert Normaliser._normalise_id_probabilities(np.ones((4, 2)), 4, 2).shape == (4, 2)
         assert Normaliser._normalise_id_probabilities(np.ones((4, 2, 1)), 4, 2).shape == (4, 2)
+
+
+class TestAllMissingVideoInfoAtOnce:
+    """A bare export lacks fps and the video size together: one error, not three runs."""
+
+    def test_every_missing_field_is_named_in_one_error(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = {"trajectories": np.ones((5, 2, 2))}
+        with pytest.raises(DataValidationError) as err:
+            Normaliser(tmp_path).normalise(payload)
+        assert err.value.code == "IDT_DICT_MISSING_KEY"
+        assert err.value.subject == "frames_per_second"  # the first, as before
+        text = f"{err.value} {err.value.remediation}"
+        for option in ("fps", "width_px", "height_px"):
+            assert option in text
+
+    def test_only_the_missing_fields_are_named(self, tmp_path: Path) -> None:
+        from track2data.core.errors import DataValidationError
+
+        payload = {"trajectories": np.ones((5, 2, 2)), "frames_per_second": 25.0}
+        with pytest.raises(DataValidationError) as err:
+            Normaliser(tmp_path).normalise(payload)
+        assert err.value.subject == "width"
+        assert "height_px" in f"{err.value} {err.value.remediation}"
+        assert "fps" not in (err.value.remediation or "")

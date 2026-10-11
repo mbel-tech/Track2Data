@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pandas as pd
 
 from track2data.core.runplan import FusionRunInfo
 from track2data.exporters.base import Exporter, ExportPayload, SessionProvenance
@@ -75,6 +78,9 @@ class ReadmeExporter(Exporter):
         readme_lines += self._camera_view_lines(p.provenance)
         if p.fusion is not None:
             readme_lines += self._fusion_lines(p.fusion)
+        readme_lines += _units_lines(p.manifest_json)
+        readme_lines += _sparse_slot_lines(p.fish_by_frame)
+        readme_lines += _empty_column_lines(p)
 
         readme_lines += [
             "## Metrics computed",
@@ -202,6 +208,14 @@ class ReadmeExporter(Exporter):
             f"| Vertical axis | {n.get('vertical_axis') or '*(not recorded)*'} |",
             f"| Flipped | {n.get('flip', False)} |",
             f"| Water column | {water} |",
+            *(
+                [
+                    f"| Samples outside the water column | {n['outside_samples']} "
+                    "(left out of IL-15, IL-16, IL-17 and GL-16, never clipped) |"
+                ]
+                if n.get("outside_samples") is not None
+                else []
+            ),
             "",
         ]
 
@@ -335,6 +349,11 @@ class ReadmeExporter(Exporter):
                 "identity (no per-identity blob-layer data) |"
             )
 
+        if p.reader_options:
+            lines.append(
+                f"| Reader options (given by the user, not recorded in the files) | "
+                f"{_options_cell(p.reader_options)} |"
+            )
         lines.append(
             f"| Last validated | {p.last_validated or '*(never opened in the Validator)*'} |"
         )
@@ -403,6 +422,131 @@ _VERIFICATION = {
 }
 
 _CHOSEN_BY = {"detected": "detected automatically", "user": "chosen by the user"}
+
+
+#: A slot with more than this share of its frames missing gets a line in the README.
+_SPARSE_SLOT_SHARE = 0.9
+
+
+def _units_lines(manifest_json: str) -> list[str]:
+    """Say why the centimetre columns are empty when the project calibrates by body length.
+
+    That mode fills the ``*_bl`` (body lengths) and ``*_px`` columns and leaves ``*_cm`` empty
+    on purpose: no pixels-per-cm value is set. Nothing else in the output says so.
+    """
+    try:
+        calibration = json.loads(manifest_json).get("calibration") or {}
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return []
+    if calibration.get("mode") != "bodylength":
+        return []
+    return [
+        "## Units",
+        "",
+        "Calibration is 'bodylength': distances and speeds are given in pixels (`*_px`) and in "
+        "body lengths (`*_bl`). The centimetre columns (`*_cm`) are empty (NaN) because no "
+        "pixels-per-cm value is set. For centimetres choose 'scalar' calibration and give "
+        "pixels per cm, or 'session' calibration where the tracker records its own length unit.",
+        "",
+    ]
+
+
+def _sparse_slot_lines(fish_by_frame: pd.DataFrame) -> list[str]:
+    """List identity slots that are almost always missing (idtracker.ai allocates slots up
+    front, so a run with fewer animals than slots leaves some empty)."""
+    df = fish_by_frame
+    column = next((c for c in ("x_px", "x") if c in df.columns), None)
+    if column is None or "individual_id" not in df.columns or len(df) == 0:
+        return []
+    share = df[column].isna().groupby(df["individual_id"]).mean()
+    sparse = share[share > _SPARSE_SLOT_SHARE]
+    if sparse.empty:
+        return []
+    lines = [
+        "## Identity slots with little data",
+        "",
+        f"These slots have a position in fewer than {1 - _SPARSE_SLOT_SHARE:.0%} of their frames; "
+        "their metrics are mostly NaN.",
+        "",
+        "| Slot | Frames missing |",
+        "|------|----------------|",
+    ]
+    lines += [f"| {slot} | {value:.1%} |" for slot, value in sparse.items()]
+    lines.append("")
+    return lines
+
+
+_FRAGMENTS_REASON = (
+    "needs preprocessing/list_of_fragments.json, which a bare trajectory export lacks"
+)
+
+#: Why a diagnostic's columns can be entirely NaN, keyed by metric id. Each reason was checked
+#: against where the metric reads its input (``metrics/diagnostic.py`` and the idtracker.ai reader).
+_EMPTY_COLUMN_REASONS = {
+    "D-2": "the trajectory file records no estimated_accuracy or fraction_identified",
+    "D-3": "the export has no id_probabilities",
+    "D-5": "the trajectory file records no fraction_identified",
+    "D-6": "needs session.json (number_of_error_frames), which a bare trajectory export lacks",
+    "D-7": _FRAGMENTS_REASON,
+    "D-8": _FRAGMENTS_REASON,
+    "D-9": _FRAGMENTS_REASON,
+    "D-12": (
+        "the trajectory file records no silhouette_score or fragment_connectivity "
+        "(idtracker.ai writes them only to some exports)"
+    ),
+    "D-13": _FRAGMENTS_REASON,
+    "D-14": _FRAGMENTS_REASON,
+    "D-15": (
+        "needs the tracker's blob table (preprocessing/list_of_blobs.pickle), which is read only "
+        "when the project enables blob diagnostics and allows pickle loading"
+    ),
+}
+_GENERIC_EMPTY_REASON = "no valid values in this session (all frames NaN after preprocessing)"
+
+
+def _empty_column_lines(p: ExportPayload) -> list[str]:
+    """List the metric columns that hold no value at all, each with the reason it can be empty.
+
+    Only columns that are NaN in every row of a non-empty table count; a column with a single
+    value is not listed. The reason comes from the metric id, except ``*_cm`` columns, which the
+    Units section explains.
+    """
+    try:
+        calibration = json.loads(p.manifest_json).get("calibration") or {}
+        bodylength = calibration.get("mode") == "bodylength"
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        bodylength = False
+
+    rows: list[str] = []
+    for tables in (p.individual_metrics, p.group_metrics, p.zone_metrics, p.diagnostic_metrics):
+        for mid, df in tables.items():
+            if len(df) == 0:
+                continue
+            by_reason: dict[str, list[str]] = {}
+            for column in df.columns:
+                if not df[column].isna().all():
+                    continue
+                if bodylength and re.search(r"_cm(_s)?$", str(column)):
+                    reason = "empty on purpose under body-length calibration; see the Units section"
+                else:
+                    reason = _EMPTY_COLUMN_REASONS.get(mid, _GENERIC_EMPTY_REASON)
+                by_reason.setdefault(reason, []).append(f"`{column}`")
+            rows += [
+                f"| {mid} | {', '.join(columns)} | {reason} |"
+                for reason, columns in by_reason.items()
+            ]
+    if not rows:
+        return []
+    return [
+        "## Columns with no values",
+        "",
+        "These metric columns are NaN in every row of this run.",
+        "",
+        "| Metric | Columns | Why |",
+        "|--------|---------|-----|",
+        *rows,
+        "",
+    ]
 
 
 def _is_idtracker(p: SessionProvenance) -> bool:

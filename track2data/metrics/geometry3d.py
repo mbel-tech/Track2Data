@@ -14,32 +14,19 @@ import numpy as np
 from track2data.core.models import KinematicsCfg, PreprocessedSession
 
 
-def z_cm(psess: PreprocessedSession) -> np.ndarray | None:
-    """``(n_frames, n_animals)`` float64 vertical coordinate in cm, or None without one.
-
-    ``psess.z`` for a native 3-D session (absolute, in the project unit), else
-    ``depth * depth_height_cm`` for a fused one. Not masked by the horizontal position.
-    """
-    if psess.z is not None:
-        return np.asarray(psess.z, dtype=np.float64)
-    if psess.depth is not None and psess.depth_height_cm is not None:
-        return np.asarray(psess.depth, dtype=np.float64) * float(psess.depth_height_cm)
-    return None
-
-
 def vertical_speed(psess: PreprocessedSession, kin_cfg: KinematicsCfg | dict) -> np.ndarray | None:
     """``(n_frames, n_animals)`` vertical speed (cm/s, unsigned) of the session's Z, or None.
 
     The single implementation of IL-17's vertical part: the pipeline's own derivative
-    (``compute_kinematics``) applied to ``[Z, 0]``, so the speed is ``|vz|``, NaN wherever Z is
-    or the estimator has no value. The Engine calls it once on the whole session and slices the
-    result with the windows; ``Speed3D`` calls it only when the session carries no precomputed
-    series. None without a Z or without the cm scale.
+    (``compute_kinematics``) applied to ``[Z, 0]`` (Z from :func:`vertical_cm`), so the speed is
+    ``|vz|``, NaN wherever Z is or the estimator has no value. The Engine calls it once on the
+    whole session and slices the result with the windows; ``Speed3D`` calls it only when the
+    session carries no precomputed series. None without a Z or without the cm scale.
     """
     from track2data.core.models import KinematicsCfg
     from track2data.preprocess.kinematics import compute_kinematics
 
-    z = z_cm(psess)
+    z = vertical_cm(psess)
     if z is None or psess.px_per_cm is None:
         return None
     kcfg = KinematicsCfg.model_validate(kin_cfg or {})
@@ -47,18 +34,39 @@ def vertical_speed(psess: PreprocessedSession, kin_cfg: KinematicsCfg | dict) ->
     return compute_kinematics(zz, psess.fps, kcfg).speed_px_s
 
 
+def vertical_cm(psess: PreprocessedSession) -> np.ndarray | None:
+    """``(n_frames, n_animals)`` vertical coordinate in cm that the 3-D metrics use, or None.
+
+    A native 3-D session's ``psess.z`` (already absolute, in the project's length unit) with the
+    samples that fall outside the water column set to NaN: the column that bounds IL-15's depth
+    bounds the path length and the speed too, so a mis-triangulated or out-of-tank sample is out
+    of every 3-D metric alike. Nothing is clipped, and ``psess.z`` itself is not modified (the
+    exported ``z_cm`` is the file's own coordinate). Without a water column the whole z is used.
+    A fused session has ``depth * depth_height_cm``, which is already NaN outside the column.
+    None when there is neither a ``z`` nor a ``depth`` with its ``depth_height_cm``.
+    """
+    if psess.z is not None:
+        z = np.array(psess.z, dtype=np.float64)
+        if psess.depth_outside_mask is not None:
+            z[np.asarray(psess.depth_outside_mask, dtype=bool)] = np.nan
+        return z
+    if psess.depth is not None and psess.depth_height_cm is not None:
+        return np.asarray(psess.depth, dtype=np.float64) * float(psess.depth_height_cm)
+    return None
+
+
 def positions_cm(psess: PreprocessedSession) -> np.ndarray | None:
     """``(n_frames, n_animals, 3)`` float64 ``(X, Y, Z)`` in cm, or None without a 3-D scale.
 
-    ``X = x_px / px_per_cm``, ``Y = y_px / px_per_cm``. ``Z`` is ``psess.z`` when the session
-    carries an absolute z (a native 3-D file), else ``depth * depth_height_cm``. A position is
+    ``X = x_px / px_per_cm``, ``Y = y_px / px_per_cm``. ``Z`` is :func:`vertical_cm` (a native
+    3-D file's absolute z inside its water column, else ``depth * depth_height_cm``). A position is
     NaN in every component where any of the three is NaN (a step or a frame needs all three).
     None when ``px_per_cm`` is missing, or when there is neither a ``z`` nor a ``depth`` with
     its ``depth_height_cm``.
     """
     if psess.px_per_cm is None:
         return None
-    z = z_cm(psess)
+    z = vertical_cm(psess)
     if z is None:
         return None
     xy = np.asarray(psess.xy, dtype=np.float64)

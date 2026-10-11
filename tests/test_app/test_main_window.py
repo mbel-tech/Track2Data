@@ -97,6 +97,57 @@ def test_action_validate_with_issues_disables_run_action_and_shows_warning(
     assert "No sessions" in warnings[0] or "No metrics" in warnings[0]
 
 
+def _bare_idtrackerai_session(tmp_path: Path) -> Path:
+    """A bare idtracker.ai csv export: no session.json, so no video size is recorded."""
+    folder = tmp_path / "bare"
+    (folder / "trajectories" / "trajectories_csv").mkdir(parents=True)
+    rows = "".join(f"{i},{i + 1},{i + 2},{i + 3}\n" for i in range(40))
+    (folder / "trajectories" / "trajectories_csv" / "trajectories.csv").write_text(
+        "x1,y1,x2,y2\n" + rows
+    )
+    return folder
+
+
+def test_action_validate_reports_a_session_the_run_could_not_read(
+    qtbot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare idtracker.ai export added without its video size cannot be read, and "Ready to
+    run." would only be contradicted by a failed run: validate says what is missing, as
+    `track2data validate` does."""
+    from app.main_window import MainWindow
+
+    folder = _bare_idtrackerai_session(tmp_path)
+    warnings: list[str] = []
+    infos: list[str] = []
+    monkeypatch.setattr(
+        "app.main_window.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warnings.append(a[2]) or None),
+    )
+    monkeypatch.setattr(
+        "app.main_window.QMessageBox.information",
+        staticmethod(lambda *a, **k: infos.append(a[2]) or None),
+    )
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("bare", tmp_path)
+    ref = SessionRef(session_id="bare", folder=folder, sha256="", reader="idtrackerai")
+    manifest = win._store.manifest
+    win._store._manifest = manifest.model_copy(
+        update={
+            "sessions": [ref],
+            "calibration": CalibrationConfig(mode="scalar", px_per_cm=10.0),
+            "metrics": MetricSelection(individual=["IL-1"], group=[], zone=[], diagnostic=[]),
+        }
+    )
+
+    win._action_validate()
+
+    assert infos == []
+    assert win._run_action.isEnabled() is False
+    assert len(warnings) == 1
+    assert "bare" in warnings[0] and "IDT_DICT_MISSING_KEY" in warnings[0]
+
+
 def test_action_validate_with_no_issues_enables_run_action_and_shows_message(
     qtbot, tmp_path: Path, tiny_real_session: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

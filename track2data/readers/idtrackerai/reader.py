@@ -85,6 +85,10 @@ def _trajectories_subfolder_hint(
     return None
 
 
+def _is_positive_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+
+
 class IDTrackerAiReader(SessionReader):
     """
     Unified reader for idtracker.ai sessions (all formats, all supported versions).
@@ -257,13 +261,20 @@ class IDTrackerAiReader(SessionReader):
         # Load trajectory payload from the best available format, falling back
         # through hit.all_present when the highest-priority format (often h5,
         # idtracker.ai's own default) has no loader yet.
-        fmt_used, source_path, payload = self._load_payload(hit, allow_pickle=allow_pickle)
-
         # Load session.json once, up front: it is both a fallback source for
         # fps/width/height/version (some formats' payloads omit them -- see
         # Normaliser._require_positive_number) and the enrichment source for
-        # tracking_intervals/roi_list below.
+        # tracking_intervals/roi_list below. Loaded before the trajectories so a
+        # pickle refusal can say whether a video size is still to be given.
         session_meta = load_session_json(folder)
+        video_size_given = all(
+            _is_positive_number(opts[key])
+            or _is_positive_number((session_meta or {}).get(meta_key))
+            for key, meta_key in (("width_px", "width"), ("height_px", "height"))
+        )
+        fmt_used, source_path, payload = self._load_payload(
+            hit, allow_pickle=allow_pickle, video_size_given=video_size_given
+        )
 
         # Build the normalised Session (core trajectory data + quality + labels).
         normaliser = Normaliser(folder)
@@ -347,7 +358,7 @@ class IDTrackerAiReader(SessionReader):
 
     @classmethod
     def _load_payload(
-        cls, hit: ReaderHit, *, allow_pickle: bool = False
+        cls, hit: ReaderHit, *, allow_pickle: bool = False, video_size_given: bool = True
     ) -> tuple[str, Path, dict[str, Any]]:
         """
         Load the trajectory payload from the best *readable* format in *hit*.
@@ -365,6 +376,10 @@ class IDTrackerAiReader(SessionReader):
         because the single best-ranked format lacks a loader while a readable
         one sits right next to it. Only raise once nothing in the folder is
         readable.
+
+        ``video_size_given`` says whether the width and height are already known from the
+        reader options or ``session.json``. A refused pickle cannot be opened to see whether
+        it records them, so when they are not given the refusal says what else is needed.
         """
         from track2data.core.errors import DataValidationError, ImportError_
 
@@ -431,6 +446,13 @@ class IDTrackerAiReader(SessionReader):
                 "loaded. Enable security.allow_pickle_trajectories for this "
                 "project if you trust its source, or re-export it as h5: "
                 f"`idtrackerai_format {hit.path.parent.parent} --formats h5`."
+                + (
+                    ""
+                    if video_size_given
+                    else " Pickled idtracker.ai files usually record no video size, so "
+                    "also give `--option width_px=... --option height_px=...` (the frame "
+                    "rate is usually recorded)."
+                )
                 if refused_pickle
                 else "Convert to a readable format, e.g. "
                 f"`idtrackerai_format {hit.path.parent.parent} --formats npy`."
