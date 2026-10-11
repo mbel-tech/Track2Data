@@ -41,6 +41,7 @@ UNITS: tuple[str, ...] = tuple(UNIT_FACTORS_M)
 #: The ``target_unit`` option's default: the project length unit a file is converted to when the
 #: user chose none.
 DEFAULT_TARGET_UNIT = "cm"
+DEFAULT_VERTICAL_AXIS = "z"
 AXES: tuple[str, ...] = ("x", "y", "z")
 
 
@@ -51,6 +52,15 @@ def manifest_native_3d(manifest: Any) -> bool:
     kinds (``Engine.register_native_import`` refuses it), so one native session decides it.
     """
     return any(ref.reader in NATIVE_3D_READERS for ref in manifest.sessions)
+
+
+def ref_vertical_axis(ref: Any) -> str | None:
+    """The vertical axis a native entry's file is read with, from its saved options (None for an
+    entry of another reader). Confirmed entries save only the options that were given, so a
+    missing one is the default."""
+    if ref.reader not in NATIVE_3D_READERS:
+        return None
+    return str(ref.reader_options.get("vertical_axis") or DEFAULT_VERTICAL_AXIS)
 
 
 def ref_target_unit(ref: Any) -> str | None:
