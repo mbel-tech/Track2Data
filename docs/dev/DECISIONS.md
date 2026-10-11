@@ -1139,3 +1139,33 @@ an error. Missing-as-all-zero keeps a real zero coordinate that a per-axis rule 
 pixel sessions; the board unit must be confirmed by the user; no refraction correction; the water
 column is entered, not estimated; no z column in the per-frame table; formats are read from synthetic
 files only.
+
+### D-044 · The 3-D review fixes: water column bounds z, depth flags, GL-16 keeps complete-case, right-handed plane
+
+**Status:** accepted; implemented (PRs #147, #150, #152, #155-#161). It amends D-043 and D-041 in the
+places named below; everything else in them stands.
+
+**Decision:** *Native z is preprocessed like x and y* (`preprocess/z_axis.py`): bridged across tracking
+intervals, gap-filled with the xy settings, smoothed with the xy window, and re-filled where xy was
+jump-replaced. D-043's "z not smoothed, interpolated" is replaced; unsmoothed z had inflated the vertical
+part of IL-16 and no setting could reduce it. *The water column bounds z* for IL-15, IL-16, IL-17 and
+GL-16 (`geometry3d.vertical_cm`): a sample outside is NaN and the step touching it is dropped, never
+clipped. This amends D-043's reading that z is absolute so outside frames keep their speed. The exported
+`z_cm` stays the file's own coordinate, and the run README counts the samples left out. *z is exported:*
+`z_cm` in the per-frame table (D-043 said it was not), and the wide CSV also writes the per-frame table when
+it has vertical columns. *Fused depth provenance is flagged, not blanked:* `depth_interpolated` and
+`depth_jump_replaced` come from the side view's own flags and are True only where the depth is a number;
+the depth values are unchanged. IL-15's `frac_outside_extent` uses the side view's samples as denominator
+(`depth_side_valid`). *GL-16 keeps its complete-case policy and discloses it:* GL-1 also skips frames with
+a missing animal, so the earlier idea of matching GL-1's per-frame policy rested on a wrong premise; the
+difference is only the extra frames lost to missing depth, reported as `frac_frames_used_3d`, with a warning
+above a 5 % shortfall. *Geometry:* an upside-down side view is valid (`surface_row` and `floor_row` need only
+differ); native sessions of one project must share a `vertical_axis` (`NATIVE_3D_AXIS_MISMATCH`); the
+horizontal plane of a native file is right-handed (`z -> (x, y)`, `x -> (y, z)`, `y -> (z, x)`), which
+mirrors IL-11's heading and turn-bias sign for `vertical_axis` x or y.
+
+**Not changed, on purpose:** `VideoInfo.n_frames` stays the row count (the reader contract pins it, and the
+Sessions screen is the only consumer); the water column stays in the preprocess cache key, because the cached
+object already includes `apply_calibration_and_zones`. *Limits:* `flip` reverses the vertical axis only, which
+also mirrors the view from above; one origin for the water column cannot be checked from the files; no
+refraction or parallax correction.
