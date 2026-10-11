@@ -15,6 +15,7 @@ from typing import Any
 
 from track2data.core.errors import ImportError_
 from track2data.core.models import Session
+from track2data.readers.anipose import AniposeReader
 from track2data.readers.base import SessionReader
 from track2data.readers.ctrax_mat import CtraxMatReader
 from track2data.readers.deeplabcut import DeepLabCutReader
@@ -57,6 +58,7 @@ def _load_entry_points() -> None:
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
 register(DeepLabCutReader)
+register(AniposeReader)
 register(SleapAnalysisReader)
 register(CtraxMatReader)
 register(TrxMatReader)
