@@ -919,6 +919,12 @@ class PreprocessedSession:
     # is missing and on separator rows. A fused session's ``was_interpolated`` / ``jump_replaced``
     # describe the top view only, so these are the vertical axis's own. None for a session
     # without a fused depth (a native 3-D session marks its reconstructed z through xy).
+    # (n_frames, n_animals) bool, same shape as ``depth``: True where the side view had a position
+    # for that animal at that fused row, whether or not the top view did and whether or not it fell
+    # inside the water column. It is the denominator of IL-15's ``frac_outside_extent``: the share
+    # of the side view's own samples that lay outside the column, which must not shrink when the
+    # top view loses the fish. None for a session without a fused depth.
+    depth_side_valid: np.ndarray | None = None
     depth_interpolated: np.ndarray | None = None
     depth_jump_replaced: np.ndarray | None = None
     # (n_rows, n_animals) absolute vertical coordinate of a native 3-D session, in the

@@ -129,9 +129,10 @@ def fuse(
 
     # Depth: the side view's y between the surface (0) and the floor (1); outside is NaN.
     y = side.xy[srows][:, side_cols, 1]
-    x = side.xy[srows][:, side_cols, 0]
     top_ok = np.isfinite(top.xy[rows][:, keep]).all(axis=2)
-    valid = np.isfinite(y) & np.isfinite(x) & top_ok
+    # depth needs the side view's y only; its x serves the agreement check alone
+    side_has_y = np.isfinite(y)
+    valid = side_has_y & top_ok
     depth = (y - fs.surface_row) / (fs.floor_row - fs.surface_row)
     with np.errstate(invalid="ignore"):
         # counted on the side y alone; depth is NaN wherever either view lacks a position
@@ -192,6 +193,7 @@ def fuse(
         depth_height_cm=fs.tank_height_cm,
         depth_outside=outside.sum(axis=0).astype(int),
         depth_outside_mask=_separate(outside, at),
+        depth_side_valid=_separate(side_has_y, at),
         depth_interpolated=_separate(depth_interpolated, at),
         depth_jump_replaced=_separate(depth_jump_replaced, at),
         source_animal_index=np.asarray(keep, dtype=np.int64),

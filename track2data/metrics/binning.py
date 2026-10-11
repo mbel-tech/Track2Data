@@ -83,6 +83,9 @@ def slice_psess(psess: PreprocessedSession, start: int, stop: int) -> Preprocess
         depth_outside_mask=(
             None if psess.depth_outside_mask is None else psess.depth_outside_mask[start:stop]
         ),
+        depth_side_valid=(
+            None if psess.depth_side_valid is None else psess.depth_side_valid[start:stop]
+        ),
         depth_interpolated=(
             None if psess.depth_interpolated is None else psess.depth_interpolated[start:stop]
         ),

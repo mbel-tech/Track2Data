@@ -9,6 +9,7 @@ a :class:`pandas.DataFrame` with at least the columns ``session_id`` and
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 import numpy as np
@@ -32,6 +33,11 @@ from track2data.metrics.references import (
     TUNSTROM_2013,
     VICSEK_1995,
 )
+
+logger = logging.getLogger(__name__)
+
+#: GL-16 logs a warning when missing depth costs it more than this share of the frames GL-1 uses.
+_DEPTH_LOSS_WARN = 0.05
 
 # GL-6's two cohesion definitions. Kept beside the metric's own
 # `choices` declaration so the schema the ⚙ dialog offers and the values
@@ -184,6 +190,7 @@ class NearestNeighbourDistance3D(Metric):
         "median_nnd_3d_cm",
         "mean_nnd_3d_bl",
         "n_skipped_frames_3d",
+        "frac_frames_used_3d",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -208,11 +215,16 @@ class NearestNeighbourDistance3D(Metric):
             "The depth comes from a side camera at right angles to the top camera (a native "
             "3-D file holds one animal per session, so this metric is not offered for it)",
             "A frame needs finite X, Y and Z for every animal; other frames are skipped "
-            "and counted (a frame GL-1 keeps can be skipped here for missing depth)",
+            "and counted. GL-1 skips a frame when any animal lacks X or Y; GL-16 also skips it "
+            "when any animal lacks a depth, so a frame GL-1 keeps can be skipped here",
             "Body length for the BL column is the mean over animals, as for GL-1",
         ],
         warnings=[
-            "Skipped-frame count is reported; high counts may bias the metric",
+            "Skipped-frame count and frac_frames_used_3d are reported; high counts may bias "
+            "the metric, because frames in which every animal is tracked cleanly are "
+            "disproportionately frames without crossings, where neighbours are far apart",
+            "GL-1 and GL-16 are computed on different frames whenever depth is missing, so "
+            "mean_nnd_3d_cm and mean_nnd_cm are not a like-for-like comparison",
             "Over the frames where both are valid the 3-D distance is at least GL-1's "
             "(in cm); not an unconditional inequality, because the frame sets differ",
             "No refraction or parallax correction; a wrong tank height scales every "
@@ -259,6 +271,23 @@ class NearestNeighbourDistance3D(Metric):
         else:
             mean_nnd = median_nnd = np.nan
 
+        # Share of the real frames (separator rows are not frames) this metric could use.
+        counted = session.counted_rows()
+        n_counted = int(counted.sum())
+        frac_used = np.nan
+        if pos is not None and n_animals >= 2 and n_counted:
+            frac_used = len(frame_nnds) / n_counted
+            gl1_frames = int(np.isfinite(session.xy[counted]).all(axis=(1, 2)).sum())
+            if gl1_frames and (gl1_frames - len(frame_nnds)) / gl1_frames > _DEPTH_LOSS_WARN:
+                logger.warning(
+                    "GL-16: session %s uses %d of the %d frames GL-1 uses, because at least "
+                    "one animal has no depth in the rest; the two are computed on different "
+                    "frames.",
+                    session.session_id,
+                    len(frame_nnds),
+                    gl1_frames,
+                )
+
         # Same convention as GL-1's mean_nnd_bl: mean body length over the animals.
         bl_cm = np.array([body_length_cm(session, k) for k in range(n_animals)], dtype=float)
         mean_bl = float(np.nanmean(bl_cm)) if np.isfinite(bl_cm).any() else np.nan
@@ -273,6 +302,7 @@ class NearestNeighbourDistance3D(Metric):
                     "median_nnd_3d_cm": median_nnd,
                     "mean_nnd_3d_bl": mean_nnd_bl,
                     "n_skipped_frames_3d": n_skipped,
+                    "frac_frames_used_3d": frac_used,
                 }
             ]
         )
