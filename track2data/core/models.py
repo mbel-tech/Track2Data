@@ -269,15 +269,6 @@ class Session(BaseModel):
     def n_frames(self) -> int:
         return int(self.raw_xy.shape[0])
 
-    @property
-    def pixel_size_known(self) -> bool:
-        """Whether the video frame size in pixels is a real, positive size.
-
-        False for a native 3-D session (no image frame) and for a reader that could not read the
-        size; a consumer that needs the frame as a rectangle checks this first.
-        """
-        return self.has_pixel_frame and self.video.width_px > 0 and self.video.height_px > 0
-
     def coverage(self) -> np.ndarray:
         """Fraction of non-NaN frames per animal, shape (n_animals,)."""
         valid = ~np.isnan(self.raw_xy[:, :, 0])  # (n_frames, n_animals)

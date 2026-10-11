@@ -627,11 +627,18 @@ def add(
         # project that had no native session, sets its calibration. A file that cannot be read
         # stops the add too.
         engine = Engine(updated)
+        read_path = ""
         try:
             engine.check_native_refs(refs)
-            engine.set_up_native_import([engine.read_ref(ref) for ref in refs])
+            sessions = []
+            for ref in refs:
+                read_path = str(ref.folder)
+                sessions.append(engine.read_ref(ref))
+            read_path = ""
+            engine.set_up_native_import(sessions)
         except Track2DataError as exc:
-            click.echo(f"[error] {exc}", err=True)
+            # A file that cannot be read is named: "<path>: <reason>".
+            click.echo(f"[error] {read_path + ': ' if read_path else ''}{exc}", err=True)
             sys.exit(1)
         updated = engine.manifest
     manifest_write(updated, Path(project))

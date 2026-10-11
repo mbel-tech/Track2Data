@@ -855,6 +855,11 @@ class ProjectStore(QObject):
             return
         session_id = default_session_id(folder)
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
+        # The native mixing/unit rule needs no probe when the folder's reader is known: detect it
+        # the way scan/import does and check a throw-away entry that carries it (the saved entry
+        # stays reader-less). An undetected folder keeps the check after the probe.
+        if not self._native_refs_allowed([self._detected_ref(ref)]):
+            return
         sessions = [*list(self._manifest.sessions), ref]
         self._manifest = self._manifest.model_copy(update={"sessions": sessions})
         self.sessionsChanged.emit()
@@ -990,6 +995,18 @@ class ProjectStore(QObject):
         names = ", ".join(f"`{sid}`" for sid in session_ids)
         self.append_log(f"_Not added: {names}: {exc}_\n")
         self.sessionRefused.emit(str(getattr(exc, "subject", "") or session_ids[0]), str(exc))
+
+    @staticmethod
+    def _detected_ref(ref: SessionRef) -> SessionRef:
+        """*ref* with the reader the folder is detected as (no file is read in full), or *ref*
+        itself when none is detected or detection fails."""
+        from track2data.readers import detect_reader
+
+        try:
+            cls = detect_reader(Path(ref.folder))
+        except Exception:
+            return ref
+        return ref if cls is None else ref.model_copy(update={"reader": cls.name})
 
     def _native_refs_allowed(self, refs: Sequence[SessionRef]) -> bool:
         """Check a batch about to be added with the engine's rule, from the saved reader names
