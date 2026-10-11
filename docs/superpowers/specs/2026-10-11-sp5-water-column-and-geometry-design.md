@@ -1,7 +1,9 @@
 # SP5 — water-column semantics and geometry the model cannot express
 
 Design note for findings 5, 7 and the smaller items of finding 9 of the 3-D data-path review.
-Status: **draft for review**; nothing here is implemented. Based on `main` after #147, #150, #152
+Status: **draft for review**; nothing here is implemented. Decided with the requester: the water column
+bounds z for every 3-D metric (section 1); the mirrored horizontal plane is fixed (section 5); sessions on
+different vertical axes are refused at import (section 4). Based on `main` after #147, #150, #152
 and #155 (SP1-SP4).
 
 ## 1. The water column also bounds z for IL-16, IL-17 and GL-16 (finding 5)
