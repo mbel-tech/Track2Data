@@ -589,11 +589,27 @@ class Engine:
         )
         if natives and (pixel_before or pixels):
             first = natives[0]
-            others = [*pixel_before, *(f.session_id for f in pixels)]
+            others = [
+                *((r.session_id, r.reader) for r in existing if r.reader not in NATIVE_3D_READERS),
+                *((f.session_id, f.reader) for f in pixels),
+            ]
+            tracked = [i for i, reader in others if reader]
+            unread = [i for i, reader in others if not reader]
+            parts: list[str] = []
+            if tracked:
+                parts.append(
+                    f"{', '.join(repr(o) for o in tracked)} pixel-tracked "
+                    f"({'is' if len(tracked) == 1 else 'are'} in this project or added with it)"
+                )
+            if unread:
+                parts.append(
+                    f"{', '.join(repr(o) for o in unread)} "
+                    f"{'is' if len(unread) == 1 else 'are'} not a native 3-D file "
+                    "(no native reader recognised it)"
+                )
             raise ImportError_(
                 f"Session {first.session_id!r} is a native 3-D session ({first.reader}), and "
-                f"{', '.join(repr(o) for o in others)} pixel-tracked "
-                f"({'is' if len(others) == 1 else 'are'} in this project or added with it)",
+                + " and ".join(parts),
                 code="NATIVE_3D_MIXED",
                 subject=first.session_id,
                 remediation=remedy,

@@ -84,8 +84,8 @@ def header_too_long_error(path: Path, what: str) -> DataValidationError:
     """The error for a file whose header exceeds the cap, named after the format *what*."""
     megabytes = MAX_HEADER_BYTES // (1024 * 1024)
     return DataValidationError(
-        f"{path.name}: the header is longer than the {megabytes} MB a {what} header may "
-        "take, so the file was not recognised.",
+        f"{path.name}: the header is longer than the {megabytes} MB allowed for a header, so "
+        f"the file was not recognised as {what}.",
         code="HEADER_TOO_LONG",
         subject=str(path),
         remediation="Check that this is a real tracker export; a header this long is usually a "

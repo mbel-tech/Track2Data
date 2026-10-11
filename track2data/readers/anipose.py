@@ -217,7 +217,7 @@ def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
 
 def _not_a_pose_3d_file(path: Path) -> DataValidationError:
     if path.is_file() and header_too_long(path, 1):
-        return header_too_long_error(path, "Anipose pose-3d")
+        return header_too_long_error(path, "an Anipose pose-3d table")
     return _error(
         "ANIPOSE_NOT_A_POSE_3D_FILE",
         f"{path} is not an Anipose pose-3d table.",

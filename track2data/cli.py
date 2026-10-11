@@ -98,9 +98,19 @@ def cli(verbose: bool) -> None:
     )
     # The console says "calibration settings", not "Calibration page" (there is none here); the
     # library's own log text, the README and the Metrics screen stay as they are.
-    for handler in root.handlers:
-        if not isinstance(handler.formatter, _ReasonFormatter):
-            handler.setFormatter(_ReasonFormatter(handler.formatter))
+    # The wrap lasts for this invocation only: the handlers may belong to the host process (a test
+    # runner's capture, an embedding application), so their formatters are put back at the end.
+    originals = [
+        (h, h.formatter) for h in root.handlers if not isinstance(h.formatter, _ReasonFormatter)
+    ]
+    for handler, formatter in originals:
+        handler.setFormatter(_ReasonFormatter(formatter))
+
+    def restore() -> None:
+        for handler, formatter in originals:
+            handler.setFormatter(formatter)
+
+    click.get_current_context().call_on_close(restore)
 
 
 # ── run ───────────────────────────────────────────────────────────────────────

@@ -214,7 +214,7 @@ def _resolved_parameters(layouts: list[_Layout]) -> tuple[ReaderParameter, ...]:
 
 def _not_a_dlc3d_file(path: Path) -> DataValidationError:
     if path.is_file() and header_too_long(path, 3):
-        return header_too_long_error(path, "DeepLabCut 3-D")
+        return header_too_long_error(path, "a DeepLabCut 3-D table")
     return _error(
         "DLC3D_NOT_A_3D_FILE",
         f"{path} is not a DeepLabCut 3-D table.",

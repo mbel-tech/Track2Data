@@ -267,16 +267,6 @@ def test_native_into_pixel_project_and_back_are_refused() -> None:
     assert "'p1'" in message and "native 3-D" in message and "pixel" in message
 
 
-def test_a_legacy_pixel_entry_is_not_printed_as_none() -> None:
-    engine = Engine(_manifest([_ref("n1")], calibration=SESSION_CM))
-    with pytest.raises(ImportError_) as info:
-        engine.check_native_refs([_ref("p2", None)])
-    message = str(info.value)
-    assert info.value.code == "NATIVE_3D_MIXED"
-    assert "'p2' is not a native 3-D file (no native reader recognised it)" in message
-    assert "None" not in message
-
-
 def test_native_refused_in_a_fused_3d_project() -> None:
     engine = Engine(_manifest([_ref("n1")], dimension="3d"))
     with pytest.raises(ImportError_) as info:
@@ -694,3 +684,14 @@ def test_undetected_folder_into_a_native_project_message() -> None:
     with pytest.raises(ImportError_) as info:
         engine.check_native_refs([_ref("p3", "deeplabcut")])
     assert "'p3' is a pixel-tracked session (deeplabcut)" in str(info.value)
+
+
+def test_a_native_file_added_with_readerless_refs_says_not_a_native_file() -> None:
+    engine = Engine(_manifest([_ref("p0", "deeplabcut")], calibration=SESSION_CM))
+    with pytest.raises(ImportError_) as info:
+        engine.check_native_refs([_ref("n1"), _ref("p2", None)])
+    message = str(info.value)
+    assert info.value.code == "NATIVE_3D_MIXED"
+    assert "'p0' pixel-tracked (is in this project or added with it)" in message
+    assert "'p2' is not a native 3-D file (no native reader recognised it)" in message
+    assert "None" not in message
