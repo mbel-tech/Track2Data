@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from track2data.core.errors import DataValidationError, ImportError_
@@ -58,3 +59,36 @@ def test_an_invalid_option_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ImportError_) as err:
         read_session(_bare(tmp_path), options={**OPTS, "width_px": 0})
     assert err.value.code == "READER_OPTION_INVALID"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (640, True),
+        (640.5, True),
+        ("640", True),
+        (np.int64(640), True),
+        (np.float32(25.0), True),
+        (True, False),
+        (0, False),
+        (-3, False),
+        (float("nan"), False),
+        (float("inf"), False),
+        ("wide", False),
+        (None, False),
+    ],
+)
+def test_the_video_size_check_agrees_with_the_normaliser(value: object, expected: bool) -> None:
+    """A session.json width of "640" is accepted by the normaliser, so it must also count as a
+    video size already given (otherwise a pickle refusal wrongly asks for width_px/height_px)."""
+    from track2data.readers.idtrackerai.normaliser import Normaliser
+    from track2data.readers.idtrackerai.reader import _is_positive_number
+
+    assert _is_positive_number(value) is expected
+    if not isinstance(value, bool):
+        try:
+            Normaliser._require_positive_number("width", value, None)
+            normaliser_accepts = True
+        except DataValidationError:
+            normaliser_accepts = False
+        assert normaliser_accepts is expected

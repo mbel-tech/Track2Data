@@ -148,6 +148,43 @@ def test_action_validate_reports_a_session_the_run_could_not_read(
     assert "bare" in warnings[0] and "IDT_DICT_MISSING_KEY" in warnings[0]
 
 
+def test_action_validate_in_3d_also_reports_a_session_the_run_could_not_read(
+    qtbot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from app.main_window import MainWindow
+    from track2data.api import Engine
+    from track2data.core.models import ProjectMode
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "app.main_window.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warnings.append(a[2]) or None),
+    )
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win._store.new_project("three_d", tmp_path)
+    win._store._manifest = win._store.manifest.model_copy(
+        update={"mode": ProjectMode(dimension="3d", layout="two_videos")}
+    )
+    plan = SimpleNamespace(units=[])
+    monkeypatch.setattr(
+        win._store.run_plan,
+        "snapshot",
+        lambda: SimpleNamespace(checking=False, plan=plan, gate=None),
+    )
+    monkeypatch.setattr("ui.store.run_plan.skipped_lines", lambda _plan: [])
+    monkeypatch.setattr(Engine, "validation_issues", lambda self, _plan: ([], []))
+    monkeypatch.setattr(
+        Engine, "session_read_issues", lambda self: ["session 'top': IDT_DICT_MISSING_KEY"]
+    )
+
+    win._action_validate()
+
+    assert len(warnings) == 1 and "IDT_DICT_MISSING_KEY" in warnings[0]
+
+
 def test_action_validate_with_no_issues_enables_run_action_and_shows_message(
     qtbot, tmp_path: Path, tiny_real_session: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

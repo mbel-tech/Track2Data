@@ -875,7 +875,7 @@ and headless CLI report the same identifier. The full list:
 | `IDT_NO_TRAJ` | 2 | error | "No trajectory file found in `<folder>/trajectories/`." |
 | `IDT_FORMAT_AMBIGUOUS` | 2 | info | "Multiple trajectory formats present (`<list>`); chose `<best>`." |
 | `IDT_PICKLE_REFUSED` | 2 | error | "Loading `<path>` requires explicit consent (`--allow-pickle` / GUI prompt)." |
-| `IDT_VERSION_UNKNOWN` | 2 | warning | "idtracker.ai version `<v>` not recognised; using v6.x assumptions." |
+| `IDT_VERSION_UNKNOWN` | 2 | warning (information for 4.x files) | "idtracker.ai version `<v>` not recognised; using v6.x assumptions." |
 | `IDT_PARTIAL_SESSION` | 2 | warning | "Session looks incomplete (no `trajectories/`; log ended in error)." |
 | `IDT_BODY_LENGTH_UNRELIABLE` | 3 | warning | "idtracker.ai's `body_length` is computed from blob bounding boxes and varies with segmentation parameters; not a validated biological length." |
 | `IDT_DICT_MISSING_KEY` | 2 | warning | "Trajectory dict missing optional key `<k>`; field set to None." |

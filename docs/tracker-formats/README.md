@@ -11,7 +11,7 @@ supplied. Do not edit them in place: re-copy the file, then update its pin in
 | `animal_tracking_formats_table.csv` | One-row-per-tool summary table. It predates the corrections above (see below) | `9c9f3df7…` |
 | `importer_priority.csv` | Importer priority by recent citation share. Seven importers cover 80.5 % of animal-tracker citations, and the rollout follows this order | `b4307f31…` |
 | `tracker_test_datasets.csv` | Public datasets for each importer, with licence and what was verified. The provenance record for every fixture. The 41-row revision of 2026-10-11. Its Track2Data sentences ("main @7052e9b … fails with …") describe the code before the fixes of #146, #151 and #154; what Track2Data does now is in `idtrackerai_track2data_runs.csv` | `136bf05e…` |
-| `fishtank_idtracker_survey.csv` | Per-file survey of the 22 FishTank idtracker.ai files (version, fps, shape, NaN share, sha256 of each zip); row 39 of the dataset CSV cites it | `ad90fcc5…` |
+| `fishtank_idtracker_survey.csv` | Per-file survey of the 22 FishTank idtracker.ai files (version, fps, shape, NaN share, sha256 and size of each zip's `trajectories.npy` member); the FishTank row of the dataset CSV cites it | `ad90fcc5…` |
 
 Ours, not pinned: `idtrackerai_track2data_runs.csv` records which of the dataset CSV's idtracker.ai rows
 Track2Data has run, how, with which test, and with what caveat (placeholder video sizes, manual runs).

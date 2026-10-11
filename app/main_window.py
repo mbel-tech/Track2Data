@@ -772,6 +772,8 @@ class MainWindow(QMainWindow):
                 issues = [state.gate or MODE_3D_BLOCK_REASON]
             else:
                 issues, _notes = engine.validation_issues(state.plan)
+                # Same pre-flight as the 2-D branch; _checked_refs covers the 3-D sessions.
+                issues += engine.session_read_issues()
                 if state.plan.units:
                     plan_lines.append(will_run_line(state.plan))
                 plan_lines += skipped_lines(state.plan)

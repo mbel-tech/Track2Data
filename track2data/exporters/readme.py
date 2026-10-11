@@ -79,7 +79,7 @@ class ReadmeExporter(Exporter):
         if p.fusion is not None:
             readme_lines += self._fusion_lines(p.fusion)
         readme_lines += _units_lines(p.manifest_json)
-        readme_lines += _sparse_slot_lines(p.fish_by_frame)
+        readme_lines += _sparse_slot_lines(p)
         readme_lines += _empty_column_lines(p)
 
         readme_lines += [
@@ -420,33 +420,65 @@ _CHOSEN_BY = {"detected": "detected automatically", "user": "chosen by the user"
 _SPARSE_SLOT_SHARE = 0.9
 
 
-def _units_lines(manifest_json: str) -> list[str]:
-    """Say why the centimetre columns are empty when the project calibrates by body length.
-
-    That mode fills the ``*_bl`` (body lengths) and ``*_px`` columns and leaves ``*_cm`` empty
-    on purpose: no pixels-per-cm value is set. Nothing else in the output says so.
-    """
+def _calibration(manifest_json: str) -> dict:
     try:
-        calibration = json.loads(manifest_json).get("calibration") or {}
+        return json.loads(manifest_json).get("calibration") or {}
     except (json.JSONDecodeError, TypeError, AttributeError):
-        return []
-    if calibration.get("mode") != "bodylength":
-        return []
-    return [
-        "## Units",
-        "",
-        "Calibration is 'bodylength': distances and speeds are given in pixels (`*_px`) and in "
-        "body lengths (`*_bl`). The centimetre columns (`*_cm`) are empty (NaN) because no "
-        "pixels-per-cm value is set. For centimetres choose 'scalar' calibration and give "
-        "pixels per cm, or 'session' calibration where the tracker records its own length unit.",
-        "",
-    ]
+        return {}
 
 
-def _sparse_slot_lines(fish_by_frame: pd.DataFrame) -> list[str]:
-    """List identity slots that are almost always missing (idtracker.ai allocates slots up
-    front, so a run with fewer animals than slots leaves some empty)."""
-    df = fish_by_frame
+def _cm_columns_empty_by_design(manifest_json: str) -> str | None:
+    """Return the calibration that leaves ``*_cm`` empty on purpose, or None.
+
+    Body-length calibration never sets pixels-per-cm; scalar calibration without a value does
+    not either. Both leave the centimetre columns NaN.
+    """
+    calibration = _calibration(manifest_json)
+    mode = calibration.get("mode")
+    if mode == "bodylength":
+        return "bodylength"
+    if mode == "scalar" and not calibration.get("px_per_cm"):
+        return "scalar"
+    return None
+
+
+def _units_lines(manifest_json: str) -> list[str]:
+    """Say why the centimetre columns are empty when no pixels-per-cm value is set."""
+    kind = _cm_columns_empty_by_design(manifest_json)
+    if kind == "bodylength":
+        return [
+            "## Units",
+            "",
+            "Calibration is 'bodylength': distances and speeds are given in pixels (`*_px`) and "
+            "in body lengths (`*_bl`). The centimetre columns (`*_cm`) are empty (NaN) because "
+            "no pixels-per-cm value is set. For centimetres choose 'scalar' calibration and "
+            "give pixels per cm.",
+            "",
+        ]
+    if kind == "scalar":
+        return [
+            "## Units",
+            "",
+            "Calibration is 'scalar' but no pixels-per-cm value is set, so the centimetre "
+            "columns (`*_cm`) are empty (NaN). Give pixels per cm to fill them.",
+            "",
+        ]
+    return []
+
+
+#: At most this many identity slots are listed in the README.
+_MAX_SLOTS_SHOWN = 20
+
+
+def _sparse_slot_lines(p: ExportPayload) -> list[str]:
+    """List idtracker.ai identity slots that are almost always missing.
+
+    idtracker.ai allocates slots up front, so a run with fewer animals than slots leaves some
+    empty. Other trackers open and close track IDs freely, so the note does not apply to them.
+    """
+    if not _is_idtracker(p.provenance):
+        return []
+    df = p.fish_by_frame
     column = next((c for c in ("x_px", "x") if c in df.columns), None)
     if column is None or "individual_id" not in df.columns or len(df) == 0:
         return []
@@ -463,7 +495,11 @@ def _sparse_slot_lines(fish_by_frame: pd.DataFrame) -> list[str]:
         "| Slot | Frames missing |",
         "|------|----------------|",
     ]
-    lines += [f"| {slot} | {value:.1%} |" for slot, value in sparse.items()]
+    lines += [
+        f"| {slot} | {value:.1%} |" for slot, value in list(sparse.items())[:_MAX_SLOTS_SHOWN]
+    ]
+    if len(sparse) > _MAX_SLOTS_SHOWN:
+        lines += ["", f"...and {len(sparse) - _MAX_SLOTS_SHOWN} more."]
     lines.append("")
     return lines
 
@@ -493,7 +529,23 @@ _EMPTY_COLUMN_REASONS = {
         "when the project enables blob diagnostics and allows pickle loading"
     ),
 }
-_GENERIC_EMPTY_REASON = "no valid values in this session (all frames NaN after preprocessing)"
+_GENERIC_EMPTY_REASON = "no valid values in this run"
+_ALL_SKIPPED_REASON = (
+    "every frame has at least one animal with a missing position, and such frames are "
+    "skipped (n_skipped_frames)"
+)
+
+
+def _all_frames_skipped(df: pd.DataFrame, n_frames: int, n_animals: int) -> bool:
+    """Whether GL-1 skipped every frame because some animal had no position in it.
+
+    GL-1 skips frames where any animal is NaN and reports the count in ``n_skipped_frames``.
+    A single animal also gives an all-skipped count, with a different cause, so that is excluded.
+    """
+    if "n_skipped_frames" not in df.columns or n_frames == 0 or n_animals < 2:
+        return False
+    skipped = df["n_skipped_frames"].dropna()
+    return len(skipped) > 0 and bool((skipped == n_frames).all())
 
 
 def _empty_column_lines(p: ExportPayload) -> list[str]:
@@ -503,11 +555,16 @@ def _empty_column_lines(p: ExportPayload) -> list[str]:
     value is not listed. The reason comes from the metric id, except ``*_cm`` columns, which the
     Units section explains.
     """
-    try:
-        calibration = json.loads(p.manifest_json).get("calibration") or {}
-        bodylength = calibration.get("mode") == "bodylength"
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        bodylength = False
+    cm_by_design = _cm_columns_empty_by_design(p.manifest_json) is not None
+    idtracker = _is_idtracker(p.provenance)
+    n_frames = (
+        int(p.fish_by_frame["frame"].nunique()) if "frame" in p.fish_by_frame.columns else 0
+    )
+    n_animals = (
+        int(p.fish_by_frame["individual_id"].nunique())
+        if "individual_id" in p.fish_by_frame.columns
+        else 0
+    )
 
     rows: list[str] = []
     for tables in (p.individual_metrics, p.group_metrics, p.zone_metrics, p.diagnostic_metrics):
@@ -518,10 +575,14 @@ def _empty_column_lines(p: ExportPayload) -> list[str]:
             for column in df.columns:
                 if not df[column].isna().all():
                     continue
-                if bodylength and re.search(r"_cm(_s)?$", str(column)):
-                    reason = "empty on purpose under body-length calibration; see the Units section"
-                else:
+                if cm_by_design and re.search(r"_cm(_s)?$", str(column)):
+                    reason = "empty on purpose (no pixels-per-cm set); see the Units section"
+                elif mid == "GL-1" and _all_frames_skipped(df, n_frames, n_animals):
+                    reason = _ALL_SKIPPED_REASON
+                elif idtracker:
                     reason = _EMPTY_COLUMN_REASONS.get(mid, _GENERIC_EMPTY_REASON)
+                else:
+                    reason = _GENERIC_EMPTY_REASON
                 by_reason.setdefault(reason, []).append(f"`{column}`")
             rows += [
                 f"| {mid} | {', '.join(columns)} | {reason} |"

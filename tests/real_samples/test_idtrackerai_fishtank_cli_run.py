@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -108,7 +109,7 @@ def _invoke(*args: str):
     return CliRunner().invoke(cli, list(args))
 
 
-def test_a_long_4_0_9_recording_goes_through_add_validate_and_run(tmp_path):
+def test_a_long_4_0_9_recording_goes_through_add_validate_and_run(tmp_path, caplog):
     member = _fishtank_member()
     session = tmp_path / "data" / "fishtank"
     (session / "trajectories").mkdir(parents=True)
@@ -127,8 +128,17 @@ def test_a_long_4_0_9_recording_goes_through_add_validate_and_run(tmp_path):
     validated = _invoke("validate", str(project))
     assert validated.exit_code == 0, validated.output
     out = tmp_path / "out"
-    ran = _invoke("run", str(project), "-o", str(out), "-e", "csv_long", "-e", "readme")
+    with caplog.at_level(logging.INFO):
+        ran = _invoke("run", str(project), "-o", str(out), "-e", "csv_long", "-e", "readme")
     assert ran.exit_code == 0, ran.output
+
+    # A 4.x file is known to read: its version note is information, not a warning.
+    loud = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not any("IDT_VERSION_UNKNOWN" in r.getMessage() for r in loud)
+    assert "IDT_VERSION_UNKNOWN" not in ran.output.replace("INFO", "")
+    # The project keeps the default body-length calibration, so the README explains *_cm.
+    readme = (out / "fishtank" / "README.md").read_text(encoding="utf-8")
+    assert "## Units" in readme
 
     frames = pd.read_csv(out / "fishtank" / "master_fish_by_frame.csv")
     assert len(frames) == FRAMES * ANIMALS

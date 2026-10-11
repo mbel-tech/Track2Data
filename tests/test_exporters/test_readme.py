@@ -583,6 +583,22 @@ class TestUnitsNote:
         assert "## Units" in text
         assert "_cm" in text and "empty" in text and "scalar" in text
 
+    def test_the_note_makes_no_idtrackerai_claim_for_another_reader(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.provenance.reader = "sleap"
+        _with_calibration(minimal_payload, "bodylength")
+        text = _render_readme(minimal_payload, tmp_path)
+        section = text.split("## Units")[1].split("\n## ")[0]
+        assert "idtracker" not in section.lower() and "tracker records" not in section
+
+    def test_scalar_mode_without_a_scale_explains_the_empty_cm_columns(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        _with_calibration(minimal_payload, "scalar", None)
+        text = _render_readme(minimal_payload, tmp_path)
+        assert "Calibration is 'scalar' but no pixels-per-cm value is set" in text
+
     def test_scalar_mode_with_a_scale_has_no_such_note(
         self, minimal_payload: ExportPayload, tmp_path: Path
     ) -> None:
@@ -623,6 +639,42 @@ class TestEmptyIdentitySlots:
         assert "## Identity slots with little data" in text
         section = text.split("## Identity slots with little data")[1].split("\n## ")[0]
         assert "| 1 |" in section and "| 2 |" in section and "| 0 |" not in section
+
+    def test_other_readers_get_no_idtrackerai_slot_section(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.provenance.reader = "sleap"
+        n = 20
+        nan = float("nan")
+        minimal_payload.fish_by_frame = pd.DataFrame(
+            {
+                "individual_id": [0] * n + [1] * n,
+                "frame": list(range(n)) * 2,
+                "x_px": [1.0] * n + [nan] * n,
+                "y_px": [1.0] * n + [nan] * n,
+            }
+        )
+        assert "Identity slots with little data" not in _render_readme(minimal_payload, tmp_path)
+
+    def test_the_slot_table_is_capped_at_twenty_rows(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.provenance.reader = "idtrackerai"
+        n_slots = 27
+        nan = float("nan")
+        minimal_payload.fish_by_frame = pd.DataFrame(
+            {
+                "individual_id": [0] * 20 + [i for i in range(1, n_slots) for _ in range(20)],
+                "frame": list(range(20)) * n_slots,
+                "x_px": [1.0] * 20 + [nan] * (20 * (n_slots - 1)),
+                "y_px": [1.0] * 20 + [nan] * (20 * (n_slots - 1)),
+            }
+        )
+        text = _render_readme(minimal_payload, tmp_path)
+        section = text.split("## Identity slots with little data")[1].split("\n## ")[0]
+        rows =[ln for ln in section.splitlines() if ln.startswith("| ") and "%" in ln]
+        assert len(rows) == 20
+        assert "and 6 more" in section
 
     def test_a_well_covered_session_has_no_such_section(
         self, minimal_payload: ExportPayload, tmp_path: Path
@@ -680,7 +732,7 @@ class TestColumnsWithNoValues:
     ) -> None:
         minimal_payload.group_metrics = {"GL-5": pd.DataFrame({"session_id": ["s1"], "m": [_NAN]})}
         section = _section(_render_readme(minimal_payload, tmp_path))
-        assert "no valid values in this session (all frames NaN after preprocessing)" in section
+        assert "no valid values in this run" in section
 
     def test_cm_columns_point_to_the_units_section_under_bodylength(
         self, minimal_payload: ExportPayload, tmp_path: Path
@@ -695,6 +747,67 @@ class TestColumnsWithNoValues:
         assert "## Units" in text
         assert "Units" in _row(_section(text), "path_length_cm")
         assert "Units" in _row(_section(text), "mean_speed_cm_s")
+
+    def test_idtrackerai_reasons_are_not_given_to_other_readers(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.provenance.reader = "trex"
+        minimal_payload.diagnostic_metrics = {
+            "D-7": pd.DataFrame({"session_id": ["s1"], "fragment_length_median": [_NAN]}),
+            "D-6": pd.DataFrame({"session_id": ["s1"], "number_of_error_frames": [_NAN]}),
+        }
+        section = _section(_render_readme(minimal_payload, tmp_path))
+        assert "list_of_fragments" not in section and "session.json" not in section
+        assert "no valid values in this run" in _row(section, "fragment_length_median")
+
+    def test_cm_columns_point_to_units_when_scalar_has_no_scale(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        _with_calibration(minimal_payload, "scalar", None)
+        minimal_payload.individual_metrics = {
+            "IL-1": pd.DataFrame({"individual_id": [0], "path_length_cm": [_NAN]})
+        }
+        text = _render_readme(minimal_payload, tmp_path)
+        assert "Units" in _row(_section(text), "path_length_cm")
+
+    def test_gl1_blames_the_skipped_frames_when_every_frame_was_skipped(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.fish_by_frame = pd.DataFrame(
+            {
+                "individual_id": [0, 1] * 5,
+                "frame": [f for f in range(5) for _ in range(2)],
+                "x_px": [1.0] * 10,
+                "y_px": [1.0] * 10,
+            }
+        )
+        minimal_payload.group_metrics = {
+            "GL-1": pd.DataFrame(
+                {"session_id": ["s1"], "mean_nnd_px": [_NAN], "n_skipped_frames": [5]}
+            )
+        }
+        section = _section(_render_readme(minimal_payload, tmp_path))
+        assert "n_skipped_frames" in _row(section, "mean_nnd_px")
+        assert "missing position" in _row(section, "mean_nnd_px")
+
+    def test_gl1_stays_generic_when_not_every_frame_was_skipped(
+        self, minimal_payload: ExportPayload, tmp_path: Path
+    ) -> None:
+        minimal_payload.fish_by_frame = pd.DataFrame(
+            {
+                "individual_id": [0, 1] * 5,
+                "frame": [f for f in range(5) for _ in range(2)],
+                "x_px": [1.0] * 10,
+                "y_px": [1.0] * 10,
+            }
+        )
+        minimal_payload.group_metrics = {
+            "GL-1": pd.DataFrame(
+                {"session_id": ["s1"], "mean_nnd_px": [_NAN], "n_skipped_frames": [2]}
+            )
+        }
+        section = _section(_render_readme(minimal_payload, tmp_path))
+        assert "no valid values in this run" in _row(section, "mean_nnd_px")
 
     def test_nothing_empty_nothing_written(
         self, minimal_payload: ExportPayload, tmp_path: Path

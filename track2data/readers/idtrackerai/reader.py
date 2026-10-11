@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -86,7 +87,17 @@ def _trajectories_subfolder_hint(
 
 
 def _is_positive_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+    """Whether *value* is a finite number above zero, by the rule the normaliser applies.
+
+    Anything ``float()`` accepts counts ("640", a numpy integer); a boolean does not.
+    """
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(number) and number > 0
 
 
 class IDTrackerAiReader(SessionReader):
