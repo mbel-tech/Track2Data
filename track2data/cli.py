@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -70,13 +71,18 @@ def _refuse_3d_sensitivity(engine: Engine) -> None:
 # ── CLI group ─────────────────────────────────────────────────────────────────
 
 
-class _CliFormatter(logging.Formatter):
-    """Formats a record as usual, then words the availability reasons for the command line."""
+class _ReasonFormatter(logging.Formatter):
+    """Wraps a handler's formatter: formats a record as it did, then words the availability
+    reasons for the command line."""
+
+    def __init__(self, inner: logging.Formatter | None = None) -> None:
+        super().__init__()
+        self._inner = inner or logging.Formatter()
 
     def format(self, record: logging.LogRecord) -> str:
         from track2data.metrics.availability import reason_for_cli
 
-        return reason_for_cli(super().format(record))
+        return reason_for_cli(self._inner.format(record))
 
 
 @click.group()
@@ -86,7 +92,6 @@ def cli(verbose: bool) -> None:
     """Track2Data — headless pipeline runner."""
     level = logging.DEBUG if verbose else logging.INFO
     root = logging.getLogger()
-    before = list(root.handlers)
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
@@ -94,9 +99,19 @@ def cli(verbose: bool) -> None:
     )
     # The console says "calibration settings", not "Calibration page" (there is none here); the
     # library's own log text, the README and the Metrics screen stay as they are.
-    for handler in root.handlers:
-        if handler not in before and handler.formatter is not None:
-            handler.setFormatter(_CliFormatter(handler.formatter._fmt, handler.formatter.datefmt))
+    # The wrap lasts for this invocation only: the handlers may belong to the host process (a test
+    # runner's capture, an embedding application), so their formatters are put back at the end.
+    originals = [
+        (h, h.formatter) for h in root.handlers if not isinstance(h.formatter, _ReasonFormatter)
+    ]
+    for handler, formatter in originals:
+        handler.setFormatter(_ReasonFormatter(formatter))
+
+    def restore() -> None:
+        for handler, formatter in originals:
+            handler.setFormatter(formatter)
+
+    click.get_current_context().call_on_close(restore)
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -226,6 +241,30 @@ def _natural_sort_key(metric_cls: type[Metric]) -> tuple[str, int]:
     return (prefix, int(number))
 
 
+def _native_3d_unavailability(metrics: list[type[Metric]]) -> list[str]:
+    """One ``IDs: reason`` line per reason a native 3-D project rules *metrics* out.
+
+    Asked of ``availability.unavailable_reason`` with a native stand-in and no water column, so
+    the wording is the Metrics screen's and ``validate``'s (rewritten for the command line).
+    """
+    from track2data.metrics.availability import reason_for_cli, unavailable_reason
+
+    stand_in = {
+        "dimension": "3d",
+        "calibration_mode": "session",
+        "has_depth": True,
+        "px_per_cm": 1.0,
+        "depth_height_cm": 1.0,
+        "native_3d": True,
+    }
+    by_reason: dict[str, list[str]] = {}
+    for m in metrics:
+        reason = unavailable_reason(m, "top", has_depth=False, depth_scale=stand_in)
+        if reason is not None:
+            by_reason.setdefault(reason, []).append(m.id)
+    return [f"{', '.join(ids)}: {reason_for_cli(reason)}" for reason, ids in by_reason.items()]
+
+
 @cli.command("list-metrics")
 @click.option("--level", default=None,
               type=click.Choice(["individual", "group", "zone", "diagnostic"]),
@@ -275,6 +314,12 @@ def list_metrics(level: str | None) -> None:
         click.echo(
             f"{m.id:<{id_w}}  {m.level:<{lvl_w}}  {needs:<{idy_w}}  {view:<{view_w}}  {label}"
         )
+    native_lines = _native_3d_unavailability(metrics)
+    if native_lines:
+        click.echo()
+        click.echo("Not offered in a native 3-D project (Anipose, DeepLabCut 3-D):")
+        for line in native_lines:
+            click.echo(textwrap.fill(line, 100, initial_indent="  ", subsequent_indent="      "))
     click.echo()
     click.echo(
         "Availability also depends on the project (3-D data, cm scale, pixel frame, number of "

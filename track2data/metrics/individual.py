@@ -17,7 +17,7 @@ import pandas as pd
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
-from track2data.metrics.geometry3d import body_length_cm, positions_cm, vertical_cm
+from track2data.metrics.geometry3d import body_length_cm, positions_cm, vertical_speed
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -1700,7 +1700,10 @@ class VerticalPosition(Metric):
             "Interpolated frames are included",
             "A native 3-D file (Anipose, DeepLabCut 3-D) takes its depth from the absolute z "
             "and the surface and floor z entered by the user (depth_extent_source = "
-            "water_column); positions outside that column are dropped and counted",
+            "water_column); positions outside that column are dropped and counted. Without the "
+            "water column there is no depth and depth_extent_source is none:no_water_column",
+            "On a fused 3-D session frac_outside_extent is the share of the side view's own "
+            "samples that fell outside the column, so top-view gaps do not change it",
         ],
         warnings=[
             "No refraction or parallax correction: a fish near the front glass looks "
@@ -1898,6 +1901,9 @@ class PathLength3D(Metric):
             "n_valid_steps says how many steps the length rests on",
             "Interpolated frames contribute a straight line, which understates the real path "
             "across a gap -- see D-11's frac_interpolated",
+            "A native 3-D file's z goes through the same gap filling and smoothing as x and y, "
+            "and a sample outside the water column (when one is set) is left out, so a step "
+            "touching it is dropped, never clipped",
         ],
         warnings=[
             "Under-smoothed data inflates the length, exactly as for IL-1: summing step "
@@ -1993,7 +1999,9 @@ class Speed3D(Metric):
             "forward-difference estimator, a depth segment too short for the window) the "
             "frame is left out, never counted as zero",
             "The depth comes from a side camera at right angles to the top camera; a native "
-            "3-D file's vertical series is its absolute z (in the project unit)",
+            "3-D file's vertical series is its absolute z (in the project unit), gap-filled and "
+            "smoothed like x and y, with samples outside the water column (when one is set) "
+            "left out",
         ],
         warnings=[
             "Max speed is sensitive to remaining jump artefacts, and to depth noise, which "
@@ -2013,19 +2021,14 @@ class Speed3D(Metric):
         ``cfg["kinematics"]`` (a ``KinematicsCfg`` or its dict) is the estimator the pipeline
         used; the Engine supplies it, and the default ``KinematicsCfg()`` applies without it.
         """
-        from track2data.core.models import KinematicsCfg
-        from track2data.preprocess.kinematics import compute_kinematics
-
         speed_3d: np.ndarray | None = None
         scale = session.px_per_cm
-        z_cm = vertical_cm(session)  # inside the water column when one is set
-        if z_cm is not None and scale is not None:
-            kcfg = KinematicsCfg.model_validate((cfg or {}).get("kinematics") or {})
-            z = z_cm
-            # compute_kinematics differentiates an (n, animals, 2) array; [Z, 0] makes its
-            # speed |vz|, with the second component NaN wherever Z is.
-            zz = np.stack([z, np.where(np.isnan(z), np.nan, 0.0)], axis=-1)
-            vz = compute_kinematics(zz, session.fps, kcfg).speed_px_s
+        # The Engine precomputes the whole-session series (sliced with the session); a direct
+        # compute() call estimates it on its own session.
+        vz = session.z_speed
+        if vz is None:
+            vz = vertical_speed(session, (cfg or {}).get("kinematics") or {})
+        if vz is not None and scale is not None:
             vh = session.kinematics.speed_px_s / float(scale)
             speed_3d = np.sqrt(vh**2 + vz**2)  # NaN where either is NaN
 

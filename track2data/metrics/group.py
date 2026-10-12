@@ -19,7 +19,7 @@ from scipy.spatial.distance import pdist
 
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
-from track2data.metrics.geometry3d import body_length_cm, positions_cm
+from track2data.metrics.geometry3d import positions_cm
 from track2data.metrics.references import (
     BALLERINI_2008,
     BERNARDIN_STIEFELHAGEN_2008,
@@ -109,6 +109,8 @@ class NearestNeighbourDistance(Metric):
         """
         xy = session.xy  # (n_frames, n_animals, 2)
         n_frames, n_animals = xy.shape[0], xy.shape[1]
+        # A separator row is not a frame: it is never skipped, so never counted as skipped.
+        counted = session.counted_rows()
 
         if n_animals < 2:
             return pd.DataFrame(
@@ -118,7 +120,7 @@ class NearestNeighbourDistance(Metric):
                         "metric_id": self.id,
                         "mean_nnd_px": np.nan,
                         "median_nnd_px": np.nan,
-                        "n_skipped_frames": n_frames,
+                        "n_skipped_frames": int(counted.sum()),
                     }
                 ]
             )
@@ -127,6 +129,8 @@ class NearestNeighbourDistance(Metric):
         n_skipped = 0
 
         for t in range(n_frames):
+            if not counted[t]:
+                continue
             positions = xy[t]  # (n_animals, 2)
             # Skip frame if any animal has NaN
             if np.isnan(positions).any():
@@ -161,7 +165,14 @@ class NearestNeighbourDistance(Metric):
             else np.nan
         )
         bl_all = session.body_length_in_px()
-        mean_bl_px = float(np.nanmean(bl_all)) if bl_all is not None else np.nan
+        # Same rule as GL-16's mean_nnd_3d_bl (which averages in cm); keep the two in step.
+        # The all-NaN guard only avoids nanmean's "Mean of empty slice" warning (the value is
+        # NaN either way); infinite lengths pass through exactly as before.
+        mean_bl_px = (
+            float(np.nanmean(bl_all))
+            if bl_all is not None and not np.isnan(np.asarray(bl_all, dtype=float)).all()
+            else np.nan
+        )
         row["mean_nnd_bl"] = (
             mean_nnd / mean_bl_px if mean_bl_px > 0 and not np.isnan(mean_nnd) else np.nan
         )
@@ -252,11 +263,14 @@ class NearestNeighbourDistance3D(Metric):
         """
         pos = positions_cm(session)  # (n_frames, n_animals, 3) or None
         n_frames, n_animals = session.xy.shape[0], session.xy.shape[1]
+        counted = session.counted_rows()  # a separator row is not a frame
         frame_nnds: list[float] = []
-        n_skipped = n_frames
+        n_skipped = int(counted.sum())
         if pos is not None and n_animals >= 2:
             n_skipped = 0
             for t in range(n_frames):
+                if not counted[t]:
+                    continue
                 points = pos[t]
                 if np.isnan(points).any():
                     n_skipped += 1
@@ -272,7 +286,6 @@ class NearestNeighbourDistance3D(Metric):
             mean_nnd = median_nnd = np.nan
 
         # Share of the real frames (separator rows are not frames) this metric could use.
-        counted = session.counted_rows()
         n_counted = int(counted.sum())
         frac_used = np.nan
         if pos is not None and n_animals >= 2 and n_counted:
@@ -288,9 +301,15 @@ class NearestNeighbourDistance3D(Metric):
                     gl1_frames,
                 )
 
-        # Same convention as GL-1's mean_nnd_bl: mean body length over the animals.
-        bl_cm = np.array([body_length_cm(session, k) for k in range(n_animals)], dtype=float)
-        mean_bl = float(np.nanmean(bl_cm)) if np.isfinite(bl_cm).any() else np.nan
+        # Same rule as GL-1's mean_nnd_bl (nan-mean of the raw per-animal lengths, valid when
+        # the mean is positive), averaged in cm so ordinary sessions keep their exact value.
+        bl_px = session.body_length_in_px()
+        px_per_cm = session.px_per_cm
+        mean_bl = np.nan
+        if bl_px is not None and px_per_cm is not None:
+            bl_cm = np.asarray(bl_px, dtype=np.float64) / px_per_cm
+            if not np.isnan(bl_cm).all():  # nanmean warns only when every entry is NaN
+                mean_bl = float(np.nanmean(bl_cm))
         mean_nnd_bl = mean_nnd / mean_bl if mean_bl > 0 and not np.isnan(mean_nnd) else np.nan
 
         return pd.DataFrame(

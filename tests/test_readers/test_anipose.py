@@ -249,3 +249,35 @@ def test_keypoint_choices_are_the_union_when_files_share_none(tmp_path: Path) ->
         read(tmp_path / "a.csv", keypoint="fin")
     assert err.value.code == "READER_OPTION_INVALID"
     assert "nose" in err.value.remediation and "tail" in err.value.remediation
+
+
+def test_overlong_header_read_says_so(tmp_path: Path) -> None:
+    from track2data.readers.peek import MAX_HEADER_BYTES
+
+    path = tmp_path / "wide.csv"
+    path.write_text("fnum," + "a_x," * (9 * 1024 * 1024 // 4) + "\n0\n")
+    assert path.stat().st_size > MAX_HEADER_BYTES
+    assert not AniposeReader.detect(path)  # detection stays False
+    with pytest.raises(Track2DataError) as err:
+        read(path)
+    assert err.value.code == "HEADER_TOO_LONG"
+    assert "wide.csv" in str(err.value) and "8 MB" in str(err.value)
+
+
+def test_discover_warns_about_a_duplicate_column(tmp_path: Path) -> None:
+    path = tmp_path / "d.csv"
+    path.write_text("a_x,a_y,a_z,a_x,fnum\n1,2,3,4,0\n2,3,4,5,1\n")
+    assert AniposeReader.detect(path)  # still recognised
+    (group,) = scan([tmp_path]).groups
+    (detection,) = group.detections
+    (candidate,) = detection.sessions
+    assert candidate.warnings == ("duplicate column a_x: the file will be refused when read",)
+    with pytest.raises(Track2DataError) as err:
+        read(path)
+    assert err.value.code == "ANIPOSE_DUPLICATE_COLUMN"
+
+    other = tmp_path / "clean"
+    other.mkdir()
+    write_anipose_csv(other / "c.csv", KPS, 3)
+    (group,) = scan([other]).groups
+    assert group.detections[0].sessions[0].warnings == ()

@@ -899,3 +899,80 @@ def test_a_refused_session_is_explained_in_a_warning(qtbot, tmp_path: Path, monk
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a))
     store.sessionRefused.emit("n1", "[NATIVE_3D_MIXED] no")
     assert shown and shown[0][1] == "Session not added" and "NATIVE_3D_MIXED" in shown[0][2]
+
+
+# ── the real span of a session tracked in separate intervals ────────────────
+
+
+def _detail_values(screen) -> dict[str, str]:
+    grid = screen._detail_grid
+    out = {}
+    for r in range(grid.rowCount()):
+        k, v = grid.itemAtPosition(r, 0), grid.itemAtPosition(r, 1)
+        if k and v:
+            out[k.widget().text()] = v.widget().text()
+    return out
+
+
+def _table_frames(screen, row: int = 0) -> str:
+    from ui.import_screen import _COL_FRAMES
+
+    return screen._table.item(row, _COL_FRAMES).text()
+
+
+def test_a_gappy_session_shows_its_real_span_beside_the_tracked_rows(qtbot, tmp_path: Path) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    # 400 tracked rows in two intervals of a 600-frame recording at 30 fps (20 s)
+    _cache_facts(store, "s1", n_frames=400, span_frames=600, fps=30.0)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._table.selectRow(0)
+
+    assert _table_frames(screen) == "400 of 600"
+    frames = _detail_values(screen)["Frames"]
+    assert "400" in frames and "600" in frames and "0 min" in frames
+    assert "20 s" in screen._facts_label.text() or "0 min" in screen._facts_label.text()
+
+
+def test_a_session_without_gaps_shows_the_row_count_as_before(qtbot, tmp_path: Path) -> None:
+    from ui.import_screen import ImportScreen
+
+    store = _make_store(tmp_path)
+    _add_ref(store, "s1", tmp_path)
+    _cache_facts(store, "s1", n_frames=1000)
+    screen = ImportScreen(store)
+    qtbot.addWidget(screen)
+    screen._table.selectRow(0)
+
+    assert _table_frames(screen) == "1000"
+    assert " of " not in _detail_values(screen)["Frames"]
+
+
+def test_session_facts_span_comes_from_the_last_tracking_interval() -> None:
+    import numpy as np
+
+    from track2data.core.models import Session, VideoInfo
+    from ui.store.session_facts import SessionFacts
+
+    def sess(intervals):
+        return Session(
+            velocity_threshold_px_frame=20.0,
+            session_id="s",
+            folder=Path("/tmp/s"),
+            reader="test",
+            video=VideoInfo(fps=30.0, n_frames=20, width_px=10, height_px=10),
+            n_animals=1,
+            trajectory_variant="with_gaps",
+            has_stable_identities=True,
+            raw_xy=np.zeros((20, 1, 2)),
+            tracking_intervals=intervals,
+        )
+
+    gappy = SessionFacts.from_session(sess([(0, 10), (500, 510)]))
+    assert gappy.n_frames == 20 and gappy.span_frames == 510
+    assert SessionFacts.from_session(sess(None)).span_frames is None
+    # one interval from frame 0 covers exactly its rows: no gap to report
+    assert SessionFacts.from_session(sess([(0, 20)])).span_frames is None

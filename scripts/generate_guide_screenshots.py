@@ -314,7 +314,50 @@ def main() -> int:
     scroll_bottom(export)
     shot("10-export-code")
 
+    _native_3d_shots(win, store, work, pump, shot)
     return 0
+
+
+def build_native_3d_file(root: Path) -> Path:
+    """A synthetic Anipose pose-3d file: one fish swimming up and down in a 25 cm deep tank (mm)."""
+    from tests.test_readers.native3d_files import write_anipose_csv
+
+    rng = np.random.default_rng(11)
+    horizontal = _walk(rng, 0.0)
+    depth_mm = 120.0 + 100.0 * np.sin(np.arange(N_FRAMES) / 90.0)
+    xyz = np.stack(
+        [(horizontal[:, 0] - CENTRE[0]) * 0.5, (horizontal[:, 1] - CENTRE[1]) * 0.5, -depth_mm],
+        axis=1,
+    )[:, None, :]
+    root.mkdir(parents=True, exist_ok=True)
+    return write_anipose_csv(root / "fish_a_pose3d.csv", ["head"], N_FRAMES, xyz=xyz)
+
+
+def _native_3d_shots(win: Any, store: Any, work: Path, pump: Any, shot: Any) -> None:
+    """A second project from a native 3-D file: the confirm dialog and the water column."""
+    path = build_native_3d_file(work / "native")
+    store.new_project("Native 3-D demo", work)
+    win._go_to_page(1)
+    sessions_page = win._stack.widget(1)
+    sessions_page._import_paths([path])
+    pump(until=lambda: sessions_page._dialog is not None)
+    dialog = sessions_page._dialog
+    form = dialog.options_form
+    form.widget_for("fps").setValue(FPS)
+    unit = form.widget_for("unit")
+    unit.setCurrentIndex(unit.findText("mm"))
+    pump(0.3)
+    dialog.resize(dialog.width(), 760)  # eight option rows need more room than the default size
+    pump(0.3)
+    shot("02-sessions-confirm-native-3d", widget=dialog)
+    dialog.ok_button.click()
+    pump(until=lambda: len(store.manifest.sessions) == 1)
+    cal = win._stack.widget(2)
+    win._go_to_page(2)
+    cal._surface_edit.setText("0")
+    cal._floor_edit.setText("-25")
+    cal.flush()
+    shot("03-calibration-water-column")
 
 
 if __name__ == "__main__":

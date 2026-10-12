@@ -266,6 +266,21 @@ def test_serial_and_parallel_runs_write_identical_files(
     assert {n.split("/")[0] for n in serial} >= {"fish1", "fish2", "sessions.csv"}
 
 
+def test_a_binned_il17_run_is_identical_serial_and_parallel(
+    project: Path, tmp_path: Path
+) -> None:
+    """The whole-session vertical speed is computed inside each worker, so bins agree."""
+    manifest = _manifest(project, bin_minutes=0.004)
+    Engine(manifest).run(tmp_path / "serial", exporters=["csv_long"])
+    Engine(manifest).run(tmp_path / "parallel", exporters=["csv_long"], n_workers=2)
+    serial, parallel = _files(tmp_path / "serial"), _files(tmp_path / "parallel")
+    report = _difference_report(serial, parallel)
+    assert report == "", "serial and parallel runs wrote different files:\n" + report
+    long = _long(tmp_path / "serial", "fish1")
+    rows = long[(long["metric_id"] == "IL-17") & (long["column"] == "mean_speed_3d_cm_s")]
+    assert len(rows) == 2 and rows["value"].notna().all()
+
+
 def test_a_binned_run_splits_the_path_by_bin(project: Path, tmp_path: Path) -> None:
     """0.004 min = 0.24 s = 6 frames: bins hold frames 0-5 (5 steps) and 6-10 (4 steps)."""
     manifest = _manifest(project, bin_minutes=0.004)

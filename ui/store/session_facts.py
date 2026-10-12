@@ -43,6 +43,15 @@ def _tracked_coverage(raw_xy) -> float | None:
         return None
 
 
+def _span_frames(session: Session) -> int | None:
+    """End of the last tracking interval when it lies beyond the rows read, else None."""
+    intervals = session.tracking_intervals
+    if not intervals:
+        return None
+    end = int(max(e for _s, e in intervals))
+    return end if end > int(session.raw_xy.shape[0]) else None
+
+
 @dataclass(frozen=True)
 class SessionFacts:
     """Read-only facts about one session, probed off its trajectory files.
@@ -97,6 +106,22 @@ class SessionFacts:
     calibration_ratios: tuple[float, ...] = ()
     # False for a native 3-D session: no image frame, width_px/height_px are 0 and mean nothing.
     has_pixel_frame: bool = True
+    # Video frames from 0 to the end of the last tracking interval, when the session was tracked
+    # in separate intervals and that exceeds the rows read (n_frames); None when the rows cover
+    # the recording. Real elapsed time is span_frames / fps, not n_frames / fps.
+    span_frames: int | None = None
+
+    @property
+    def video_frames(self) -> int:
+        """Frames of real elapsed time: the span when the session has gaps, else the row count."""
+        return self.span_frames if self.span_frames is not None else self.n_frames
+
+    @property
+    def frames_text(self) -> str:
+        """The row count, as "tracked of span" for a session with gaps."""
+        if self.span_frames is None:
+            return str(self.n_frames)
+        return f"{self.n_frames} of {self.span_frames}"
 
     @property
     def pixel_size_known(self) -> bool:
@@ -138,4 +163,5 @@ class SessionFacts:
             tracked_coverage=_tracked_coverage(session.raw_xy),
             calibration_ratios=tuple(calibration_ratios(session.length_calibrations)),
             has_pixel_frame=session.has_pixel_frame,
+            span_frames=_span_frames(session),
         )

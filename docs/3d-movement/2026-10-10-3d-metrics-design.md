@@ -104,8 +104,9 @@ Where the build differs from the text above, the build is right.
 - **IL-17 and the inequality.** `3-D speed >= IL-2` holds only over the frames where the vertical
   speed is finite (the forward-difference estimator gives none for the last frame; a depth segment
   shorter than the Savitzky-Golay window gives none). Frames without a vertical speed are left out of
-  IL-17, never counted as 0. In a binned run `vz` is estimated inside each bin, so the estimator's edge
-  frames can differ slightly from a whole-session run.
+  IL-17, never counted as 0. `vz` is estimated once on the whole session (`geometry3d.vertical_speed`, set as
+  `PreprocessedSession.z_speed` by the Engine) and sliced with the session, so a bin's edge frames match a
+  whole-session run.
 - **IL-16 and IL-1.** `IL-16 >= IL-1` holds over the steps where depth is also finite (`n_valid_steps`).
 - **GL-16 and GL-1.** GL-16 skips frames where any fish lacks depth that GL-1 keeps, so the
   inequality holds only per frame where both are valid, not for the two means.
