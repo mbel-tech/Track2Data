@@ -1,4 +1,4 @@
-"""Light / dark ("Teal Field" / graphite) theme loader.
+"""Light / dark ("Harbor Navy" / graphite) theme loader.
 
 The stylesheets live in ``app/resources/track2data-{light,dark}.qss`` and map
 the design tokens onto Qt widgets through objectName / dynamic properties.
@@ -22,14 +22,14 @@ THEMES = ("light", "dark")
 #: Per-theme colours the custom-painted widgets (sidebar delegate, toast) need.
 PALETTES: dict[str, dict[str, str]] = {
     "light": {
-        "sidebar": "#1c5866", "sideActive": "#174b57", "sideHover": "#1f6170",
-        "sideSub": "#a9cdd1", "sideLocked": "#7fa8ae", "mustard": "#e8b64c",
-        "mustardFg": "#2a2205", "tealText": "#1c5866",
+        "sidebar": "#00204a", "sideActive": "#0a3363", "sideHover": "#062a58",
+        "sideSub": "#9cc0dc", "sideLocked": "#5f80a3", "mustard": "#fdb44b",
+        "mustardFg": "#2a1a00", "tealText": "#00204a",
     },
     "dark": {
         "sidebar": "#0f1315", "sideActive": "#1e272b", "sideHover": "#171d20",
-        "sideSub": "#7f8b91", "sideLocked": "#4f5a60", "mustard": "#e8b64c",
-        "mustardFg": "#1b1503", "tealText": "#06181b",
+        "sideSub": "#7f8b91", "sideLocked": "#4f5a60", "mustard": "#fdb44b",
+        "mustardFg": "#2a1a00", "tealText": "#06181b",
     },
 }
 
