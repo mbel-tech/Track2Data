@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-13
+
 ### Added
 
 - **Metric documentation for the 3-D fixes.** IL-15, IL-16 and IL-17 (METRICS_SPEC and the in-app text) now say that a native file's z is cleaned like x and y and bounded by the water column, and that IL-15 on a fused session counts the side view's own samples; `docs/dev/DECISIONS.md` gains D-044 recording the decisions of the 3-D review.
