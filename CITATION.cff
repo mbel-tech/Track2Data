@@ -40,8 +40,8 @@ keywords:
   - zebrafish
   - reproducibility
 license: MIT
-version: 0.2.1
-date-released: "2026-10-09"
+version: 0.3.0
+date-released: "2026-10-13"
 
 references:
   - type: article
