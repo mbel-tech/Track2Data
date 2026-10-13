@@ -30,6 +30,9 @@ GOLDEN_JSON_SHA = "8b06d0dd10f5ce93a06d31d8549a16e98bbd8b349c8342ce0737a7632fbd9
 def _manifest(water_column: WaterColumn | None = None) -> ProjectManifest:
     t = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
     return ProjectManifest(
+        # pinned: the manifest stamps the app version, and the golden values were computed
+        # with 0.2.1, so a release bump must not change them
+        app_version="0.2.1",
         project_name="golden",
         created_at=t,
         updated_at=t,
