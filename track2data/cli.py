@@ -125,8 +125,14 @@ def cli(verbose: bool) -> None:
               help="Exporter(s) to use. Repeat for multiple.")
 @click.option("--cache-dir", default=None,
               help="Reuse preprocessed sessions from this directory (off by default).")
+@click.option("--workers", "-w", "n_workers", type=click.IntRange(min=1), default=1,
+              show_default=True, help="Sessions to process in parallel.")
 def run(
-    project: str, out_dir: str | None, exporters: tuple[str, ...], cache_dir: str | None
+    project: str,
+    out_dir: str | None,
+    exporters: tuple[str, ...],
+    cache_dir: str | None,
+    n_workers: int,
 ) -> None:
     """Run the full pipeline for a project manifest.
 
@@ -170,7 +176,9 @@ def run(
     click.echo(f"Running project '{manifest.project_name}' ({size})…")
 
     try:
-        result = engine.run(out_path, exporters=exporter_list, plan=plan)
+        result = engine.run(
+            out_path, exporters=exporter_list, plan=plan, n_workers=n_workers
+        )
     except Exception as exc:
         click.echo(f"[error] Pipeline failed: {exc}", err=True)
         logger.exception("Pipeline failed")

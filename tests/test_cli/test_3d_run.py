@@ -56,3 +56,13 @@ def test_validate_3d_fails_when_no_pair_fuses(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "[issue] no pair is ready to fuse: pair t1+s1: " in result.output
     assert "ready to run" not in result.output
+
+
+def test_run_accepts_a_worker_count_and_rejects_zero(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    project = _project(tmp_path, side2_fps=10.0)
+    ok = CliRunner().invoke(cli, ["run", str(project), "-o", str(out), "--workers", "1"])
+    assert ok.exit_code == 0, ok.output
+    bad = CliRunner().invoke(cli, ["run", str(project), "-o", str(out), "--workers", "0"])
+    assert bad.exit_code == 2
+    assert "--workers" in bad.output
