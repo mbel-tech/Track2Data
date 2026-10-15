@@ -50,88 +50,61 @@ long.merge(book[["column", "unit", "doi"]].drop_duplicates(), on="column")
 trajectory libraries expect: one row per (frame, individual) with `x_px`,
 `y_px`, `time_s`, and reconstruction flags.
 
-## Planned: the `movement` package
+## Using the `movement` package
 
 [`movement`](https://movement.neuroinformatics.dev/) (Neuroinformatics Unit,
-UCL) is an xarray-based library for animal-movement data. It is a natural
-downstream consumer: it has plotting, filtering and kinematic utilities that
-Track2Data does not attempt, and it reads pose data from DeepLabCut, SLEAP
-and others.
+UCL) is an xarray-based library for animal-movement data, with plotting,
+filtering and kinematic utilities that Track2Data does not attempt. Track2Data
+hands it a preprocessed session as an `xarray.Dataset` in `movement`'s layout.
+Install the extra first: `pip install track2data[xarray]`.
 
-**Not implemented yet.** The mapping is documented here first so that the
-shape of the adapter is agreed before it is written, and so anyone who wants
-it in the meantime can do the conversion by hand.
+```python
+from track2data.api import Engine
+from track2data.core.manifest import read
+from track2data.interop.movement import to_movement_dataset
+
+engine = Engine(read("project.t2d.json"))
+psess = engine.preprocess(engine.import_session("session_folder"))
+ds = to_movement_dataset(psess)
+```
 
 ### The mapping
 
-`movement` centres on a `xarray.Dataset` with a `position` DataArray of
-dimensions `(time, individuals, keypoints, space)`.
+`position` has dimensions `(time, individuals, keypoints, space)`.
 
 | `movement` | Track2Data | Note |
 |---|---|---|
-| `position` | `PreprocessedSession.xy`, `(n_frames, n_animals, 2)` | Add a length-1 `keypoints` axis |
-| `time` | `frame / fps` | `time_s` in the per-frame table |
-| `individuals` | `Session.identities_labels`, else `0..n-1` | Labels come from the Validator when set |
-| `keypoints` | a single `"centroid"` | idtracker.ai tracks a centroid, not a skeleton |
-| `space` | `["x", "y"]` | Always 2-D |
-| `confidence` | `Session.id_probabilities` | Identity confidence, **not** pose confidence — see below |
-| `fps` (attr) | `Session.video.fps` | |
-| `source_software` (attr) | `"idtracker.ai"` | |
+| `position` | `PreprocessedSession.xy` (plus `z` for a native 3-D session) | A length-1 `keypoints` axis is added |
+| `time` | the session's timeline divided by `fps` | True video time, so a session tracked in separate intervals keeps its gaps |
+| `individuals` | `Session.identities_labels`, else `0..n-1` | |
+| `keypoints` | the keypoint that stands for the animal, else `"centroid"` | The rest of a skeleton is not exported |
+| `space` | `["x", "y"]`, or `["x", "y", "z"]` for a native 3-D session | |
+| `identity_confidence` | `Session.id_probabilities` | A separate variable, **not** `confidence` (see below); absent when the tracker gave none |
+| attrs | `fps`, `source_software`, `reader_verification`, `length_unit`, `px_per_cm` | `length_unit` is the unit of `position` (`px`, or the file's unit for a native 3-D session) |
+
+The single NaN row that stands for an unfilled gap between tracking intervals
+is dropped; pass `include_separator_rows=True` to keep it. Rows for unobserved
+video stay as NaN.
 
 ### Two things that do not map cleanly
 
 **`confidence` means something different.** In `movement` it is a pose
 estimator's per-keypoint confidence: how sure the network is about *where*
 the body part is. idtracker.ai's `id_probabilities` is how sure it is about
-*which animal* this is — the position may be exact while the identity is a
-coin flip. Writing one into the other's slot would silently invite a filter
-on the wrong quantity. Any adapter should carry it as a separately-named
-variable, or document the substitution loudly.
+*which animal* this is, so the position may be exact while the identity is a
+coin flip. Writing one into the other's slot would invite a filter on the wrong
+quantity, which is why it is named `identity_confidence`.
 
 **Zones and calibration have no home in the pose schema.** `main_zone`,
-`sec_zone`, `px_per_cm` and the body-length scale are Track2Data concepts.
-They would ride along as dataset attributes and extra data variables, which
-`movement` tolerates but does not interpret.
-
-### If you need it now
-
-```python
-import numpy as np
-import xarray as xr
-from track2data.api import Engine
-from track2data.core.manifest import read
-
-engine = Engine(read("project.t2d.json"))
-psess = engine.preprocess(engine.import_session("session_folder"))
-
-n_frames, n_animals, _ = psess.xy.shape
-labels = psess.session.identities_labels or [str(k) for k in range(n_animals)]
-
-ds = xr.Dataset(
-    {
-        "position": (
-            ("time", "individuals", "keypoints", "space"),
-            psess.xy[:, :, np.newaxis, :],
-        )
-    },
-    coords={
-        "time": np.arange(n_frames) / psess.fps,
-        "individuals": labels,
-        "keypoints": ["centroid"],
-        "space": ["x", "y"],
-    },
-    attrs={"fps": psess.fps, "source_software": "idtracker.ai"},
-)
-```
-
-## Other formats
+`sec_zone` and the body-length scale stay in Track2Data; only `px_per_cm`
+rides along as an attribute.
 
 | Target | Status | Notes |
 |---|---|---|
 | CSV (long and wide) | ✅ shipped | `csv_long`, `csv_wide` |
 | Excel | ✅ shipped | `excel` exporter, needs `openpyxl` |
 | Feather / Arrow | ✅ shipped | `feather` exporter, needs `pyarrow` |
-| `movement` xarray | 📋 documented above | Not implemented |
+| `movement` xarray | ✅ shipped | `track2data.interop.movement.to_movement_dataset`, needs `xarray` |
 | DeepLabCut CSV input (also Lightning Pose, EKS) | ✅ supported | One session per prediction file; the frame rate and frame size are options you give (the file records neither); one keypoint stands for the animal and the whole skeleton is stored beside it. See `docs/tracker-formats/README.md`. |
 | SLEAP analysis HDF5 input | ✅ supported | In SLEAP choose *File > Export Analysis HDF5*. One session per file; the frame rate and frame size are options you give; one skeleton node stands for the animal and the whole skeleton is stored beside it. `.slp` project files are not read. See `docs/tracker-formats/README.md`. |
 | Ctrax raw `.mat` input | ✅ supported | The file Ctrax's *Save Tracks as Matlab File* writes. Frame size is an option you give; the frame rate comes from the file. Ctrax track ids are fragments, so a session is identity-free and one slot per id (`top_n` keeps the longest). See `docs/tracker-formats/README.md`. |

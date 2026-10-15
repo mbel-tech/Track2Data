@@ -1221,3 +1221,11 @@ could not be re-added, while the store would have accepted it.
 **Decision:** `ScanResult` keeps the walk (`index`, dropped by `release_index()` when the confirm dialog closes, never stored on a manifest). `SessionReader.discover_lenient(index, peek)` (default: nothing) reports files `discover` refused; `scan.lenient_scan(result, name)` returns them as one LOW-confidence group, and `ConfirmDraft.offer_reader(name)` makes it the first group, so `select_reader` can then name it. Only DeepLabCut (`.txt`, `.dat`, no extension) and SLEAP (`.analysis`, `.hdf`, `.dat`, no extension) implement it, and each still requires the full header or layout.
 
 **Why:** a forced reader on files it cannot read only moves the error. Loosening the name and not the content means a wrong guess still fails with the reader's own coded error instead of producing a session of guesses.
+
+### D-049 · The `movement` adapter is a function, not an exporter, and identity probability is never `confidence`
+
+**Status:** accepted; implemented.
+
+**Decision:** `interop/movement.to_movement_dataset(psess)` builds an `xarray.Dataset` from a `PreprocessedSession`; it is not registered as an exporter because an exporter payload carries metric results and no position array. `time` comes from `psess.timeline()` over `fps`, not `arange`, so tracking gaps survive. The tracker's identity probability is `identity_confidence`. `length_unit` in the attrs is the unit of `position` (`px`, or the native file's unit), and `px_per_cm` is NaN when not calibrated. `xarray` is an optional extra imported inside the function (`XARRAY_MISSING`).
+
+**Why:** `movement` filters on `confidence` as pose certainty; putting identity certainty there would invite a filter on the wrong quantity.

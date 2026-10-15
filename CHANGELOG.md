@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`movement` / xarray adapter.** `track2data.interop.movement.to_movement_dataset(psess)` returns a preprocessed session as an `xarray.Dataset` in the `movement` layout (`position` over time, individuals, keypoints, space), with true video time across tracking gaps, a `z` coordinate for native 3-D sessions, and the tracker's identity probability as a separate `identity_confidence` variable. Needs the new optional `xarray` extra.
 - **Import: "Choose software…" when nothing was recognised.** The empty-state dialog lists the readers that can try again with looser rules, and `track2data add --reader NAME` does the same on its own. DeepLabCut accepts a prediction table saved as `.txt` or `.dat`, and SLEAP an analysis file without an `.h5` extension. The header must still match, a candidate still goes through the reader's own `read`, and it is offered at low confidence.
 - **Import: "Read from video…"** fills the frame rate and frame size for readers that need them (DeepLabCut, SLEAP) from a video you choose (needs the optional `av` package). It never overwrites a value you typed, and an unreadable video changes nothing.
 - **Zones: the video's first frame is the backdrop** when a session has no background image (and no panel). It is used only when the decoded frame is exactly the declared video size, so zones are never drawn in the wrong pixel space; `extract_frame_rgb` returns the frame with its decoded size.
