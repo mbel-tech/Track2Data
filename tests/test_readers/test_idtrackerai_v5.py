@@ -125,19 +125,19 @@ class TestReadTrajectory:
 
     def test_fallback_to_with_gaps(self, reader: IDTrackerAiV5Reader,
                                     tiny_v5_no_wo_gaps: Path) -> None:
-        s = reader.read(tiny_v5_no_wo_gaps)
+        s = reader.read(tiny_v5_no_wo_gaps, allow_pickle=True)
         assert s.trajectory_variant == "with_gaps"
 
     def test_fallback_has_nans_at_gap_frames(self, reader: IDTrackerAiV5Reader,
                                               tiny_v5_no_wo_gaps: Path) -> None:
-        s = reader.read(tiny_v5_no_wo_gaps)
+        s = reader.read(tiny_v5_no_wo_gaps, allow_pickle=True)
         for f in TINY_V5_GAP_FRAMES:
             assert np.isnan(s.raw_xy[f, 0, 0]), f"Expected NaN at frame {f}"
 
     def test_transposed_input_corrected(self, reader: IDTrackerAiV5Reader,
                                          tiny_v5_transposed: Path) -> None:
         """(n_animals, n_frames, 2) input must be transposed to canonical form."""
-        s = reader.read(tiny_v5_transposed)
+        s = reader.read(tiny_v5_transposed, allow_pickle=True)
         assert s.raw_xy.shape == (TINY_V5_N_FRAMES, TINY_V5_N_ANIMALS, 2)
 
 
@@ -194,7 +194,7 @@ class TestIdentityStability:
             "paths_to_video_files": [],
         }
         np.save(tmp_path / "video_object.npy", video_obj)
-        s = reader.read(tmp_path)
+        s = reader.read(tmp_path, allow_pickle=True)
         assert s.has_stable_identities is False
 
     def test_body_length_px_is_none_when_absent(self, reader: IDTrackerAiV5Reader,
@@ -226,3 +226,32 @@ class TestReadErrors:
                                                   "height": 1080, "width": 1920})
         with pytest.raises(DataValidationError, match="TRAJ_NOT_FOUND"):
             reader.read(tmp_path)
+
+
+class TestMissingFrameRate:
+    """A guessed frame rate scales every speed and duration, so it is an error, not a default."""
+
+    def _folder(self, tmp_path: Path, video_obj: dict) -> Path:
+        traj_dir = tmp_path / "trajectories"
+        traj_dir.mkdir()
+        np.save(traj_dir / "trajectories_wo_gaps.npy", np.ones((20, 2, 2)))
+        np.save(tmp_path / "video_object.npy", video_obj)
+        return tmp_path
+
+    def test_no_fps_anywhere_raises(self, reader: IDTrackerAiV5Reader, tmp_path: Path) -> None:
+        folder = self._folder(tmp_path, {"frame_number": 20, "height": 100, "width": 100})
+        with pytest.raises(DataValidationError, match="VIDEO_FPS_MISSING"):
+            reader.read(folder, allow_pickle=True)
+
+    def test_refused_pickle_and_no_session_json_raises(
+        self, reader: IDTrackerAiV5Reader, tmp_path: Path
+    ) -> None:
+        folder = self._folder(tmp_path, {"fps": 25.0, "frame_number": 20})
+        with pytest.raises(DataValidationError, match="VIDEO_FPS_MISSING"):
+            reader.read(folder)
+
+    def test_a_real_one_fps_recording_is_kept(
+        self, reader: IDTrackerAiV5Reader, tmp_path: Path
+    ) -> None:
+        folder = self._folder(tmp_path, {"fps": 1.0, "frame_number": 20, "height": 9, "width": 9})
+        assert reader.read(folder, allow_pickle=True).video.fps == 1.0

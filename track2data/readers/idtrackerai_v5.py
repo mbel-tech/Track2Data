@@ -318,21 +318,45 @@ class IDTrackerAiV5Reader(SessionReader):
             folder, allow_pickle=allow_pickle
         )
 
-        fps = float(_get_field(obj, "fps", "frames_per_second") or 1.0)
+        # None = not found. A recording genuinely at 1 fps is a legitimate value, so 1.0 must
+        # not double as the "missing" marker.
+        fps_raw = _get_field(obj, "fps", "frames_per_second")
+        fps = float(fps_raw) if fps_raw else None
         height = int(_get_field(obj, "height", "original_height", "video_height") or 0)
         width = int(_get_field(obj, "width", "original_width", "video_width") or 0)
         raw_paths = _get_field(obj, "paths_to_video_files", "video_paths", "video_path")
 
         # Fallback: session_progress.json for any missing fields
-        if not height or not width or fps == 1.0:
+        if not height or not width or fps is None:
             meta = self._load_session_json(folder)
             if meta:
-                if fps == 1.0:
-                    fps = float(_get_field(meta, "fps", "frames_per_second") or fps)
+                if fps is None:
+                    fps_raw = _get_field(meta, "fps", "frames_per_second")
+                    fps = float(fps_raw) if fps_raw else None
                 if not height:
                     height = int(_get_field(meta, "video_height", "height") or 0)
                 if not width:
                     width = int(_get_field(meta, "video_width", "width") or 0)
+
+        if fps is None:
+            # Every speed, duration and time bin scales with the frame rate; guessing one
+            # would export wrong numbers that look valid.
+            raise DataValidationError(
+                "The frame rate of this session could not be found in "
+                f"{_VIDEO_OBJ_NAME} or the session json.",
+                code="VIDEO_FPS_MISSING",
+                subject=str(folder),
+                remediation=(
+                    "Allow reading video_object.npy (security.allow_pickle_trajectories) or "
+                    "make sure the session json is in the folder."
+                ),
+            )
+        if not height or not width:
+            logger.warning(
+                "The frame size of %s is unknown; zone and panel checks that need it are "
+                "skipped.",
+                folder,
+            )
 
         # Resolve video path (ASSUMPTION 5 — may be unreachable)
         video_path: Path | None = None
