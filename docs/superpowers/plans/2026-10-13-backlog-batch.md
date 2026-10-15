@@ -65,21 +65,24 @@
 **Files:**
 - Modify: `ui/zones_screen.py` (`_refresh_canvas`, ~L475-490), `ui/widgets/zone_canvas.py` (`ZoneCanvas.load_session`, ~L255-320)
 - Modify: `ui/widgets/panel_preview.py` (extract the existing `_video_frame` static method into a shared helper)
+- Modify: `track2data/readers/video_meta.py` (new `extract_frame_rgb(video_path, frame_index=0) -> tuple[bytes, int, int] | None` returning the bytes with the frame's own decoded `(width, height)` from the `av` frame; `extract_frame` becomes a thin wrapper that returns only the bytes, so its callers and mocks are unchanged)
 - Create: `ui/widgets/video_frame.py` holding `decode_first_frame(video_path: Path | None, width_px: int, height_px: int) -> QImage | None`
-- Test: `tests/test_ui/test_zones_screen.py`, `tests/test_ui/test_zone_canvas.py`, `tests/test_ui/test_panel_preview.py`
+- Test: `tests/test_ui/test_zones_screen.py`, `tests/test_ui/test_zone_canvas.py`, `tests/test_ui/test_panel_preview.py`, `tests/test_readers/test_video_meta.py`
 
 **Interfaces:**
-- Produces: `decode_first_frame(...)` returning `None` unless the path exists, `extract_frame(path, 0)` returns bytes and `len(data) == w * h * 3`. `ZoneCanvas.load_session(background_image_path, setup_points, frame_size=None, crop=None, video_path: Path | None = None)` falls back to `decode_first_frame` only when the backdrop image is missing and `crop is None`.
+- Produces: `decode_first_frame(...)` returning `None` unless the path exists, `extract_frame_rgb(path, 0)` returns a frame whose **reported `(width, height)` equals `(width_px, height_px)`** and `len(data) == w * h * 3`. A byte-length check alone is not enough: a rotated or transposed frame (1080x1920 against a declared 1920x1080) has the same `w * h * 3`, so the decoded dimensions are the guard and the length is only a sanity check. `ZoneCanvas.load_session(background_image_path, setup_points, frame_size=None, crop=None, video_path: Path | None = None)` falls back to `decode_first_frame` only when the backdrop image is missing and `crop is None`.
 - Consumes: `SessionFacts.video_path` (already filled), `track2data.readers.video_meta.extract_frame`.
 
-- [ ] **Step 1: Write failing tests** (monkeypatch `extract_frame` as `tests/test_ui/test_panel_preview.py` does):
+- [ ] **Step 1: Write failing tests** (monkeypatch `extract_frame_rgb` (and `extract_frame` for the preserved `PanelPreview` path) as `tests/test_ui/test_panel_preview.py` does):
   - `test_zone_canvas_uses_the_video_first_frame_when_there_is_no_background_image`
   - `test_a_video_frame_of_the_wrong_size_is_rejected_and_the_canvas_stays_blank`
+  - `test_a_transposed_frame_with_the_same_byte_count_is_rejected` (mock `extract_frame_rgb` to return `(bytes(1920*1080*3), 1080, 1920)` against a declared 1920x1080)
+  - `test_extract_frame_rgb_reports_the_decoded_frame_size` (in `tests/test_readers/test_video_meta.py`, `av` mocked as `TestExtractFrame*` does)
   - `test_a_cropped_panel_never_falls_back_to_the_video_frame`
   - `test_zones_screen_passes_the_session_video_path_to_the_canvas`
   - `test_panel_preview_still_reports_backdrop_kind_video` (refactor guard).
 - [ ] **Step 2:** Run `py -3.14 -m pytest tests/test_ui/test_zones_screen.py tests/test_ui/test_zone_canvas.py tests/test_ui/test_panel_preview.py -q`. Expected: FAIL on the new tests.
-- [ ] **Step 3:** Implement the helper by moving `PanelPreview._video_frame` logic unchanged, have `PanelPreview` call it, add the `video_path` parameter to `ZoneCanvas.load_session`, and pass `facts.video_path` from `ZonesScreen._refresh_canvas`. The size check is the guard in Review Focus; the first saved zone stamps `source_*_px`, so a wrong-size frame must be refused, not scaled.
+- [ ] **Step 3:** Implement `extract_frame_rgb`, then the helper by moving `PanelPreview._video_frame` logic and swapping its length-only check for the decoded-size check (so `PanelPreview` gets the stricter guard too), have `PanelPreview` call it, add the `video_path` parameter to `ZoneCanvas.load_session`, and pass `facts.video_path` from `ZonesScreen._refresh_canvas`. The decoded-size check is the guard in Review Focus; the first saved zone stamps `source_*_px`, so a wrong-size frame must be refused, not scaled.
 - [ ] **Step 4:** Run the three test files plus `tests/test_api.py -k preview_frame`, ruff, mypy. Expected: PASS.
 - [ ] **Step 5:** Commit `feat(ui): show the video's first frame behind the zones canvas`.
 
@@ -92,15 +95,15 @@
 - Test: `tests/test_readers/test_confirm.py` (class `TestSessions`), `tests/test_ui/test_project_store.py`, `tests/test_ui/test_import_screen.py`
 
 **Interfaces:**
-- Produces: `same_session_part(a, b)`: same resolved folder, readers equal or either `None`, session-scope option values equal, and `a.panel == b.panel`. It lives in `track2data/core` so `confirm.py` and `project_store.py` both import it without the circular import that importing `find_reader` into `confirm.py` would cause. The session-scope option selector currently lives in `project_store._selector`; move it with the helper and pass the reader's parameters in rather than importing `find_reader` at module level.
+- Produces: `same_session_part(candidate: SessionRef, existing: SessionRef) -> bool`, deliberately **not symmetric**, copying `project_store._is_duplicate` exactly: same resolved folder; `existing.reader is None or existing.reader == candidate.reader` (only the *existing* ref's `None` is a wildcard, a candidate with `reader=None` matches only an existing ref that also has none or the same name); session-scope option values equal; and `existing.panel == candidate.panel`. It lives in `track2data/core` so `confirm.py` and `project_store.py` both import it without the circular import that importing `find_reader` into `confirm.py` would cause. The session-scope option selector currently lives in `project_store._selector`; move it with the helper and pass the reader's parameters in rather than importing `find_reader` at module level.
 - Candidate refs from the dialog are `panel=None`; existing refs with a `panel` therefore no longer block them.
 
 - [ ] **Step 1: Write failing tests**
   - `test_a_whole_frame_candidate_is_offered_again_after_the_folder_was_split_into_panels` (existing `SessionRef` with `panel=PanelRect(...)`, candidate `panel=None`, `already_added is False`).
   - `test_a_true_duplicate_is_still_left_out` (same folder, reader, selector, panel).
-  - `test_project_store_and_confirm_agree_on_what_a_duplicate_is` (parametrized truth table run through both code paths).
+  - `test_project_store_and_confirm_agree_on_what_a_duplicate_is` (a fixed truth table written out as data, not derived from the implementation: existing reader `None`/`"a"` x candidate reader `None`/`"a"`/`"b"` x panel equal/different, run through both code paths; the asymmetric cases (existing `"a"` with candidate `None`) are listed explicitly as not duplicates).
 - [ ] **Step 2:** Run `py -3.14 -m pytest tests/test_readers/test_confirm.py tests/test_ui/test_project_store.py -k "panel or duplicate" -q`. Expected: FAIL.
-- [ ] **Step 3:** Implement the shared helper, make `ConfirmDraft` keep its existing list as `SessionRef`s rather than `(folder, reader)` tuples, and make `_is_duplicate` delegate. Keep the legacy rule: `reader is None` on the existing ref matches any reader.
+- [ ] **Step 3:** Implement the shared helper, make `ConfirmDraft` keep its existing list as `SessionRef`s rather than `(folder, reader)` tuples, and make `_is_duplicate` delegate. Keep the legacy rule above and do not make it symmetric.
 - [ ] **Step 4:** Run `tests/test_readers tests/test_ui/test_project_store.py tests/test_ui/test_import_screen.py tests/test_ui/test_panel_dialog.py -q`, ruff, mypy. Expected: PASS.
 - [ ] **Step 5:** Commit `fix(import): a split folder is not "already in the project" when rescanned`.
 
@@ -151,9 +154,11 @@
 - [ ] **Step 4:** Run the same files in full, plus `tests/test_readers/test_conformance.py`, ruff, mypy. Expected: PASS.
 - [ ] **Step 5:** Commit `feat(import): read fps and frame size from a chosen video for DLC and SLEAP`.
 
+(Task 5 edits `ConfirmDraft._enter` and the confirm dialog, which Task 3 also touches: start it after Task 3 has landed.)
+
 ### Task 6: `lenient_detection` ("choose software…" re-run)
 
-**Depends on:** Task 3 (both edit `readers/confirm.py`).
+**Depends on:** Task 3 and Task 5. Tasks 3, 5 and 6 all edit `readers/confirm.py` (`ConfirmDraft`) and `ui/dialogs/confirm_format_dialog.py`; run them in that order on one line of branches, not in parallel, or the three will conflict.
 
 **Files:**
 - Modify: `track2data/readers/scan.py` (`ScanResult` keeps the `ScanIndex`; new `lenient_scan(result: ScanResult, reader_name: str) -> FormatGroup | None`), `track2data/readers/confirm.py` (`ConfirmDraft.offer_reader(name: str) -> bool`), `track2data/cli.py` (`add --reader` falls through to it), `ui/dialogs/confirm_format_dialog.py` (`_show_nothing_recognised` L212 gains a "Choose software…" combo)
@@ -197,25 +202,25 @@
   - `test_scan_never_unpickles` (monkeypatch `pickle.loads` / `pickle.Unpickler` to raise; scanning a DLC h5 must not call them).
   - `test_a_hostile_pickled_label_is_refused_with_a_coded_error`
   - `test_sleap_and_dlc_h5_never_both_claim_a_file`
-  - `test_the_epm_real_sample_is_read_to_18485_frames` (`real_sample` marker, `importorskip` as the oracle needs `tables`).
+  - `test_the_epm_real_sample_is_read_to_18485_frames` (`real_sample` marker; skips only when the fixture file is absent. It must run without `tables`: it reads with the shipped h5py path and asserts the shape and bodypart count recorded in the Step 1 spike (18485 frames, 8 bodyparts). The separate test `test_the_epm_real_sample_matches_the_pytables_oracle` is the one that uses `pytest.importorskip("tables")`, to cross-check values.)
   - `test_a_tracks_group_h5_is_refused_with_a_remediation` (maDLC `_el.h5` layout).
 - [ ] **Step 3:** Run `py -3.14 -m pytest tests/test_readers/test_deeplabcut_h5.py tests/test_readers/test_sleap_analysis.py -q`. Expected: new tests FAIL, existing SLEAP tests PASS.
 - [ ] **Step 4:** Implement per the G-H5 outcome. Errors: `DLCH5_UNREADABLE`, `DLCH5_LABELS_REFUSED`, `DLCH5_LAYOUT_UNSUPPORTED`, each with `subject` and `remediation`.
-- [ ] **Step 5:** Run `tests/test_readers tests/test_scan tests/real_samples -q` (real-sample tests skip when fixtures are absent), `tests/test_readers/test_conformance.py`, ruff, mypy. Expected: PASS and the `dlc_single_animal_h5` contract case no longer XFAILs.
+- [ ] **Step 5:** Run `tests/test_readers tests/test_scan tests/real_samples -q` (real-sample tests skip when fixtures are absent), `tests/test_readers/test_conformance.py`, ruff, mypy. Expected: PASS and the `dlc_single_animal_h5` contract case no longer XFAILs. Check that the run did not skip the real-sample reader test: with the fixture present and `tables` absent it must still execute (`-rs` shows the skip reasons).
 - [ ] **Step 6:** Commit `feat(readers): DeepLabCut .h5 predictions`.
 
 ### Task 8: Fix the stale docs
 
-**Depends on:** Tasks 1-7 and 9-11 (write the final statements last; re-run this task's numbers at the end).
+**Depends on:** Tasks 1-7 and 9-11, including Task 6 (it closes the tier-0 deferred notes this task would otherwise leave open). Task 8 runs last of all the code tasks and re-measures every number, so it never blocks them.
 
 **Files:**
 - Modify: `docs/dev/ROADMAP.md` (L3-4 status and date; L34 "~1760 passing"; M5 checklist L52 onward: first tag and branch protection are done, L80 "not yet applied" is false; reserved-ID table L106-125: D-11 is Metric Input Provenance, D-12 is Fragment Quality Scores, GL-16 is 3-D NND, so reassign their old proposals to unused IDs D-17, D-18 and GL-20, and keep GL-17 reserved; L157 screen count), `docs/INTEROPERABILITY.md` (add `anipose` and `deeplabcut_3d` rows, keep `trx.mat` "synthetic only"), `docs/tracker-formats/README.md` (L61, L121, L129 `trx.mat` is built, synthetic only), `docs/tracker-formats/2026-10-08-tier-2-implementation-plan.md` (L9, L44-49), `docs/IDTRACKERAI_FORMAT_ANALYSIS.md` (§3 gap table L177-207: re-check each row against `track2data/readers/idtrackerai/*` and mark done rows)
-- Modify: every `- [ ]` in `docs/superpowers/plans/2026-10-09-*.md`, `2026-10-10-*.md`, `2026-10-11-*.md` and `docs/tracker-formats/2026-10-07-tier-0-implementation-plan.md` becomes `- [x]` (all shipped in v0.3.0); this plan's own boxes are ticked by the executor as it goes
+- Modify: the `- [ ]` boxes in `docs/superpowers/plans/2026-10-09-*.md`, `2026-10-10-*.md`, `2026-10-11-*.md` and `docs/tracker-formats/2026-10-07-tier-0-implementation-plan.md` (all currently unticked, 339 boxes). A box is ticked only after it is checked against the repository: the task's commit (`git log --oneline --grep`), its named test (`grep -rn "def <test name>" tests`) or file exists, or the `[0.3.0]` section of `CHANGELOG.md` records the feature. A box that cannot be verified stays `- [ ]` with a one-line `Status:` note under its task (not shipped, deferred, or superseded and by what). The tier-0 deferred items (T0-4, T0-6) are ticked only if Task 6 shipped them. This plan's own boxes are ticked by the executor as it goes
 - Modify: `docs/dev/DECISIONS.md` only if a numbering fix needs a note
 - Test: `tests/test_docs_tracker_formats.py` (pins sha256 of research files and README rows; run it before and after), `tests/test_metric_references_consistency.py`, `tests/test_docs`
 
 - [ ] **Step 1:** Re-measure: `py -3.14 -m pytest --collect-only -q` (tail) for the test count, `len(track2data.metrics._registry)` for the metric count, and write the numbers into ROADMAP as "collected", not "passing".
-- [ ] **Step 2:** Edit the files above. Do not edit files that `tests/test_docs_tracker_formats.py` hashes (the research files); change only the README rows it keeps in step.
+- [ ] **Step 2:** Edit the files above, plan by plan, writing the verification evidence (commit subject or test name) in the commit message for the ticked set. Do not edit files that `tests/test_docs_tracker_formats.py` hashes (the research files); change only the README rows it keeps in step.
 - [ ] **Step 3:** Run `py -3.14 -m pytest tests/test_docs_tracker_formats.py tests/test_metric_references_consistency.py tests/test_docs -q`. Expected: PASS.
 - [ ] **Step 4:** Commit `docs: bring the roadmap, interoperability table and shipped plans up to date`.
 
@@ -227,11 +232,11 @@
 - Test: `tests/test_metadata/test_schema.py`, `tests/test_ui/test_metadata_screen.py`
 
 **Interfaces:**
-- Produces: `load(path: Path, sheet: str | None = None) -> pd.DataFrame` (`None` keeps today's behaviour, first sheet), and `list_sheets(path: Path) -> list[str]` (`[]` for CSV). A sheet name that is absent raises `ValueError` with the available names in the message. The new `MetadataSource.sheet` defaults to `None` so existing manifests load unchanged and `project_hash` is unchanged when no sheet is chosen.
+- Produces: `load(path: Path, sheet: str | None = None) -> pd.DataFrame` (`None` keeps today's behaviour, first sheet), and `list_sheets(path: Path) -> list[str]` (`[]` for CSV). A sheet name that is absent raises `ValueError` with the available names in the message. The new `MetadataSource.sheet` defaults to `None` so existing manifests load unchanged. A plain pydantic field would serialise as `"sheet": null` and change `project_hash` (a `model_dump` of the whole manifest) for every project that has a metadata source, so `MetadataSource` gets a wrap `model_serializer` that omits `sheet` when it is `None`; `project_hash` and the saved JSON are then byte-identical until a sheet is chosen.
 
 - [ ] **Step 1: Write failing tests** (workbooks built with openpyxl, already in the `export` extra and `dev`):
   - `test_load_xlsx_defaults_to_the_first_sheet`, `test_load_xlsx_reads_a_named_sheet`, `test_an_unknown_sheet_name_lists_the_available_ones`, `test_list_sheets_of_a_csv_is_empty`
-  - `test_a_manifest_without_a_sheet_keeps_its_hash`
+  - `test_a_manifest_without_a_sheet_keeps_its_hash` (a manifest that **has** a `MetadataSource`, hash and `model_dump_json` compared with the values computed before the change; the pinned golden projects have no metadata source, so they alone would not catch this) and `test_a_chosen_sheet_is_saved_and_changes_the_hash`
   - UI: `test_loading_an_xlsx_previews_it_and_offers_a_sheet_choice`, `test_choosing_a_second_sheet_persists_it_on_the_store`, `test_reopened_project_restores_the_chosen_sheet`
 - [ ] **Step 2:** Run `py -3.14 -m pytest tests/test_metadata tests/test_ui/test_metadata_screen.py -k "sheet or xlsx" -q`. Expected: FAIL.
 - [ ] **Step 3:** Implement. `.xls` stays declared but unsupported by openpyxl: raise a clear `ValueError` instead of the current silent failure.
@@ -261,7 +266,7 @@
 
 ### Task 11: Standalone 3-D metrics (IL-18, GL-18, GL-19)
 
-**Depends on:** Tasks 1 and 8 for their doc edits to settle first; this task changes the registered count from 54 to 57.
+**Depends on:** Task 1 only (both edit `ui/metrics_screen.py` presets and the metric docs). This task changes the registered count from 54 to 57 and must update the four pinned prose counts itself, because `test_metric_counts_stated_in_the_docs_match_the_registry` fails otherwise; Task 8 then runs after it and re-measures, it is not a prerequisite.
 
 **Files:**
 - Modify: `track2data/metrics/individual.py` (new `VerticalSpeed3D`, registered after `Speed3D`), `track2data/metrics/group.py` (new `InterIndividualDistance3D`, `GroupCohesion3D`, registered after `NearestNeighbourDistance3D`), `track2data/metrics/references.py` only if a needed reference is missing
@@ -305,10 +310,10 @@
 
 ## Execution order and dependencies
 
-1. Task 0 (user), then Tasks 1, 2, 3 (small, independent; 3 before 6).
-2. Tasks 4, 5, 7, 9, 10 are independent of each other; 5 and 7 both touch reader parameters, so land 5 first.
-3. Task 6 after 3.
-4. Task 11, then Task 8 last of the doc work (counts and statuses must be final).
+1. Task 0 (user), then Tasks 1, 2, 3 (small, independent of each other).
+2. Tasks 3, 5 and 6 share `readers/confirm.py` and the confirm dialog, so they land strictly in the order 3, 5, 6.
+3. Tasks 4, 7, 9, 10 are independent of each other and of the 3-5-6 line; 5 and 7 both touch reader parameters, so land 5 before 7.
+4. Task 11 after Task 1, then Task 8 last of all (counts and statuses must be final; Task 8 does not block 11).
 5. Task 12 only after the layout decision.
 
 Suggested branches: one per task from `main`, merged through PRs so `CI passed` gates each.
