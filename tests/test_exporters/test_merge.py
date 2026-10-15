@@ -119,3 +119,43 @@ def test_exports_with_metadata_and_two_metrics_have_no_suffixed_columns(
     assert not [c for c in sheet.columns if str(c).endswith(("_x", "_y"))]
     assert len(sheet) == 2
     assert sheet["path_length_px"].notna().all() and sheet["mean_speed_px_s"].notna().all()
+
+
+class TestBinnedAfterWholeSession:
+    """A whole-session frame (NaN bins) merged with a binned one must keep the bin boundaries."""
+
+    def _frames(self) -> dict[str, pd.DataFrame]:
+        nan = np.nan
+        return {
+            "whole": pd.DataFrame(
+                {"session_id": ["s"], "individual_id": [0], "bin_index": [nan],
+                 "bin_start_s": [nan], "bin_end_s": [nan], "total": [9.0]}
+            ),
+            "binned": pd.DataFrame(
+                {"session_id": ["s", "s"], "individual_id": [0, 0], "bin_index": [0, 1],
+                 "bin_start_s": [0.0, 60.0], "bin_end_s": [60.0, 120.0], "path": [1.0, 2.0]}
+            ),
+        }
+
+    def test_the_bin_boundaries_survive_in_either_order(self) -> None:
+        frames = self._frames()
+        for order in (list(frames), list(reversed(list(frames)))):
+            out = merge_metric_frames({k: frames[k] for k in order})
+            binned = out[out["bin_index"].notna()].sort_values("bin_index")
+            assert list(binned["bin_start_s"]) == [0.0, 60.0]
+            assert list(binned["bin_end_s"]) == [60.0, 120.0]
+            assert list(binned["path"]) == [1.0, 2.0]
+
+    def test_a_row_only_the_second_frame_has_is_filled_from_it(self) -> None:
+        frames = {
+            "a": pd.DataFrame(
+                {"session_id": ["s"], "individual_id": [0], "treatment": ["ctrl"], "x": [1.0]}
+            ),
+            "b": pd.DataFrame(
+                {"session_id": ["s", "s"], "individual_id": [0, 1], "treatment": "ctrl",
+                 "y": [2.0, 3.0]}
+            ),
+        }
+        out = merge_metric_frames(frames)
+        assert list(out["treatment"]) == ["ctrl", "ctrl"]
+        assert "treatment_x" not in out.columns
