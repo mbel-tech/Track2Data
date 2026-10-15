@@ -524,7 +524,9 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 <figcaption><b>Figure 11.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
 </figure>
 
-1. **Load metadata CSV…**. The first rows are previewed.
+1. **Load metadata file…** (a CSV or an Excel `.xlsx` workbook). The first rows are previewed. If a
+   workbook has several sheets, a **Sheet** menu appears: pick the one that holds your metadata (the
+   first sheet is used until you do). The older `.xls` format is not read; save it as `.xlsx`.
 2. Match columns to fields. Names like `date`, `condition` or `tank` are matched automatically to
    *Trial date*, *Treatment*, *Group ID*; change any you disagree with, or leave a field on
    `(skip)`.
@@ -536,7 +538,7 @@ row is matched per session (if several rows match, the first is used and the sum
 
 ### Per-animal information (sex, weight, genotype of individual animals)
 
-Give the CSV **one row per animal** and map its animal column (`fish_id`, `animal_id` or any name)
+Give the file **one row per animal** and map its animal column (`fish_id`, `animal_id` or any name)
 to *Individual ID*. Then:
 
 - **Match animals by** decides how each value is matched to an animal. *Validator label* uses the

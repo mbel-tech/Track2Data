@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from track2data.core.hashing import file_sha256
 from track2data.core.models import MappingRule, MetadataSource
+from track2data.metadata.loader import list_sheets, preview
 from track2data.metadata.schema import CANONICAL, resolve_column
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.labels import label_for
@@ -99,7 +100,7 @@ class MetadataScreen(QWidget):
 
         # ── file row ──────────────────────────────────────────────────────
         file_row = QHBoxLayout()
-        load_btn = QPushButton("Load metadata CSV…")
+        load_btn = QPushButton("Load metadata file…")
         load_btn.setProperty("role", "accent")
         load_btn.clicked.connect(self._load_csv)
         skip_btn = QPushButton("Skip metadata")
@@ -111,6 +112,20 @@ class MetadataScreen(QWidget):
         file_row.addWidget(skip_btn)
         file_row.addWidget(self._file_label, 1)
         root.addLayout(file_row)
+
+        # A workbook with several sheets needs to be told which one holds the metadata; the row
+        # is shown only then (a CSV or a one-sheet workbook has nothing to choose).
+        self._sheet_row = QWidget()
+        sheet_layout = QHBoxLayout(self._sheet_row)
+        sheet_layout.setContentsMargins(0, 0, 0, 0)
+        sheet_layout.addWidget(QLabel("Sheet:"))
+        self._sheet_combo = QComboBox()
+        self._sheet_combo.currentIndexChanged.connect(weak_slot(self._on_sheet_chosen))
+        sheet_layout.addWidget(self._sheet_combo, 1)
+        self._sheet_row.hide()
+        self._shown_path: Path | None = None
+        self._shown_sheet: str | None = None
+        root.addWidget(self._sheet_row)
 
         # ── preview table ─────────────────────────────────────────────────
         self._preview = QTableWidget(0, 0)
@@ -177,39 +192,60 @@ class MetadataScreen(QWidget):
 
     def _load_csv(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load metadata CSV", "", "CSV files (*.csv);;All files (*)"
+            self,
+            "Load metadata file",
+            "",
+            "Metadata files (*.csv *.xlsx);;CSV files (*.csv);;Excel workbooks (*.xlsx);;"
+            "All files (*)",
         )
         if path:
             self.load_path(Path(path))
 
-    def load_path(self, path: Path) -> None:
-        """Load *path* as the project's metadata file (what the dialog calls)."""
+    def load_path(self, path: Path, sheet: str | None = None) -> None:
+        """Load *path* as the project's metadata file (what the dialog calls).
+
+        *sheet* picks a sheet of an Excel workbook; the first one when None."""
         try:
-            import csv
-            rows: list[list[str]] = []
-            with open(path, newline="", encoding="utf-8-sig") as fh:
-                reader = csv.reader(fh)
-                for i, row in enumerate(reader):
-                    rows.append(row)
-                    if i >= 5:  # header + 5 data rows
-                        break
-            if not rows:
-                QMessageBox.warning(self, "Empty file", "The CSV file appears to be empty.")
+            sheets = list_sheets(path)
+            chosen = sheet if sheet is not None else (sheets[0] if sheets else None)
+            headers, data_rows = preview(path, chosen)
+            if not headers:
+                QMessageBox.warning(self, "Empty file", "The metadata file appears to be empty.")
                 return
-            headers = rows[0]
-            data_rows = rows[1:]
             self._columns = headers
             self._populate_preview(headers, data_rows)
             self._populate_combos(headers)
             self._file_label.setText(Path(path).name)
             self._file_label.setProperty("role", "")
+            stored = chosen if len(sheets) > 1 else None
+            self._show_sheets(Path(path), sheets, stored)
             if self._store is not None:
-                csv_path = Path(path)
                 self._store.update_metadata_source(
-                    MetadataSource(path=csv_path, sha256=file_sha256(csv_path))
+                    MetadataSource(path=Path(path), sha256=file_sha256(Path(path)), sheet=stored)
                 )
         except Exception as exc:
-            QMessageBox.critical(self, "Error", f"Failed to load CSV:\n{exc}")
+            QMessageBox.critical(self, "Error", f"Failed to load the metadata file:\n{exc}")
+
+    def _show_sheets(self, path: Path, sheets: list[str], chosen: str | None) -> None:
+        """Offer the workbook's sheets (only when there is more than one) without reloading."""
+        self._shown_path = path
+        self._shown_sheet = chosen
+        self._sheet_combo.blockSignals(True)
+        try:
+            self._sheet_combo.clear()
+            self._sheet_combo.addItems(sheets if len(sheets) > 1 else [])
+            if chosen is not None:
+                self._sheet_combo.setCurrentIndex(max(self._sheet_combo.findText(chosen), 0))
+        finally:
+            self._sheet_combo.blockSignals(False)
+        self._sheet_row.setVisible(len(sheets) > 1)
+
+    def _on_sheet_chosen(self) -> None:
+        """The user picked another sheet: reload the preview and mapping from it."""
+        sheet = self._sheet_combo.currentText()
+        if self._shown_path is None or not sheet or sheet == self._shown_sheet:
+            return
+        self.load_path(self._shown_path, sheet)
 
     def _populate_preview(self, headers: list[str], rows: list[list[str]]) -> None:
         self._preview.setColumnCount(len(headers))
@@ -312,7 +348,9 @@ class MetadataScreen(QWidget):
             if src is None:
                 if self._file_label.text() not in ("(skipped)",):
                     self._file_label.setText("(no file loaded)")
-            elif self._file_label.text() != src.path.name and Path(src.path).exists():
+            elif (
+                self._file_label.text() != src.path.name or self._shown_sheet != src.sheet
+            ) and Path(src.path).exists():
                 self._restore_from_source(src)
             self._sync_combos_to_mapping()
         self._refresh_match_summary()
@@ -334,18 +372,17 @@ class MetadataScreen(QWidget):
                 self._match_mode.setCurrentIndex(mode_idx)
 
     def _restore_from_source(self, src: MetadataSource) -> None:
-        import csv
-
-        with open(src.path, newline="", encoding="utf-8-sig") as fh:
-            rows = [row for _, row in zip(range(6), csv.reader(fh), strict=False)]
-        if not rows:
+        sheets = list_sheets(src.path)
+        headers, data_rows = preview(src.path, src.sheet)
+        if not headers:
             return
-        self._columns = rows[0]
-        self._populate_preview(rows[0], rows[1:])
+        self._columns = headers
+        self._populate_preview(headers, data_rows)
         with self._auto.suppressed():
-            self._fill_combos(rows[0])
+            self._fill_combos(headers)
         self._file_label.setText(src.path.name)
         self._file_label.setProperty("role", "")
+        self._show_sheets(src.path, sheets, src.sheet)
 
     def _per_animal_notes(self, manifest, result) -> list[str]:
         """Problems with per-animal rows that the engine will only log: animals
@@ -399,7 +436,9 @@ class MetadataScreen(QWidget):
             from track2data.metadata.loader import load
             from track2data.metadata.mapping import apply_mapping
 
-            mapped = apply_mapping(load(m.metadata_source.path), m.mapping)
+            mapped = apply_mapping(
+                load(m.metadata_source.path, m.metadata_source.sheet), m.mapping
+            )
             result = match([r.session_id for r in m.sessions], mapped, m.mapping)
         except Exception as exc:
             self._match_label.setText(f"Could not match sessions: {exc}")

@@ -352,3 +352,87 @@ def test_summary_warns_for_identity_free_sessions(qtbot, tmp_path) -> None:
     ref = store.manifest.sessions[0].model_copy(update={"identity_free_override": True})
     store.update_sessions([ref])
     assert "identity-free" in screen._match_label.text()
+
+
+# ── Excel workbooks with several sheets ──────────────────────────────────────
+
+
+def _book(tmp_path: Path, sheets: dict[str, list[list[str]]]) -> Path:
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, rows in sheets.items():
+        ws = wb.create_sheet(name)
+        for row in rows:
+            ws.append(row)
+    path = tmp_path / "meta.xlsx"
+    wb.save(path)
+    return path
+
+
+_SHEETS = {
+    "Notes": [["note"], ["read me"]],
+    "Trials": [["sid", "cond"], ["s1", "ctrl"]],
+}
+
+
+def test_loading_an_xlsx_previews_it_and_offers_a_sheet_choice(qtbot, tmp_path) -> None:
+    from ui.metadata_screen import MetadataScreen
+
+    screen = MetadataScreen(_store_with_sessions(tmp_path, ["s1"]))
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.load_path(_book(tmp_path, _SHEETS))
+    assert screen._sheet_row.isVisible()
+    assert [screen._sheet_combo.itemText(i) for i in range(screen._sheet_combo.count())] == [
+        "Notes",
+        "Trials",
+    ]
+    assert screen._preview.columnCount() == 1  # the first sheet
+
+
+def test_a_csv_and_a_one_sheet_workbook_offer_no_sheet_choice(qtbot, tmp_path) -> None:
+    from ui.metadata_screen import MetadataScreen
+
+    screen = MetadataScreen(_store_with_sessions(tmp_path, ["s1"]))
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.load_path(_write(tmp_path, ["s1,1,ctrl,1.5"]))
+    assert not screen._sheet_row.isVisible()
+    screen.load_path(_book(tmp_path, {"Only": _SHEETS["Trials"]}))
+    assert not screen._sheet_row.isVisible()
+    assert screen._store.manifest.metadata_source.sheet is None
+
+
+def test_choosing_a_second_sheet_persists_it_on_the_store(qtbot, tmp_path) -> None:
+    from ui.metadata_screen import MetadataScreen
+
+    store = _store_with_sessions(tmp_path, ["s1"])
+    screen = MetadataScreen(store)
+    qtbot.addWidget(screen)
+    screen.show()
+    screen.load_path(_book(tmp_path, _SHEETS))
+    screen._sheet_combo.setCurrentIndex(1)
+    assert store.manifest.metadata_source.sheet == "Trials"
+    assert screen._preview.columnCount() == 2
+    assert screen._combos["session_id"].findText("sid") >= 0  # the Trials columns are offered
+
+
+def test_reopened_project_restores_the_chosen_sheet(qtbot, tmp_path) -> None:
+    from track2data.core.hashing import file_sha256
+    from track2data.core.models import MappingRule, MetadataSource
+    from ui.metadata_screen import MetadataScreen
+
+    path = _book(tmp_path, _SHEETS)
+    store = _store_with_sessions(tmp_path, ["s1"])
+    screen = MetadataScreen(store)
+    qtbot.addWidget(screen)
+    screen.show()
+    store.update_metadata_source(
+        MetadataSource(path=path, sha256=file_sha256(path), sheet="Trials")
+    )
+    store.update_mapping(MappingRule(rules={"session_id": "sid", "treatment": "cond"}))
+    assert screen._sheet_row.isVisible()
+    assert screen._sheet_combo.currentText() == "Trials"
+    assert screen._combos["treatment"].currentText() == "cond"
+    assert "1 of 1 sessions matched" in screen._match_label.text()

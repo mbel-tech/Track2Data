@@ -327,7 +327,7 @@ class Engine:
         from track2data.metadata.loader import load
         from track2data.metadata.mapping import apply_mapping
 
-        raw = load(src.path)
+        raw = load(src.path, src.sheet)
         mapped = apply_mapping(raw, rule)
         session_ids = [ref.session_id for ref in self._manifest.sessions]
         return match(session_ids, mapped, rule)

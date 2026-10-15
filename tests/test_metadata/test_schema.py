@@ -246,3 +246,121 @@ def test_join_key_column_absent_from_dataframe() -> None:
     rule = MappingRule(join_keys=["video_id"])
     result = match(["vid_42"], df, rule)
     assert "vid_42" in result.unmatched_sessions
+
+
+# ── Excel sheets ─────────────────────────────────────────────────────────────
+
+
+def _workbook(path: Path, sheets: dict[str, list[list[str]]]) -> Path:
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, rows in sheets.items():
+        ws = wb.create_sheet(name)
+        for row in rows:
+            ws.append(row)
+    wb.save(path)
+    return path
+
+
+TWO_SHEETS = {
+    "Notes": [["note"], ["read me"]],
+    "Trials": [["Session ID", "Treatment"], ["s1", "ctrl"], ["s2", "drug"]],
+}
+
+
+def test_load_xlsx_defaults_to_the_first_sheet(tmp_path: Path) -> None:
+    from track2data.metadata.loader import load
+
+    df = load(_workbook(tmp_path / "m.xlsx", TWO_SHEETS))
+    assert list(df.columns) == ["note"]
+
+
+def test_load_xlsx_reads_a_named_sheet(tmp_path: Path) -> None:
+    from track2data.metadata.loader import load
+
+    df = load(_workbook(tmp_path / "m.xlsx", TWO_SHEETS), sheet="Trials")
+    assert list(df.columns) == ["session id", "treatment"]
+    assert df["treatment"].tolist() == ["ctrl", "drug"]
+
+
+def test_an_unknown_sheet_name_lists_the_available_ones(tmp_path: Path) -> None:
+    from track2data.metadata.loader import load
+
+    path = _workbook(tmp_path / "m.xlsx", TWO_SHEETS)
+    with pytest.raises(ValueError, match="Notes, Trials"):
+        load(path, sheet="Missing")
+
+
+def test_list_sheets_of_a_csv_is_empty(tmp_path: Path) -> None:
+    from track2data.metadata.loader import list_sheets
+
+    csv = tmp_path / "m.csv"
+    csv.write_text("a,b\n1,2\n")
+    assert list_sheets(csv) == []
+    assert list_sheets(_workbook(tmp_path / "m.xlsx", TWO_SHEETS)) == ["Notes", "Trials"]
+
+
+def test_an_old_xls_file_is_refused_with_a_clear_message(tmp_path: Path) -> None:
+    from track2data.metadata.loader import list_sheets, load
+
+    old = tmp_path / "old.xls"
+    old.write_bytes(b"\xd0\xcf\x11\xe0")
+    for call in (load, list_sheets):
+        with pytest.raises(ValueError, match=r"\.xlsx"):
+            call(old)
+
+
+def test_preview_keeps_the_stored_header_case(tmp_path: Path) -> None:
+    from track2data.metadata.loader import preview
+
+    headers, rows = preview(_workbook(tmp_path / "m.xlsx", TWO_SHEETS), "Trials")
+    assert headers == ["Session ID", "Treatment"]
+    assert rows == [["s1", "ctrl"], ["s2", "drug"]]
+
+
+# ── MetadataSource.sheet and the project hash ────────────────────────────────
+
+
+def _manifest(**source):
+    from datetime import UTC, datetime
+
+    from track2data.core.models import MetadataSource, ProjectManifest
+
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+    return ProjectManifest(
+        project_name="p",
+        created_at=t,
+        updated_at=t,
+        metadata_source=MetadataSource(path=Path("meta.csv"), sha256="ab" * 32, **source),
+    )
+
+
+def test_a_manifest_without_a_sheet_keeps_its_hash_and_json() -> None:
+    manifest = _manifest()
+    assert "sheet" not in manifest.model_dump()["metadata_source"]
+    assert (
+        '"metadata_source":{"path":"meta.csv","sha256":"' + "ab" * 32 + '"}'
+        in manifest.model_dump_json()
+    )
+    # Hash pinned on the dump a manifest without the field produced before it existed.
+    import hashlib
+    import json
+
+    data = manifest.model_dump(exclude={"created_at", "updated_at", "run_log_path"})
+    legacy = json.dumps(data, sort_keys=True, default=str)
+    assert '"sheet"' not in legacy
+    assert manifest.project_hash() == hashlib.sha256(legacy.encode()).hexdigest()[:16]
+
+
+def test_a_chosen_sheet_is_saved_and_changes_the_hash() -> None:
+    from track2data.core.models import ProjectManifest
+
+    plain, chosen = _manifest(), _manifest(sheet="Trials")
+    assert chosen.project_hash() != plain.project_hash()
+    assert '"sheet":"Trials"' in chosen.model_dump_json()
+    again = ProjectManifest.model_validate_json(chosen.model_dump_json())
+    assert again.metadata_source.sheet == "Trials"
+    assert again.project_hash() == chosen.project_hash()
+    old = ProjectManifest.model_validate_json(plain.model_dump_json())
+    assert old.metadata_source.sheet is None

@@ -1239,3 +1239,11 @@ could not be re-added, while the store would have accepted it.
 **Evidence:** a table-format file written by pandas 2.x with PyTables 3.x under key `df_with_missing`, with three-level `(scorer, bodyparts, coords)` columns, was opened with plain h5py. The group's `pandas_type` is `b'frame_table'`; `table` is a `(R,)` compound of `index` (int64) and `values_block_0` (float64, `(C,)`); `non_index_axes` unpickles to `[(1, [(scorer, bodypart, coord), ...])]` and `values_block_0_kind` to the same list of tuples. Both pickles are protocol 0 and contain only lists, tuples, strings and integers, so an unpickler that refuses every global decodes them.
 
 **Limit of the evidence:** the real sample (`DLC_single-mouse_EPM.predictions.h5`, 18485 x 24) could not be downloaded here (the host is not on this environment's network allowlist, HTTP 403), so its 18485 frames and 8 bodyparts are not re-verified. Until a run with the fixture passes, the reader is `synthetic_only`, and the real-sample tests skip when the file is absent. If the real file needs a global in its label pickle, the unpickler refuses it with `DLCH5_LABELS_REFUSED` instead of widening the allowlist silently; option (b) (an optional `hdf` extra with `tables`, behind the pickle-consent gate) is then the fallback.
+
+### D-051 · The metadata sheet is stored only once chosen, so existing project hashes do not move
+
+**Status:** accepted; implemented.
+
+**Decision:** `MetadataSource.sheet` (default None, the first sheet) is left out of the serialised manifest while it is None, by a wrap `model_serializer`. The screen stores a sheet name only for a workbook with more than one sheet. `loader.load(path, sheet)`, `list_sheets` and `preview` share one sheet check, and `.xls` is refused outright.
+
+**Why:** `project_hash` is a dump of the whole manifest, so a plain `sheet: null` field would change the hash (and the cache and run identity built on it) of every project that already has a metadata file.
