@@ -260,6 +260,9 @@ class CentreDistance(Metric):
     name = "centre_distance"
     label = "Distance from Arena Centre"
     level = "individual"
+    # Arena-plan geometry: meaningless in a side view. "unknown" stays in so a project that never
+    # declared a view keeps both metrics.
+    valid_camera_views = frozenset({"top", "unknown"})
     priority = "primary"
     requires_identity = True
     output_columns: ClassVar[list[str]] = [
@@ -1489,6 +1492,8 @@ class WallDistanceThigmotaxis(Metric):
 
     id = "IL-14"
     name = "wall_distance_thigmotaxis"
+    # As IL-3: distance to the arena boundary only makes sense in plan view.
+    valid_camera_views = frozenset({"top", "unknown"})
     label = "Wall-Distance Thigmotaxis"
     level = "individual"
     priority = "primary"

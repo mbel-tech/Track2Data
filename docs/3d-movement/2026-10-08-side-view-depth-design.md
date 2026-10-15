@@ -15,7 +15,8 @@ computed from a top-down y axis.
 - The metric is **IL-15**, not Z-10: exports bucket metrics by ID prefix and the UI by level.
   Z-10 is re-reserved for auto depth bands.
 - Camera view is project-level. A per-session override arrives with sub-project D.
-- Existing metrics are not gated by camera view in this cycle.
+- Existing metrics were not gated by camera view in this cycle. (IL-3 and IL-14 are gated to top-down and
+  unset views since D-045.)
 
 ## Design
 

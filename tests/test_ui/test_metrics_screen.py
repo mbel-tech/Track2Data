@@ -1256,3 +1256,31 @@ def test_preset_leaves_identity_needing_rows_unticked_when_every_session_is_iden
     screen.flush()
     assert store.manifest.metrics.individual == []
     assert screen.current_preset_name() == "None"
+
+
+def test_thigmotaxis_preset_leaves_greyed_side_view_rows_unticked(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    store = _make_store()
+    _set_view(store, "side")
+    screen = MetricsScreen(store=store)
+    qtbot.addWidget(screen)
+
+    for metric_id in ("IL-3", "IL-14"):
+        assert not _is_enabled(screen._ind_table.item(_row_for_id(screen._ind_table, metric_id), 0))
+    screen.apply_preset("Thigmotaxis & space use")
+    checked = set(screen._checked_ids(screen._ind_table))
+    assert not {"IL-3", "IL-14"} & checked
+
+
+def test_il3_and_il14_are_enabled_for_an_unset_or_top_view(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    for view in ("unknown", "top"):
+        store = _make_store()
+        _set_view(store, view)
+        screen = MetricsScreen(store=store)
+        qtbot.addWidget(screen)
+        for metric_id in ("IL-3", "IL-14"):
+            item = screen._ind_table.item(_row_for_id(screen._ind_table, metric_id), 0)
+            assert _is_enabled(item)

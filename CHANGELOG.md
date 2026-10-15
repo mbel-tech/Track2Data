@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **IL-3 and IL-14 are skipped on a declared side view.** The arena centre and the wall distance are plan-view quantities, so a project whose camera view is **Side view** now greys them out and skips them (decision D-045). A project that never set a view, or set Top-down, is unchanged, as are fused and native 3-D sessions.
+
 ### Fixed
 
 - **idtracker.ai pickle reader could run code.** The allowlist for `list_of_blobs.pickle` admitted every class in any module whose name starts with `numpy`, including helpers that execute code. It is now an exact list of the array-reconstruction functions numpy pickles use.

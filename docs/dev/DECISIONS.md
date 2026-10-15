@@ -820,7 +820,8 @@ preprocessing cache key, which a view never changes). *Gate.* A metric names the
 meaningful for in `Metric.valid_camera_views` (a set; `None` = any). A metric the view rules out
 is greyed, skipped with a reason that reaches the run README, and never silently computed on the
 wrong axis. *Existing metrics are deliberately not gated:* IL-3 and IL-14 assume a top-down view,
-but gating them would change what existing projects get. *IL-15, not Z-10.* Exports bucket
+but gating them would change what existing projects get. (Superseded by D-045: IL-3 and IL-14 are now
+gated to top-down and unset views.) *IL-15, not Z-10.* Exports bucket
 metrics by ID prefix and the UI by level, so an individual-level metric must be IL-xx; Z-10 is
 re-reserved for auto depth bands. *Depth.* 0 = water surface, 1 = tank floor. The water column is
 the vertical span of every main-level "+" zone pooled (not per animal like IL-3), and when there
@@ -1169,3 +1170,23 @@ Sessions screen is the only consumer); the water column stays in the preprocess 
 object already includes `apply_calibration_and_zones`. *Limits:* `flip` reverses the vertical axis only, which
 also mirrors the view from above; one origin for the water column cannot be checked from the files; no
 refraction or parallax correction.
+
+
+### D-045 · IL-3 and IL-14 are plan-view metrics: gated to top-down and unset camera views
+
+**Status:** accepted; implemented. It supersedes the sentence in D-036 that left IL-3 and IL-14 ungated.
+
+**Decision:** `CentreDistance` (IL-3) and `WallDistanceThigmotaxis` (IL-14) declare
+`valid_camera_views = {"top", "unknown"}`. On a project whose camera view is declared `side` they are greyed
+on the Metrics screen, skipped with the view reason (which reaches the run README), and left out of the
+presets. `unknown` stays in the set, so a project that never declared a view, which is every project created
+before the setting existed, keeps both metrics with the same values. A fused session counts as top-view
+whatever the project says (`Engine.camera_view_for_psess`), so fused and native 3-D sessions are unchanged;
+a native project keeps its own pixel-frame reason for these metrics, which is checked first.
+
+**Why:** the arena centre and the wall distance are defined on the plan view; on a side view the image's
+vertical axis is depth, so the numbers were computed but meant nothing. D-036 held them back only to avoid
+changing existing projects, and the `unknown` member of the set removes that cost.
+
+**Not changed:** no metric value, exported file or `project_hash` for a project with an unset or top-down
+view.

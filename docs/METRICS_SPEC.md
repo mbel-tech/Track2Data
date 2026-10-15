@@ -212,7 +212,7 @@ info-button modal (§6).
 | **Assumptions** | Arena is roughly circular or a centre point is meaningful |
 | **Warnings** | For non-circular arenas, "centre-distance" is interpretable only with a clearly defined origin. In a non-circular (e.g. rectangular) arena, centre-distance is not monotonic in distance-to-wall — a corner-hugging animal can score the same centre-distance as one near a wall's midpoint; see **IL-14** for the wall-distance-specific measure. |
 | **Parameters** | `inner_radius_fraction` (float, default 0.5). `centre` / `arena_radius` / `centres` / `arena_radii` are `derived=True` and cannot be overridden. |
-| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
+| **Availability** | Camera view top-down or not set; greyed out and skipped on a declared side view (D-045), because the arena centre is a plan-view quantity. Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 > **Where the centre comes from.** It is derived in
 > `track2data/metrics/derived.py`, not supplied by the user — a value
@@ -395,7 +395,7 @@ info-button modal (§6).
 | **Parameters** | `arena_polygon_vertices` / `arena_polygon_vertices_per_animal` are `derived=True` and cannot be overridden. `wall_contact_threshold_px` (float, px, default 20.0). |
 | **Reference** | Simon et al. 1994, Behav. Brain Res. 61(1):59-64 (thigmotaxis as an index of anxiety in mice) — DOI [10.1016/0166-4328(94)90008-6](https://doi.org/10.1016/0166-4328(94)90008-6) |
 | **Supporting references** | Schnorr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish) (DOI: 10.1016/j.bbr.2011.12.016); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031) |
-| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
+| **Availability** | Camera view top-down or not set; greyed out and skipped on a declared side view (D-045), because the distance to the arena boundary is a plan-view quantity. Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 #### IL-15 — Vertical position (depth)
 

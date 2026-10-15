@@ -532,3 +532,28 @@ def test_run_flushes_the_skip_tally_when_it_raises_or_is_cancelled(
     assert len(records) == 1
     assert "2 sessions" in records[0].getMessage()
     assert engine._skip_tally is None
+
+
+@pytest.mark.parametrize("metric_id", ["IL-3", "IL-14"])
+def test_il3_and_il14_run_on_a_fused_session_even_when_the_project_says_side(metric_id) -> None:
+    """A fused session is top-view, so the plan-view metrics keep running on it."""
+    fused = _with_depth(_make_psess(_make_session(n_frames=10, n_animals=2)))
+    engine = Engine(_manifest("side", [metric_id]))
+    assert engine.camera_view_for_psess(fused) == "top"
+    assert engine.skipped_metrics(False, fused.session, psess=fused) == {}
+
+
+@pytest.mark.parametrize("metric_id", ["IL-3", "IL-14"])
+@pytest.mark.parametrize("view", ["unknown", "top"])
+def test_il3_and_il14_are_not_skipped_for_unset_or_top_views(metric_id, view) -> None:
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest(view, [metric_id]))
+    assert metric_id not in engine.skipped_metrics(False, psess.session, psess=psess)
+
+
+@pytest.mark.parametrize("metric_id", ["IL-3", "IL-14"])
+def test_il3_and_il14_are_skipped_on_a_declared_side_view(metric_id) -> None:
+    psess = _make_psess(_make_session(n_frames=10, n_animals=2))
+    engine = Engine(_manifest("side", [metric_id]))
+    assert metric_id in engine.skipped_metrics(False, psess.session, psess=psess)
+    assert metric_id not in engine.compute_metrics(psess)

@@ -309,15 +309,17 @@ def test_compute_metrics_every_registered_metric_runs_without_crashing(
                 zone=_ids_for("zone"),
                 diagnostic=[],
             ),
-            # IL-15 is offered only for a declared side view.
-            "scene": SceneConfig(camera_view="side"),
         }
     )
-    engine = Engine(manifest)
-
-    session = engine.import_session(tiny_real_session)
-    psess = engine.preprocess(session)
-    results = engine.compute_metrics(psess)
+    # IL-15 is offered only for a declared side view and IL-3/IL-14 only for a top-down (or
+    # unset) one, so every metric is covered by running both views and taking the union.
+    results: dict[str, pd.DataFrame] = {}
+    for view in ("top", "side"):
+        view_manifest = manifest.model_copy(update={"scene": SceneConfig(camera_view=view)})
+        engine = Engine(view_manifest)
+        session = engine.import_session(tiny_real_session)
+        psess = engine.preprocess(session)
+        results.update(engine.compute_metrics(psess))
 
     # A 3-D metric (needs a fused session and a cm scale) is never offered in a 2-D project.
     expected = [mid for mid in all_ids if not metrics_registry.get(mid).requires_depth_scale]
