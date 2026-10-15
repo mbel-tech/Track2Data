@@ -1,7 +1,7 @@
 # Track2Data — Implementation Roadmap
 
 **Status:** M1–M4 complete. M5 (v1.0 release) is the only milestone left.
-**Last updated:** 2026-08-21
+**Last updated:** 2026-10-15
 
 ---
 
@@ -31,7 +31,7 @@ The engine, the GUI, and the packaging pipeline are all built and green.
 | Metadata join wired into `Engine` | ✅ Implemented |
 | Desktop GUI (`app/` + `ui/`) | ✅ Wizard wired end-to-end to the engine |
 | Standalone binaries (Windows / macOS / Linux) | ✅ Built + validated in CI |
-| Test suite | ✅ ~1760 passing (plus `r_parity` and `corpus_local` gates) |
+| Test suite | ✅ ~4990 collected (4769 passed, 219 skipped on the last full local run; plus `r_parity` and `corpus_local` gates) |
 | Preprocessed-session cache, parallel runs, in-session cancel | ✅ Implemented (D-019, D-020); parallel not yet benchmarked on the real corpus |
 | Trajectory viewer, zone tools, calibration ruler, stage status / Next gating | ✅ Implemented (D-021, D-022) |
 | User guide with screenshots (`docs/guide/`) | ✅ Generated from the real app |
@@ -116,13 +116,13 @@ re-reading why each was deferred:
 |---|---|---|
 | Z-10 | Auto depth bands: time in the top / middle / bottom third of the water column, with no zones to draw | The prerequisite shipped: the project-level `camera_view` setting (D-036) and IL-15, the continuous depth statistic. Stacked secondary-level zones already give band occupancy, latency, visits and dwell through Z-1..Z-9, so this is only a convenience. Re-reserved here because the original "vertical-position" proposal became IL-15 (an individual-level metric cannot carry a Z- prefix). |
 | GL-17 | Individual consistency / repeatability of social position | Needs repeated trials. `Metric.compute(session, cfg)` is per-session with no cross-session concept -- an architectural change, not a metric. |
-| D-11 | Effective sample size / autocorrelation-adjusted N | Viable, medium effort, no blocker -- deferred on scope alone this round. |
-| D-12 | Interpolation & gap provenance per metric | `PreprocessedSession.was_interpolated` already exists, but *per-metric* provenance requires every metric to report which frames fed it -- a change to the `Metric` contract, not one new class. |
+| D-17 | Effective sample size / autocorrelation-adjusted N | Viable, medium effort, no blocker -- deferred on scope alone this round. |
+| D-18 | Interpolation & gap provenance per metric | `PreprocessedSession.was_interpolated` already exists, but *per-metric* provenance requires every metric to report which frames fed it -- a change to the `Metric` contract, not one new class. |
 | IL-12 | Speed autocorrelation / persistence time | Viable, medium effort, no blocker -- deferred on scope alone this round. |
 | IL-13 | Bout / kinematic-state segmentation | The proposal's source (Marques et al. 2018) segmented bouts from **tail shape at ~700 fps**; citing it for a centroid-based segmenter would repeat the exact over-claim the audit flagged on IL-5's tortuosity estimator. |
 | GL-12 | Neighbour angular distribution / density map | Viable, but its natural output is a 2-D histogram, which doesn't fit the long-format `session_id \| individual_id \| metric_id \| value` schema -- needs summary scalars designed first. |
 | GL-14 | Directional correlation delay / leadership ranking | D-7 measured a **median individual-fragment length of 3 frames** on a real corpus session; lag correlation needs identity to hold across seconds, which this corpus does not support. |
-| GL-16 | Group spatial correlation length | Cavagna's method is validated on flocks of hundreds; on shoals of 5-20 animals the correlation length is not estimable. |
+| GL-20 | Group spatial correlation length | Cavagna's method is validated on flocks of hundreds; on shoals of 5-20 animals the correlation length is not estimable. |
 
 ### Done: identity-free zone metrics (SCI-02, D-016)
 
