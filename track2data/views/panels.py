@@ -213,12 +213,21 @@ def keep_animals(session: Session, keep: list[int]) -> Session:
 def apply_panel(session: Session, rect: PanelRect) -> Session:
     """Return the session cut to ``rect``, in panel coordinates (see the module docstring).
 
-    Raises ValueError when the panel does not fit inside the video.
+    Raises ValueError when the panel does not fit inside the video, or when no animal has
+    enough of its positions inside it (a session of zero animals would only fail later, with an
+    unrelated shape error or empty tables).
     """
     cov = panel_coverage(session, rect)  # also checks that the panel fits
     _, inside = _masks(session.raw_xy, rect)
     stable = session.has_stable_identities
     keep = [c.index for c in cov if is_kept(c, stable)]
+    if not keep:
+        raise ValueError(
+            f"No animal has enough of its positions inside the panel (x {rect.x:g}, "
+            f"y {rect.y:g}, {rect.width:g} x {rect.height:g}); at least "
+            f"{round(MIN_COVERAGE * 100)}% of a tracked animal's positions must fall in it. "
+            "Move or resize the panel, or check that it is placed on the right half of the video."
+        )
     if stable:
         left_out = [c.label for c in cov if not is_kept(c, stable)]
         if left_out:

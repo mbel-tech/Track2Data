@@ -95,7 +95,10 @@ def test_identity_free_has_no_fifty_percent_rule():
     inside, outside = [150, 80], [10, 10]
     raw = [[inside]] + [[outside]] * 9
     assert apply_panel(_session(raw, stable=False), PANEL).n_animals == 1
-    assert apply_panel(_session(raw, stable=True), PANEL).n_animals == 0
+    # with stable identities the 50% rule applies: no animal reaches it, and a session of zero
+    # animals is refused rather than handed on
+    with pytest.raises(ValueError, match="No animal has enough"):
+        apply_panel(_session(raw, stable=True), PANEL)
 
 
 def test_setup_points_and_roi_shift():
@@ -255,8 +258,8 @@ def test_half_open_bounds():
 def test_zero_kept_animals():
     s = _session([[[10, 10]]] * 3)
     assert panel_coverage(s, PANEL)[0].share_inside == 0.0
-    out = apply_panel(s, PANEL)
-    assert out.n_animals == 0 and out.raw_xy.shape == (3, 0, 2)
+    with pytest.raises(ValueError, match="No animal has enough"):
+        apply_panel(s, PANEL)
 
 
 def test_mismatched_per_animal_data_is_dropped():
@@ -342,3 +345,11 @@ def test_left_out_animals_are_logged(caplog):
     with caplog.at_level(logging.WARNING, logger="track2data.views.panels"):
         apply_panel(_session(raw, stable=False), PANEL)
     assert caplog.records == []
+
+
+def test_a_panel_nobody_is_in_is_refused_for_either_identity_mode():
+    outside = [10, 10]
+    raw = [[outside, outside]] * 4
+    for stable in (True, False):
+        with pytest.raises(ValueError, match="No animal has enough"):
+            apply_panel(_session(raw, stable=stable), PANEL)

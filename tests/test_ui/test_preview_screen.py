@@ -634,8 +634,12 @@ def test_load_trajectory_data_fills_crop_from_the_refs_panel(
 
     store = _trajectory_store(tmp_path, tiny_real_session)
     assert load_trajectory_data(store.manifest, tiny_real_session.name, None).crop is None
-    panel = PanelRect(x=0, y=0, width=10, height=10)
+    from track2data.api import Engine
+
     ref = store.manifest.sessions[0]
+    video = Engine(store.manifest).import_ref(ref).video
+    # A panel the animals are in (the whole frame); one nobody is in is refused outright.
+    panel = PanelRect(x=0, y=0, width=video.width_px, height=video.height_px)
     store.manifest.sessions[0] = ref.model_copy(update={"panel": panel})
     data = load_trajectory_data(store.manifest, tiny_real_session.name, None)
     assert data.crop == panel
