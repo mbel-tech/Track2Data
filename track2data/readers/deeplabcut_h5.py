@@ -325,4 +325,4 @@ def _has_csv_twin(path: Path, index: ScanIndex, peek: Peeker) -> bool:
     if twin is None or twin.is_dir or twin.cloud_only:
         return False
     lines = peek.text_lines(twin.path, 5)
-    return bool(lines) and _parse_header(lines) is not None
+    return lines is not None and _parse_header(lines) is not None
