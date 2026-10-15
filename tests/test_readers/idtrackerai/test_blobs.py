@@ -124,6 +124,33 @@ class TestAllowlistUnpickler:
         with pytest.raises(pickle.UnpicklingError, match="not in the allowlist"):
             _AllowlistUnpickler(io.BytesIO(data)).load()
 
+    def test_refuses_code_executing_numpy_helpers(self) -> None:
+        """A module-prefix match on 'numpy' once admitted
+        numpy.testing._private.utils.runstring (exec)."""
+        import io
+
+        payload = (
+            b"cnumpy.testing._private.utils\nrunstring\n"
+            b"(S'raise SystemExit(99)'\n(dtR."
+        )
+        with pytest.raises(pickle.UnpicklingError, match="not in the allowlist"):
+            _AllowlistUnpickler(io.BytesIO(payload)).load()
+
+    @pytest.mark.parametrize(
+        "obj",
+        [
+            np.arange(6, dtype=np.float64).reshape(2, 3),
+            np.array([1, 2], dtype=np.int32),
+            np.float64(1.5),
+            np.array([("a", 1)], dtype=[("n", "U1"), ("v", "i4")]),
+        ],
+    )
+    def test_still_loads_numpy_arrays_and_scalars(self, obj) -> None:
+        import io
+
+        back = _AllowlistUnpickler(io.BytesIO(pickle.dumps(obj))).load()
+        assert np.array_equal(back, obj)
+
     def test_loads_real_pickle_without_idtrackerai_installed(
         self, tmp_path: Path, fake_idtrackerai_classes
     ) -> None:

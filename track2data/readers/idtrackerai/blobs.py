@@ -68,15 +68,33 @@ class _BlobStub:
             self.__dict__["_state"] = state
 
 
+# Exact (module, name) pairs needed to reconstruct pickled ndarrays and numpy
+# scalars. numpy 1.x pickles under ``numpy.core``, numpy 2.x under
+# ``numpy._core``. A module-prefix match would also admit code-executing
+# helpers such as ``numpy.testing._private.utils.runstring``.
+_NUMPY_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
+    (mod, name)
+    for mod in ("numpy.core.multiarray", "numpy._core.multiarray")
+    for name in ("_reconstruct", "scalar")
+) | frozenset(
+    {
+        ("numpy", "ndarray"),
+        ("numpy", "dtype"),
+        ("numpy.core.numeric", "_frombuffer"),
+        ("numpy._core.numeric", "_frombuffer"),
+    }
+)
+
+
 class _AllowlistUnpickler(pickle.Unpickler):
-    """Refuses every class except idtrackerai.* (stubbed) and a small
+    """Refuses every class except idtrackerai.* (stubbed) and an exact
     numpy allowlist needed to reconstruct the pickled arrays. More
     restrictive than a bare pickle.load(), not less."""
 
     def find_class(self, module: str, name: str) -> Any:
         if module.startswith("idtrackerai"):
             return _BlobStub
-        if module.startswith("numpy"):
+        if (module, name) in _NUMPY_ALLOWLIST:
             return super().find_class(module, name)
         raise pickle.UnpicklingError(
             f"Refusing to unpickle {module}.{name} (not in the allowlist)."
