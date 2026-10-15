@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **idtracker.ai pickle reader could run code.** The allowlist for `list_of_blobs.pickle` admitted every class in any module whose name starts with `numpy`, including helpers that execute code. It is now an exact list of the array-reconstruction functions numpy pickles use.
+- **Z-5 no longer invents an exit at a tracking-interval gap.** A stay in a zone that continued across two tracking intervals was reported as enter, exit, enter, with the exit on the separator row between them. Entry/exit counts, Z-6 and Z-9 were inflated for sessions tracked in separate intervals.
+- **Cache key includes the identity-free override.** Changing a session's identity-free setting now invalidates its cached preprocessing instead of serving the old gap-bridging.
+- **Binned exports.** The long table keeps `bin_index`, `bin_start_s` and `bin_end_s` as identifiers rather than melting them into measurements, and merging a binned metric after a whole-session one no longer drops its bin boundaries.
+- **idtracker.ai v5 reader** raises `VIDEO_FPS_MISSING` when the frame rate is in neither `video_object.npy` nor the session json, instead of assuming 1 fps. A real 1 fps recording is no longer mistaken for "missing".
+- **DeepLabCut multi-animal files with positional names** (`ind1`, `ind2`, ...) are declared identity-free, as SLEAP files already were, so per-individual metrics are skipped for them.
+- **Calibration page** offers inches and keeps whatever unit label the project has instead of rewriting it to the first choice on Apply.
+- **`track2data run --workers N`** now exists; the Processing page's headless command used it before the option did, and adds `--cache-dir` when a cache is in use.
+- **Export page** asks before overwriting after each export, not only when the folder is first chosen; the default folder moves on to a fresh timestamp.
+- **Metadata join** matches numeric session or key columns (trial numbers) against folder names.
+- **Panels:** a panel that no animal is in is refused with a message instead of producing a session of zero animals.
+- **Zones CSV** keeps each ROI's `+`/`-` sign, same-named polygons and the source resolution through save and load (older four-column files still load); `flip_orientation` keeps them too.
+- **Removing a session** drops its located-video override, so a later session with the same name does not inherit it.
+
 ## [0.3.0] — 2026-10-13
 
 ### Added

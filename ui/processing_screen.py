@@ -386,7 +386,8 @@ class ProcessingScreen(QWidget):
         name = "<project>"
         if self._store is not None and self._store.manifest is not None:
             name = self._store.manifest.project_name
-        command = f"track2data run {shlex.quote(name + '.t2d.json')} --workers {self._workers.value()}"
+        project_file = shlex.quote(f"{name}.t2d.json")
+        command = f"track2data run {project_file} --workers {self._workers.value()}"
         cache_dir = self._store.cache_dir if self._store is not None else None
         if cache_dir is not None:
             command += f" --cache-dir {shlex.quote(str(cache_dir))}"
