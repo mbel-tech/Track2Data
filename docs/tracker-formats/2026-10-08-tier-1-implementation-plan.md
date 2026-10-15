@@ -59,8 +59,8 @@ layouts, `.slp` projects (the scan names them and says to export the analysis fi
 - `dense_from_long` / `dense_from_segments` and `classify_identity_regime`: no Tier 1 reader needs
   them (DeepLabCut and SLEAP are already dense, by frame). They arrive with the first reader that
   does (Ctrax / TRex, Tier 2 and 4), so they are written against a real file.
-- `probe_video` (PyAV, to prefill fps and frame size): optional, arrives with the dialog work in
-  T1-2 if the metadata pickle (G-meta) does not already answer it.
+- `probe_video` (PyAV, to prefill fps and frame size): **built** (D-047), behind the import dialog's
+  "Read from video…" button.
 - A long-form export of the skeleton: stored only, as decided.
 
 **Decisions recorded.**

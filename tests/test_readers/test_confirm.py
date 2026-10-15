@@ -165,6 +165,48 @@ class TestOptions:
         assert draft.options == {"fps": 25.0}
         assert draft.option_source("fps") == "user"
 
+    def test_prefill_from_video_sets_values_with_source_video_and_leaves_user_values_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from track2data.readers import confirm
+        from track2data.readers.video_meta import VideoProbe
+
+        monkeypatch.setattr(confirm, "probe_video", lambda p: VideoProbe(25.0, 640, 480, 100))
+        height = ReaderParameter(name="height_px", label="Frame height", kind="int", required=True)
+        draft = ConfirmDraft(result((detection("alpha", parameters=(FPS, SIZE, height)),)))
+        draft.set_option("fps", 30.0)  # typed by the user: the video must not overwrite it
+        probe = draft.prefill_from_video(Path("clip.mp4"))
+        assert probe is not None
+        assert draft.options == {"fps": 30.0, "width_px": 640, "height_px": 480}
+        assert draft.option_source("fps") == "user"
+        assert draft.option_source("width_px") == draft.option_source("height_px") == "video"
+
+    def test_an_unreadable_video_changes_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from track2data.readers import confirm
+
+        monkeypatch.setattr(confirm, "probe_video", lambda p: None)
+        draft = ConfirmDraft(result((detection("alpha", parameters=(FPS,)),)))
+        assert draft.prefill_from_video(Path("clip.mp4")) is None
+        assert draft.options == {}
+
+    def test_options_the_reader_does_not_have_are_not_filled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from track2data.readers import confirm
+        from track2data.readers.video_meta import VideoProbe
+
+        monkeypatch.setattr(confirm, "probe_video", lambda p: VideoProbe(25.0, 640, 480, None))
+        draft = ConfirmDraft(result((detection("alpha", parameters=(FPS,)),)))
+        draft.prefill_from_video(Path("clip.mp4"))
+        assert draft.options == {"fps": 25.0}
+
+    def test_a_video_probe_is_only_offered_when_the_reader_asks_for_fps_or_size(self) -> None:
+        assert ConfirmDraft(result((detection("alpha", parameters=(FPS,)),))).accepts_video_probe
+        assert not ConfirmDraft(result((detection("alpha"),))).accepts_video_probe
+        assert not ConfirmDraft(
+            result((detection("alpha", parameters=(ARENA,)),))
+        ).accepts_video_probe
+
     def test_clearing_a_value_leaves_a_required_option_missing_again(self) -> None:
         proposed = {"fps": ProposedValue(value=30.0, source="file")}
         draft = ConfirmDraft(result((detection("alpha", parameters=(FPS,), proposed=proposed),)))

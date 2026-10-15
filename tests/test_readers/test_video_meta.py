@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from track2data.readers.video_meta import extract_frame, extract_frame_rgb
 
 # ── real-environment tests (no mocking) ─────────────────────────────────────
@@ -136,3 +138,68 @@ class TestExtractFrameRgb:
         failing = _make_fake_av(frames=[], open_side_effect=RuntimeError("bad file"))
         with patch.dict(sys.modules, {"av": failing}):
             assert extract_frame_rgb(tmp_path / "v.mp4") is None
+
+
+class TestProbeVideo:
+    def _stream(self, **kw):
+        from fractions import Fraction
+
+        values = {
+            "average_rate": Fraction(25), "guessed_rate": None, "width": 640, "height": 480,
+            "frames": 500,
+        }
+        values.update(kw)
+        stream = MagicMock(name="video_stream")
+        for name, value in values.items():
+            setattr(stream, name, value)
+        return stream
+
+    def _av(self, stream) -> MagicMock:
+        fake_av = _make_fake_av(frames=[])
+        fake_av.open.return_value.streams.video = [stream]
+        return fake_av
+
+    def test_probe_video_without_av_returns_none(self, tmp_path: Path) -> None:
+        from track2data.readers.video_meta import probe_video
+
+        with patch.dict(sys.modules, {"av": None}):
+            assert probe_video(tmp_path / "v.mp4") is None
+
+    def test_probe_video_of_a_missing_file_returns_none(self, tmp_path: Path) -> None:
+        from track2data.readers.video_meta import probe_video
+
+        failing = _make_fake_av(frames=[], open_side_effect=FileNotFoundError("gone"))
+        with patch.dict(sys.modules, {"av": failing}):
+            assert probe_video(tmp_path / "gone.mp4") is None
+
+    def test_probe_video_reads_fps_and_size_from_the_first_video_stream(
+        self, tmp_path: Path
+    ) -> None:
+        from track2data.readers.video_meta import VideoProbe, probe_video
+
+        with patch.dict(sys.modules, {"av": self._av(self._stream())}):
+            assert probe_video(tmp_path / "v.mp4") == VideoProbe(25.0, 640, 480, 500)
+
+    def test_the_frame_count_is_none_when_the_container_has_none(self, tmp_path: Path) -> None:
+        from track2data.readers.video_meta import probe_video
+
+        with patch.dict(sys.modules, {"av": self._av(self._stream(frames=0))}):
+            assert probe_video(tmp_path / "v.mp4").n_frames is None
+
+    def test_a_guessed_rate_is_used_when_there_is_no_average_rate(self, tmp_path: Path) -> None:
+        from fractions import Fraction
+
+        from track2data.readers.video_meta import probe_video
+
+        stream = self._stream(average_rate=None, guessed_rate=Fraction(30000, 1001))
+        with patch.dict(sys.modules, {"av": self._av(stream)}):
+            assert probe_video(tmp_path / "v.mp4").fps == pytest.approx(29.97, abs=0.01)
+
+    @pytest.mark.parametrize(
+        "bad", [{"average_rate": None}, {"width": 0}, {"height": 0}], ids=["fps", "w", "h"]
+    )
+    def test_a_zero_fps_or_zero_size_stream_returns_none(self, tmp_path: Path, bad) -> None:
+        from track2data.readers.video_meta import probe_video
+
+        with patch.dict(sys.modules, {"av": self._av(self._stream(**bad))}):
+            assert probe_video(tmp_path / "v.mp4") is None

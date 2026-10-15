@@ -306,3 +306,58 @@ class TestWhenNothingWasRecognised:
     def test_it_names_the_software_this_version_can_read(self, qtbot) -> None:
         dialog = make(qtbot)
         assert "idtracker.ai" in dialog.empty_label.text()
+
+
+# ── Read from video ──────────────────────────────────────────────────────────
+
+
+def _fps_size_detection():
+    from track2data.readers.params import ReaderParameter
+
+    params = tuple(
+        ReaderParameter(name=n, label=n, kind=k, required=True)
+        for n, k in (("fps", "float"), ("width_px", "int"), ("height_px", "int"))
+    )
+    return detection("alpha", parameters=params)
+
+
+def test_the_read_from_video_button_is_disabled_when_no_reader_needs_fps_or_size(qtbot) -> None:
+    assert not make(qtbot, (detection("alpha"),)).probe_button.isEnabled()
+    assert make(qtbot, (_fps_size_detection(),)).probe_button.isEnabled()
+
+
+def test_choosing_a_video_fills_the_options_and_enables_add(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from track2data.readers import confirm
+    from track2data.readers.video_meta import VideoProbe
+
+    monkeypatch.setattr(confirm, "probe_video", lambda p: VideoProbe(25.0, 640, 480, 10))
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("/data/clip.mp4", ""))
+    )
+    dialog = make(qtbot, (_fps_size_detection(),))
+    assert not dialog.ok_button.isEnabled()
+    dialog.probe_button.click()
+    assert dialog.draft.options == {"fps": 25.0, "width_px": 640, "height_px": 480}
+    assert dialog.draft.option_source("fps") == "video"
+    assert dialog.ok_button.isEnabled()
+
+
+def test_a_video_that_cannot_be_read_warns_and_keeps_the_values(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from track2data.readers import confirm
+
+    warnings: list[str] = []
+    monkeypatch.setattr(confirm, "probe_video", lambda p: None)
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("/data/clip.mp4", ""))
+    )
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: warnings.append(a[2]) or None)
+    )
+    dialog = make(qtbot, (_fps_size_detection(),))
+    dialog.probe_button.click()
+    assert dialog.draft.options == {}
+    assert warnings and "frame rate" in warnings[0]

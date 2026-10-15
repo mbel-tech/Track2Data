@@ -1206,3 +1206,10 @@ could not be re-added, while the store would have accepted it.
 
 **Why:** two copies of the rule had drifted. A panel is another part of the video, so it is another session.
 
+### D-047 · Frame rate and size can be read from a chosen video, never silently
+
+**Status:** accepted; implemented.
+
+**Decision:** `readers/video_meta.probe_video(path)` returns `VideoProbe(fps, width_px, height_px, n_frames)` or None (never raises; None for missing `av`, an unopenable file, or non-positive fps/size). The import dialog's "Read from video…" button, enabled only when the reader has an `fps`, `width_px` or `height_px` option, calls `ConfirmDraft.prefill_from_video`, which sets those options with source "video" and never overwrites a "user"-sourced value. An unreadable video shows a warning and changes nothing.
+
+**Why:** DeepLabCut and SLEAP files carry neither value, and asking people to type them invites the silent-fps errors fixed for the v5 reader. The probe is explicit and user-triggered, so nothing is guessed.

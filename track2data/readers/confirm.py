@@ -25,6 +25,7 @@ from track2data.core.session_identity import same_session_part
 from track2data.readers.detection import Confidence, Detection
 from track2data.readers.params import ReaderParameter, ValueSource, resolve_options
 from track2data.readers.scan import FormatGroup, ScanResult
+from track2data.readers.video_meta import VideoProbe, probe_video
 
 ProblemCode = Literal[
     "NOTHING_SELECTED", "OPTION_MISSING", "OPTION_INVALID", "ID_DUPLICATE", "ID_UNSAFE"
@@ -63,6 +64,10 @@ class SessionRow:
     #: Already in the project under the same reader, so adding it again is a duplicate.
     already_added: bool
     warnings: tuple[str, ...] = ()
+
+
+#: The shared options a video file can answer.
+_VIDEO_OPTIONS = frozenset({"fps", "width_px", "height_px"})
 
 
 class ConfirmDraft:
@@ -193,6 +198,30 @@ class ConfirmDraft:
         else:
             self._values[name] = value
             self._sources[name] = "user"
+
+    @property
+    def accepts_video_probe(self) -> bool:
+        """Whether the selected reader asks for something a video can answer (frame rate, size)."""
+        names = {p.name for p in self.parameters if p.scope == "group"}
+        return bool(names & _VIDEO_OPTIONS)
+
+    def prefill_from_video(self, path: Path) -> VideoProbe | None:
+        """Fill the frame rate and frame size from the video at *path*.
+
+        Only the options this reader has, and never one the user already typed (its source is
+        "user"). The filled values carry the source "video". Returns what the video said, or
+        None when it could not be read (nothing is changed then).
+        """
+        probe = probe_video(Path(path))
+        if probe is None:
+            return None
+        answers = {"fps": probe.fps, "width_px": probe.width_px, "height_px": probe.height_px}
+        group = {p.name for p in self.parameters if p.scope == "group"}
+        for name, value in answers.items():
+            if name in group and self._sources.get(name) != "user":
+                self._values[name] = value
+                self._sources[name] = "video"
+        return probe
 
     def set_session_option(self, session_id: str, name: str, value: Any) -> None:
         """Set an option that differs per session (which arena); ``None`` clears it."""

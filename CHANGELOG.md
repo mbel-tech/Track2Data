@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Import: "Read from video…"** fills the frame rate and frame size for readers that need them (DeepLabCut, SLEAP) from a video you choose (needs the optional `av` package). It never overwrites a value you typed, and an unreadable video changes nothing.
 - **Zones: the video's first frame is the backdrop** when a session has no background image (and no panel). It is used only when the decoded frame is exactly the declared video size, so zones are never drawn in the wrong pixel space; `extract_frame_rgb` returns the frame with its decoded size.
 
 ### Changed

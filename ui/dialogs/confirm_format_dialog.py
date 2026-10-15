@@ -20,6 +20,7 @@ Three rules for a dialog the user is expected to trust:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -27,9 +28,11 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -150,6 +153,18 @@ class ConfirmFormatDialog(QDialog):
         self._options_form = ReaderOptionsForm([])
         self._options_holder.addWidget(self._options_form)
         content.addLayout(self._options_holder)
+
+        probe_row = QHBoxLayout()
+        self.probe_button = QPushButton("Read from video…")
+        self.probe_button.setProperty("role", "outline")
+        self.probe_button.setAutoDefault(False)
+        self.probe_button.setToolTip(
+            "Pick the recorded video to fill in its frame rate and frame size."
+        )
+        self.probe_button.clicked.connect(self._on_probe_clicked)
+        probe_row.addWidget(self.probe_button)
+        probe_row.addStretch()
+        content.addLayout(probe_row)
 
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["", "Session", "Source", "Note"])
@@ -282,6 +297,26 @@ class ConfirmFormatDialog(QDialog):
         self._options_form.set_values(draft.options, sources)
         self._options_form.valueChanged.connect(self._on_option_edited)
         self._options_form.setVisible(not self._options_form.is_empty)
+        self.probe_button.setEnabled(draft.accepts_video_probe)
+
+    def _on_probe_clicked(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Choose the recorded video", "", "Video files (*.mp4 *.avi *.mov *.mkv *.m4v)"
+        )
+        if not path:
+            return
+        probe = self._draft.prefill_from_video(Path(path))
+        if probe is None:
+            QMessageBox.warning(
+                self,
+                "Read from video",
+                "The frame rate and size could not be read from that file. Reading videos needs "
+                "the optional video support (pip install track2data[video]); otherwise type the "
+                "values in.",
+            )
+            return
+        self._rebuild_options()
+        self._update_ok()
 
     def _fill_table(self) -> None:
         rows = self._draft.rows
