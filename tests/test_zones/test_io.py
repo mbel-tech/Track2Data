@@ -82,6 +82,59 @@ def test_csv_file_has_header(tmp_path: Path) -> None:
     assert "roi_name" in first_line or "name" in first_line
 
 
+def test_csv_roundtrip_keeps_holes_apart_from_their_outline(tmp_path: Path) -> None:
+    """An arena and its exclusion hole share a name; merging them made the hole additive."""
+    outline = [(0, 0), (100, 0), (100, 100), (0, 100)]
+    hole = [(40, 40), (60, 40), (60, 60), (40, 60)]
+    zs = ZoneSet(
+        rois=[
+            ROI(name="arena", level="main", vertices=outline, sign="+"),
+            ROI(name="arena", level="main", vertices=hole, sign="-"),
+            ROI(name="arena", level="main", vertices=[(200, 0), (300, 0), (300, 50)], sign="+"),
+        ],
+        source_width_px=1920,
+        source_height_px=1080,
+    )
+    path = tmp_path / "zones.csv"
+    save_zones_csv(zs, path)
+    loaded = load_zones_csv(path)
+    assert [(r.name, r.sign, len(r.vertices)) for r in loaded.rois] == [
+        ("arena", "+", 4),
+        ("arena", "-", 4),
+        ("arena", "+", 3),
+    ]
+    assert loaded.rois[1].vertices == [(float(x), float(y)) for x, y in hole]
+    assert (loaded.source_width_px, loaded.source_height_px) == (1920, 1080)
+
+
+def test_csv_without_source_size_roundtrips_to_none(tmp_path: Path) -> None:
+    zs = ZoneSet(rois=[ROI(name="A", vertices=[(0, 0), (1, 0), (1, 1)])])
+    path = tmp_path / "zones.csv"
+    save_zones_csv(zs, path)
+    loaded = load_zones_csv(path)
+    assert loaded.source_width_px is None and loaded.source_height_px is None
+
+
+def test_legacy_four_column_csv_still_loads(tmp_path: Path) -> None:
+    path = tmp_path / "old.csv"
+    path.write_text(
+        "roi_name,level,vertex_x,vertex_y\nA,main,0,0\nA,main,1,0\nA,main,1,1\n",
+        encoding="utf-8",
+    )
+    loaded = load_zones_csv(path)
+    assert len(loaded.rois) == 1
+    assert loaded.rois[0].sign == "+" and len(loaded.rois[0].vertices) == 3
+
+
+def test_csv_with_a_bad_sign_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "bad.csv"
+    path.write_text(
+        "roi_name,level,vertex_x,vertex_y,sign\nA,main,0,0,x\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="sign"):
+        load_zones_csv(path)
+
+
 def test_load_csv_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         load_zones_csv(tmp_path / "nonexistent.csv")
