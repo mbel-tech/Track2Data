@@ -822,8 +822,13 @@ class ProjectStore(QObject):
             if p.top_session_id in kept and p.side_session_id in kept
         ]
         pairs_dropped = len(pairs) != len(self._manifest.view_pairs)
+        # A video located for a removed session must not carry over to a later session that
+        # happens to get the same id (the default id is the folder name).
+        overrides = {
+            sid: path for sid, path in self._manifest.video_overrides.items() if sid in kept
+        }
         self._manifest = self._manifest.model_copy(
-            update={"sessions": list(sessions), "view_pairs": pairs}
+            update={"sessions": list(sessions), "view_pairs": pairs, "video_overrides": overrides}
         )
         self.sessionsChanged.emit()
         if pairs_dropped:

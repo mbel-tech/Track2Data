@@ -1453,3 +1453,21 @@ def test_fusion_survives_a_panel_change(qtbot, tmp_path: Path, store) -> None:
     kept = store.manifest.view_pairs[0]
     assert kept.fish_map == {} and not kept.same_ids
     assert kept.fusion == _fusion()
+
+
+def test_removing_a_session_drops_its_video_override(store, tmp_path: Path) -> None:
+    """A later session that gets the same id must not inherit the removed one's video."""
+    video = tmp_path / "located.avi"
+    video.write_bytes(b"x")
+    a = SessionRef(session_id="trial1", folder=tmp_path / "trial1", sha256="")
+    b = SessionRef(session_id="trial2", folder=tmp_path / "trial2", sha256="")
+    store.update_sessions([a, b])
+    store.set_video_path("trial1", video)
+    store.set_video_path("trial2", video)
+    assert set(store.manifest.video_overrides) == {"trial1", "trial2"}
+
+    store.update_sessions([b])
+    assert set(store.manifest.video_overrides) == {"trial2"}
+
+    store.update_sessions([b, a])  # a new folder that is also called trial1
+    assert "trial1" not in store.manifest.video_overrides
