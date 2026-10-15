@@ -5,6 +5,8 @@ and recorded in its summary but never block it:
 
 * A reader written from a format's documentation alone (``verification == "synthetic_only"``)
   may disagree with the real files in ways only real output reveals (DECISIONS D-012).
+* A tracker that reports fragments (a Ctrax file with one slot per track id) leaves most slots
+  empty, and group metrics skip every frame with a missing animal.
 * The default "bodylength" calibration needs a body length, which most trackers do not report.
   Without one it is skipped and the session is exported in pixels only.
 """
@@ -17,11 +19,13 @@ from track2data.core.session_consistency import SessionSummary
 from track2data.readers import find_reader
 
 _LISTED = 4
+#: Warn when at least this share of a multi-animal session's (frame, animal) slots is empty.
+FRAGMENTED_NAN_FRACTION = 0.5
 
 
 def reader_advisories(summaries: Sequence[SessionSummary]) -> list[str]:
     """One plain-language warning per caveat, naming the sessions it applies to."""
-    return [*_unverified(summaries), *_missing_body_length(summaries)]
+    return [*_unverified(summaries), *_missing_body_length(summaries), *_fragmented(summaries)]
 
 
 def _unverified(summaries: Sequence[SessionSummary]) -> list[str]:
@@ -51,6 +55,29 @@ def _missing_body_length(summaries: Sequence[SessionSummary]) -> list[str]:
         "skipped for them and their columns stay in pixels. Affected sessions, by reader: "
         f"{detail}. To get real-unit columns, choose 'scalar' calibration and give pixels per "
         "cm (or 'session' calibration, for sessions that carry their own length unit)."
+    ]
+
+
+def _fragmented(summaries: Sequence[SessionSummary]) -> list[str]:
+    fragmented = [
+        s
+        for s in summaries
+        if s.n_animals > 1
+        and s.nan_slot_fraction is not None
+        and s.nan_slot_fraction >= FRAGMENTED_NAN_FRACTION
+    ]
+    if not fragmented:
+        return []
+    detail = ", ".join(
+        f"{s.session_id} ({s.nan_slot_fraction:.0%} of animal slots empty)"
+        for s in fragmented[:_LISTED]
+    )
+    more = f", +{len(fragmented) - _LISTED} more" if len(fragmented) > _LISTED else ""
+    return [
+        "Most animal slots are empty in some sessions, which usually means the tracker reported "
+        "track fragments rather than continuous animals. Group metrics skip every frame in which "
+        "any animal is missing, so they will see few usable frames. Sessions: "
+        f"{detail}{more}. For Ctrax files, the 'top_n' option keeps only the longest tracks."
     ]
 
 

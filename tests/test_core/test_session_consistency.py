@@ -82,6 +82,28 @@ def test_from_session_reads_the_session_not_the_manifest() -> None:
     assert summary.is_calibrated
 
 
+def test_from_session_computes_the_nan_slot_fraction() -> None:
+    xy = np.zeros((10, 2, 2), dtype=np.float64)
+    xy[:5, 1] = np.nan  # animal 1 is missing for 5 frames
+    xy[7, 0] = np.nan  # animal 0 for one more: 6 of the 20 slots in all
+    session = Session(
+        session_id="frag",
+        folder=".",
+        reader="idtrackerai_v5",
+        video=VideoInfo(fps=30.0, n_frames=10, width_px=800, height_px=600),
+        n_animals=2,
+        trajectory_variant="with_gaps",
+        has_stable_identities=True,
+        raw_xy=xy,
+    )
+    summary = SessionSummary.from_session(session, calibration_mode="scalar")
+    assert summary.nan_slot_fraction == pytest.approx(6 / 20)
+
+
+def test_a_summary_built_without_the_field_has_none() -> None:
+    assert _summary().nan_slot_fraction is None
+
+
 # ── heterogeneity_warnings ────────────────────────────────────────────────────
 
 

@@ -19,7 +19,9 @@ cannot be misread as 193 animals; and the choice is recorded (`reader_options`) 
 export can see it. A file whose slots would not fit in memory (over 1 GiB of positions) is refused
 with a request to set `top_n` rather than run out of memory.
 
-**Left for the Tier 2 follow-up.** Group metrics that skip frames with any NaN will see mostly-NaN
+**Built later (pre-flight advisory).** `readers/advisories._fragmented` warns, in `track2data validate` and the run README, when at least half the animal slots of a multi-animal session are empty, and points to `top_n`. The GUI has no screen that shows these advisories yet.
+
+**Was left for the Tier 2 follow-up.** Group metrics that skip frames with any NaN will see mostly-NaN
 slots on a fragment-heavy file. That is a property of the data, not something to hide; a pre-flight
 note saying so is a separate piece of work (it needs the advisories to know about fragmentation).
 
