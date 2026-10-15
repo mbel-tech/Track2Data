@@ -128,6 +128,35 @@ class TestObservationGaps:
         assert not events["after_gap"].any()
 
 
+class TestSeparatorRows:
+    def _with_separator(self, in_zone_rows: list[int]) -> PreprocessedSession:
+        # rows 0-9 are frames 0-9, row 10 is the separator for the unfilled gap,
+        # rows 11-20 are frames 20-29
+        n = 21
+        psess = _psess(in_zone_rows, intervals=[(0, 10), (20, 30)], n=n)
+        sep = np.zeros(n, dtype=bool)
+        sep[10] = True
+        frames = np.array([*range(10), 10, *range(20, 30)])
+        psess.frame_index = frames
+        psess.separator_mask = sep
+        psess.tracked_mask = ~sep
+        return psess
+
+    def test_no_exit_is_fabricated_on_the_separator_row(self) -> None:
+        # inside zone A for the whole of both intervals (the separator row is not in A)
+        rows = [r for r in range(21) if r != 10]
+        events = Z5EntryExitEvents().compute(self._with_separator(rows))
+        events = events.reset_index(drop=True)
+        assert list(events["event"]) == ["enter", "enter"]
+        assert list(events["frame"]) == [0, 20]
+        assert list(events["after_gap"]) == [False, True]
+
+    def test_a_real_exit_before_the_separator_is_kept(self) -> None:
+        events = Z5EntryExitEvents().compute(self._with_separator([6, 7, 8]))
+        assert list(events["event"]) == ["enter", "exit"]
+        assert list(events["frame"]) == [6, 9]
+
+
 class TestLatency:
     def test_it_is_time_since_the_start_of_tracking_and_says_where_that_is(self) -> None:
         psess = _psess(list(range(10, 20)), intervals=[(1000, 1020)])
