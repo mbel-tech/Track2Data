@@ -250,6 +250,22 @@ class TestMissingFrameRate:
         with pytest.raises(DataValidationError, match="VIDEO_FPS_MISSING"):
             reader.read(folder)
 
+    def test_a_given_frame_rate_fills_the_gap(
+        self, reader: IDTrackerAiV5Reader, tmp_path: Path
+    ) -> None:
+        folder = self._folder(tmp_path, {"frame_number": 20, "height": 9, "width": 9})
+        assert reader.read(folder, allow_pickle=True, options={"fps": 30}).video.fps == 30.0
+
+    def test_the_session_json_wins_over_a_given_frame_rate(
+        self, reader: IDTrackerAiV5Reader, tmp_path: Path
+    ) -> None:
+        import json
+
+        folder = self._folder(tmp_path, {"frame_number": 20, "height": 9, "width": 9})
+        (folder / "session.json").write_text(json.dumps({"frames_per_second": 50}))
+        video = reader.read(folder, allow_pickle=True, options={"fps": 30}).video
+        assert video.fps == 50.0
+
     def test_a_real_one_fps_recording_is_kept(
         self, reader: IDTrackerAiV5Reader, tmp_path: Path
     ) -> None:

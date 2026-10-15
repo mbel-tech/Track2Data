@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **idtracker.ai v5 sessions with no recorded frame rate can be given one.** The legacy v5 reader now takes an `fps` option (`--option fps=25`, or the Frame rate field on import), used only after `video_object.npy` and the session json have been tried. Without any of the three it still stops with `VIDEO_FPS_MISSING` rather than assuming 1 fps; the message now says how to supply it.
 - **Rescanning a folder that was split into panels** offers the whole-frame session again instead of reporting it "already in the project". The import dialog and the project store now share one duplicate rule (decision D-046); a true duplicate is still left out.
 - **idtracker.ai pickle reader could run code.** The allowlist for `list_of_blobs.pickle` admitted every class in any module whose name starts with `numpy`, including helpers that execute code. It is now an exact list of the array-reconstruction functions numpy pickles use.
 - **Z-5 no longer invents an exit at a tracking-interval gap.** A stay in a zone that continued across two tracking intervals was reported as enter, exit, enter, with the exit on the separator row between them. Entry/exit counts, Z-6 and Z-9 were inflated for sessions tracked in separate intervals.
