@@ -864,9 +864,10 @@ def test_social_preset_selects_group_metrics_and_everything_selects_all(qtbot) -
     screen.apply_preset("All metrics")
     screen.flush()
     m = store.manifest.metrics
-    # IL-15, IL-16, IL-17 and GL-16 are greyed out in a 2-D project, so the preset skips them
+    # IL-15..IL-18 and GL-16, GL-18, GL-19 are greyed out in a 2-D project, so the preset skips them
     assert len(m.individual) == 12 and len(m.group) == 13 and len(m.zone) == 9
-    assert {"IL-15", "IL-16", "IL-17"}.isdisjoint(m.individual) and "GL-16" not in m.group
+    assert {"IL-15", "IL-16", "IL-17", "IL-18"}.isdisjoint(m.individual)
+    assert {"GL-16", "GL-18", "GL-19"}.isdisjoint(m.group)
 
 
 def test_all_metrics_preset_includes_the_3d_metrics_in_a_3d_scalar_project(qtbot) -> None:
@@ -885,7 +886,8 @@ def test_all_metrics_preset_includes_the_3d_metrics_in_a_3d_scalar_project(qtbot
     screen.apply_preset("All metrics")
     screen.flush()
     m = store.manifest.metrics
-    assert {"IL-16", "IL-17"} <= set(m.individual) and "GL-16" in m.group
+    assert {"IL-16", "IL-17", "IL-18"} <= set(m.individual)
+    assert {"GL-16", "GL-18", "GL-19"} <= set(m.group)
     assert screen.current_preset_name() == "All metrics"
 
 
@@ -904,11 +906,11 @@ def test_counter_shows_selected_of_total_by_level(qtbot) -> None:
 
     screen = MetricsScreen(store=_make_store())
     qtbot.addWidget(screen)
-    assert "0 / 38" in screen._counter.text()
+    assert "0 / 41" in screen._counter.text()
     screen._ind_table.item(_row_for_id(screen._ind_table, "IL-1"), 0).setCheckState(
         Qt.CheckState.Checked
     )
-    assert "1 / 38" in screen._counter.text()
+    assert "1 / 41" in screen._counter.text()
     assert "1 individual" in screen._counter.text()
 
 

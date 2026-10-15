@@ -2061,6 +2061,101 @@ class Speed3D(Metric):
         return pd.DataFrame(records, columns=self.output_columns)
 
 
+class VerticalSpeed3D(Metric):
+    """IL-18 — Vertical speed (cm/s) of a fused top + side session, or of a native 3-D file's z."""
+
+    id = "IL-18"
+    name = "vertical_speed_3d"
+    label = "Vertical Speed (mean / median / max)"
+    level = "individual"
+    priority = "optional"
+    requires_identity = True
+    requires_depth_scale = True
+    uses_kinematics_cfg = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "individual_id",
+        # Emitted unconditionally: NaN when the session has no depth or no cm scale.
+        "mean_vertical_speed_cm_s",
+        "median_vertical_speed_cm_s",
+        "max_vertical_speed_cm_s",
+        "mean_vertical_speed_bl_s",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "Mean, median and maximum speed of each individual along the vertical axis, in "
+            "cm/s: how fast it climbs or dives, regardless of how fast it swims sideways. It is "
+            "the vertical part of IL-17 reported on its own, for a fused 3-D session (the side "
+            "view's depth times the tank height) or a native 3-D file (its absolute z)."
+        ),
+        formula_plain=(
+            "|vz| per frame, the derivative of the vertical coordinate in cm from the same "
+            "estimator and window as the pipeline's kinematics; mean/median/max over frames "
+            "where it is finite"
+        ),
+        inputs=[
+            "PreprocessedSession.depth (fused) or PreprocessedSession.z (native 3-D file)",
+            "PreprocessedSession.depth_height_cm (fused only)",
+            "PreprocessedSession.px_per_cm",
+            "KinematicsCfg (the pipeline's estimator and window)",
+        ],
+        assumptions=[
+            "The speed is unsigned (|vz|), so a climb and a dive count the same; a signed or "
+            "split climb/dive measure is not offered",
+            "Where the estimator returns NaN (the last frame of the forward-difference "
+            "estimator, a depth segment too short for the window) the frame is left out, never "
+            "counted as zero",
+            "The depth comes from a side camera at right angles to the top camera; a native "
+            "3-D file's vertical series is its absolute z, with samples outside the water "
+            "column (when one is set) left out",
+        ],
+        warnings=[
+            "Max speed is sensitive to depth noise and remaining jump artefacts.",
+            "No refraction or parallax correction. A wrong tank height scales every vertical "
+            "speed by the same factor.",
+            "Needs a cm scale for the top view; without it (or without depth) every column "
+            "is NaN.",
+        ],
+        citation="Standard kinematics",
+        supporting_references=[BJORNERAAS_2010],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """Vertical speed statistics per individual; NaN columns without depth or a cm scale.
+
+        ``cfg["kinematics"]`` is the estimator the pipeline used (the Engine supplies it); the
+        whole-session series the Engine precomputed (``session.z_speed``) wins, so a window sees
+        the whole-session estimate at its edge frames.
+        """
+        vz = session.z_speed
+        if vz is None:
+            vz = vertical_speed(session, (cfg or {}).get("kinematics") or {})
+
+        records: list[dict] = []
+        for k in range(session.n_animals):
+            mean_s = median_s = max_s = float("nan")
+            if vz is not None:
+                valid = vz[:, k][np.isfinite(vz[:, k])]
+                if len(valid) > 0:
+                    mean_s = float(np.mean(valid))
+                    median_s = float(np.median(valid))
+                    max_s = float(np.max(valid))
+            bl_cm = body_length_cm(session, k)
+            records.append(
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "individual_id": k,
+                    "mean_vertical_speed_cm_s": mean_s,
+                    "median_vertical_speed_cm_s": median_s,
+                    "max_vertical_speed_cm_s": max_s,
+                    "mean_vertical_speed_bl_s": mean_s / bl_cm if bl_cm > 0 else float("nan"),
+                }
+            )
+        return pd.DataFrame(records, columns=self.output_columns)
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 from track2data.metrics import register as _register  # noqa: E402
@@ -2080,3 +2175,4 @@ _register(WallDistanceThigmotaxis)
 _register(VerticalPosition)
 _register(PathLength3D)
 _register(Speed3D)
+_register(VerticalSpeed3D)

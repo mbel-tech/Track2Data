@@ -293,7 +293,7 @@ def test_readme_native_block_counts_the_samples_outside_the_water_column(tmp_pat
         tmp_path, WaterColumn(surface_z=0.0, floor_z=20.0), outside_samples=5
     )
     assert (
-        "| Samples outside the water column | 5 (left out of IL-15, IL-16, IL-17 and GL-16, "
+        "| Samples outside the water column | 5 (left out of IL-15, IL-16, IL-17, IL-18 and GL-16, "
         "never clipped) |" in text
     )
 

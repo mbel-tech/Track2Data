@@ -1247,3 +1247,12 @@ could not be re-added, while the store would have accepted it.
 **Decision:** `MetadataSource.sheet` (default None, the first sheet) is left out of the serialised manifest while it is None, by a wrap `model_serializer`. The screen stores a sheet name only for a workbook with more than one sheet. `loader.load(path, sheet)`, `list_sheets` and `preview` share one sheet check, and `.xls` is refused outright.
 
 **Why:** `project_hash` is a dump of the whole manifest, so a plain `sheet: null` field would change the hash (and the cache and run identity built on it) of every project that already has a metadata file.
+
+### D-052 · IL-18, GL-18 and GL-19 reuse the 3-D helpers; GL-19 defaults to the nearest-neighbour source
+
+**Status:** accepted; implemented.
+
+**Decision:** IL-18 takes the vertical component of the 3-D velocity (`session.z_speed` for native files, otherwise `geometry3d.vertical_speed`), so it follows the session's kinematics estimator exactly as IL-17 does. GL-18 averages the distance over all animal pairs per frame using the same frame filter as GL-16 (a frame with any missing animal is skipped and counted); a single-animal session is NaN. GL-19 is the reciprocal of the mean 3-D distance, with `cohesion_source` of `nnd` (default, matching GL-6) or `iid`. GL-16, GL-18 and GL-19 share `_mean_body_length_cm` and `_frame_distances_3d`.
+
+**Why:** one frame rule and one body-length rule keep the three group metrics comparable, and the NND default keeps GL-19 the direct 3-D analogue of GL-6.
+

@@ -127,6 +127,8 @@ _EXPLICIT_UNITS: dict[str, str] = {
     # Dimensionless indices and ratios.
     "area_corrected_occupancy": "dimensionless (ratio)",
     "cohesion_index": "dimensionless (index)",
+    # 1 / a mean distance in cm: the inverse unit (GL-6 is per pixel and is left as is).
+    "cohesion_index_3d": "1/cm",
     "jacobs_d": "dimensionless (-1 to 1)",
     "left_right_turn_bias": "dimensionless (-1 to 1)",
     "mean_elongation_ratio": "dimensionless (ratio)",

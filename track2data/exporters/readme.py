@@ -211,7 +211,7 @@ class ReadmeExporter(Exporter):
             *(
                 [
                     f"| Samples outside the water column | {n['outside_samples']} "
-                    "(left out of IL-15, IL-16, IL-17 and GL-16, never clipped) |"
+                    "(left out of IL-15, IL-16, IL-17, IL-18 and GL-16, never clipped) |"
                 ]
                 if n.get("outside_samples") is not None
                 else []
