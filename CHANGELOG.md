@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Zones: the video's first frame is the backdrop** when a session has no background image (and no panel). It is used only when the decoded frame is exactly the declared video size, so zones are never drawn in the wrong pixel space; `extract_frame_rgb` returns the frame with its decoded size.
+
 ### Changed
 
 - **IL-3 and IL-14 are skipped on a declared side view.** The arena centre and the wall distance are plan-view quantities, so a project whose camera view is **Side view** now greys them out and skips them (decision D-045). A project that never set a view, or set Top-down, is unchanged, as are fused and native 3-D sessions.

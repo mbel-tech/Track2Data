@@ -33,6 +33,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
 from track2data.core.models import PanelRect
 from ui.widgets.backdrop import load_backdrop_image
+from ui.widgets.video_frame import decode_first_frame
 
 #: Click-to-point tolerance, in image pixels (scene units == image
 #: pixels here, since the background pixmap is added at its native
@@ -262,6 +263,7 @@ class ZoneCanvas(QGraphicsView):
         setup_points,
         frame_size: tuple[int, int] | None = None,
         crop: PanelRect | None = None,
+        video_path: Path | None = None,
     ) -> None:
         """Load a new session's backdrop + setup_points, discarding any
         prior selection -- called when the Zones screen's session
@@ -273,7 +275,12 @@ class ZoneCanvas(QGraphicsView):
         not the video.
 
         *crop* is the session's panel: the backdrop is cut to it, since the zones of a panel
-        session are relative to the panel."""
+        session are relative to the panel.
+
+        *video_path* is the session's video. When there is no backdrop image, its first frame
+        is drawn instead, but only for a whole-frame session (no *crop*) and only when the
+        decoded frame is exactly *frame_size*: a frame of any other size would put the zones in
+        the wrong pixel space, so the blank scene stays."""
         self._gscene.clear()
         self._marker_items = {}
         self._label_items = {}
@@ -286,6 +293,8 @@ class ZoneCanvas(QGraphicsView):
 
         pixmap: QPixmap | None = None
         image = load_backdrop_image(background_image_path, crop)
+        if image is None and crop is None and video_path is not None and frame_size is not None:
+            image = decode_first_frame(video_path, frame_size[0], frame_size[1])
         if image is not None:
             pixmap = QPixmap.fromImage(image)
 

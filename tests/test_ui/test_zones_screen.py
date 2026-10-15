@@ -796,3 +796,23 @@ def test_zones_screen_passes_the_sessions_panel_to_the_canvas(
     screen._session_combo.setCurrentText("session_a")
     screen._refresh_canvas()
     assert calls[-1] == panel
+
+
+def test_zones_screen_passes_the_session_video_path_to_the_canvas(
+    qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    from ui.widgets.zone_canvas import ZoneCanvas
+    from ui.zones_screen import ZonesScreen
+
+    store = _make_store(tmp_path)
+    video = tmp_path / "v.mp4"
+    _add_session_with_facts(store, "session_a", tmp_path, video_path=video)
+    calls = []
+    monkeypatch.setattr(
+        ZoneCanvas, "load_session", lambda self, *a, **k: calls.append(k.get("video_path"))
+    )
+    screen = ZonesScreen(store)
+    qtbot.addWidget(screen)
+    screen._session_combo.setCurrentText("session_a")
+    screen._refresh_canvas()
+    assert calls[-1] == video

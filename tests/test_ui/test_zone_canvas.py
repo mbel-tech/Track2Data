@@ -500,3 +500,112 @@ def test_load_session_without_crop_keeps_the_whole_backdrop(qtbot, tmp_path: Pat
     canvas.load_session(_bg(tmp_path), None)
     rect = canvas._gscene.sceneRect()
     assert (rect.width(), rect.height()) == (400, 200)
+
+
+# ── video first frame as the backdrop ────────────────────────────────────────
+
+
+@pytest.fixture
+def fake_video(tmp_path: Path) -> Path:
+    path = tmp_path / "v.mp4"
+    path.write_bytes(b"x")
+    return path
+
+
+def test_zone_canvas_uses_the_video_first_frame_when_there_is_no_background_image(
+    qtbot, fake_video: Path, monkeypatch
+) -> None:
+    from PySide6.QtWidgets import QGraphicsPixmapItem
+
+    from ui.widgets import video_frame
+
+    monkeypatch.setattr(
+        video_frame, "extract_frame_rgb", lambda p, i=0: (bytes(40 * 20 * 3), 40, 20)
+    )
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(None, None, frame_size=(40, 20), video_path=fake_video)
+
+    assert any(isinstance(i, QGraphicsPixmapItem) for i in canvas.scene().items())
+    assert (canvas.scene().sceneRect().width(), canvas.scene().sceneRect().height()) == (40, 20)
+
+
+def test_a_video_frame_of_the_wrong_size_is_rejected_and_the_canvas_stays_blank(
+    qtbot, fake_video: Path, monkeypatch
+) -> None:
+    from PySide6.QtWidgets import QGraphicsPixmapItem
+
+    from ui.widgets import video_frame
+
+    monkeypatch.setattr(
+        video_frame, "extract_frame_rgb", lambda p, i=0: (bytes(30 * 20 * 3), 30, 20)
+    )
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(None, None, frame_size=(40, 20), video_path=fake_video)
+
+    assert not any(isinstance(i, QGraphicsPixmapItem) for i in canvas.scene().items())
+    assert canvas.scene().sceneRect().width() == 40  # the blank scene is still the frame's size
+
+
+def test_a_transposed_frame_with_the_same_byte_count_is_rejected(
+    qtbot, fake_video: Path, monkeypatch
+) -> None:
+    """1080x1920 decoded against a declared 1920x1080 has the same w * h * 3 bytes."""
+    from PySide6.QtWidgets import QGraphicsPixmapItem
+
+    from ui.widgets import video_frame
+
+    monkeypatch.setattr(
+        video_frame, "extract_frame_rgb", lambda p, i=0: (bytes(40 * 20 * 3), 20, 40)
+    )
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(None, None, frame_size=(40, 20), video_path=fake_video)
+
+    assert not any(isinstance(i, QGraphicsPixmapItem) for i in canvas.scene().items())
+
+
+def test_a_cropped_panel_never_falls_back_to_the_video_frame(
+    qtbot, fake_video: Path, monkeypatch
+) -> None:
+    from track2data.core.models import PanelRect
+    from ui.widgets import video_frame
+
+    def boom(p, i=0):
+        raise AssertionError("a panel session must not read the whole-video frame")
+
+    monkeypatch.setattr(video_frame, "extract_frame_rgb", boom)
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(
+        None, None, frame_size=(40, 20), crop=PanelRect(x=0, y=0, width=20, height=20),
+        video_path=fake_video,
+    )
+
+
+def test_a_background_image_wins_over_the_video_frame(
+    qtbot, tmp_path: Path, fake_video: Path, monkeypatch
+) -> None:
+    from PySide6.QtGui import QImage
+
+    from ui.widgets import video_frame
+
+    def boom(p, i=0):
+        raise AssertionError("the background image must be used first")
+
+    monkeypatch.setattr(video_frame, "extract_frame_rgb", boom)
+    png = tmp_path / "bg.png"
+    image = QImage(20, 10, QImage.Format.Format_RGB32)
+    image.fill(0)
+    image.save(str(png))
+    canvas = ZoneCanvas()
+    qtbot.addWidget(canvas)
+
+    canvas.load_session(png, None, frame_size=(40, 20), video_path=fake_video)
+
+    assert canvas.scene().sceneRect().width() == 20

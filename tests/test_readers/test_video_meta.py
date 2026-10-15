@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from track2data.readers.video_meta import extract_frame
+from track2data.readers.video_meta import extract_frame, extract_frame_rgb
 
 # ── real-environment tests (no mocking) ─────────────────────────────────────
 #
@@ -115,3 +115,24 @@ class TestExtractFrameAvAvailable:
             result = extract_frame(tmp_path / "corrupt.mp4", frame_index=0)
 
         assert result is None
+
+
+class TestExtractFrameRgb:
+    def test_reports_the_decoded_frame_size(self, tmp_path: Path) -> None:
+        fake_frame = MagicMock(name="frame")
+        image = fake_frame.to_image.return_value
+        image.tobytes.return_value = b"\x01\x02\x03"
+        image.width, image.height = 1080, 1920
+        fake_av = _make_fake_av(frames=[fake_frame])
+
+        with patch.dict(sys.modules, {"av": fake_av}):
+            result = extract_frame_rgb(tmp_path / "video.mp4", frame_index=0)
+
+        assert result == (b"\x01\x02\x03", 1080, 1920)
+
+    def test_returns_none_without_av_or_on_failure(self, tmp_path: Path) -> None:
+        with patch.dict(sys.modules, {"av": None}):
+            assert extract_frame_rgb(tmp_path / "v.mp4") is None
+        failing = _make_fake_av(frames=[], open_side_effect=RuntimeError("bad file"))
+        with patch.dict(sys.modules, {"av": failing}):
+            assert extract_frame_rgb(tmp_path / "v.mp4") is None
