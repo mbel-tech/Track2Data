@@ -447,6 +447,19 @@ class TestEdgesOfTheFormat:
         assert session.warnings == ()
         assert read(f, keypoint="snout").has_stable_identities is True
 
+    def test_positional_animals_are_declared_identity_free(self, tmp_path: Path) -> None:
+        """So the engine's identity-free gate fires; slot k is not the same animal over time."""
+        f = multi(tmp_path / "m.csv", animals=("ind1", "ind2"))
+        session = read(f, keypoint="snout")
+        assert session.has_stable_identities is False
+        assert session.track_wo_identities is True
+
+    def test_named_animals_are_not_declared_identity_free(self, tmp_path: Path) -> None:
+        f = multi(tmp_path / "m.csv", animals=("mouse1", "mouse2"))
+        session = read(f, keypoint="snout")
+        assert session.has_stable_identities is True
+        assert session.track_wo_identities is None
+
     def test_choosing_animals_in_a_single_animal_file_says_there_are_none_to_choose(
         self, tmp_path: Path
     ) -> None:

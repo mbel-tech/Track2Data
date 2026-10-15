@@ -445,6 +445,9 @@ def _build_session(
         height_px=opts["height_px"],
         raw_xy=reduction.raw_xy,
         has_stable_identities=not placeholders,
+        # ind1, ind2... are positional slots, not identities: say so, so identity-requiring
+        # metrics are skipped and no gap is bridged across tracking intervals (as SLEAP does).
+        track_wo_identities=True if placeholders else None,
         identities_labels=list(animals) if header.multi else None,
         keypoints=keypoints,
         trajectory_source=path,
