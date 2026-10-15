@@ -20,7 +20,7 @@ pytestmark = pytest.mark.contract
 
 #: case id -> the reader that must claim it (and no other). None = nothing can read it yet.
 EXPECTED: dict[str, str | None] = {
-    "dlc_single_animal_h5": None,  # .h5: arrives with the G-H5 decision
+    "dlc_single_animal_h5": "deeplabcut_h5",
     "dlc_two_mice_csv": "deeplabcut",
     "lightning_pose_eks_csv": "deeplabcut",
     "sleap_named_tracks": "sleap_analysis",

@@ -56,7 +56,7 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 
 | Prio | Importer | Tier | Status | Suite cases |
 |---|---|---|---|---|
-| 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) | 1 | **built** (CSV); `.h5` planned | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` waits for the G-H5 decision |
+| 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) and `.h5` | 1 | **built** (CSV real-sample; `.h5` synthetic-only until the real EPM file has been read in a run, D-050) | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` is claimed by `deeplabcut_h5` and needs the fixture to run |
 | 2 | SLEAP analysis HDF5 | 1 | **built** | `sleap_named_tracks`, `sleap_no_tracks` pass |
 | 3 | Ctrax raw `.mat` (**built**), `trx.mat`, FlyTracker | 2 | raw `.mat` built; `trx.mat` waits for a real sample; FlyTracker recognise-only | `ctrax_raw_mat` passes |
 | 4 | ToxTrac `Tracking_RealSpace.txt` | 3 | planned | `toxtrac_realspace` |

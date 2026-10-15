@@ -427,7 +427,14 @@ def _read_table(path: Path, header: _Header) -> _Table:
 
 
 def _build_session(
-    given: Path, path: Path, header: _Header, table: _Table, opts: dict[str, Any]
+    given: Path,
+    path: Path,
+    header: _Header,
+    table: _Table,
+    opts: dict[str, Any],
+    *,
+    reader_name: str = "deeplabcut",
+    trajectory_format: str = "deeplabcut_csv",
 ) -> Session:
     wanted = _chosen_individuals(header, opts.get("individuals"))
     animals = wanted if header.multi else [""]
@@ -480,7 +487,7 @@ def _build_session(
     session = assemble_session(
         session_id=default_session_id(path, is_file=True),
         folder=given,
-        reader=DeepLabCutReader.name,
+        reader=reader_name,
         fps=opts["fps"],
         width_px=opts["width_px"],
         height_px=opts["height_px"],
@@ -492,7 +499,7 @@ def _build_session(
         identities_labels=list(animals) if header.multi else None,
         keypoints=keypoints,
         trajectory_source=path,
-        trajectory_format="deeplabcut_csv",
+        trajectory_format=trajectory_format,
         length_unit=opts.get("px_per_unit"),
     )
     if opts.get("keep_skeleton") and keypoints is None:
