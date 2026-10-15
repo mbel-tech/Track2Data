@@ -230,6 +230,32 @@ class TestSessions:
         draft = ConfirmDraft(result((detection("alpha"),)), existing=existing)
         assert {r.original_id for r in draft.rows if r.already_added} == {"a"}
 
+    def test_a_whole_frame_candidate_is_offered_again_after_the_folder_was_split_into_panels(
+        self,
+    ) -> None:
+        from track2data.core.models import PanelRect
+
+        existing = [
+            SessionRef(
+                session_id="a__top",
+                folder=Path("root") / "a",
+                sha256="",
+                reader="alpha",
+                panel=PanelRect(x=0, y=0, width=10, height=10),
+            )
+        ]
+        draft = ConfirmDraft(result((detection("alpha"),)), existing=existing)
+        by_id = {r.original_id: r for r in draft.rows}
+        assert not by_id["a"].already_added and by_id["a"].included
+
+    def test_a_true_duplicate_is_still_left_out(self) -> None:
+        existing = [
+            SessionRef(session_id="old", folder=Path("root") / "a", sha256="", reader="alpha")
+        ]
+        draft = ConfirmDraft(result((detection("alpha"),)), existing=existing)
+        by_id = {r.original_id: r for r in draft.rows}
+        assert by_id["a"].already_added and not by_id["a"].included
+
     def test_choosing_another_reader_keeps_what_was_already_in_the_project(self) -> None:
         existing = [SessionRef(session_id="old", folder=Path("root") / "a", sha256="")]
         draft = ConfirmDraft(result((detection("alpha"), detection("beta"))), existing=existing)

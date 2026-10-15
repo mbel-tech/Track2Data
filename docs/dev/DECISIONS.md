@@ -1190,3 +1190,19 @@ changing existing projects, and the `unknown` member of the set removes that cos
 
 **Not changed:** no metric value, exported file or `project_hash` for a project with an unset or top-down
 view.
+
+
+### D-046 · "Already in the project" is one rule, and a split folder is offered again as a whole-frame session
+
+**Status:** accepted; implemented.
+
+**Decision:** `core/session_identity.same_session_part(candidate, existing)` is the single test for whether
+the project already holds a session. Same resolved folder, `existing.reader` empty or equal to the
+candidate's, equal session-scope options (an arena), and equal `panel`. It is deliberately not symmetric: only
+a legacy existing entry without a reader is a wildcard. `ProjectStore._is_duplicate` and the import dialog's
+`ConfirmDraft` both call it. Before, the dialog compared folder and reader only, so a folder whose whole-frame
+session had been split into `__top` and `__side` panels was reported "already in the project" on rescan and
+could not be re-added, while the store would have accepted it.
+
+**Why:** two copies of the rule had drifted. A panel is another part of the video, so it is another session.
+

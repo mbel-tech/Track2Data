@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from track2data.core.errors import ImportError_
 from track2data.core.models import SessionRef
+from track2data.core.session_identity import same_session_part
 from track2data.readers.detection import Confidence, Detection
 from track2data.readers.params import ReaderParameter, ValueSource, resolve_options
 from track2data.readers.scan import FormatGroup, ScanResult
@@ -64,13 +65,6 @@ class SessionRow:
     warnings: tuple[str, ...] = ()
 
 
-def _resolved(path: Path) -> Path:
-    try:
-        return Path(path).resolve()
-    except OSError:
-        return Path(path)
-
-
 class ConfirmDraft:
     """The choices made about one scan, from the first suggestion to the sessions to add.
 
@@ -82,9 +76,9 @@ class ConfirmDraft:
 
     def __init__(self, result: ScanResult, *, existing: Sequence[SessionRef] = ()) -> None:
         self._result = result
-        # (resolved folder, reader or None) of what the project already holds. A legacy entry
-        # (no saved reader) is the same session whichever reader reads it.
-        self._existing = [(_resolved(ref.folder), ref.reader) for ref in existing]
+        # What the project already holds. A legacy entry (no saved reader) is the same session
+        # whichever reader reads it; one with a panel is another part of the video.
+        self._existing = list(existing)
         self._existing_ids = {ref.session_id for ref in existing}
         self._group_index = 0
         self._detection: Detection | None = None
@@ -228,7 +222,7 @@ class ConfirmDraft:
                 session_id=self._ids[candidate.session_id],
                 source=candidate.source,
                 included=self._included[candidate.session_id],
-                already_added=self._already_added(candidate.source),
+                already_added=self._already_added(candidate.session_id, candidate.source),
                 warnings=candidate.warnings,
             )
             for candidate in self._detection.sessions
@@ -305,15 +299,22 @@ class ConfirmDraft:
         self._per_session = {}
         self._ids = {c.session_id: c.session_id for c in detection.sessions}
         self._included = {
-            c.session_id: not self._already_added(c.source) for c in detection.sessions
+            c.session_id: not self._already_added(c.session_id, c.source)
+            for c in detection.sessions
         }
 
-    def _already_added(self, source: Path) -> bool:
-        resolved = _resolved(source)
-        return any(
-            path == resolved and (reader is None or reader == self.reader)
-            for path, reader in self._existing
+    def _already_added(self, original_id: str, source: Path) -> bool:
+        """Whether the project holds this candidate as a whole-frame session of this reader."""
+        if not self._existing:
+            return False
+        candidate = SessionRef(
+            session_id=original_id,
+            folder=source,
+            sha256="",
+            reader=self.reader,
+            reader_options={**self._values, **self._per_session.get(original_id, {})},
         )
+        return any(same_session_part(candidate, ref) for ref in self._existing)
 
     def _row_key(self, session_id: str) -> None:
         if session_id not in self._ids:

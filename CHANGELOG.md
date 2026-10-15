@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Rescanning a folder that was split into panels** offers the whole-frame session again instead of reporting it "already in the project". The import dialog and the project store now share one duplicate rule (decision D-046); a true duplicate is still left out.
 - **idtracker.ai pickle reader could run code.** The allowlist for `list_of_blobs.pickle` admitted every class in any module whose name starts with `numpy`, including helpers that execute code. It is now an exact list of the array-reconstruction functions numpy pickles use.
 - **Z-5 no longer invents an exit at a tracking-interval gap.** A stay in a zone that continued across two tracking intervals was reported as enter, exit, enter, with the exit on the separator row between them. Entry/exit counts, Z-6 and Z-9 were inflated for sessions tracked in separate intervals.
 - **Cache key includes the identity-free override.** Changing a session's identity-free setting now invalidates its cached preprocessing instead of serving the old gap-bridging.
