@@ -418,6 +418,11 @@ def new(name: str, out: str | None) -> None:
         sys.exit(1)
 
 
+def _recognised_by(draft: ConfirmDraft, reader: str) -> bool:
+    """Whether the scan already offers *reader* for some group."""
+    return any(d.reader == reader for group in draft.groups for d in group.detections)
+
+
 # ── list-readers ──────────────────────────────────────────────────────────────
 
 _VERIFICATION_NOTE = {
@@ -653,12 +658,22 @@ def add(
     result = Engine.scan([Path(r) for r in roots], budget=budget)
     _echo_scan_header(result)
     draft = ConfirmDraft(result, existing=manifest.sessions)
+    lenient = False
+    if reader is not None and not _recognised_by(draft, reader):
+        # The user named software the scan did not recognise: try its looser rules, as the
+        # app's "Choose software" does. The sessions still go through the reader's own read.
+        lenient = draft.offer_reader(reader)
+        if lenient:
+            click.echo(
+                f"Nothing matched {reader} exactly; offering files it can read under looser rules."
+            )
     if draft.is_empty:
         _echo_nothing_found(result)
         sys.exit(1)
 
     try:
-        draft.select_group(group_number - 1)
+        if not lenient:
+            draft.select_group(group_number - 1)
         if reader is not None:
             draft.select_reader(reader)
         shared = [p for p in draft.parameters if p.scope == "group"]

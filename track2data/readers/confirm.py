@@ -12,6 +12,7 @@ It never reads a session. The options are validated against the reader's declare
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +25,7 @@ from track2data.core.models import SessionRef
 from track2data.core.session_identity import same_session_part
 from track2data.readers.detection import Confidence, Detection
 from track2data.readers.params import ReaderParameter, ValueSource, resolve_options
-from track2data.readers.scan import FormatGroup, ScanResult
+from track2data.readers.scan import FormatGroup, ScanResult, lenient_scan
 from track2data.readers.video_meta import VideoProbe, probe_video
 
 ProblemCode = Literal[
@@ -162,6 +163,21 @@ class ConfirmDraft:
             raise ValueError(f"There is no group {index}; the scan found {len(self.groups)}.")
         self._group_index = index
         self._enter(self._result.groups[index].best, "detected")
+
+    def offer_reader(self, name: str) -> bool:
+        """Try reader *name* with its loosened rules on the files the scan walked.
+
+        On success its sessions become a new, first group (LOW confidence) and are selected, so
+        :meth:`select_reader` can name it; returns False when it finds nothing to read. Only
+        readers that implement ``discover_lenient`` can be offered.
+        """
+        group = lenient_scan(self._result, name)
+        if group is None:
+            return False
+        self._result = dataclasses.replace(self._result, groups=(group, *self._result.groups))
+        self._group_index = 0
+        self._enter(group.best, "user")
+        return True
 
     def select_reader(self, name: str) -> None:
         """Amend the suggestion: read the selected group with another reader that recognised it."""

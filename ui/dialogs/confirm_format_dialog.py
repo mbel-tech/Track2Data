@@ -44,6 +44,7 @@ from track2data.core.models import SessionRef
 from track2data.readers import get_reader, reader_names
 from track2data.readers.confirm import ConfirmDraft
 from track2data.readers.detection import Confidence
+from track2data.readers.scan import lenient_readers
 from ui.widgets.dots import level_colour
 from ui.widgets.reader_options_form import ReaderOptionsForm
 
@@ -118,6 +119,19 @@ class ConfirmFormatDialog(QDialog):
         self.empty_label.setWordWrap(True)
         self.empty_label.setTextFormat(Qt.TextFormat.RichText)
         root.addWidget(self.empty_label)
+
+        # "Choose software…": when nothing was recognised, let the user name a reader to try with
+        # looser rules (readers/scan.lenient_scan). Shown only in that state.
+        self._lenient_row = QWidget()
+        lenient_layout = QHBoxLayout(self._lenient_row)
+        lenient_layout.setContentsMargins(0, 0, 0, 0)
+        lenient_layout.addWidget(QLabel("Choose software…"))
+        self.lenient_combo = QComboBox()
+        lenient_layout.addWidget(self.lenient_combo, 1)
+        self.lenient_button = QPushButton("Try this software")
+        self.lenient_button.clicked.connect(self._on_lenient_clicked)
+        lenient_layout.addWidget(self.lenient_button)
+        root.addWidget(self._lenient_row)
 
         self._content = QWidget()
         content = QVBoxLayout(self._content)
@@ -217,6 +231,7 @@ class ConfirmFormatDialog(QDialog):
             f"Scanned {result.entries} entries in {result.seconds:.1f} s: {roots}"
         )
         self.empty_label.hide()
+        self._lenient_row.hide()
         self._content.show()
         self.ok_button.show()
         self.cancel_button.setText("Cancel")
@@ -241,9 +256,35 @@ class ConfirmFormatDialog(QDialog):
         lines.append("Folders are searched four levels deep.")
         self.empty_label.setText("<br>".join(lines))
         self.empty_label.show()
+        self._sync_lenient_row()
         self._content.hide()
         self.ok_button.hide()
         self.cancel_button.setText("Close")
+
+    def _sync_lenient_row(self) -> None:
+        names = lenient_readers() if self._draft.result.index is not None else []
+        self.lenient_combo.clear()
+        for name in names:
+            self.lenient_combo.addItem(get_reader(name).display_name or name, name)
+        self._lenient_row.setVisible(bool(names))
+
+    def _on_lenient_clicked(self) -> None:
+        name = self.lenient_combo.currentData()
+        if not name:
+            return
+        if self._draft.offer_reader(name):
+            self._sync_all()
+            return
+        label = self.lenient_combo.currentText()
+        self.empty_label.setText(
+            self.empty_label.text()
+            + f"<br><b>Nothing here could be read as {label}</b>, even with looser rules."
+        )
+
+    def done(self, result: int) -> None:
+        # The scan's walk is only kept for the retry above; do not hold a large tree after close.
+        self._draft.result.release_index()
+        super().done(result)
 
     def _sync_groups(self) -> None:
         groups = self._draft.groups

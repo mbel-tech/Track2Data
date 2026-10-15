@@ -446,3 +446,57 @@ class TestAgainstARealScan:
         manifest = ProjectManifest(project_name="p", created_at=now, updated_at=now, sessions=refs)
         session = Engine(manifest).import_ref(refs[0])
         assert session.n_animals == 2 and session.session_id == refs[0].session_id
+
+
+class TestOfferReader:
+    """The "choose software" retry: a reader the scan did not recognise, tried with looser rules."""
+
+    @staticmethod
+    def _scan_of_a_txt_table(tmp_path: Path) -> ScanResult:
+        import numpy as np
+
+        from tests.support.dlc import random_pose, write_dlc_csv
+        from track2data.readers.scan import scan
+
+        write_dlc_csv(
+            tmp_path / "trial1.txt",
+            random_pose(20, 1, 3),
+            np.ones((20, 1, 3)),
+            bodyparts=["a", "b", "c"],
+        )
+        return scan([tmp_path])
+
+    def test_offer_reader_then_select_reader_succeeds_and_other_names_still_raise(
+        self, tmp_path: Path
+    ) -> None:
+        draft = ConfirmDraft(self._scan_of_a_txt_table(tmp_path))
+        assert draft.is_empty
+        with pytest.raises(ValueError):
+            draft.select_reader("deeplabcut")  # not offered yet
+        assert draft.offer_reader("deeplabcut") is True
+        assert not draft.is_empty
+        assert draft.reader == "deeplabcut"
+        assert draft.confidence is Confidence.LOW
+        assert draft.chosen_by == "user"
+        draft.select_reader("deeplabcut")
+        with pytest.raises(ValueError, match="No reader"):
+            draft.select_reader("sleap_analysis")
+
+    def test_a_reader_with_nothing_to_offer_leaves_the_draft_alone(self, tmp_path: Path) -> None:
+        draft = ConfirmDraft(self._scan_of_a_txt_table(tmp_path))
+        assert draft.offer_reader("sleap_analysis") is False
+        assert draft.offer_reader("idtrackerai") is False
+        assert draft.is_empty
+
+    def test_an_offered_session_reads_through_the_readers_own_read(self, tmp_path: Path) -> None:
+        from track2data import readers
+
+        draft = ConfirmDraft(self._scan_of_a_txt_table(tmp_path))
+        draft.offer_reader("deeplabcut")
+        (row,) = draft.rows
+        session = readers.read_session(
+            row.source,
+            reader="deeplabcut",
+            options={"fps": 30.0, "width_px": 640, "height_px": 480},
+        )
+        assert session.n_animals == 1

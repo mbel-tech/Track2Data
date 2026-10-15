@@ -323,3 +323,43 @@ def test_a_ref_added_by_the_command_equals_the_one_the_draft_builds(
     invoke("add", str(project), str(idtracker_root), "--yes")
     expected: list[SessionRef] = ConfirmDraft(scan([idtracker_root])).to_session_refs()
     assert read_manifest(project).sessions == expected
+
+
+class TestAddWithAReaderThatDidNotDetect:
+    def _folder_with_a_txt_table(self, tmp_path: Path) -> Path:
+        import numpy as np
+
+        from tests.support.dlc import random_pose, write_dlc_csv
+
+        root = tmp_path / "txt_root"
+        root.mkdir()
+        write_dlc_csv(
+            root / "trial1.txt",
+            random_pose(20, 1, 3),
+            np.ones((20, 1, 3)),
+            bodyparts=["a", "b", "c"],
+        )
+        return root
+
+    def test_without_reader_nothing_is_found(self, project: Path, tmp_path: Path) -> None:
+        out = invoke("add", str(project), str(self._folder_with_a_txt_table(tmp_path)), "--yes")
+        assert out.exit_code == 1
+
+    def test_cli_add_with_reader_retries_leniently_on_a_header_mismatch(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        root = self._folder_with_a_txt_table(tmp_path)
+        out = invoke(
+            "add", str(project), str(root), "--reader", "deeplabcut", "--yes",
+            "--option", "fps=30", "--option", "width_px=640", "--option", "height_px=480",
+        )
+        assert out.exit_code == 0, out.output
+        assert "looser rules" in out.output
+        assert [s.session_id for s in read_manifest(project).sessions] == ["trial1"]
+
+    def test_a_reader_that_cannot_read_them_still_fails(
+        self, project: Path, tmp_path: Path
+    ) -> None:
+        root = self._folder_with_a_txt_table(tmp_path)
+        out = invoke("add", str(project), str(root), "--reader", "sleap_analysis", "--yes")
+        assert out.exit_code == 1

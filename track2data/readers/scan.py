@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from track2data.core.ids import sanitise_session_id, uniquify
@@ -50,6 +50,14 @@ class ScanResult:
     seconds: float
     #: Formats named but not readable (so "nothing to add" can say what the files are).
     recognised: tuple[Recognised, ...] = ()
+    #: The walk behind the result, kept so a reader can be tried again leniently
+    #: (:func:`lenient_scan`). Not part of the result's identity; the confirm dialog drops it with
+    #: :meth:`release_index` when it closes, and it is never stored on a manifest.
+    index: ScanIndex | None = field(default=None, repr=False, compare=False)
+
+    def release_index(self) -> None:
+        """Let go of the retained walk (a large tree is a lot of memory to hold for nothing)."""
+        object.__setattr__(self, "index", None)
 
 
 def scan(
@@ -99,7 +107,47 @@ def scan_index(
         entries=len(index),
         seconds=index.seconds,
         recognised=find_unreadable(index, peek, claimed),
+        index=index,
     )
+
+
+def lenient_readers() -> list[str]:
+    """Names of the readers that can try again with looser rules (they override
+    ``discover_lenient``), in registry order."""
+    from track2data.readers import _REGISTRY
+    from track2data.readers.base import SessionReader
+
+    base = SessionReader.discover_lenient.__func__  # type: ignore[attr-defined]
+    return [
+        cls.name
+        for cls in _REGISTRY
+        if getattr(cls.discover_lenient, "__func__", None) is not base
+    ]
+
+
+def lenient_scan(result: ScanResult, reader_name: str) -> FormatGroup | None:
+    """Re-run one reader's loosened discovery on the walk *result* kept.
+
+    Returns a group of LOW-confidence detections, or None when the reader is unknown, has no
+    lenient rules, finds nothing, or the index was released. Never raises. A candidate still goes
+    through ``read``, so a wrong guess fails with the reader's own coded error.
+    """
+    from track2data.readers import find_reader
+
+    cls = find_reader(reader_name)
+    if cls is None or result.index is None:
+        return None
+    try:
+        found = cls.discover_lenient(result.index, Peeker(None, result.index))
+    except Exception:  # a reader must never break a retry
+        return None
+    if not found:
+        return None
+    found = [
+        _with_unique_ids(dataclasses.replace(d, confidence=Confidence.LOW), result.index.roots)
+        for d in found
+    ]
+    return FormatGroup(tuple(found))
 
 
 def _prune_nested(detections: list[Detection], index: ScanIndex) -> list[Detection]:

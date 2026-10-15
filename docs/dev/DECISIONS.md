@@ -1213,3 +1213,11 @@ could not be re-added, while the store would have accepted it.
 **Decision:** `readers/video_meta.probe_video(path)` returns `VideoProbe(fps, width_px, height_px, n_frames)` or None (never raises; None for missing `av`, an unopenable file, or non-positive fps/size). The import dialog's "Read from video…" button, enabled only when the reader has an `fps`, `width_px` or `height_px` option, calls `ConfirmDraft.prefill_from_video`, which sets those options with source "video" and never overwrites a "user"-sourced value. An unreadable video shows a warning and changes nothing.
 
 **Why:** DeepLabCut and SLEAP files carry neither value, and asking people to type them invites the silent-fps errors fixed for the v5 reader. The probe is explicit and user-triggered, so nothing is guessed.
+
+### D-048 · A reader the scan did not recognise can be tried again, with only its extension loosened
+
+**Status:** accepted; implemented.
+
+**Decision:** `ScanResult` keeps the walk (`index`, dropped by `release_index()` when the confirm dialog closes, never stored on a manifest). `SessionReader.discover_lenient(index, peek)` (default: nothing) reports files `discover` refused; `scan.lenient_scan(result, name)` returns them as one LOW-confidence group, and `ConfirmDraft.offer_reader(name)` makes it the first group, so `select_reader` can then name it. Only DeepLabCut (`.txt`, `.dat`, no extension) and SLEAP (`.analysis`, `.hdf`, `.dat`, no extension) implement it, and each still requires the full header or layout.
+
+**Why:** a forced reader on files it cannot read only moves the error. Loosening the name and not the content means a wrong guess still fails with the reader's own coded error instead of producing a session of guesses.

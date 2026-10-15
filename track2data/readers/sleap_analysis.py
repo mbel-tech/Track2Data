@@ -48,6 +48,8 @@ from track2data.readers.peek import Hdf5Root, Peeker
 
 _MARKERS = ("track_names", "node_names", "track_occupancy")
 _SUFFIXES = (".h5", ".hdf5")
+#: Other names an analysis export is saved under (the choose-software retry).
+_LENIENT_SUFFIXES = frozenset({"", ".analysis", ".hdf", ".dat"})
 _SYNTHETIC = re.compile(r"^track_\d+$")
 _STANDARD_DIMS = ["track", "xy", "node", "frame"]
 
@@ -206,6 +208,43 @@ class SleapAnalysisReader(SessionReader):
                 ),
                 sessions=sessions,
                 parameters=parameters,
+                verification=cls.verification,
+            )
+        ]
+
+    @classmethod
+    def discover_lenient(cls, index: ScanIndex, peek: Peeker) -> list[Detection]:
+        """Analysis files saved without an ``.h5`` / ``.hdf5`` extension.
+
+        The file must still have every analysis marker, so only the extension is loosened.
+        """
+        sessions = []
+        for entry in index.walk():
+            if entry.is_dir or entry.suffix not in _LENIENT_SUFFIXES or entry.cloud_only:
+                continue
+            root = peek.hdf5_root(entry.path, strings=("node_names", "track_names"))
+            if _is_analysis(root):
+                sessions.append(
+                    SessionCandidate(
+                        session_id=_session_id(entry.path),
+                        source=entry.path,
+                        files=(entry.path,),
+                        warnings=_warnings_for(root),  # type: ignore[arg-type]
+                    )
+                )
+        if not sessions:
+            return []
+        return [
+            Detection(
+                reader=cls.name,
+                display_name=cls.display_name,
+                confidence=Confidence.LOW,
+                evidence=(
+                    f"{len(sessions)} HDF5 file(s) with the SLEAP analysis layout "
+                    "but not an .h5 / .hdf5 extension",
+                ),
+                sessions=tuple(sessions),
+                parameters=cls.parameters,
                 verification=cls.verification,
             )
         ]

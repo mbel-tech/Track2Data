@@ -81,6 +81,10 @@ class _Header:
         return any(c[2] not in _NEEDED for c in self.columns)
 
 
+#: Extensions a prediction table is sometimes saved under (the choose-software retry).
+_LENIENT_SUFFIXES = frozenset({".txt", ".dat", ""})
+
+
 def _parse_header(lines: list[str]) -> _Header | None:
     """The header the first lines describe, or None if this is not a prediction table."""
     if len(lines) < 3:
@@ -256,6 +260,43 @@ class DeepLabCutReader(SessionReader):
                 sessions=sessions,
                 parameters=_resolved_parameters(headers),
                 proposed=proposed,
+                verification=cls.verification,
+            )
+        ]
+
+    @classmethod
+    def discover_lenient(cls, index: ScanIndex, peek: Peeker) -> list[Detection]:
+        """Prediction tables saved under another name (``.txt``, ``.dat`` or none).
+
+        The header must still be a full DeepLabCut one, so only the extension is loosened.
+        """
+        sessions = []
+        for entry in index.walk():
+            if entry.is_dir or entry.suffix not in _LENIENT_SUFFIXES or entry.cloud_only:
+                continue
+            lines = peek.text_lines(entry.path, 5)
+            header = _parse_header(lines) if lines else None
+            if header is not None:
+                sessions.append(
+                    SessionCandidate(
+                        session_id=default_session_id(entry.path, is_file=True),
+                        source=entry.path,
+                        files=(entry.path,),
+                        warnings=_warnings_for(header),
+                    )
+                )
+        if not sessions:
+            return []
+        return [
+            Detection(
+                reader=cls.name,
+                display_name=cls.display_name,
+                confidence=Confidence.LOW,
+                evidence=(
+                    f"{len(sessions)} file(s) with a DeepLabCut header but not a .csv extension",
+                ),
+                sessions=tuple(sessions),
+                parameters=cls.parameters,
                 verification=cls.verification,
             )
         ]
