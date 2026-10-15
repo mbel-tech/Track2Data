@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import PanelRect
-from ui.widgets import panel_preview as pp
 from ui.widgets import video_frame as vf
 from ui.widgets.panel_preview import PanelPreview
 

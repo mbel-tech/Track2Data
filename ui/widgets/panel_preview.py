@@ -11,7 +11,7 @@ from typing import Literal
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsPixmapItem,
