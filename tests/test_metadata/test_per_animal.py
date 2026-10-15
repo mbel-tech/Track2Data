@@ -140,3 +140,29 @@ def test_individual_match_defaults_to_label_and_validates() -> None:
     assert MappingRule(individual_match="index").individual_match == "index"
     with pytest.raises(ValueError):
         MappingRule(individual_match="position")  # type: ignore[arg-type]
+
+
+# ── numeric session keys ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [[1, 2, 3], [1.0, 2.0, 3.0], [1.0, 2.0, float("nan")]],
+    ids=["int", "float-whole", "float-with-blank"],
+)
+def test_numeric_session_ids_match_the_text_session_ids_of_folders(ids) -> None:
+    """A column of trial numbers is read as numbers; sessions from folders '1','2','3' are text."""
+    df = pd.DataFrame({"session_id": ids, "treatment": ["a", "b", "c"]})
+    rule = MappingRule(rules={"session_id": "session_id", "treatment": "treatment"})
+    res = match(["1", "2"], df, rule)
+    assert res.unmatched_sessions == []
+    assert res.matched["1"]["treatment"] == "a"
+    assert res.matched["2"]["treatment"] == "b"
+
+
+def test_numeric_composite_key_columns_match_too() -> None:
+    df = pd.DataFrame({"day": [1, 2], "tank": [7, 7], "treatment": ["a", "b"]})
+    rule = MappingRule(rules={"treatment": "treatment"}, join_keys=["day", "tank"])
+    res = match(["1_7", "2_7"], df, rule)
+    assert res.unmatched_sessions == []
+    assert res.matched["2_7"]["treatment"] == "b"

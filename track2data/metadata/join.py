@@ -191,6 +191,19 @@ def resolve_animal(key: str, labels: list[str], mode: str, n_animals: int) -> in
     return idx if 0 <= idx < n_animals else None
 
 
+def _as_text(column: pd.Series) -> pd.Series:
+    """*column* as strings, so it compares with a session id (always text).
+
+    A key column of trial numbers is read as integers (or floats, when a row is blank); both
+    must still match the session id ``"1"``, not ``"1.0"``.
+    """
+    if pd.api.types.is_float_dtype(column):
+        return column.map(
+            lambda v: str(int(v)) if pd.notna(v) and float(v).is_integer() else str(v)
+        )
+    return column.astype(str)
+
+
 def _find_rows(
     session_id: str, df: pd.DataFrame, rule: MappingRule
 ) -> pd.DataFrame:
@@ -204,24 +217,24 @@ def _find_rows(
             mask = pd.Series([True] * len(df), index=df.index)
             for col, val in groups.items():
                 if col in df.columns:
-                    mask &= df[col].astype(str) == str(val)
+                    mask &= _as_text(df[col]) == str(val)
             return df[mask]
         return df.iloc[0:0]  # empty
 
     # Strategy 2: composite / exact key join.
     keys = rule.join_keys if rule.join_keys else ["session_id"]
     if "session_id" in keys and "session_id" in df.columns:
-        return df[df["session_id"] == session_id]
+        return df[_as_text(df["session_id"]) == session_id]
 
     # Composite: match session_id against concatenated key columns.
     if len(keys) > 1:
         sep = "_"
-        composite = df[keys].astype(str).agg(sep.join, axis=1)
+        composite = pd.concat([_as_text(df[k]) for k in keys], axis=1).agg(sep.join, axis=1)
         return df[composite == session_id]
 
     # Single non-session_id key: fallback to exact value match.
     key = keys[0]
     if key in df.columns:
-        return df[df[key] == session_id]
+        return df[_as_text(df[key]) == session_id]
 
     return df.iloc[0:0]
