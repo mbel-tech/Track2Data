@@ -925,13 +925,19 @@ class Engine:
         """
         m = self._manifest
         override = m.video_overrides.get(ref.session_id)
-        return {
+        fingerprint: dict[str, Any] = {
             "allow_pickle_trajectories": m.security.allow_pickle_trajectories,
             "blob_diagnostics": m.blob_diagnostics,
             "video_override": (
                 None if override is None else [str(override), Path(override).exists()]
             ),
         }
+        # The user's identity-free answer decides whether gaps may be bridged across tracking
+        # intervals during preprocessing. Only when set, so existing keys stay valid.
+        identity_free = self._identity_free_override(ref.session_id)
+        if identity_free is not None:
+            fingerprint["identity_free_override"] = identity_free
+        return fingerprint
 
     def preprocess_ref(self, ref: SessionRef) -> PreprocessedSession:
         """Preprocess the session a manifest entry describes, reusing/filling the cache
