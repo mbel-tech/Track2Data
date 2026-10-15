@@ -47,7 +47,7 @@ from track2data.readers.native3d import NATIVE_3D_READERS, manifest_native_3d
 from ui.widgets.autocommit import AutoCommit
 from ui.widgets.mode_banner import ModeBanner
 
-_UNIT_CHOICES = ["cm", "mm", "m"]
+_UNIT_CHOICES = ["cm", "mm", "m", "in"]  # in: native 3-D files can arrive in inches
 
 _IDT_INFO = (
     "Uses each session's own calibration ratio, recorded by the "
@@ -546,8 +546,10 @@ class CalibrationScreen(QWidget):
                     self._px_spin.setValue(cfg.px_per_cm)
             elif cfg.mode == "session":
                 self._radio_session.setChecked(True)
-                if cfg.length_unit_label in _UNIT_CHOICES:
-                    self._unit_combo.setCurrentText(cfg.length_unit_label)
+                if self._unit_combo.findText(cfg.length_unit_label) < 0:
+                    # A label set elsewhere must never be silently replaced by Apply.
+                    self._unit_combo.addItem(cfg.length_unit_label)
+                self._unit_combo.setCurrentText(cfg.length_unit_label)
                 self._stat_combo.setCurrentIndex(
                     max(0, self._stat_combo.findData(cfg.session_calibration_stat))
                 )

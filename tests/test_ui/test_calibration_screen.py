@@ -203,6 +203,31 @@ def test_on_calibration_changed_reselects_session_radio_and_widgets(
     assert screen._confirm_check.isChecked()
 
 
+@pytest.mark.parametrize("unit", ["in", "furlong"])
+def test_a_unit_set_elsewhere_is_shown_and_survives_apply(
+    qtbot, tmp_path: Path, unit: str
+) -> None:
+    """Native 3-D files can be in inches; Apply must not rewrite the label to the first choice."""
+    from track2data.core.models import CalibrationConfig
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    store.update_calibration(
+        CalibrationConfig(
+            mode="session", length_unit_label=unit, length_unit_confirmed_by_user=True
+        )
+    )
+
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+    assert screen._unit_combo.currentText() == unit
+
+    screen._confirm_check.setChecked(False)
+    screen.flush()
+
+    assert store.manifest.calibration.length_unit_label == unit
+
+
 # ── per-session readiness list ───────────────────────────────────────────────
 
 
