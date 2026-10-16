@@ -17,7 +17,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -737,6 +737,10 @@ class ExportTarget(BaseModel):
 # ── Project manifest ──────────────────────────────────────────────────────────
 
 
+def _hash_default(value: object) -> str:
+    return value.as_posix() if isinstance(value, PurePath) else str(value)
+
+
 class ProjectManifest(BaseModel):
     schema_version: int = 1
     # Stamped into every exported manifest.json and the run README's
@@ -771,12 +775,10 @@ class ProjectManifest(BaseModel):
 
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""
-        # JSON mode writes a path with forward slashes on every platform, so the same project
-        # hashes the same on Windows and elsewhere.
-        data: dict[str, Any] = self.model_dump(
-            mode="json", exclude={"created_at", "updated_at", "run_log_path"}
-        )
-        serialised = json.dumps(data, sort_keys=True, default=str)
+        data: dict[str, Any] = self.model_dump(exclude={"created_at", "updated_at", "run_log_path"})
+        # A path is written with forward slashes on every platform, so the same project hashes the
+        # same on Windows and elsewhere (``as_posix`` equals ``str`` on posix).
+        serialised = json.dumps(data, sort_keys=True, default=_hash_default)
         return hashlib.sha256(serialised.encode()).hexdigest()[:16]
 
 
