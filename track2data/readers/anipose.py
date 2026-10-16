@@ -8,8 +8,11 @@ NaN in x, y and z together.
 
 What the file does **not** record is the frame rate and the unit of its coordinates (the unit of
 the calibration board the user used; mm is the usual one, but it is a fact about the recording
-rather than the file). Both are options the user gives, never defaulted. There is one animal per
-file; several animals are several files.
+rather than the file). Both are options the user gives, never defaulted. A file holds one animal
+unless the user lists the animals' column prefixes in the ``animals`` option (decision D-053):
+``fishA,fishB`` reads the columns ``fishA_<keypoint>_x|y|z`` and ``fishB_<keypoint>_x|y|z`` as two
+slots of one session, in that order. The prefixes are never guessed from the names, because
+``left_ear`` / ``right_ear`` look the same as ``fishA_nose`` / ``fishB_nose``.
 
 Rows missing from ``fnum`` are not filled: the stored rows are the frames the file has, and the
 gaps become ``tracking_intervals``, so no step treats the move across a gap as one frame of motion.
@@ -126,7 +129,18 @@ class AniposeReader(SessionReader):
     verification = "synthetic_only"
     coordinate_frame = "physical_unaligned"
     provides_native_3d: ClassVar[bool] = True
-    parameters: ClassVar[tuple[ReaderParameter, ...]] = native_parameters("mm")
+    parameters: ClassVar[tuple[ReaderParameter, ...]] = (
+        *native_parameters("mm"),
+        ReaderParameter(
+            name="animals",
+            label="Animal column prefixes (several animals in one file)",
+            kind="str",
+            help="Leave empty for a file with one animal. For several animals in one file, "
+            "list the prefixes of their columns in order, separated by commas: 'fishA,fishB' "
+            "reads fishA_<keypoint>_x, _y, _z and fishB_<keypoint>_x, _y, _z. Every animal "
+            "needs the same keypoints.",
+        ),
+    )
 
     # ── detection ──────────────────────────────────────────────────────────
 
@@ -270,6 +284,77 @@ def _read_table(path: Path, layout: _Layout) -> pd.DataFrame:
     return numeric
 
 
+def animal_prefixes(value: Any) -> list[str]:
+    """The prefixes in the ``animals`` option, in order; empty when the option is not used."""
+    if value is None:
+        return []
+    names = [part.strip() for part in str(value).split(",") if part.strip()]
+    if len(set(names)) != len(names):
+        raise ImportError_(
+            f"Option 'animals' repeats a name: {value!r}.",
+            code="READER_OPTION_INVALID",
+            subject="animals",
+            remediation="List each animal prefix once, e.g. fishA,fishB.",
+        )
+    return names
+
+
+def _split_animals(
+    path: Path, layout: _Layout, prefixes: list[str]
+) -> tuple[list[str], list[list[str]]]:
+    """Per animal, the file's column stem of each shared keypoint, and the shared names.
+
+    A keypoint column belongs to the longest listed prefix it starts with (``fish_`` and
+    ``fish_2_`` can both be animals). Every column must belong to one, and every animal must have
+    the same keypoints; otherwise the file is not what the user said it is.
+    """
+    by_animal: list[list[str]] = [[] for _ in prefixes]
+    stray: list[str] = []
+    for name in layout.keypoints:
+        owners = [
+            (len(p), i) for i, p in enumerate(prefixes) if name.startswith(f"{p}_") and name != p
+        ]
+        if not owners:
+            stray.append(name)
+            continue
+        by_animal[max(owners)[1]].append(name)
+    problems: list[str] = []
+    for prefix, stems in zip(prefixes, by_animal, strict=True):
+        if not stems:
+            problems.append(f"no columns start with '{prefix}_'")
+    if stray:
+        problems.append(
+            "columns of no listed animal: "
+            + ", ".join(stray[:4])
+            + (" ..." if len(stray) > 4 else "")
+        )
+    shared: list[str] = []
+    if not problems:
+        shortened = [
+            [s[len(p) + 1 :] for s in stems]
+            for p, stems in zip(prefixes, by_animal, strict=True)
+        ]
+        shared = shortened[0]
+        for p, names in zip(prefixes[1:], shortened[1:], strict=True):
+            if names != shared:
+                missing = sorted(set(shared) ^ set(names))
+                problems.append(
+                    f"'{p}' does not have the same keypoints as '{prefixes[0]}' "
+                    f"({', '.join(missing[:4])})"
+                )
+    if problems:
+        raise _error(
+            "ANIPOSE_ANIMAL_COLUMNS",
+            f"{path.name}: the animals option does not match the columns: "
+            + "; ".join(problems)
+            + ".",
+            "List every animal's column prefix in the order you want the animals, and give each "
+            "the same keypoints; or leave the option empty for a file with one animal.",
+            str(path),
+        )
+    return shared, by_animal
+
+
 def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any]) -> Session:
     """The session for one file. ``raw_xy``/``raw_z`` follow ``vertical_axis`` and ``flip``; the
     stored skeleton keeps the file's axes (converted to the target unit, not permuted or flipped).
@@ -297,21 +382,37 @@ def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any
         )
     order = np.argsort(fnum, kind="stable")
     frames = fnum[order].astype(np.int64)
-    names = list(layout.keypoints)
+    prefixes = animal_prefixes(opts.get("animals"))
+    if prefixes:
+        names, stems_by_animal = _split_animals(path, layout, prefixes)
+    else:
+        names, stems_by_animal = list(layout.keypoints), [list(layout.keypoints)]
     xyz = np.stack(
         [
-            table[[f"{n}_x", f"{n}_y", f"{n}_z"]].to_numpy(dtype=np.float64)[order]
-            for n in names
+            np.stack(
+                [
+                    table[[f"{n}_x", f"{n}_y", f"{n}_z"]].to_numpy(dtype=np.float64)[order]
+                    for n in stems
+                ],
+                axis=1,
+            )
+            for stems in stems_by_animal
         ],
         axis=1,
-    )  # (R, K, 3)
+    )  # (R, A, K, 3)
     xyz[~np.isfinite(xyz).all(axis=-1)] = np.nan  # a triple is missing as a whole
-    xyz = convert_units(xyz, opts["unit"], opts["target_unit"])[:, None, :, :]  # (R, 1, K, 3)
+    xyz = convert_units(xyz, opts["unit"], opts["target_unit"])
     score = None
     if layout.scored:
         score = np.stack(
-            [table[f"{n}_score"].to_numpy(dtype=np.float64)[order] for n in names], axis=1
-        )[:, None, :]  # (R, 1, K)
+            [
+                np.stack(
+                    [table[f"{n}_score"].to_numpy(dtype=np.float64)[order] for n in stems], axis=1
+                )
+                for stems in stems_by_animal
+            ],
+            axis=1,
+        )  # (R, A, K)
     cutoff = opts.get("likelihood_cutoff")
     if cutoff and score is None:
         raise DataValidationError(
@@ -347,6 +448,8 @@ def _build_session(given: Path, path: Path, layout: _Layout, opts: dict[str, Any
         trajectory_source=path,
         trajectory_format="anipose_pose3d_csv",
     )
+    if prefixes:
+        session.identities_labels = list(prefixes)
     if opts.get("keep_skeleton") and keypoints is None and session.raw_attrs is not None:
         session.raw_attrs["skeleton_not_kept"] = (
             "the full skeleton is larger than the storage budget; only the chosen keypoint was kept"

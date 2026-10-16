@@ -14,7 +14,7 @@ is authoritative.
 | **DeepLabCut** (CSV; also Lightning Pose) | **Supported** | One session per file. Frame rate and frame size are required options; the optional **Scale (pixels per cm)** feeds Session calibration |
 | **SLEAP** (analysis HDF5) | **Supported** | Export Analysis HDF5 from SLEAP. Same required options and optional scale as DeepLabCut |
 | **Ctrax** (raw `.mat`) | **Supported** | Frame size is a required option; the frame rate comes from the file. Ctrax track ids are fragments, so a session is identity-free. Optional scale as above |
-| **Anipose** (`pose-3d` CSV) | **Unverified** | Built from the published layout, tested on synthetic files only. Native 3-D: one animal per file; the frame rate and the unit of the coordinates are required options (never guessed). See the 3-D section of the user guide |
+| **Anipose** (`pose-3d` CSV) | **Unverified** | Built from the published layout, tested on synthetic files only. Native 3-D: one animal per file, or several when you list their column prefixes in the `animals` option; the frame rate and the unit of the coordinates are required options (never guessed). See the 3-D section of the user guide |
 | **DeepLabCut 3-D** (triangulated CSV) | **Unverified** | Same as Anipose; the unit is the calibration board's and is not proposed. Multi-animal 3-D tables are not read (the scan names them) |
 | **Ctrax / FlyTracker / JAABA** (`trx.mat`) | **Unverified** | Built from the documented layout with no real sample yet, and labelled as such in the confirm step. Classic MATLAB files only. `pxpermm` becomes the session scale |
 

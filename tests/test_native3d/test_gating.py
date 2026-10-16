@@ -71,3 +71,27 @@ def test_pixel_and_fused_projects_still_offer_them() -> None:
     skipped = Engine(fused).skipped_metrics(False)
     reasons = {NEEDS_PIXEL_FRAME_REASON, NEEDS_SEVERAL_ANIMALS_REASON}
     assert not reasons & set(skipped.values())
+
+
+def _pair_ref(session_id: str):
+    ref = _ref(session_id)
+    return ref.model_copy(update={"reader_options": {**ref.reader_options, "animals": "a, b"}})
+
+
+def _group_reasons(refs) -> dict[str, str]:
+    manifest = _manifest(refs, calibration=SESSION_CM, individual=STILL_OFFERED, group=GROUP)
+    return {m: r for m, r in Engine(manifest).skipped_metrics(False).items() if m in GROUP}
+
+
+def test_group_metrics_are_offered_for_a_native_session_with_several_animals() -> None:
+    assert _group_reasons([_pair_ref("n1")]) == {}
+
+
+def test_group_metrics_stay_unavailable_for_a_one_animal_native_session() -> None:
+    reasons = _group_reasons([_ref("n1")])
+    assert set(reasons) == set(GROUP) and set(reasons.values()) == {NEEDS_SEVERAL_ANIMALS_REASON}
+
+
+def test_one_single_animal_file_rules_the_group_metrics_out_for_the_project() -> None:
+    reasons = _group_reasons([_pair_ref("n1"), _ref("n2")])
+    assert set(reasons) == set(GROUP)

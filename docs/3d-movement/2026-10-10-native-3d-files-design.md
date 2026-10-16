@@ -23,8 +23,11 @@ A adds readers for both and lets the 3-D metrics of B2 and IL-15 run on them.
   `anipose` (pose-3d CSV) and `deeplabcut_3d`. There are no real sample files at hand for the DLC-3D
   layout. For Anipose the repo's published sample (`tests/real_samples/`) is used by the existing
   reader-contract case when the fixture is present; it is not required.
-- **One animal per file.** Neither format carries an animal axis. Several animals are several files
-  (several sessions), as for the other single-animal readers.
+- **One animal per file, unless the user lists the animals (Anipose, D-053).** Neither format carries
+  an animal axis. Several animals are several files (several sessions), as for the other
+  single-animal readers. An Anipose file can hold several animals as column prefixes
+  (`<animal>_<keypoint>_x|y|z`) when the `animals` option names them in order; the prefixes are
+  never guessed, since `left_ear` / `right_ear` look the same as `fishA_nose` / `fishB_nose`.
 - **Units are converted when reading, to the project's length unit.** The reader takes `unit` (the
   file's unit: mm, cm, m, in; Anipose proposes mm, which the file does not state, so it is always
   confirmed) and `target_unit` (default cm). The first import sets the project's
@@ -139,7 +142,7 @@ code does.
 - **IL-17 reads `z`.** The first build left IL-17 on `depth * height`, so a native session without the
   water column got NaN; found by the end-to-end test and fixed. IL-15 outside values, and non-finite z,
   are NaN and counted.
-- **GL-16 is not offered for native files** (one animal per file; the metric needs two in a session).
+- **GL-16 is not offered for native files** unless every native file of the project lists several animals (the metric needs two in a session).
 - **The unreadable-format notice for DLC-3D was narrowed** in `readers/recognise.py`: the single-animal
   tables the reader takes are no longer reported, while a multi-animal table (extra `individuals` header
   row) or one without full x, y, z triples is still named as one that cannot be read yet.

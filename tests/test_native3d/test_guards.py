@@ -69,19 +69,67 @@ def test_fuse_refusal_names_the_missing_pixel_frame() -> None:
     )
 
 
-def test_switch_correction_warns_for_multi_animal_z(caplog) -> None:
+def _crossing_pair(n: int = 40, swap_at: int = 20):
+    """Two fish on straight parallel lines whose labels swap at *swap_at*; z tells them apart."""
+    t = np.arange(n, dtype=float)
+    xy = np.zeros((n, 2, 2))
+    xy[:, 0, 0], xy[:, 0, 1] = t, 0.0
+    xy[:, 1, 0], xy[:, 1, 1] = t, 30.0
+    z = np.zeros((n, 2))
+    z[:, 0], z[:, 1] = 5.0, 50.0
+    swapped = xy.copy()
+    swapped_z = z.copy()
+    swapped[swap_at:] = xy[swap_at:, ::-1]
+    swapped_z[swap_at:] = z[swap_at:, ::-1]
+    return xy, z, swapped, swapped_z
+
+
+def test_switch_correction_reports_which_column_holds_each_identity() -> None:
     from track2data.preprocess.identity_switch import correct_switches
 
-    xy = np.random.default_rng(2).random((10, 2, 2)) * 50
-    cfg = IdSwitchCfg(enabled=True)
-    with caplog.at_level(logging.WARNING, logger="track2data.preprocess.identity_switch"):
-        correct_switches(xy, cfg, has_z=True)
-    z_warnings = [r for r in caplog.records if "3-D z coordinate" in r.getMessage()]
-    assert len(z_warnings) == 1
-    caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="track2data.preprocess.identity_switch"):
-        correct_switches(xy, cfg)
-    assert not [r for r in caplog.records if "3-D z coordinate" in r.getMessage()]
+    xy, _, swapped, _ = _crossing_pair()
+    fixed, step = correct_switches(swapped, IdSwitchCfg(enabled=True))
+    np.testing.assert_allclose(fixed, xy)
+    assert step.permutation is not None and step.permutation.shape == (40, 2)
+    assert step.permutation[:20].tolist() == [[0, 1]] * 20
+    assert step.permutation[20:].tolist() == [[1, 0]] * 20
+
+
+def test_identity_switch_correction_leaves_native_z_aligned_with_xy() -> None:
+    """A swapped label moves z with x and y: the animal keeps its own height."""
+    from track2data.core.models import PreprocessConfig
+    from track2data.preprocess.pipeline import run
+
+    xy, z, swapped, swapped_z = _crossing_pair()
+    session = _native_session(swapped, swapped_z)
+    cfg = PreprocessConfig()
+    cfg.identity_switch = IdSwitchCfg(enabled=True)
+    cfg.smoothing.enabled = False
+    cfg.gap_fill.enabled = False
+    psess = run(session, cfg)
+    np.testing.assert_allclose(psess.xy, xy)
+    np.testing.assert_allclose(psess.z, z)
+
+
+def _native_session(xy: np.ndarray, z: np.ndarray):
+    from track2data.readers.assemble import assemble_native_session
+
+    return assemble_native_session(
+        session_id="pair",
+        folder=Path("pair.csv"),
+        reader="anipose",
+        fps=25.0,
+        raw_xy=xy,
+        raw_z=z,
+        source_unit="cm",
+        target_unit="cm",
+        vertical_axis="z",
+        flip=False,
+        keypoints=None,
+        tracking_intervals=None,
+        trajectory_source=None,
+        trajectory_format="anipose_pose3d_csv",
+    )
 
 
 def test_t2d_add_names_the_unreadable_native_file(tmp_path: Path) -> None:
