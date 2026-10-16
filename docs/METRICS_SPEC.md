@@ -129,11 +129,11 @@ Individual        Locomotion               IL-1, IL-2, IL-6
                   Activity / freezing      IL-4, IL-7
                   Space use                IL-3, IL-9, IL-10, IL-14
                   Vertical position        IL-15
-                  3-D movement             IL-16, IL-17
+                  3-D movement             IL-16, IL-17, IL-18
                   Path geometry            IL-5, IL-8, IL-11
 Group             Social spacing           GL-1, GL-2, GL-13
                   Cohesion                 GL-4, GL-6, GL-10, GL-15
-                  3-D spacing              GL-16
+                  3-D spacing              GL-16, GL-18, GL-19
                   Collective motion        GL-3, GL-5, GL-8, GL-9, GL-11
                   Identity-free fallback   GL-7
 Zone              Occupancy                Z-1, Z-2, Z-8
@@ -212,7 +212,7 @@ info-button modal (§6).
 | **Assumptions** | Arena is roughly circular or a centre point is meaningful |
 | **Warnings** | For non-circular arenas, "centre-distance" is interpretable only with a clearly defined origin. In a non-circular (e.g. rectangular) arena, centre-distance is not monotonic in distance-to-wall — a corner-hugging animal can score the same centre-distance as one near a wall's midpoint; see **IL-14** for the wall-distance-specific measure. |
 | **Parameters** | `inner_radius_fraction` (float, default 0.5). `centre` / `arena_radius` / `centres` / `arena_radii` are `derived=True` and cannot be overridden. |
-| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
+| **Availability** | Camera view top-down or not set; greyed out and skipped on a declared side view (D-045), because the arena centre is a plan-view quantity. Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 > **Where the centre comes from.** It is derived in
 > `track2data/metrics/derived.py`, not supplied by the user — a value
@@ -395,7 +395,7 @@ info-button modal (§6).
 | **Parameters** | `arena_polygon_vertices` / `arena_polygon_vertices_per_animal` are `derived=True` and cannot be overridden. `wall_contact_threshold_px` (float, px, default 20.0). |
 | **Reference** | Simon et al. 1994, Behav. Brain Res. 61(1):59-64 (thigmotaxis as an index of anxiety in mice) — DOI [10.1016/0166-4328(94)90008-6](https://doi.org/10.1016/0166-4328(94)90008-6) |
 | **Supporting references** | Schnorr et al. 2012, Behav. Brain Res. 228(2):367-374 (thigmotaxis in larval zebrafish) (DOI: 10.1016/j.bbr.2011.12.016); Maximino et al. 2010, Behav. Brain Res. 214(2):157-171 (measuring anxiety in zebrafish: a critical review) (DOI: 10.1016/j.bbr.2010.05.031) |
-| **Availability** | Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
+| **Availability** | Camera view top-down or not set; greyed out and skipped on a declared side view (D-045), because the distance to the arena boundary is a plan-view quantity. Not offered for native 3-D projects (Anipose, DeepLabCut 3-D files): "uses a pixel-sized default and the project's native 3-D files have no pixel frame". Its default is sized in video pixels, which would silently change with the project's length unit. Pixel-frame and fused 3-D projects are unchanged. |
 
 #### IL-15 — Vertical position (depth)
 
@@ -446,6 +446,23 @@ info-button modal (§6).
 | **Units** | cm/s / BL/s |
 | **Assumptions** | The depth comes from a side camera at right angles to the top camera. A frame needs both speeds finite: where the estimator gives no vertical speed (the last frame of the forward-difference estimator, a depth segment shorter than the window needs) the frame is left out of the 3-D speed, never counted as 0. An animal with no such frame is NaN. `vz` is estimated once on the whole session's Z and sliced with the session, as IL-2's speed is, so in a binned run a bin's first and last frames carry the whole-session estimate (not the estimator's edge behaviour inside the bin); unbinned values are unchanged |
 | **Warnings** | Max speed is sensitive to jump artefacts and to depth noise. No refraction or parallax correction. A wrong tank height scales every vertical speed. Over the frames where the vertical speed is finite, the 3-D speed is at least IL-2's cm/s (not an unconditional inequality: frames without a vertical speed are in IL-2 but not here). Without depth or a cm scale all columns are NaN |
+| **Reference** | Standard kinematics |
+| **Supporting references** | Bjorneraas et al. 2010, J. Wildl. Manage. 74(6):1361-1366 (screening GPS location data for errors using animal movement characteristics) (DOI: 10.2193/2009-405) |
+
+#### IL-18 — Vertical speed (mean / median / max)
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Vertical speed |
+| **Level** | Individual; trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.depth` and `depth_height_cm` of a fused 3-D session (for a native 3-D file, the absolute `PreprocessedSession.z` in place of `depth · tank_height_cm`), `px_per_cm`; the pipeline's `KinematicsCfg` |
+| **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
+| **Formula** | `|vz[t, k]|`, the vertical speed in cm/s of `Z = depth · tank_height_cm` (for a native file, its z after the same gap filling and smoothing as x and y, with samples outside the water column left out), from the same estimator and window as the pipeline's kinematics; mean/median/max over frames where it is finite. This is the vertical part of IL-17 on its own |
+| **Output columns** | `individual_id`, `mean_vertical_speed_cm_s`, `median_vertical_speed_cm_s`, `max_vertical_speed_cm_s`, `mean_vertical_speed_bl_s` |
+| **Units** | cm/s / BL/s |
+| **Assumptions** | The speed is unsigned, so a climb and a dive count the same; a signed or climb/dive split measure is not offered. Where the estimator gives no vertical speed (the last frame of the forward-difference estimator, a depth segment shorter than the window needs) the frame is left out, never counted as 0. An animal with no such frame is NaN. As for IL-17, `vz` is estimated once on the whole session's Z and sliced with the session |
+| **Warnings** | Max speed is sensitive to depth noise and jump artefacts. No refraction or parallax correction. A wrong tank height scales every vertical speed. Without depth or a cm scale all columns are NaN |
 | **Reference** | Standard kinematics |
 | **Supporting references** | Bjorneraas et al. 2010, J. Wildl. Manage. 74(6):1361-1366 (screening GPS location data for errors using animal movement characteristics) (DOI: 10.2193/2009-405) |
 
@@ -850,6 +867,41 @@ Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availabil
 | **Reference** | Clark & Evans 1954, Ecology 35(4):445-453 (distance to nearest neighbor as a measure of spatial relationships in populations) — DOI [10.2307/1931034](https://doi.org/10.2307/1931034) |
 | **Supporting references** | Pitcher 1973, Anim. Behav. 21(4):673-686 (the three-dimensional structure of schools in the minnow, Phoxinus phoxinus) (DOI: 10.1016/S0003-3472(73)80091-0); Krause & Ruxton 2002, Living in Groups (Oxford University Press) (DOI: 10.1093/oso/9780198508175.001.0001) |
 
+#### GL-18 — 3-D inter-individual distance
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Inter-individual distance in 3-D |
+| **Level** | Group (per frame averaged across pairs); trial summary |
+| **Priority** | Optional |
+| **Inputs** | `PreprocessedSession.xy`, `PreprocessedSession.depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session |
+| **Required preprocessing** | A fused 3-D session (top view plus side view) with a cm scale for the top view (scalar or session calibration, not body-length calibration). A project without these skips the metric and the run records why |
+| **Formula** | `P[t, k] = (x/px_per_cm, y/px_per_cm, depth · tank_height_cm)`; `iid[t] = mean(pdist(P[t]))`, the mean of all pairwise Euclidean distances; mean and median over frames |
+| **Output columns** | `mean_iid_3d_cm`, `median_iid_3d_cm`, `mean_iid_3d_bl`, `n_skipped_frames_3d`, `frac_frames_used_3d` |
+| **Units** | cm / BL / frames / fraction (0-1) |
+| **Assumptions** | The depth comes from a side camera at right angles to the top camera. A frame needs finite X, Y and Z for every animal; other frames are skipped and counted in `n_skipped_frames_3d`, and `frac_frames_used_3d` is the share of the real frames (separator rows excluded) that were used. Needs no identities (an unordered point set per frame, like GL-2). `mean_iid_3d_bl` uses GL-16's body-length rule. One animal, or no valid frame, gives NaN (never 0) |
+| **Warnings** | GL-2 and GL-18 are computed on different frames whenever depth is missing, so `mean_iid_px` and `mean_iid_3d_cm` are not a like-for-like comparison. No refraction or parallax correction. A wrong tank height scales every vertical distance. Without depth or a cm scale all statistics are NaN |
+| **Reference** | Krause & Ruxton 2002, Living in Groups (Oxford University Press) — DOI [10.1093/oso/9780198508175.001.0001](https://doi.org/10.1093/oso/9780198508175.001.0001) |
+| **Supporting references** | Miller & Gerlai 2007, Behav. Brain Res. 184(2):157-166 (quantification of shoaling behaviour in zebrafish) (DOI: 10.1016/j.bbr.2007.07.007); Delcourt & Poncin 2012, Rev. Fish Biol. Fish. 22(3):595-619 (shoals and schools: back to the heuristic definitions and quantitative references) (DOI: 10.1007/s11160-012-9260-z) |
+
+#### GL-19 — 3-D group cohesion index
+
+| Field | Value |
+|---|---|
+| **Manuscript label** | Group cohesion in 3-D |
+| **Level** | Group (trial summary) |
+| **Priority** | Optional |
+| **Inputs** | The 3-D distances of GL-16 (`cohesion_source='nnd'`, default) or GL-18 (`'iid'`), from the `PreprocessedSession.xy`, `depth`, `px_per_cm` and `depth_height_cm` of a fused 3-D session |
+| **Required preprocessing** | As GL-18 |
+| **Formula** | `cohesion_index_3d = 1 / mean_nnd_3d_cm` or `1 / mean_iid_3d_cm`, the mean over the frames with a full 3-D position for every animal |
+| **Parameters** | `cohesion_source` (the choices are nnd and iid; any other value is refused) |
+| **Output columns** | `cohesion_index_3d` |
+| **Units** | 1/cm |
+| **Assumptions** | A frame needs finite X, Y and Z for every animal; needs no identities |
+| **Warnings** | The index is per cm, so it is not comparable with GL-6, which is per pixel (or BL⁻¹ with calibration). NaN when the mean distance is 0, with fewer than two animals, or without depth or a cm scale |
+| **Reference** | Krause & Ruxton 2002, Living in Groups (Oxford University Press) — DOI [10.1093/oso/9780198508175.001.0001](https://doi.org/10.1093/oso/9780198508175.001.0001) |
+| **Supporting references** | Delcourt & Poncin 2012, Rev. Fish Biol. Fish. 22(3):595-619 (shoals and schools: back to the heuristic definitions and quantitative references) (DOI: 10.1007/s11160-012-9260-z) |
+
 ### 4.5 Identity-free variants
 
 Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availability note under 4.3.
@@ -890,6 +942,7 @@ three together.
 | IL-15 Vertical Position (Depth) | ❌ | Per-animal time series |
 | IL-16 3-D Distance Travelled | ❌ | Per-animal time series |
 | IL-17 3-D Speed | ❌ | Per-animal time series |
+| IL-18 Vertical Speed | ❌ | Per-animal time series |
 | GL-1 Nearest-Neighbour Distance | ✅ | Unordered point set per frame |
 | GL-2 Inter-Individual Distance | ✅ | Unordered point set per frame |
 | GL-3 Polarisation | ❌ | Heading requires per-individual tracklets |
@@ -904,6 +957,8 @@ three together.
 | GL-13 Topological k-NN Counts | ✅ | Per-frame k-nearest-neighbour counts |
 | GL-15 Group Elongation / Anisotropy | ✅ | Per-frame covariance of the point set |
 | GL-16 3-D Nearest-Neighbour Distance | ✅ | Unordered 3-D point set per frame |
+| GL-18 3-D Inter-Individual Distance | ✅ | Unordered 3-D point set per frame |
+| GL-19 3-D Group Cohesion | ✅ | Built on GL-16/GL-18's unordered point sets |
 | Z-1 Time in zone | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
 | Z-2 Area-Corrected Occupancy | ✅ | Pure occupancy; emitted **pooled** (no `individual_id`) on identity-free sessions \|
 | Z-3 Zone visit count | ❌ | Follows one slot across frames (visits / events / sequences) \|
@@ -1209,6 +1264,8 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | GL-13 | `metrics/group.py` | `TopologicalNeighbourCounts` | `scipy.spatial.cKDTree`, same tree GL-1 builds |
 | GL-15 | `metrics/group.py` | `GroupElongation` | `np.linalg.eigh` on the per-frame position covariance |
 | GL-16 | `metrics/group.py` | `NearestNeighbourDistance3D` | `scipy.spatial.cKDTree` on the 3-D positions of `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` |
+| GL-18 | `metrics/group.py` | `InterIndividualDistance3D` | `scipy.spatial.distance.pdist` on the 3-D positions of `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` |
+| GL-19 | `metrics/group.py` | `GroupCohesion3D` | GL-16's `cKDTree` distance or GL-18's `pdist`, per `cohesion_source`; gated by `Metric.requires_depth_scale` |
 | Z-1..Z-6 | `metrics/zone.py` | `TimeInZone`, `AreaCorrectedOccupancy`, `ZoneVisitCount`, `ZoneTransitions`, `Z5EntryExitEvents`, `Z6LatencyToFirstEntry` | `shapely` for point-in-polygon |
 | Z-7 | `metrics/zone.py` | `ZoneTransitionMatrix` | Reuses Z-4's debounced zone sequence |
 | Z-8 | `metrics/zone.py` | `ZonePreferenceIndex` | Reuses Z-2's `roi_areas`/`total_arena_area` derivation |
@@ -1221,6 +1278,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | IL-15 | `metrics/individual.py` | `VerticalPosition` | np-only; the water column comes from `zones/extent.py`, derived in `metrics/derived.py`; gated by `Metric.valid_camera_views` (`metrics/availability.py`) |
 | IL-16 | `metrics/individual.py` | `PathLength3D` | np-only; positions from `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` (`metrics/availability.py`) |
 | IL-17 | `metrics/individual.py` | `Speed3D` | np-only; positions from `metrics/geometry3d.py`; vertical speed from `compute_kinematics` with the pipeline's `KinematicsCfg` (handed over by the Engine through `Metric.uses_kinematics_cfg`); gated by `Metric.requires_depth_scale` |
+| IL-18 | `metrics/individual.py` | `VerticalSpeed3D` | np-only; the vertical part of IL-17 (`metrics/geometry3d.vertical_speed`, or the Engine's precomputed `z_speed`); gated by `Metric.requires_depth_scale` |
 
 ### 5.1 Shared computations (no duplicated work)
 
@@ -1451,7 +1509,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 18 of the 38
+   it is disabled with an explanatory tooltip for the 20 of the 41
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by

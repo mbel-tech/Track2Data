@@ -56,9 +56,9 @@ reader fixture-test suite that must go from XFAIL to PASS when the reader lands.
 
 | Prio | Importer | Tier | Status | Suite cases |
 |---|---|---|---|---|
-| 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) | 1 | **built** (CSV); `.h5` planned | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` waits for the G-H5 decision |
+| 1 | DeepLabCut CSV (Lightning Pose, EKS, maDLC) and `.h5` | 1 | **built** (CSV real-sample; `.h5` synthetic-only until the real EPM file has been read in a run, D-050) | `dlc_two_mice_csv`, `lightning_pose_eks_csv` pass; `dlc_single_animal_h5` is claimed by `deeplabcut_h5` and needs the fixture to run |
 | 2 | SLEAP analysis HDF5 | 1 | **built** | `sleap_named_tracks`, `sleap_no_tracks` pass |
-| 3 | Ctrax raw `.mat` (**built**), `trx.mat`, FlyTracker | 2 | raw `.mat` built; `trx.mat` waits for a real sample; FlyTracker recognise-only | `ctrax_raw_mat` passes |
+| 3 | Ctrax raw `.mat` (**built**), `trx.mat`, FlyTracker | 2 | raw `.mat` built; `trx.mat` **built**, synthetic only (no real sample yet); FlyTracker recognise-only | `ctrax_raw_mat` passes |
 | 4 | ToxTrac `Tracking_RealSpace.txt` | 3 | planned | `toxtrac_realspace` |
 | 5 | Anipose pose-3d CSV (and DLC-3D) | 3 | **built** (both; synthetic files only, `verification = "synthetic_only"`) | quirk tests, and synthetic-file reader tests; the real-sample contract case runs when its fixture is present |
 | 6 | TRex `.npz` | 4 | planned | `trex_new_export`, `trex_old_export` |
@@ -126,4 +126,4 @@ The file Ctrax's "Save Tracks as Matlab File" writes. Verified against the real
 | Identity | Track ids are **fragments**, not animals: Ctrax starts a new id each time it loses a track. Every id becomes a slot, the session is identity-free by construction (`track_wo_identities`), and the scan says so. `top_n` keeps the longest tracks (ties to the lower id). A file whose slots would not fit in memory is refused with a request to set `top_n`. |
 | Frame offset | `startframe` greater than 0 is recorded as the tracking interval, so true frame numbers are kept. |
 | Missing | A frame with no detection for a track is NaN. |
-| Not yet | `trx.mat` (needs a real sample), v7.3 files, ellipse axes and angle (`maj_ax`, `min_ax`, `angle` are not used). |
+| Not yet | v7.3 files, ellipse axes and angle (`maj_ax`, `min_ax`, `angle` are not used). |

@@ -123,6 +123,10 @@ class Hdf5Root:
 
     nodes: dict[str, Hdf5Node]
     strings: dict[str, list[str]] = field(default_factory=dict)
+    #: Top-level groups that pandas wrote with ``format="table"`` (their ``pandas_type`` attribute,
+    #: plain text, is ``frame_table``), as ``{group: (rows, value_columns)}``. Only that marker is
+    #: read: the column labels are pickled and a peek never unpickles anything.
+    pandas_tables: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
 #: A string dataset longer than this is not read by a peek.
@@ -200,6 +204,7 @@ class Peeker:
 
             with h5py.File(path, "r") as handle:
                 nodes: dict[str, Hdf5Node] = {}
+                tables: dict[str, tuple[int, int]] = {}
                 for name, obj in handle.items():
                     if isinstance(obj, h5py.Dataset):
                         nodes[name] = Hdf5Node(
@@ -210,6 +215,9 @@ class Peeker:
                         )
                     else:
                         nodes[name] = Hdf5Node("group")
+                        marker = _pandas_table(obj)
+                        if marker is not None:
+                            tables[name] = marker
                 found: dict[str, list[str]] = {}
                 for name in strings:
                     node = handle.get(name)
@@ -221,7 +229,7 @@ class Peeker:
                         found[name] = [_text(v) for v in node[:]]
         except Exception:  # not HDF5, truncated, permissions: cannot tell
             return None
-        return Hdf5Root(nodes, found)
+        return Hdf5Root(nodes, found, tables)
 
     def mat_variables(self, path: Path) -> dict[str, tuple[tuple[int, ...], str]] | None:
         """The variables of a classic (v5) MATLAB file as ``{name: (shape, class)}``; else None.
@@ -257,6 +265,24 @@ class Peeker:
         except Exception:  # corrupt, truncated or not numpy at all: cannot tell
             return None
         return NpyHeader(tuple(shape), dtype, bool(fortran_order))
+
+
+def _pandas_table(group: Any) -> tuple[int, int] | None:
+    """``(rows, value columns)`` of a pandas ``format="table"`` group, else None. Reads the
+    plain-text ``pandas_type`` attribute and the table's dtype only."""
+    try:
+        if _attr_value(group.attrs.get("pandas_type")) != "frame_table":
+            return None
+        table = group.get("table")
+        names = table.dtype.names if table is not None else None
+        if not names or table.ndim != 1:
+            return None
+        columns = sum(
+            int(np.prod(table.dtype[n].shape)) or 1 for n in names if n.startswith("values_block_")
+        )
+        return int(table.shape[0]), columns
+    except Exception:  # an odd group is just not a pandas table
+        return None
 
 
 def _text(value: Any) -> str:

@@ -177,7 +177,7 @@ def test_a_native_project_has_3d_data_and_asks_for_the_water_column() -> None:
     assert (view, has_depth) == ("top", False)  # the declared view is irrelevant
     scale = manifest_depth_scale(native)
     assert scale["dimension"] == "3d" and scale["has_depth"] is True
-    for mid in ("IL-16", "IL-17", "IL-1"):
+    for mid in ("IL-16", "IL-17", "IL-18", "IL-1"):
         assert unavailable_reason(get(mid), view, has_depth=has_depth, depth_scale=scale) is None
     assert (
         unavailable_reason(get("IL-15"), view, has_depth=has_depth, depth_scale=scale)
@@ -199,3 +199,29 @@ def test_a_native_project_has_3d_data_and_asks_for_the_water_column() -> None:
         )
         is None
     )
+
+
+# ── IL-3 and IL-14 are plan-view metrics ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("metric_id", ["IL-3", "IL-14"])
+def test_il3_and_il14_declare_top_and_unknown_views(metric_id: str) -> None:
+    import track2data.metrics as registry
+
+    assert registry.get(metric_id).valid_camera_views == frozenset({"top", "unknown"})
+
+
+@pytest.mark.parametrize("metric_id", ["IL-3", "IL-14"])
+def test_il3_and_il14_are_unavailable_on_a_declared_side_view(metric_id: str) -> None:
+    import track2data.metrics as registry
+
+    reason = view_unavailable_reason(registry.get(metric_id), "side")
+    assert reason is not None and "top-down" in reason
+
+
+@pytest.mark.parametrize("metric_id", ["IL-3", "IL-14"])
+@pytest.mark.parametrize("view", ["top", "unknown"])
+def test_il3_and_il14_stay_available_for_top_and_unset_views(metric_id: str, view: str) -> None:
+    import track2data.metrics as registry
+
+    assert view_unavailable_reason(registry.get(metric_id), view) is None

@@ -16,8 +16,8 @@ from track2data.metrics.availability import (
 )
 
 PIXEL_SIZED = ("IL-3", "IL-9", "IL-10", "IL-14")
-GROUP = ("GL-1", "GL-3", "GL-5", "GL-7", "GL-16")
-STILL_OFFERED = ("IL-1", "IL-2", "IL-16", "IL-17")
+GROUP = ("GL-1", "GL-3", "GL-5", "GL-7", "GL-16", "GL-18", "GL-19")
+STILL_OFFERED = ("IL-1", "IL-2", "IL-16", "IL-17", "IL-18")
 
 
 def _native():

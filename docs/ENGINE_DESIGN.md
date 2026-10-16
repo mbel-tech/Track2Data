@@ -385,10 +385,14 @@ ALIASES = {"condition": "treatment", "date": "trial_date"}
 
 ### 6.2 Loader
 
-`metadata.loader.load(path)` returns a `pandas.DataFrame` with stripped
-whitespace, lowered string columns where appropriate, and ISO-8601
-dates. Excel files: read sheet 0; multi-sheet support is a future
-feature.
+`metadata.loader.load(path, sheet=None)` returns a `pandas.DataFrame` with
+stripped whitespace, lowered string columns where appropriate, and ISO-8601
+dates. For an Excel workbook `sheet` names the sheet to read; `None` reads the
+first. `list_sheets(path)` gives a workbook's sheet names (`[]` for a CSV) and
+an unknown name raises `ValueError` listing them. The chosen sheet is stored
+in `MetadataSource.sheet`, which is left out of the saved manifest while it is
+`None` so projects without a sheet keep their `project_hash`. The old `.xls`
+format is refused with a message (openpyxl cannot read it).
 
 ### 6.3 Mapping & join
 

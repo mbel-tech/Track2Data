@@ -299,3 +299,55 @@ class TestLegacyAndMisbehavingReaders:
         self, toy_readers: None, tiny_real_session: Path
     ) -> None:
         assert "exploding_detect" not in _readers_in(scan([tiny_real_session]))
+
+
+# ── Lenient retry ("Choose software…") ──────────────────────────────────────
+
+
+def _txt_prediction(root: Path) -> Path:
+    import numpy as np
+
+    from tests.support.dlc import random_pose, write_dlc_csv
+
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "trial1.txt"
+    write_dlc_csv(path, random_pose(20, 1, 3), np.ones((20, 1, 3)), bodyparts=["a", "b", "c"])
+    return path
+
+
+def test_a_scan_result_keeps_its_index_until_released(tmp_path: Path) -> None:
+    result = scan([tmp_path])
+    assert result.index is not None
+    result.release_index()
+    assert result.index is None
+
+
+def test_lenient_scan_offers_a_reader_that_did_not_detect_at_low_confidence(tmp_path: Path) -> None:
+    from track2data.readers.detection import Confidence
+    from track2data.readers.scan import lenient_scan
+
+    path = _txt_prediction(tmp_path / "root")
+    result = scan([tmp_path / "root"])
+    assert result.groups == ()
+    group = lenient_scan(result, "deeplabcut")
+    assert group is not None
+    assert group.best.confidence is Confidence.LOW
+    assert [s.source for s in group.best.sessions] == [path]
+
+
+def test_lenient_scan_of_an_unrelated_reader_returns_none(tmp_path: Path) -> None:
+    from track2data.readers.scan import lenient_scan
+
+    _txt_prediction(tmp_path / "root")
+    result = scan([tmp_path / "root"])
+    assert lenient_scan(result, "idtrackerai") is None
+    assert lenient_scan(result, "no_such_reader") is None
+    result.release_index()
+    assert lenient_scan(result, "deeplabcut") is None
+
+
+def test_only_readers_with_looser_rules_are_listed() -> None:
+    from track2data.readers.scan import lenient_readers
+
+    assert {"deeplabcut", "sleap_analysis"} <= set(lenient_readers())
+    assert "idtrackerai" not in lenient_readers()

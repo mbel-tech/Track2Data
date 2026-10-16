@@ -306,6 +306,21 @@ class ExportScreen(QWidget):
             return Path(self._output_dir)
         return self._default_dir()
 
+    def _refresh_output_dir_after_run(self) -> None:
+        """Re-arm the overwrite guard once a run has (possibly) written into the directory.
+
+        The guard otherwise only ran when the directory was chosen or the project changed, so a
+        second Export went to the same, now populated, directory without asking. The default
+        timestamped directory moves on to a fresh name; a directory the user chose stays, and
+        now lists what the first run wrote and asks before it is replaced.
+        """
+        if not self._output_dir:
+            self._default_dir_cache = None
+            has_project = self._store is not None and self._store.has_project
+            if has_project:
+                self._dir_label.setText(str(self._resolved_out_dir()))
+        self._check_overwrite()
+
     def _check_overwrite(self) -> None:
         out_dir = self._resolved_out_dir()
         existing: list[str] = []
@@ -417,7 +432,7 @@ class ExportScreen(QWidget):
         if task_id != self._current_task_id:
             return
         self._current_task_id = None
-        self._update_export_enabled()
+        self._refresh_output_dir_after_run()
 
         if isinstance(result, RunResult):
             accepted = self._store.set_run_results(
@@ -449,7 +464,7 @@ class ExportScreen(QWidget):
         if task_id != self._current_task_id:
             return
         self._current_task_id = None
-        self._update_export_enabled()
+        self._refresh_output_dir_after_run()
         self._status_label.setText("Cancelled.")
         if self._store is not None:
             self._store.append_log("### Export cancelled\n")

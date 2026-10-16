@@ -701,6 +701,18 @@ class SessionRef(BaseModel):
 class MetadataSource(BaseModel):
     path: Path
     sha256: str
+    # Which sheet of an Excel workbook holds the metadata; None = the first sheet (and every CSV).
+    sheet: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_sheet(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        # A plain field would write ``"sheet": null`` and change ``project_hash`` (a dump of the
+        # whole manifest) for every project that already has a metadata source. Left out while
+        # unset, the saved JSON and the hash stay byte-identical until a sheet is chosen.
+        data: dict[str, Any] = handler(self)
+        if data.get("sheet") is None:
+            data.pop("sheet", None)
+        return data
 
 
 class MappingRule(BaseModel):

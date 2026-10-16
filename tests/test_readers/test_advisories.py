@@ -213,3 +213,43 @@ def test_the_summary_records_whether_the_session_carries_a_body_length() -> None
     without = SessionSummary.from_session(session(None), calibration_mode="x")
     assert with_it.has_body_length is True
     assert without.has_body_length is False
+
+
+class TestFragmentedSessions:
+    @staticmethod
+    def _fragmented(session_id: str, fraction: float | None, n_animals: int = 4):
+        return SessionSummary(
+            session_id=session_id,
+            reader="adv_verified",
+            fps=25.0,
+            n_frames=100,
+            n_animals=n_animals,
+            width_px=100,
+            height_px=80,
+            length_unit=None,
+            calibration_mode="scalar",
+            nan_slot_fraction=fraction,
+        )
+
+    def test_a_fragment_heavy_session_gets_an_advisory_that_names_top_n(self) -> None:
+        (text,) = reader_advisories([self._fragmented("flies", 0.8)])
+        assert "flies" in text and "80%" in text
+        assert "top_n" in text
+        assert "any animal is missing" in text
+
+    def test_a_summary_built_without_the_new_field_never_warns(self) -> None:
+        assert reader_advisories([self._fragmented("x", None)]) == []
+
+    def test_a_single_animal_session_never_warns(self) -> None:
+        assert reader_advisories([self._fragmented("x", 0.9, n_animals=1)]) == []
+
+    def test_a_session_below_the_threshold_does_not_warn(self) -> None:
+        from track2data.readers.advisories import FRAGMENTED_NAN_FRACTION
+
+        assert reader_advisories([self._fragmented("x", FRAGMENTED_NAN_FRACTION - 0.01)]) == []
+        assert reader_advisories([self._fragmented("x", FRAGMENTED_NAN_FRACTION)]) != []
+
+    def test_many_fragmented_sessions_are_truncated_with_plus_n_more(self) -> None:
+        (text,) = reader_advisories([self._fragmented(f"s{i}", 0.9) for i in range(7)])
+        assert "s0" in text and "s3" in text and "s4" not in text
+        assert "+3 more" in text

@@ -107,7 +107,7 @@ before comparing the two.
 **The native water column is one surface and floor for the whole project.** Native files in
 a project must share a vertical axis (a mix is refused at import) and an origin (this cannot
 be checked from the files, so check it yourself). Samples outside the column are left out of
-IL-15, IL-16, IL-17 and GL-16, never clipped, and the run `README.md` counts them.
+IL-15, IL-16, IL-17, IL-18 and GL-16, never clipped, and the run `README.md` counts them.
 
 **`flip` reverses the vertical axis only, which also mirrors the view from above.** For a
 native file, headings and the sign of `left_right_turn_bias` change with it. The horizontal

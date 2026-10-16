@@ -93,6 +93,10 @@ class SessionSummary:
     # False for a native 3-D session: it has no image frame, so width_px/height_px (0) say
     # nothing and must not be compared or reported as a resolution.
     has_pixel_frame: bool = True
+    # Share of (frame, animal) slots with no position. Mostly-empty slots mean the tracker handed
+    # over fragments, not continuous animals (a Ctrax file with one slot per track id). None =
+    # not computed, which never raises the fragmentation advisory.
+    nan_slot_fraction: float | None = None
 
     @property
     def duration_s(self) -> float:
@@ -143,7 +147,18 @@ class SessionSummary:
             length_calibration_n=cal_n,
             length_calibration_rel_sd=cal_rel_sd,
             has_pixel_frame=session.has_pixel_frame,
+            nan_slot_fraction=_nan_slot_fraction(session),
         )
+
+
+def _nan_slot_fraction(session: Session) -> float | None:
+    """The share of (frame, animal) slots with no x position, or None for an empty array."""
+    import numpy as np
+
+    xy = session.raw_xy
+    if xy.size == 0:
+        return None
+    return float(np.isnan(xy[..., 0]).mean())
 
 
 def _group_by(

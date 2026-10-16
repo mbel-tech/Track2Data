@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -57,6 +58,7 @@ from track2data.readers.base import SessionReader
 from track2data.readers.detection import Confidence, Detection, SessionCandidate
 from track2data.readers.discovery import claim_sessions
 from track2data.readers.index import ScanIndex
+from track2data.readers.params import ReaderParameter
 from track2data.readers.peek import Peeker
 
 logger = logging.getLogger(__name__)
@@ -158,7 +160,24 @@ class IDTrackerAiV5Reader(SessionReader):
 
     # ── read ──────────────────────────────────────────────────────────────────
 
-    def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
+    #: Last resort only: video_object.npy, then the session json, win over it.
+    parameters: ClassVar[tuple[ReaderParameter, ...]] = (
+        ReaderParameter(
+            name="fps",
+            label="Frame rate (frames per second)",
+            kind="float",
+            minimum=0.001,
+            help="Used only when neither video_object.npy nor the session json records it.",
+        ),
+    )
+
+    def read(
+        self,
+        folder: Path,
+        *,
+        allow_pickle: bool = False,
+        options: Mapping[str, Any] | None = None,
+    ) -> Session:
         """Parse *folder* and return a Session.
 
         The trajectory arrays here load with ``allow_pickle=False`` already;
@@ -176,7 +195,11 @@ class IDTrackerAiV5Reader(SessionReader):
         traj_path, variant = self._find_trajectory(folder)
         raw_xy = self._load_trajectory(traj_path, n_frames_hint=n_frames_hint)
         video_info = self._load_video_info(
-            folder, raw_xy, video_obj=video_obj, allow_pickle=allow_pickle
+            folder,
+            raw_xy,
+            video_obj=video_obj,
+            allow_pickle=allow_pickle,
+            given_fps=(options or {}).get("fps"),
         )
         # The v5 session json was already being loaded elsewhere in this
         # reader but track_wo_identities was never looked at, so a legacy
@@ -305,6 +328,7 @@ class IDTrackerAiV5Reader(SessionReader):
         video_obj: Any = None,
         *,
         allow_pickle: bool = False,
+        given_fps: Any = None,
     ) -> VideoInfo:
         """
         Build VideoInfo from video_object.npy with fallback to session_progress.json.
@@ -318,21 +342,51 @@ class IDTrackerAiV5Reader(SessionReader):
             folder, allow_pickle=allow_pickle
         )
 
-        fps = float(_get_field(obj, "fps", "frames_per_second") or 1.0)
+        # None = not found. A recording genuinely at 1 fps is a legitimate value, so 1.0 must
+        # not double as the "missing" marker.
+        fps_raw = _get_field(obj, "fps", "frames_per_second")
+        fps = float(fps_raw) if fps_raw else None
         height = int(_get_field(obj, "height", "original_height", "video_height") or 0)
         width = int(_get_field(obj, "width", "original_width", "video_width") or 0)
         raw_paths = _get_field(obj, "paths_to_video_files", "video_paths", "video_path")
 
         # Fallback: session_progress.json for any missing fields
-        if not height or not width or fps == 1.0:
+        if not height or not width or fps is None:
             meta = self._load_session_json(folder)
             if meta:
-                if fps == 1.0:
-                    fps = float(_get_field(meta, "fps", "frames_per_second") or fps)
+                if fps is None:
+                    fps_raw = _get_field(meta, "fps", "frames_per_second")
+                    fps = float(fps_raw) if fps_raw else None
                 if not height:
                     height = int(_get_field(meta, "video_height", "height") or 0)
                 if not width:
                     width = int(_get_field(meta, "video_width", "width") or 0)
+
+        if fps is None and given_fps:
+            # The user's own answer, used only because the files hold none.
+            fps = float(given_fps)
+
+        if fps is None:
+            # Every speed, duration and time bin scales with the frame rate; guessing one
+            # would export wrong numbers that look valid.
+            raise DataValidationError(
+                "The frame rate of this session could not be found in "
+                f"{_VIDEO_OBJ_NAME} or the session json.",
+                code="VIDEO_FPS_MISSING",
+                subject=str(folder),
+                remediation=(
+                    "Give the frame rate (the fps option: --option fps=25 on the command "
+                    "line, or the Frame rate field when importing), allow reading "
+                    "video_object.npy (security.allow_pickle_trajectories), or make sure the "
+                    "session json is in the folder."
+                ),
+            )
+        if not height or not width:
+            logger.warning(
+                "The frame size of %s is unknown; zone and panel checks that need it are "
+                "skipped.",
+                folder,
+            )
 
         # Resolve video path (ASSUMPTION 5 — may be unreachable)
         video_path: Path | None = None

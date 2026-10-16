@@ -128,3 +128,18 @@ def test_flip_orientation_idempotent_double_flip() -> None:
     double_flipped = flip_orientation(flip_orientation(zs))
     assert double_flipped.orientation_tag == "FT"
     assert list(double_flipped.rois[0].vertices) == vertices
+
+
+def test_flip_orientation_keeps_hole_signs_and_source_size() -> None:
+    zs = ZoneSet(
+        rois=[
+            ROI(name="arena", level="main", vertices=[(0, 0), (10, 0), (10, 10)], sign="+"),
+            ROI(name="arena", level="main", vertices=[(2, 2), (4, 2), (4, 4)], sign="-"),
+        ],
+        orientation_tag="FT",
+        source_width_px=640,
+        source_height_px=480,
+    )
+    flipped = flip_orientation(zs)
+    assert [r.sign for r in flipped.rois] == ["+", "-"]
+    assert (flipped.source_width_px, flipped.source_height_px) == (640, 480)

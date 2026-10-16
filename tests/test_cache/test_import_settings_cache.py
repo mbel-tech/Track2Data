@@ -37,6 +37,7 @@ def _manifest(
     blob_calibration: bool = False,
     overrides: dict[str, Path] | None = None,
     extra_sessions: list[SessionRef] | None = None,
+    identity_free: bool | None = None,
 ) -> ProjectManifest:
     now = datetime.now(tz=UTC)
     return ProjectManifest(
@@ -44,7 +45,12 @@ def _manifest(
         created_at=now,
         updated_at=now,
         sessions=[
-            SessionRef(session_id=REF_ID, folder=folder, sha256="x"),
+            SessionRef(
+                session_id=REF_ID,
+                folder=folder,
+                sha256="x",
+                identity_free_override=identity_free,
+            ),
             *(extra_sessions or []),
         ],
         security=SecurityConfig(allow_pickle_trajectories=allow_pickle),
@@ -207,6 +213,16 @@ class TestTheKeyItself:
             self._key(_manifest(folder, overrides={REF_ID: video}), cache),
         }
         assert len(keys) == 4
+
+    def test_the_identity_free_override_moves_the_key(self, folder, tmp_path) -> None:
+        """It decides whether gaps are bridged across tracking intervals in preprocessing."""
+        cache = tmp_path / "cache"
+        keys = {
+            self._key(_manifest(folder), cache),
+            self._key(_manifest(folder, identity_free=True), cache),
+            self._key(_manifest(folder, identity_free=False), cache),
+        }
+        assert len(keys) == 3
 
     def test_a_worker_rebuilding_the_engine_from_the_manifest_json_gets_the_same_key(
         self, folder, tmp_path

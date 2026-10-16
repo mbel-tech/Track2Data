@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Three more 3-D metrics.** IL-18 *Vertical Speed* (mean, median and maximum of |dz/dt| in cm/s, plus body lengths per second), GL-18 *3-D Inter-Individual Distance* (mean over all pairs, the 3-D counterpart of GL-2) and GL-19 *3-D Group Cohesion* (reciprocal of the 3-D nearest-neighbour or inter-individual distance, chosen by `cohesion_source`). They need a fused or native 3-D session and a depth scale, skip frames with a missing animal as GL-16 does, and are greyed out otherwise. The registry now holds 57 metrics (decision D-052).
+- **Warning before a run when most animal slots are empty.** A multi-animal session in which at least half the (frame, animal) slots have no position, typically a Ctrax file with one slot per track fragment, now raises an advisory in `track2data validate`, the log and the run README, saying that group metrics skip any frame with a missing animal and pointing to the `top_n` option.
+- **Metadata: Excel workbooks with several sheets.** The metadata screen loads `.xlsx` files (it only took CSV before) and, when the workbook has more than one sheet, shows a **Sheet** menu; the choice is saved with the project. Projects without a chosen sheet are unchanged, including their project hash. The old `.xls` format is refused with a message that says to save as `.xlsx` or CSV.
+- **DeepLabCut `.h5` prediction files** are read (`deeplabcut_h5`). The numbers and the pickled column labels are decoded without PyTables, and the labels by an unpickler that refuses every global, so a crafted file cannot run code. A `.csv` and `.h5` pair of the same name is one session. The reader is marked synthetic-only until the real sample has been read in a run; the multi-animal `*_el.h5` tracklet files are refused with a remediation.
+- **`movement` / xarray adapter.** `track2data.interop.movement.to_movement_dataset(psess)` returns a preprocessed session as an `xarray.Dataset` in the `movement` layout (`position` over time, individuals, keypoints, space), with true video time across tracking gaps, a `z` coordinate for native 3-D sessions, and the tracker's identity probability as a separate `identity_confidence` variable. Needs the new optional `xarray` extra.
+- **Import: "Choose software…" when nothing was recognised.** The empty-state dialog lists the readers that can try again with looser rules, and `track2data add --reader NAME` does the same on its own. DeepLabCut accepts a prediction table saved as `.txt` or `.dat`, and SLEAP an analysis file without an `.h5` extension. The header must still match, a candidate still goes through the reader's own `read`, and it is offered at low confidence.
+- **Import: "Read from video…"** fills the frame rate and frame size for readers that need them (DeepLabCut, SLEAP) from a video you choose (needs the optional `av` package). It never overwrites a value you typed, and an unreadable video changes nothing.
+- **Zones: the video's first frame is the backdrop** when a session has no background image (and no panel). It is used only when the decoded frame is exactly the declared video size, so zones are never drawn in the wrong pixel space; `extract_frame_rgb` returns the frame with its decoded size.
+
+### Changed
+
+- **IL-3 and IL-14 are skipped on a declared side view.** The arena centre and the wall distance are plan-view quantities, so a project whose camera view is **Side view** now greys them out and skips them (decision D-045). A project that never set a view, or set Top-down, is unchanged, as are fused and native 3-D sessions.
+
+### Fixed
+
+- **idtracker.ai v5 sessions with no recorded frame rate can be given one.** The legacy v5 reader now takes an `fps` option (`--option fps=25`, or the Frame rate field on import), used only after `video_object.npy` and the session json have been tried. Without any of the three it still stops with `VIDEO_FPS_MISSING` rather than assuming 1 fps; the message now says how to supply it.
+- **Rescanning a folder that was split into panels** offers the whole-frame session again instead of reporting it "already in the project". The import dialog and the project store now share one duplicate rule (decision D-046); a true duplicate is still left out.
+- **idtracker.ai pickle reader could run code.** The allowlist for `list_of_blobs.pickle` admitted every class in any module whose name starts with `numpy`, including helpers that execute code. It is now an exact list of the array-reconstruction functions numpy pickles use.
+- **Z-5 no longer invents an exit at a tracking-interval gap.** A stay in a zone that continued across two tracking intervals was reported as enter, exit, enter, with the exit on the separator row between them. Entry/exit counts, Z-6 and Z-9 were inflated for sessions tracked in separate intervals.
+- **Cache key includes the identity-free override.** Changing a session's identity-free setting now invalidates its cached preprocessing instead of serving the old gap-bridging.
+- **Binned exports.** The long table keeps `bin_index`, `bin_start_s` and `bin_end_s` as identifiers rather than melting them into measurements, and merging a binned metric after a whole-session one no longer drops its bin boundaries.
+- **idtracker.ai v5 reader** raises `VIDEO_FPS_MISSING` when the frame rate is in neither `video_object.npy` nor the session json, instead of assuming 1 fps. A real 1 fps recording is no longer mistaken for "missing".
+- **DeepLabCut multi-animal files with positional names** (`ind1`, `ind2`, ...) are declared identity-free, as SLEAP files already were, so per-individual metrics are skipped for them.
+- **Calibration page** offers inches and keeps whatever unit label the project has instead of rewriting it to the first choice on Apply.
+- **`track2data run --workers N`** now exists; the Processing page's headless command used it before the option did, and adds `--cache-dir` when a cache is in use.
+- **Export page** asks before overwriting after each export, not only when the folder is first chosen; the default folder moves on to a fresh timestamp.
+- **Metadata join** matches numeric session or key columns (trial numbers) against folder names.
+- **Panels:** a panel that no animal is in is refused with a message instead of producing a session of zero animals.
+- **Zones CSV** keeps each ROI's `+`/`-` sign, same-named polygons and the source resolution through save and load (older four-column files still load); `flip_orientation` keeps them too.
+- **Removing a session** drops its located-video override, so a later session with the same name does not inherit it.
+
 ## [0.3.0] — 2026-10-13
 
 ### Added

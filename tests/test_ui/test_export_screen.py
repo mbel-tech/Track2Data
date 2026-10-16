@@ -185,6 +185,57 @@ def test_export_uses_project_dir_exports_timestamp_default(
     assert ":" not in export_dirs[0].name
 
 
+def test_a_second_export_to_a_chosen_directory_asks_before_overwriting(
+    qtbot, tmp_path: Path, tiny_real_session: Path
+) -> None:
+    from ui.export_screen import ExportScreen
+
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    screen = ExportScreen(store)
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen._checks["csv_long"].setChecked(True)
+    chosen = tmp_path / "chosen"
+    screen._set_output_dir(str(chosen))
+    assert screen._overwrite_checkbox.isVisible() is False  # nothing there yet
+
+    with qtbot.waitSignal(store.taskFinished, timeout=15000):
+        screen._run_export()
+    qtbot.waitUntil(lambda: screen._current_task_id is None, timeout=2000)
+
+    assert any(chosen.iterdir())
+    assert screen._overwrite_checkbox.isVisible() is True
+    assert screen._export_btn.isEnabled() is False  # until the overwrite is confirmed
+    screen._overwrite_checkbox.setChecked(True)
+    assert screen._export_btn.isEnabled() is True
+
+
+def test_the_default_directory_moves_on_after_an_export(
+    qtbot, tmp_path: Path, tiny_real_session: Path
+) -> None:
+    from ui.export_screen import ExportScreen
+
+    store = _make_ready_store(tmp_path, tiny_real_session)
+    screen = ExportScreen(store)
+    qtbot.addWidget(screen)
+    screen.show()
+    qtbot.waitExposed(screen)
+    screen._checks["csv_long"].setChecked(True)
+    first = screen._resolved_out_dir()
+
+    with qtbot.waitSignal(store.taskFinished, timeout=15000):
+        screen._run_export()
+    qtbot.waitUntil(lambda: screen._current_task_id is None, timeout=2000)
+
+    assert first.exists()
+    # The next export never lands silently in the folder just written: it either gets a fresh
+    # timestamped folder, or (same second) the overwrite guard is armed for the old one.
+    second = screen._resolved_out_dir()
+    assert second != first or screen._overwrite_checkbox.isVisible()
+    assert second.exists() is False or screen._overwrite_checkbox.isVisible()
+
+
 # ── _run_export(): guard ────────────────────────────────────────────────────
 
 

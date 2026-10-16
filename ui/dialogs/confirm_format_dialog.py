@@ -20,6 +20,7 @@ Three rules for a dialog the user is expected to trust:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -27,9 +28,11 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -41,6 +44,7 @@ from track2data.core.models import SessionRef
 from track2data.readers import get_reader, reader_names
 from track2data.readers.confirm import ConfirmDraft
 from track2data.readers.detection import Confidence
+from track2data.readers.scan import lenient_readers
 from ui.widgets.dots import level_colour
 from ui.widgets.reader_options_form import ReaderOptionsForm
 
@@ -116,6 +120,19 @@ class ConfirmFormatDialog(QDialog):
         self.empty_label.setTextFormat(Qt.TextFormat.RichText)
         root.addWidget(self.empty_label)
 
+        # "Choose software…": when nothing was recognised, let the user name a reader to try with
+        # looser rules (readers/scan.lenient_scan). Shown only in that state.
+        self._lenient_row = QWidget()
+        lenient_layout = QHBoxLayout(self._lenient_row)
+        lenient_layout.setContentsMargins(0, 0, 0, 0)
+        lenient_layout.addWidget(QLabel("Choose software…"))
+        self.lenient_combo = QComboBox()
+        lenient_layout.addWidget(self.lenient_combo, 1)
+        self.lenient_button = QPushButton("Try this software")
+        self.lenient_button.clicked.connect(self._on_lenient_clicked)
+        lenient_layout.addWidget(self.lenient_button)
+        root.addWidget(self._lenient_row)
+
         self._content = QWidget()
         content = QVBoxLayout(self._content)
         content.setContentsMargins(0, 0, 0, 0)
@@ -150,6 +167,18 @@ class ConfirmFormatDialog(QDialog):
         self._options_form = ReaderOptionsForm([])
         self._options_holder.addWidget(self._options_form)
         content.addLayout(self._options_holder)
+
+        probe_row = QHBoxLayout()
+        self.probe_button = QPushButton("Read from video…")
+        self.probe_button.setProperty("role", "outline")
+        self.probe_button.setAutoDefault(False)
+        self.probe_button.setToolTip(
+            "Pick the recorded video to fill in its frame rate and frame size."
+        )
+        self.probe_button.clicked.connect(self._on_probe_clicked)
+        probe_row.addWidget(self.probe_button)
+        probe_row.addStretch()
+        content.addLayout(probe_row)
 
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["", "Session", "Source", "Note"])
@@ -202,6 +231,7 @@ class ConfirmFormatDialog(QDialog):
             f"Scanned {result.entries} entries in {result.seconds:.1f} s: {roots}"
         )
         self.empty_label.hide()
+        self._lenient_row.hide()
         self._content.show()
         self.ok_button.show()
         self.cancel_button.setText("Cancel")
@@ -226,9 +256,35 @@ class ConfirmFormatDialog(QDialog):
         lines.append("Folders are searched four levels deep.")
         self.empty_label.setText("<br>".join(lines))
         self.empty_label.show()
+        self._sync_lenient_row()
         self._content.hide()
         self.ok_button.hide()
         self.cancel_button.setText("Close")
+
+    def _sync_lenient_row(self) -> None:
+        names = lenient_readers() if self._draft.result.index is not None else []
+        self.lenient_combo.clear()
+        for name in names:
+            self.lenient_combo.addItem(get_reader(name).display_name or name, name)
+        self._lenient_row.setVisible(bool(names))
+
+    def _on_lenient_clicked(self) -> None:
+        name = self.lenient_combo.currentData()
+        if not name:
+            return
+        if self._draft.offer_reader(name):
+            self._sync_all()
+            return
+        label = self.lenient_combo.currentText()
+        self.empty_label.setText(
+            self.empty_label.text()
+            + f"<br><b>Nothing here could be read as {label}</b>, even with looser rules."
+        )
+
+    def done(self, result: int) -> None:
+        # The scan's walk is only kept for the retry above; do not hold a large tree after close.
+        self._draft.result.release_index()
+        super().done(result)
 
     def _sync_groups(self) -> None:
         groups = self._draft.groups
@@ -282,6 +338,26 @@ class ConfirmFormatDialog(QDialog):
         self._options_form.set_values(draft.options, sources)
         self._options_form.valueChanged.connect(self._on_option_edited)
         self._options_form.setVisible(not self._options_form.is_empty)
+        self.probe_button.setEnabled(draft.accepts_video_probe)
+
+    def _on_probe_clicked(self) -> None:
+        path, _filter = QFileDialog.getOpenFileName(
+            self, "Choose the recorded video", "", "Video files (*.mp4 *.avi *.mov *.mkv *.m4v)"
+        )
+        if not path:
+            return
+        probe = self._draft.prefill_from_video(Path(path))
+        if probe is None:
+            QMessageBox.warning(
+                self,
+                "Read from video",
+                "The frame rate and size could not be read from that file. Reading videos needs "
+                "the optional video support (pip install track2data[video]); otherwise type the "
+                "values in.",
+            )
+            return
+        self._rebuild_options()
+        self._update_ok()
 
     def _fill_table(self) -> None:
         rows = self._draft.rows

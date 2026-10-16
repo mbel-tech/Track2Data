@@ -9,7 +9,10 @@ from track2data.core.models import ROI, ZoneSet
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-_CSV_HEADER = ("roi_name", "level", "vertex_x", "vertex_y")
+_CSV_HEADER = (
+    "roi_name", "level", "vertex_x", "vertex_y",
+    "sign", "polygon", "source_width_px", "source_height_px",
+)
 
 
 def load_zones_csv(path: Path) -> ZoneSet:
@@ -17,10 +20,17 @@ def load_zones_csv(path: Path) -> ZoneSet:
 
     The CSV must have a header row followed by one row per vertex::
 
-        roi_name, level, vertex_x, vertex_y
+        roi_name, level, vertex_x, vertex_y[, sign, polygon, source_width_px, source_height_px]
 
-    Rows are grouped by ``roi_name``; vertex order is preserved.  An empty
-    CSV (header only) returns an empty ``ZoneSet``.
+    The first four columns are required; the rest are written by
+    :func:`save_zones_csv` and optional on input, so older files still load.
+    ``sign`` ("+" additive or "-" subtractive hole, default "+") and ``polygon``
+    (an id shared by the rows of one polygon) keep same-named ROIs apart: an arena
+    outline and an exclusion hole may share the name ``arena`` and must stay two
+    polygons. Without ``polygon``, rows are grouped by ``(roi_name, sign)``. Vertex
+    order is preserved. ``source_width_px`` / ``source_height_px`` restore the
+    resolution the zones were drawn against. An empty CSV (header only) returns an
+    empty ``ZoneSet``.
 
     Parameters
     ----------
@@ -35,6 +45,11 @@ def load_zones_csv(path: Path) -> ZoneSet:
 
     Raises
     ------
+    ValueError
+        If a ``sign`` is neither "+" nor "-".
+
+    Raises
+    ------
     FileNotFoundError
         If *path* does not exist.
     """
@@ -42,27 +57,35 @@ def load_zones_csv(path: Path) -> ZoneSet:
     if not path.exists():
         raise FileNotFoundError(f"Zone CSV not found: {path}")
 
-    # Preserve insertion order for ROI names.
-    roi_vertices: dict[str, list[tuple[float, float]]] = {}
-    roi_levels: dict[str, str] = {}
+    # Preserve insertion order of the polygons.
+    polygons: dict[tuple[str, str], dict] = {}
+    source_size: list[int | None] = [None, None]
+
+    def _optional_int(text: str | None) -> int | None:
+        text = (text or "").strip()
+        return int(float(text)) if text else None
 
     with path.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
             name = row["roi_name"].strip()
             level = row["level"].strip()
-            x = float(row["vertex_x"])
-            y = float(row["vertex_y"])
-            if name not in roi_vertices:
-                roi_vertices[name] = []
-                roi_levels[name] = level
-            roi_vertices[name].append((x, y))
+            sign = (row.get("sign") or "+").strip() or "+"
+            if sign not in ("+", "-"):
+                raise ValueError(f"Zone CSV sign must be '+' or '-', got {sign!r} for {name!r}.")
+            polygon = (row.get("polygon") or "").strip()
+            key = (name, polygon if polygon else sign)
+            if key not in polygons:
+                polygons[key] = {"name": name, "level": level, "sign": sign, "vertices": []}
+            polygons[key]["vertices"].append((float(row["vertex_x"]), float(row["vertex_y"])))
+            for i, column in enumerate(("source_width_px", "source_height_px")):
+                if source_size[i] is None:
+                    source_size[i] = _optional_int(row.get(column))
 
-    rois = [
-        ROI(name=name, level=roi_levels[name], vertices=verts)
-        for name, verts in roi_vertices.items()
-    ]
-    return ZoneSet(rois=rois)
+    rois = [ROI(**fields) for fields in polygons.values()]
+    return ZoneSet(
+        rois=rois, source_width_px=source_size[0], source_height_px=source_size[1]
+    )
 
 
 def save_zones_csv(zone_set: ZoneSet, path: Path) -> None:
@@ -70,7 +93,10 @@ def save_zones_csv(zone_set: ZoneSet, path: Path) -> None:
 
     One row is written per vertex.  The CSV header is::
 
-        roi_name,level,vertex_x,vertex_y
+        roi_name,level,vertex_x,vertex_y,sign,polygon,source_width_px,source_height_px
+
+    ``polygon`` numbers the ROIs in order, so same-named ROIs (an outline and its
+    holes) round-trip as separate polygons with their ``sign``.
 
     Parameters
     ----------
@@ -80,12 +106,14 @@ def save_zones_csv(zone_set: ZoneSet, path: Path) -> None:
         Destination path.  Parent directories must already exist.
     """
     path = Path(path)
+    width = "" if zone_set.source_width_px is None else zone_set.source_width_px
+    height = "" if zone_set.source_height_px is None else zone_set.source_height_px
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(_CSV_HEADER)
-        for roi in zone_set.rois:
+        for polygon, roi in enumerate(zone_set.rois):
             for x, y in roi.vertices:
-                writer.writerow([roi.name, roi.level, x, y])
+                writer.writerow([roi.name, roi.level, x, y, roi.sign, polygon, width, height])
 
 
 def zone_set_from_dict(data: dict) -> ZoneSet:

@@ -306,3 +306,121 @@ class TestWhenNothingWasRecognised:
     def test_it_names_the_software_this_version_can_read(self, qtbot) -> None:
         dialog = make(qtbot)
         assert "idtracker.ai" in dialog.empty_label.text()
+
+
+# ── Read from video ──────────────────────────────────────────────────────────
+
+
+def _fps_size_detection():
+    from track2data.readers.params import ReaderParameter
+
+    params = tuple(
+        ReaderParameter(name=n, label=n, kind=k, required=True)
+        for n, k in (("fps", "float"), ("width_px", "int"), ("height_px", "int"))
+    )
+    return detection("alpha", parameters=params)
+
+
+def test_the_read_from_video_button_is_disabled_when_no_reader_needs_fps_or_size(qtbot) -> None:
+    assert not make(qtbot, (detection("alpha"),)).probe_button.isEnabled()
+    assert make(qtbot, (_fps_size_detection(),)).probe_button.isEnabled()
+
+
+def test_choosing_a_video_fills_the_options_and_enables_add(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from track2data.readers import confirm
+    from track2data.readers.video_meta import VideoProbe
+
+    monkeypatch.setattr(confirm, "probe_video", lambda p: VideoProbe(25.0, 640, 480, 10))
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("/data/clip.mp4", ""))
+    )
+    dialog = make(qtbot, (_fps_size_detection(),))
+    assert not dialog.ok_button.isEnabled()
+    dialog.probe_button.click()
+    assert dialog.draft.options == {"fps": 25.0, "width_px": 640, "height_px": 480}
+    assert dialog.draft.option_source("fps") == "video"
+    assert dialog.ok_button.isEnabled()
+
+
+def test_a_video_that_cannot_be_read_warns_and_keeps_the_values(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from track2data.readers import confirm
+
+    warnings: list[str] = []
+    monkeypatch.setattr(confirm, "probe_video", lambda p: None)
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("/data/clip.mp4", ""))
+    )
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: warnings.append(a[2]) or None)
+    )
+    dialog = make(qtbot, (_fps_size_detection(),))
+    dialog.probe_button.click()
+    assert dialog.draft.options == {}
+    assert warnings and "frame rate" in warnings[0]
+
+
+# ── Choose software… ─────────────────────────────────────────────────────────
+
+
+def _txt_scan(tmp_path: Path) -> ScanResult:
+    import numpy as np
+
+    from tests.support.dlc import random_pose, write_dlc_csv
+    from track2data.readers.scan import scan
+
+    write_dlc_csv(
+        tmp_path / "trial1.txt",
+        random_pose(20, 1, 3),
+        np.ones((20, 1, 3)),
+        bodyparts=["a", "b", "c"],
+    )
+    return scan([tmp_path])
+
+
+def test_the_empty_state_dialog_lists_readers_that_can_try_leniently(qtbot, tmp_path) -> None:
+    dialog = ConfirmFormatDialog(ConfirmDraft(_txt_scan(tmp_path)))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    names = [dialog.lenient_combo.itemData(i) for i in range(dialog.lenient_combo.count())]
+    assert {"deeplabcut", "sleap_analysis"} <= set(names)
+    assert dialog.lenient_combo.isVisible()
+
+
+def test_a_recognised_scan_does_not_offer_the_retry(qtbot) -> None:
+    dialog = make(qtbot, (detection("alpha"),))
+    dialog.show()
+    assert not dialog.lenient_combo.isVisible()
+
+
+def test_choosing_one_populates_the_session_rows(qtbot, tmp_path) -> None:
+    dialog = ConfirmFormatDialog(ConfirmDraft(_txt_scan(tmp_path)))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.lenient_combo.setCurrentIndex(dialog.lenient_combo.findData("deeplabcut"))
+    dialog.lenient_button.click()
+    assert dialog.draft.reader == "deeplabcut"
+    assert dialog.table.rowCount() == 1
+    assert not dialog.lenient_combo.isVisible()
+
+
+def test_a_reader_that_finds_nothing_says_so_and_stays_empty(qtbot, tmp_path) -> None:
+    dialog = ConfirmFormatDialog(ConfirmDraft(_txt_scan(tmp_path)))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.lenient_combo.setCurrentIndex(dialog.lenient_combo.findData("sleap_analysis"))
+    dialog.lenient_button.click()
+    assert dialog.draft.is_empty
+    assert "Nothing here could be read" in dialog.empty_label.text()
+
+
+def test_closing_the_dialog_releases_the_scan_index(qtbot, tmp_path) -> None:
+    draft = ConfirmDraft(_txt_scan(tmp_path))
+    dialog = ConfirmFormatDialog(draft)
+    qtbot.addWidget(dialog)
+    assert draft.result.index is not None
+    dialog.reject()
+    assert draft.result.index is None

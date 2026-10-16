@@ -1,4 +1,4 @@
-"""The 3-D metrics (IL-16, IL-17, GL-16) end to end on the physical test scene: exported values
+"""The 3-D metrics (IL-16/17/18, GL-16/18/19) end to end on the physical test scene: exported values
 against the scene's known 3-D path, the skip under body-length calibration, and a 2-D control."""
 
 from __future__ import annotations
@@ -16,7 +16,11 @@ from tests.test_integration.test_3d_run import OLD_SESSIONS_HEADER, _files
 from track2data.api import Engine
 from track2data.core.models import CalibrationConfig, MetricSelection, ProjectMode
 
-IDS = {"individual": ["IL-1", "IL-2", "IL-16", "IL-17"], "group": ["GL-1", "GL-16"]}
+IDS = {
+    "individual": ["IL-1", "IL-2", "IL-16", "IL-17", "IL-18"],
+    "group": ["GL-1", "GL-16", "GL-18", "GL-19"],
+}
+THREE_D = ("IL-16", "IL-17", "IL-18", "GL-16", "GL-18", "GL-19")
 EXPORTERS = ["csv_long", "readme"]
 SKIP_MODE = "needs a cm scale for the top view (use scalar or session calibration)"
 # The scene: every fish moves 1 px/frame in x (0.1 cm at 10 px/cm) at a constant depth, so the
@@ -77,10 +81,25 @@ def test_exported_values_match_the_scene(scalar_run: Path) -> None:
     assert _value(long, "GL-16", "n_skipped_frames_3d") == 0
 
 
+def test_the_new_3d_metrics_match_the_scene(scalar_run: Path) -> None:
+    long = _long(scalar_run)
+    for fish in range(3):
+        # the scene has no vertical movement
+        assert _value(long, "IL-18", "mean_vertical_speed_cm_s", fish) == pytest.approx(0, abs=1e-6)
+        assert _value(long, "IL-18", "max_vertical_speed_cm_s", fish) == pytest.approx(0, abs=1e-6)
+    nnd = _value(long, "GL-16", "mean_nnd_3d_cm")
+    iid = _value(long, "GL-18", "mean_iid_3d_cm")
+    assert iid >= nnd - 1e-9  # the mean over all pairs is at least the mean nearest neighbour
+    assert _value(long, "GL-18", "n_skipped_frames_3d") == 0
+    assert _value(long, "GL-18", "frac_frames_used_3d") == pytest.approx(1.0)
+    # cohesion defaults to the NND source: 1 / GL-16's mean
+    np.testing.assert_allclose(_value(long, "GL-19", "cohesion_index_3d"), 1.0 / nnd, rtol=1e-9)
+
+
 def test_both_units_have_the_3d_tables(scalar_run: Path) -> None:
     for unit in ("t1+s1", "t2+s2"):
         ids = set(_long(scalar_run, unit)["metric_id"])
-        assert {"IL-16", "IL-17", "GL-16"} <= ids
+        assert set(THREE_D) <= ids
 
 
 def test_bodylength_calibration_skips_the_3d_metrics_with_the_reason(tmp_path: Path) -> None:
@@ -90,11 +109,11 @@ def test_bodylength_calibration_skips_the_3d_metrics_with_the_reason(tmp_path: P
     out = tmp_path / "out"
     Engine(manifest).run(out, exporters=EXPORTERS)
     ids = set(_long(out)["metric_id"])
-    assert ids.isdisjoint({"IL-16", "IL-17", "GL-16"})
+    assert ids.isdisjoint(set(THREE_D))
     assert {"IL-1", "IL-2", "GL-1"} <= ids
     readme = (out / "t1+s1" / "README.md").read_text(encoding="utf-8")
     assert "## Metrics skipped" in readme
-    for mid in ("IL-16", "IL-17", "GL-16"):
+    for mid in THREE_D:
         assert mid in readme
     assert SKIP_MODE in readme
 
@@ -108,7 +127,7 @@ def test_a_2d_project_skips_the_3d_metrics_and_is_unchanged(tmp_path: Path) -> N
     assert (out / "sessions.csv").read_text(encoding="utf-8").splitlines()[0] == OLD_SESSIONS_HEADER
     for unit in ("t1", "s1", "t2", "s2", "lone"):
         ids = set(_long(out, unit)["metric_id"])
-        assert ids.isdisjoint({"IL-16", "IL-17", "GL-16"})
+        assert ids.isdisjoint(set(THREE_D))
         assert {"IL-1", "IL-2", "GL-1"} <= ids
         readme = (out / unit / "README.md").read_text(encoding="utf-8")
         assert "needs a fused 3-D session" in readme

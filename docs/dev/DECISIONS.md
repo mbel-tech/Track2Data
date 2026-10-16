@@ -820,7 +820,8 @@ preprocessing cache key, which a view never changes). *Gate.* A metric names the
 meaningful for in `Metric.valid_camera_views` (a set; `None` = any). A metric the view rules out
 is greyed, skipped with a reason that reaches the run README, and never silently computed on the
 wrong axis. *Existing metrics are deliberately not gated:* IL-3 and IL-14 assume a top-down view,
-but gating them would change what existing projects get. *IL-15, not Z-10.* Exports bucket
+but gating them would change what existing projects get. (Superseded by D-045: IL-3 and IL-14 are now
+gated to top-down and unset views.) *IL-15, not Z-10.* Exports bucket
 metrics by ID prefix and the UI by level, so an individual-level metric must be IL-xx; Z-10 is
 re-reserved for auto depth bands. *Depth.* 0 = water surface, 1 = tank floor. The water column is
 the vertical span of every main-level "+" zone pooled (not per animal like IL-3), and when there
@@ -1169,3 +1170,89 @@ Sessions screen is the only consumer); the water column stays in the preprocess 
 object already includes `apply_calibration_and_zones`. *Limits:* `flip` reverses the vertical axis only, which
 also mirrors the view from above; one origin for the water column cannot be checked from the files; no
 refraction or parallax correction.
+
+
+### D-045 · IL-3 and IL-14 are plan-view metrics: gated to top-down and unset camera views
+
+**Status:** accepted; implemented. It supersedes the sentence in D-036 that left IL-3 and IL-14 ungated.
+
+**Decision:** `CentreDistance` (IL-3) and `WallDistanceThigmotaxis` (IL-14) declare
+`valid_camera_views = {"top", "unknown"}`. On a project whose camera view is declared `side` they are greyed
+on the Metrics screen, skipped with the view reason (which reaches the run README), and left out of the
+presets. `unknown` stays in the set, so a project that never declared a view, which is every project created
+before the setting existed, keeps both metrics with the same values. A fused session counts as top-view
+whatever the project says (`Engine.camera_view_for_psess`), so fused and native 3-D sessions are unchanged;
+a native project keeps its own pixel-frame reason for these metrics, which is checked first.
+
+**Why:** the arena centre and the wall distance are defined on the plan view; on a side view the image's
+vertical axis is depth, so the numbers were computed but meant nothing. D-036 held them back only to avoid
+changing existing projects, and the `unknown` member of the set removes that cost.
+
+**Not changed:** no metric value, exported file or `project_hash` for a project with an unset or top-down
+view.
+
+
+### D-046 · "Already in the project" is one rule, and a split folder is offered again as a whole-frame session
+
+**Status:** accepted; implemented.
+
+**Decision:** `core/session_identity.same_session_part(candidate, existing)` is the single test for whether
+the project already holds a session. Same resolved folder, `existing.reader` empty or equal to the
+candidate's, equal session-scope options (an arena), and equal `panel`. It is deliberately not symmetric: only
+a legacy existing entry without a reader is a wildcard. `ProjectStore._is_duplicate` and the import dialog's
+`ConfirmDraft` both call it. Before, the dialog compared folder and reader only, so a folder whose whole-frame
+session had been split into `__top` and `__side` panels was reported "already in the project" on rescan and
+could not be re-added, while the store would have accepted it.
+
+**Why:** two copies of the rule had drifted. A panel is another part of the video, so it is another session.
+
+### D-047 · Frame rate and size can be read from a chosen video, never silently
+
+**Status:** accepted; implemented.
+
+**Decision:** `readers/video_meta.probe_video(path)` returns `VideoProbe(fps, width_px, height_px, n_frames)` or None (never raises; None for missing `av`, an unopenable file, or non-positive fps/size). The import dialog's "Read from video…" button, enabled only when the reader has an `fps`, `width_px` or `height_px` option, calls `ConfirmDraft.prefill_from_video`, which sets those options with source "video" and never overwrites a "user"-sourced value. An unreadable video shows a warning and changes nothing.
+
+**Why:** DeepLabCut and SLEAP files carry neither value, and asking people to type them invites the silent-fps errors fixed for the v5 reader. The probe is explicit and user-triggered, so nothing is guessed.
+
+### D-048 · A reader the scan did not recognise can be tried again, with only its extension loosened
+
+**Status:** accepted; implemented.
+
+**Decision:** `ScanResult` keeps the walk (`index`, dropped by `release_index()` when the confirm dialog closes, never stored on a manifest). `SessionReader.discover_lenient(index, peek)` (default: nothing) reports files `discover` refused; `scan.lenient_scan(result, name)` returns them as one LOW-confidence group, and `ConfirmDraft.offer_reader(name)` makes it the first group, so `select_reader` can then name it. Only DeepLabCut (`.txt`, `.dat`, no extension) and SLEAP (`.analysis`, `.hdf`, `.dat`, no extension) implement it, and each still requires the full header or layout.
+
+**Why:** a forced reader on files it cannot read only moves the error. Loosening the name and not the content means a wrong guess still fails with the reader's own coded error instead of producing a session of guesses.
+
+### D-049 · The `movement` adapter is a function, not an exporter, and identity probability is never `confidence`
+
+**Status:** accepted; implemented.
+
+**Decision:** `interop/movement.to_movement_dataset(psess)` builds an `xarray.Dataset` from a `PreprocessedSession`; it is not registered as an exporter because an exporter payload carries metric results and no position array. `time` comes from `psess.timeline()` over `fps`, not `arange`, so tracking gaps survive. The tracker's identity probability is `identity_confidence`. `length_unit` in the attrs is the unit of `position` (`px`, or the native file's unit), and `px_per_cm` is NaN when not calibrated. `xarray` is an optional extra imported inside the function (`XARRAY_MISSING`).
+
+**Why:** `movement` filters on `confidence` as pose certainty; putting identity certainty there would invite a filter on the wrong quantity.
+
+### D-050 · G-H5: DeepLabCut `.h5` is decoded with h5py and a restricted unpickler, not PyTables
+
+**Status:** accepted for the synthetic layout; **not yet checked against the real EPM file** (see Evidence).
+
+**Decision:** option (a). DeepLabCut writes `df.to_hdf(path, key="df_with_missing", format="table")`. h5py reads the `table` compound dataset (`index` and one or more `values_block_N` arrays), and the column labels, which pandas stores as protocol-0 pickles in the group's `non_index_axes` and each dataset's `values_block_N_kind` attribute, are decoded by an unpickler that denies every global and caps each attribute's size. PyTables (`tables`) is not imported and not a dependency of the shipped reader. The scan never unpickles: it only sees that a top-level group holds a `table` dataset whose plain-text `pandas_type` attribute is `frame_table`.
+
+**Evidence:** a table-format file written by pandas 2.x with PyTables 3.x under key `df_with_missing`, with three-level `(scorer, bodyparts, coords)` columns, was opened with plain h5py. The group's `pandas_type` is `b'frame_table'`; `table` is a `(R,)` compound of `index` (int64) and `values_block_0` (float64, `(C,)`); `non_index_axes` unpickles to `[(1, [(scorer, bodypart, coord), ...])]` and `values_block_0_kind` to the same list of tuples. Both pickles are protocol 0 and contain only lists, tuples, strings and integers, so an unpickler that refuses every global decodes them.
+
+**Limit of the evidence:** the real sample (`DLC_single-mouse_EPM.predictions.h5`, 18485 x 24) could not be downloaded here (the host is not on this environment's network allowlist, HTTP 403), so its 18485 frames and 8 bodyparts are not re-verified. Until a run with the fixture passes, the reader is `synthetic_only`, and the real-sample tests skip when the file is absent. If the real file needs a global in its label pickle, the unpickler refuses it with `DLCH5_LABELS_REFUSED` instead of widening the allowlist silently; option (b) (an optional `hdf` extra with `tables`, behind the pickle-consent gate) is then the fallback.
+
+### D-051 · The metadata sheet is stored only once chosen, so existing project hashes do not move
+
+**Status:** accepted; implemented.
+
+**Decision:** `MetadataSource.sheet` (default None, the first sheet) is left out of the serialised manifest while it is None, by a wrap `model_serializer`. The screen stores a sheet name only for a workbook with more than one sheet. `loader.load(path, sheet)`, `list_sheets` and `preview` share one sheet check, and `.xls` is refused outright.
+
+**Why:** `project_hash` is a dump of the whole manifest, so a plain `sheet: null` field would change the hash (and the cache and run identity built on it) of every project that already has a metadata file.
+
+### D-052 · IL-18, GL-18 and GL-19 reuse the 3-D helpers; GL-19 defaults to the nearest-neighbour source
+
+**Status:** accepted; implemented.
+
+**Decision:** IL-18 takes the vertical component of the 3-D velocity (`session.z_speed` for native files, otherwise `geometry3d.vertical_speed`), so it follows the session's kinematics estimator exactly as IL-17 does. GL-18 averages the distance over all animal pairs per frame using the same frame filter as GL-16 (a frame with any missing animal is skipped and counted); a single-animal session is NaN. GL-19 is the reciprocal of the mean 3-D distance, with `cohesion_source` of `nnd` (default, matching GL-6) or `iid`. GL-16, GL-18 and GL-19 share `_mean_body_length_cm` and `_frame_distances_3d`.
+
+**Why:** one frame rule and one body-length rule keep the three group metrics comparable, and the NND default keeps GL-19 the direct 3-D analogue of GL-6.
+

@@ -1773,6 +1773,23 @@ def test_consistency_warnings_silent_for_a_homogeneous_project(
     assert Engine(manifest).consistency_warnings() == []
 
 
+def test_validation_notes_include_the_fragmentation_advisory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pre-flight report (what `track2data validate` prints) carries the advisory."""
+    from track2data.api import Engine
+
+    session = _session_at("frag", 30.0, n_animals=3)
+    xy = session.raw_xy.copy()
+    xy[:, 1:] = np.nan  # two of three slots never hold an animal
+    _patch_read_session(monkeypatch, {"frag": session.model_copy(update={"raw_xy": xy})})
+    manifest = _make_manifest(sessions=[_ref("frag")])
+
+    warnings = Engine(manifest).consistency_warnings()
+
+    assert any("track fragments" in w and "frag" in w for w in warnings)
+
+
 def test_consistency_warnings_flags_mixed_frame_rates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -316,6 +316,27 @@ def test_workers_segments_drive_the_spin_box_and_the_cli_command(qtbot) -> None:
         assert screen.cli_command().endswith("--workers 2")
 
 
+def test_every_flag_in_the_shown_command_exists_on_the_cli(qtbot, tmp_path) -> None:
+    """The box promises the same run, headless: a flag `track2data run` rejects breaks that."""
+    import shlex
+
+    from track2data.cli import run as run_command
+    from ui.processing_screen import ProcessingScreen
+    from ui.store.project_store import ProjectStore
+
+    store = ProjectStore()
+    store.new_project("my project", tmp_path)
+    screen = ProcessingScreen(store)
+    qtbot.addWidget(screen)
+    known = {opt for param in run_command.params for opt in getattr(param, "opts", [])}
+    tokens = shlex.split(screen.cli_command())
+    assert tokens[:2] == ["track2data", "run"]
+    assert tokens[2] == "my project.t2d.json"  # one argument, even with a space in the name
+    flags = [t for t in tokens if t.startswith("--")]
+    assert "--workers" in flags
+    assert set(flags) <= known
+
+
 def test_clicking_a_setup_check_asks_to_navigate_to_its_page(qtbot) -> None:
     from PySide6.QtWidgets import QPushButton
 

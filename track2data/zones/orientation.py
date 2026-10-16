@@ -75,6 +75,7 @@ def flip_orientation(zone_set: ZoneSet) -> ZoneSet:
             level=roi.level,
             vertices=list(reversed(roi.vertices)),
             area_units=roi.area_units,
+            sign=roi.sign,
         )
         for roi in zone_set.rois
     ]
@@ -82,6 +83,8 @@ def flip_orientation(zone_set: ZoneSet) -> ZoneSet:
         rois=new_rois,
         orientation_tag=new_tag,
         zone_levels=dict(zone_set.zone_levels),
+        source_width_px=zone_set.source_width_px,
+        source_height_px=zone_set.source_height_px,
     )
 
 

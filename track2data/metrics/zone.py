@@ -108,6 +108,23 @@ def _run_lengths(mask: np.ndarray) -> list[int]:
     return lengths
 
 
+def _split_off_separators(
+    segments: list[tuple[int, int]], separator: np.ndarray
+) -> list[tuple[int, int]]:
+    """Cut each (start, end) row segment so that no separator row lies inside it."""
+    out: list[tuple[int, int]] = []
+    for seg_start, seg_end in segments:
+        start = seg_start
+        for row in range(seg_start, seg_end):
+            if separator[row]:
+                if row > start:
+                    out.append((start, row))
+                start = row + 1
+        if seg_end > start:
+            out.append((start, seg_end))
+    return out
+
+
 def _true_run_spans(mask: np.ndarray, min_length: int) -> list[tuple[int, int]]:
     """Return (start, end) index pairs -- end exclusive -- for each run
     of consecutive True values in mask at least min_length long. Used
@@ -981,6 +998,12 @@ class Z5EntryExitEvents(Metric):
         n_rows = len(true_frames)
         starts = segment_starts(true_frames)
         segments = list(zip([0, *starts], [*starts, n_rows], strict=True))
+        separator = getattr(session, "separator_mask", None)
+        if separator is not None:
+            # A separator row only keeps two intervals apart; it is not a frame, so an
+            # in-zone run must end on the last real frame before it, never on the separator
+            # (which would fabricate an 'exit' where observation merely stopped).
+            segments = _split_off_separators(segments, np.asarray(separator, dtype=bool))
 
         def _event(
             zone_name: str, k: int, kind: str, row: int, after_gap: bool

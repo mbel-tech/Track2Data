@@ -11,7 +11,7 @@ from typing import Literal
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsPixmapItem,
@@ -22,9 +22,9 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import PanelRect
-from track2data.readers.video_meta import extract_frame
 from ui.widgets.backdrop import load_backdrop_image
 from ui.widgets.trajectory_view import ANIMAL_COLORS
+from ui.widgets.video_frame import decode_first_frame
 
 BackdropKind = Literal["image", "video", "tracks", "none"]
 
@@ -87,7 +87,7 @@ class PanelPreview(QGraphicsView):
         image = load_backdrop_image(background_path, crop)
         kind: BackdropKind = "image"
         if image is None and crop is None:
-            image = self._video_frame(video_path, round(width), round(height))
+            image = decode_first_frame(video_path, round(width), round(height))
             kind = "video"
         self._kind = "none"
         if image is not None:
@@ -112,19 +112,6 @@ class PanelPreview(QGraphicsView):
         later ``set_source`` calls."""
         self._rects = (top, side)
         self._draw_rects()
-
-    @staticmethod
-    def _video_frame(video_path: Path | None, w: int, h: int) -> QImage | None:
-        if video_path is None or w <= 0 or h <= 0 or not Path(video_path).exists():
-            return None
-        try:
-            data = extract_frame(Path(video_path), 0)
-        except Exception:
-            return None
-        if not data or len(data) != w * h * 3:
-            return None
-        # copy() so the image owns its pixels and not the bytes object
-        return QImage(data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
 
     def _draw_tracks(self, tracks: np.ndarray) -> bool:
         """Draw *tracks* as points; False when they are not (n_frames, n_animals>0, >=2)."""

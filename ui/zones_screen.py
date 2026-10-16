@@ -486,6 +486,7 @@ class ZonesScreen(QWidget):
             facts.setup_points,
             frame_size=(facts.width_px, facts.height_px),
             crop=self._session_panel(session_id),
+            video_path=facts.video_path,
         )
 
     def _session_panel(self, session_id: str):

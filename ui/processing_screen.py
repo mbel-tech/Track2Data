@@ -23,6 +23,7 @@ it has no unit, and start_run() hands the plan to Engine.run so nothing fuses on
 from __future__ import annotations
 
 import functools
+import shlex
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -385,7 +386,12 @@ class ProcessingScreen(QWidget):
         name = "<project>"
         if self._store is not None and self._store.manifest is not None:
             name = self._store.manifest.project_name
-        return f"track2data run {name}.t2d.json --workers {self._workers.value()}"
+        project_file = shlex.quote(f"{name}.t2d.json")
+        command = f"track2data run {project_file} --workers {self._workers.value()}"
+        cache_dir = self._store.cache_dir if self._store is not None else None
+        if cache_dir is not None:
+            command += f" --cache-dir {shlex.quote(str(cache_dir))}"
+        return command
 
     def _refresh_cli_box(self) -> None:
         self._cli_label.setText(self.cli_command())

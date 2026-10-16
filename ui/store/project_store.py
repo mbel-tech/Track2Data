@@ -44,7 +44,7 @@ from track2data.core.models import (
     ZoneSet,
 )
 from track2data.core.progress import CancellationToken, OperationCancelled
-from track2data.readers import find_reader
+from track2data.core.session_identity import same_session_part
 from track2data.views.pairing import PairingResult, fish_labels, identity_map, pair_by_regex
 from ui.store.session_facts import SessionFacts
 from ui.store.task_runner import TaskRunner
@@ -88,36 +88,9 @@ class _CallableToken(CancellationToken):
         self._check()
 
 
-def _selector(ref: SessionRef) -> tuple[tuple[str, str], ...]:
-    """The options that pick *which* session in a file (an arena), not how to read it."""
-    reader = find_reader(ref.reader) if ref.reader else None
-    names = {p.name for p in reader.parameters if p.scope == "session"} if reader else set()
-    return tuple(sorted((k, repr(v)) for k, v in ref.reader_options.items() if k in names))
-
-
-def _resolved(path: Path) -> Path:
-    try:
-        return Path(path).resolve()
-    except OSError:
-        return Path(path)
-
-
 def _is_duplicate(ref: SessionRef, existing: Sequence[SessionRef]) -> bool:
-    """Whether *ref* is a session the project already has: the same place, read by the same
-    reader (a legacy entry with no saved reader counts as any), picking the same arena.
-
-    The same folder under another reader is not a duplicate: another reader could read the same
-    files into different numbers, so it is a different session. So is the same folder with
-    another panel: it is another part of the video.
-    """
-    place, selector = _resolved(ref.folder), _selector(ref)
-    return any(
-        _resolved(other.folder) == place
-        and (other.reader is None or other.reader == ref.reader)
-        and _selector(other) == selector
-        and other.panel == ref.panel
-        for other in existing
-    )
+    """Whether *ref* is a session the project already has (see ``same_session_part``)."""
+    return any(same_session_part(ref, other) for other in existing)
 
 
 @dataclass
@@ -822,8 +795,13 @@ class ProjectStore(QObject):
             if p.top_session_id in kept and p.side_session_id in kept
         ]
         pairs_dropped = len(pairs) != len(self._manifest.view_pairs)
+        # A video located for a removed session must not carry over to a later session that
+        # happens to get the same id (the default id is the folder name).
+        overrides = {
+            sid: path for sid, path in self._manifest.video_overrides.items() if sid in kept
+        }
         self._manifest = self._manifest.model_copy(
-            update={"sessions": list(sessions), "view_pairs": pairs}
+            update={"sessions": list(sessions), "view_pairs": pairs, "video_overrides": overrides}
         )
         self.sessionsChanged.emit()
         if pairs_dropped:

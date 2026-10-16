@@ -265,3 +265,20 @@ def test_empty_and_missing_metric_frames_are_skipped() -> None:
     out = long_table({"IL-1": _individual_frame(), "EMPTY": empty, "NONE": None})
 
     assert set(out["metric_id"]) == {"IL-1"}
+
+
+def test_long_table_keeps_the_time_bin_of_each_value() -> None:
+    binned = pd.DataFrame(
+        {"session_id": ["s", "s"], "individual_id": [0, 0], "bin_index": [0, 1],
+         "bin_start_s": [0.0, 60.0], "bin_end_s": [60.0, 120.0], "path_length_px": [5.0, 7.0]}
+    )
+    out = long_table({"IL-1": binned})
+    assert set(out["column"]) == {"path_length_px"}  # the bin columns are not measurements
+    assert list(out["bin_index"]) == [0, 1]
+    assert list(out["bin_start_s"]) == [0.0, 60.0]
+    assert list(out["value"]) == [5.0, 7.0]
+
+
+def test_an_unbinned_long_table_has_no_bin_columns() -> None:
+    out = long_table({"IL-1": _individual_frame()})
+    assert not {"bin_index", "bin_start_s", "bin_end_s"} & set(out.columns)

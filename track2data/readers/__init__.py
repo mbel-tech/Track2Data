@@ -20,6 +20,7 @@ from track2data.readers.base import SessionReader
 from track2data.readers.ctrax_mat import CtraxMatReader
 from track2data.readers.deeplabcut import DeepLabCutReader
 from track2data.readers.deeplabcut_3d import DeepLabCut3DReader
+from track2data.readers.deeplabcut_h5 import DeepLabCutH5Reader
 from track2data.readers.idtrackerai.reader import IDTrackerAiReader
 from track2data.readers.idtrackerai_v4 import looks_like_v4
 from track2data.readers.idtrackerai_v5 import IDTrackerAiV5Reader
@@ -59,6 +60,7 @@ def _load_entry_points() -> None:
 register(IDTrackerAiReader)
 register(IDTrackerAiV5Reader)
 register(DeepLabCutReader)
+register(DeepLabCutH5Reader)
 register(AniposeReader)
 register(DeepLabCut3DReader)
 register(SleapAnalysisReader)

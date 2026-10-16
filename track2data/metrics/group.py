@@ -10,6 +10,7 @@ a :class:`pandas.DataFrame` with at least the columns ``session_id`` and
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import ClassVar
 
 import numpy as np
@@ -303,13 +304,7 @@ class NearestNeighbourDistance3D(Metric):
 
         # Same rule as GL-1's mean_nnd_bl (nan-mean of the raw per-animal lengths, valid when
         # the mean is positive), averaged in cm so ordinary sessions keep their exact value.
-        bl_px = session.body_length_in_px()
-        px_per_cm = session.px_per_cm
-        mean_bl = np.nan
-        if bl_px is not None and px_per_cm is not None:
-            bl_cm = np.asarray(bl_px, dtype=np.float64) / px_per_cm
-            if not np.isnan(bl_cm).all():  # nanmean warns only when every entry is NaN
-                mean_bl = float(np.nanmean(bl_cm))
+        mean_bl = _mean_body_length_cm(session)
         mean_nnd_bl = mean_nnd / mean_bl if mean_bl > 0 and not np.isnan(mean_nnd) else np.nan
 
         return pd.DataFrame(
@@ -324,6 +319,222 @@ class NearestNeighbourDistance3D(Metric):
                     "frac_frames_used_3d": frac_used,
                 }
             ]
+        )
+
+
+def _mean_body_length_cm(session: PreprocessedSession) -> float:
+    """Mean body length over animals in cm (NaN when unknown): GL-1's ``mean_nnd_bl`` rule
+    (nan-mean of the raw per-animal lengths, valid when positive), taken in cm."""
+    bl_px = session.body_length_in_px()
+    px_per_cm = session.px_per_cm
+    if bl_px is None or px_per_cm is None:
+        return np.nan
+    bl_cm = np.asarray(bl_px, dtype=np.float64) / px_per_cm
+    if np.isnan(bl_cm).all():  # nanmean warns only when every entry is NaN
+        return np.nan
+    return float(np.nanmean(bl_cm))
+
+
+def _frame_distances_3d(
+    session: PreprocessedSession, per_frame: Callable[[np.ndarray], float]
+) -> tuple[list[float], int, bool]:
+    """``per_frame(points)`` for every counted frame with a full 3-D position for every animal.
+
+    Returns ``(values, n_skipped, available)``. *available* is False without 3-D positions or
+    with fewer than two animals; ``n_skipped`` is then every counted frame, as GL-16 reports it.
+    A separator row is not a frame, and a frame with any NaN is skipped and counted.
+    """
+    pos = positions_cm(session)
+    counted = session.counted_rows()
+    n_counted = int(counted.sum())
+    if pos is None or session.n_animals < 2:
+        return [], n_counted, False
+    values: list[float] = []
+    skipped = 0
+    for t in range(pos.shape[0]):
+        if not counted[t]:
+            continue
+        points = pos[t]
+        if np.isnan(points).any():
+            skipped += 1
+            continue
+        values.append(per_frame(points))
+    return values, skipped, True
+
+
+def _nnd_of(points: np.ndarray) -> float:
+    dists, _ = cKDTree(points).query(points, k=2)
+    return float(dists[:, 1].mean())
+
+
+class InterIndividualDistance3D(Metric):
+    """GL-18 — Mean inter-individual distance (IID) in 3-D (cm) on a fused session."""
+
+    id = "GL-18"
+    name = "inter_individual_distance_3d"
+    label = "3-D Inter-Individual Distance"
+    level = "group"
+    priority = "optional"
+    # Like GL-2: an unordered point set per frame, so slot identity is irrelevant.
+    requires_identity = False
+    requires_depth_scale = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "mean_iid_3d_cm",
+        "median_iid_3d_cm",
+        "mean_iid_3d_bl",
+        "n_skipped_frames_3d",
+        "frac_frames_used_3d",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "GL-2 in three dimensions. For each frame the mean of all pairwise Euclidean "
+            "distances between animals, in cm, in (X, Y, Z) space (X, Y from the top view, Z "
+            "from the side-view depth times the tank height); the metric reports the mean and "
+            "median of the frame-level values."
+        ),
+        formula_plain=(
+            "P[t,k] = (x/px_per_cm, y/px_per_cm, depth*tank_height_cm); "
+            "per frame iid[t] = mean(pdist(P[t])); metric = mean/median over frames"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.depth (fused)",
+            "PreprocessedSession.px_per_cm",
+            "PreprocessedSession.depth_height_cm",
+        ],
+        assumptions=[
+            "The depth comes from a side camera at right angles to the top camera (a native "
+            "3-D file holds one animal per session, so this metric is not offered for it)",
+            "A frame needs finite X, Y and Z for every animal; other frames are skipped and "
+            "counted, so a frame GL-2 keeps can be skipped here",
+            "Body length for the BL column is the mean over animals, as for GL-16",
+        ],
+        warnings=[
+            "Skipped-frame count and frac_frames_used_3d are reported; high counts may bias "
+            "the metric",
+            "GL-2 and GL-18 are computed on different frames whenever depth is missing, so "
+            "mean_iid_px and mean_iid_3d_cm are not a like-for-like comparison",
+            "No refraction or parallax correction; a wrong tank height scales every vertical "
+            "distance",
+            "Without depth or a cm scale all statistics are NaN",
+        ],
+        primary_reference=KRAUSE_RUXTON_2002,
+        supporting_references=[MILLER_GERLAI_2007, DELCOURT_PONCIN_2012],
+    )
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """3-D inter-individual distance statistics for *session* (NaN without depth/scale)."""
+        values, skipped, available = _frame_distances_3d(session, lambda p: float(pdist(p).mean()))
+        n_counted = int(session.counted_rows().sum())
+        mean_iid = float(np.mean(values)) if values else np.nan
+        median_iid = float(np.median(values)) if values else np.nan
+        mean_bl = _mean_body_length_cm(session)
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "mean_iid_3d_cm": mean_iid,
+                    "median_iid_3d_cm": median_iid,
+                    "mean_iid_3d_bl": (
+                        mean_iid / mean_bl if mean_bl > 0 and not np.isnan(mean_iid) else np.nan
+                    ),
+                    "n_skipped_frames_3d": skipped,
+                    "frac_frames_used_3d": (
+                        len(values) / n_counted if available and n_counted else np.nan
+                    ),
+                }
+            ],
+            columns=self.output_columns,
+        )
+
+
+class GroupCohesion3D(Metric):
+    """GL-19 — Group cohesion in 3-D = 1 / mean 3-D distance (cm)."""
+
+    id = "GL-19"
+    name = "group_cohesion_3d"
+    label = "3-D Group Cohesion"
+    level = "group"
+    priority = "optional"
+    requires_identity = False
+    requires_depth_scale = True
+    output_columns: ClassVar[list[str]] = [
+        "session_id",
+        "metric_id",
+        "cohesion_index_3d",
+    ]
+    documentation = MetricDocumentation(
+        definition=(
+            "GL-6 in three dimensions: the reciprocal of the mean 3-D distance in cm, from "
+            "nearest-neighbour distance (as GL-16) or from the mean pairwise distance (as "
+            "GL-18). Higher values mean a more cohesive (closer) group."
+        ),
+        formula_plain=(
+            "cohesion_index_3d = 1 / mean_NND_3d (cohesion_source='nnd', default), "
+            "or 1 / mean_IID_3d (cohesion_source='iid'), in cm"
+        ),
+        inputs=[
+            "PreprocessedSession.xy",
+            "PreprocessedSession.depth (fused)",
+            "PreprocessedSession.px_per_cm",
+            "PreprocessedSession.depth_height_cm",
+        ],
+        assumptions=[
+            "Distances are computed exactly as GL-16 ('nnd') and GL-18 ('iid'); a frame needs "
+            "finite X, Y and Z for every animal",
+        ],
+        warnings=[
+            "The index is per cm, so it is not comparable with GL-6, which is per pixel",
+            "Undefined (NaN) when the mean distance is 0, when fewer than 2 animals, or "
+            "without depth or a cm scale",
+        ],
+        primary_reference=KRAUSE_RUXTON_2002,
+        supporting_references=[DELCOURT_PONCIN_2012],
+    )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="cohesion_source",
+            label="Cohesion source",
+            kind="choice",
+            default="nnd",
+            choices=list(_COHESION_SOURCES),
+            help=(
+                "Which 3-D distance cohesion is derived from: nearest-neighbour distance (nnd) "
+                "or mean inter-individual distance (iid)."
+            ),
+        ),
+    ]
+
+    def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
+        """3-D group cohesion for *session*; ``cfg['cohesion_source']`` is 'nnd' or 'iid'."""
+        source = "nnd"
+        if cfg is not None and "cohesion_source" in cfg:
+            source = cfg["cohesion_source"]
+            # Refuse rather than fall through: a typo would export NND numbers while the project
+            # records the user choosing IID (the same rule as GL-6).
+            if source not in _COHESION_SOURCES:
+                raise ValueError(
+                    f"cohesion_source must be one of "
+                    f"{', '.join(sorted(_COHESION_SOURCES))}; got {source!r}"
+                )
+        per_frame = _nnd_of if source == "nnd" else (lambda p: float(pdist(p).mean()))
+        values, _skipped, _available = _frame_distances_3d(session, per_frame)
+        cohesion = np.nan
+        if values:
+            mean_dist = float(np.mean(values))
+            cohesion = 1.0 / mean_dist if mean_dist != 0 else np.nan
+        return pd.DataFrame(
+            [
+                {
+                    "session_id": session.session_id,
+                    "metric_id": self.id,
+                    "cohesion_index_3d": cohesion,
+                }
+            ],
+            columns=self.output_columns,
         )
 
 
@@ -1755,3 +1966,5 @@ _register(OrderStateClassification)
 _register(TopologicalNeighbourCounts)
 _register(GroupElongation)
 _register(NearestNeighbourDistance3D)
+_register(InterIndividualDistance3D)
+_register(GroupCohesion3D)

@@ -165,6 +165,48 @@ class TestOptions:
         assert draft.options == {"fps": 25.0}
         assert draft.option_source("fps") == "user"
 
+    def test_prefill_from_video_sets_values_with_source_video_and_leaves_user_values_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from track2data.readers import confirm
+        from track2data.readers.video_meta import VideoProbe
+
+        monkeypatch.setattr(confirm, "probe_video", lambda p: VideoProbe(25.0, 640, 480, 100))
+        height = ReaderParameter(name="height_px", label="Frame height", kind="int", required=True)
+        draft = ConfirmDraft(result((detection("alpha", parameters=(FPS, SIZE, height)),)))
+        draft.set_option("fps", 30.0)  # typed by the user: the video must not overwrite it
+        probe = draft.prefill_from_video(Path("clip.mp4"))
+        assert probe is not None
+        assert draft.options == {"fps": 30.0, "width_px": 640, "height_px": 480}
+        assert draft.option_source("fps") == "user"
+        assert draft.option_source("width_px") == draft.option_source("height_px") == "video"
+
+    def test_an_unreadable_video_changes_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from track2data.readers import confirm
+
+        monkeypatch.setattr(confirm, "probe_video", lambda p: None)
+        draft = ConfirmDraft(result((detection("alpha", parameters=(FPS,)),)))
+        assert draft.prefill_from_video(Path("clip.mp4")) is None
+        assert draft.options == {}
+
+    def test_options_the_reader_does_not_have_are_not_filled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from track2data.readers import confirm
+        from track2data.readers.video_meta import VideoProbe
+
+        monkeypatch.setattr(confirm, "probe_video", lambda p: VideoProbe(25.0, 640, 480, None))
+        draft = ConfirmDraft(result((detection("alpha", parameters=(FPS,)),)))
+        draft.prefill_from_video(Path("clip.mp4"))
+        assert draft.options == {"fps": 25.0}
+
+    def test_a_video_probe_is_only_offered_when_the_reader_asks_for_fps_or_size(self) -> None:
+        assert ConfirmDraft(result((detection("alpha", parameters=(FPS,)),))).accepts_video_probe
+        assert not ConfirmDraft(result((detection("alpha"),))).accepts_video_probe
+        assert not ConfirmDraft(
+            result((detection("alpha", parameters=(ARENA,)),))
+        ).accepts_video_probe
+
     def test_clearing_a_value_leaves_a_required_option_missing_again(self) -> None:
         proposed = {"fps": ProposedValue(value=30.0, source="file")}
         draft = ConfirmDraft(result((detection("alpha", parameters=(FPS,), proposed=proposed),)))
@@ -229,6 +271,32 @@ class TestSessions:
         ]
         draft = ConfirmDraft(result((detection("alpha"),)), existing=existing)
         assert {r.original_id for r in draft.rows if r.already_added} == {"a"}
+
+    def test_a_whole_frame_candidate_is_offered_again_after_the_folder_was_split_into_panels(
+        self,
+    ) -> None:
+        from track2data.core.models import PanelRect
+
+        existing = [
+            SessionRef(
+                session_id="a__top",
+                folder=Path("root") / "a",
+                sha256="",
+                reader="alpha",
+                panel=PanelRect(x=0, y=0, width=10, height=10),
+            )
+        ]
+        draft = ConfirmDraft(result((detection("alpha"),)), existing=existing)
+        by_id = {r.original_id: r for r in draft.rows}
+        assert not by_id["a"].already_added and by_id["a"].included
+
+    def test_a_true_duplicate_is_still_left_out(self) -> None:
+        existing = [
+            SessionRef(session_id="old", folder=Path("root") / "a", sha256="", reader="alpha")
+        ]
+        draft = ConfirmDraft(result((detection("alpha"),)), existing=existing)
+        by_id = {r.original_id: r for r in draft.rows}
+        assert by_id["a"].already_added and not by_id["a"].included
 
     def test_choosing_another_reader_keeps_what_was_already_in_the_project(self) -> None:
         existing = [SessionRef(session_id="old", folder=Path("root") / "a", sha256="")]
@@ -378,3 +446,57 @@ class TestAgainstARealScan:
         manifest = ProjectManifest(project_name="p", created_at=now, updated_at=now, sessions=refs)
         session = Engine(manifest).import_ref(refs[0])
         assert session.n_animals == 2 and session.session_id == refs[0].session_id
+
+
+class TestOfferReader:
+    """The "choose software" retry: a reader the scan did not recognise, tried with looser rules."""
+
+    @staticmethod
+    def _scan_of_a_txt_table(tmp_path: Path) -> ScanResult:
+        import numpy as np
+
+        from tests.support.dlc import random_pose, write_dlc_csv
+        from track2data.readers.scan import scan
+
+        write_dlc_csv(
+            tmp_path / "trial1.txt",
+            random_pose(20, 1, 3),
+            np.ones((20, 1, 3)),
+            bodyparts=["a", "b", "c"],
+        )
+        return scan([tmp_path])
+
+    def test_offer_reader_then_select_reader_succeeds_and_other_names_still_raise(
+        self, tmp_path: Path
+    ) -> None:
+        draft = ConfirmDraft(self._scan_of_a_txt_table(tmp_path))
+        assert draft.is_empty
+        with pytest.raises(ValueError):
+            draft.select_reader("deeplabcut")  # not offered yet
+        assert draft.offer_reader("deeplabcut") is True
+        assert not draft.is_empty
+        assert draft.reader == "deeplabcut"
+        assert draft.confidence is Confidence.LOW
+        assert draft.chosen_by == "user"
+        draft.select_reader("deeplabcut")
+        with pytest.raises(ValueError, match="No reader"):
+            draft.select_reader("sleap_analysis")
+
+    def test_a_reader_with_nothing_to_offer_leaves_the_draft_alone(self, tmp_path: Path) -> None:
+        draft = ConfirmDraft(self._scan_of_a_txt_table(tmp_path))
+        assert draft.offer_reader("sleap_analysis") is False
+        assert draft.offer_reader("idtrackerai") is False
+        assert draft.is_empty
+
+    def test_an_offered_session_reads_through_the_readers_own_read(self, tmp_path: Path) -> None:
+        from track2data import readers
+
+        draft = ConfirmDraft(self._scan_of_a_txt_table(tmp_path))
+        draft.offer_reader("deeplabcut")
+        (row,) = draft.rows
+        session = readers.read_session(
+            row.source,
+            reader="deeplabcut",
+            options={"fps": 30.0, "width_px": 640, "height_px": 480},
+        )
+        assert session.n_animals == 1

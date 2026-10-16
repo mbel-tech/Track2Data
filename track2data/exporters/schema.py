@@ -84,6 +84,7 @@ def depth_columns(psess: PreprocessedSession) -> dict[str, np.ndarray]:
 IDENTIFIER_COLUMNS: frozenset[str] = frozenset({
     "session_id", "individual_id", "metric_id", "zone_name", "from_zone",
     "to_zone", "frame", "event", "note", "k",
+    "bin_index", "bin_start_s", "bin_end_s",
 })
 
 #: Exact column -> unit, for names the suffix convention gets wrong or does
@@ -126,6 +127,8 @@ _EXPLICIT_UNITS: dict[str, str] = {
     # Dimensionless indices and ratios.
     "area_corrected_occupancy": "dimensionless (ratio)",
     "cohesion_index": "dimensionless (index)",
+    # 1 / a mean distance in cm: the inverse unit (GL-6 is per pixel and is left as is).
+    "cohesion_index_3d": "1/cm",
     "jacobs_d": "dimensionless (-1 to 1)",
     "left_right_turn_bias": "dimensionless (-1 to 1)",
     "mean_elongation_ratio": "dimensionless (ratio)",
@@ -274,7 +277,10 @@ def long_table(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """
     import pandas as pd
 
-    key_columns = ["session_id", "individual_id", "zone_name", "from_zone", "to_zone"]
+    key_columns = [
+        "session_id", "individual_id", "zone_name", "from_zone", "to_zone",
+        "bin_index", "bin_start_s", "bin_end_s",
+    ]
     frames: list[pd.DataFrame] = []
 
     for metric_id, df in metrics.items():
@@ -308,12 +314,18 @@ def long_table(metrics: dict[str, pd.DataFrame]) -> pd.DataFrame:
         return pd.DataFrame(columns=ordered)
 
     out = pd.concat(frames, ignore_index=True)
+    # Time bins identify a row too; the columns appear only for a binned export, so an
+    # unbinned long table keeps its exact column set.
+    bin_columns = [c for c in ("bin_index", "bin_start_s", "bin_end_s") if c in out.columns]
+    if bin_columns:
+        at = ordered.index("metric_id")
+        ordered = [*ordered[:at], *bin_columns, *ordered[at:]]
     out["unit"] = out["column"].map(unit_for_column)
     for column in ordered:
         if column not in out.columns:
             out[column] = pd.NA
     out = out[ordered]
 
-    sort_keys = [c for c in ("session_id", "individual_id", "metric_id", "column")
+    sort_keys = [c for c in ("session_id", "individual_id", "metric_id", "column", "bin_index")
                  if c in out.columns]
     return out.sort_values(sort_keys, na_position="last").reset_index(drop=True)

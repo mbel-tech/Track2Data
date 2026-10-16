@@ -362,3 +362,17 @@ class TestMoreLayoutChecks:
         with pytest.raises(Track2DataError) as caught:
             read(f)
         assert caught.value.code == "SLEAP_LAYOUT_AMBIGUOUS" and "not 2" in str(caught.value)
+
+
+def test_an_analysis_file_with_another_extension_is_offered_only_by_the_lenient_retry(
+    tmp_path: Path,
+) -> None:
+    from track2data.readers.scan import lenient_scan
+
+    analysis(tmp_path / "trial1.analysis")
+    result = scan([tmp_path])
+    assert result.groups == ()
+    group = lenient_scan(result, "sleap_analysis")
+    assert group is not None and group.best.confidence is Confidence.LOW
+    session = read(group.best.sessions[0].source)
+    assert session.n_animals == 2

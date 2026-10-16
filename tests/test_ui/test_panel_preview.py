@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from track2data.core.models import PanelRect
-from ui.widgets import panel_preview as pp
+from ui.widgets import video_frame as vf
 from ui.widgets.panel_preview import PanelPreview
 
 SIZE = (40.0, 20.0)
@@ -55,32 +55,32 @@ def _tracks(n_frames: int = 10, n_animals: int = 2) -> np.ndarray:
 
 
 def test_background_image_wins(view, bg_png, video, monkeypatch) -> None:
-    monkeypatch.setattr(pp, "extract_frame", lambda p, i=0: bytes(40 * 20 * 3))
+    monkeypatch.setattr(vf, "extract_frame_rgb", lambda p, i=0: (bytes(40 * 20 * 3), 40, 20))
     view.set_source(SIZE, bg_png, video, _tracks())
     assert view.backdrop_kind == "image"
     assert any(isinstance(i, QGraphicsPixmapItem) for i in view.scene().items())
 
 
 def test_video_frame_when_no_background(view, video, monkeypatch) -> None:
-    monkeypatch.setattr(pp, "extract_frame", lambda p, i=0: bytes(40 * 20 * 3))
+    monkeypatch.setattr(vf, "extract_frame_rgb", lambda p, i=0: (bytes(40 * 20 * 3), 40, 20))
     view.set_source(SIZE, None, video, _tracks())
     assert view.backdrop_kind == "video"
 
 
 def test_missing_background_file_falls_to_video(view, tmp_path, video, monkeypatch) -> None:
-    monkeypatch.setattr(pp, "extract_frame", lambda p, i=0: bytes(40 * 20 * 3))
+    monkeypatch.setattr(vf, "extract_frame_rgb", lambda p, i=0: (bytes(40 * 20 * 3), 40, 20))
     view.set_source(SIZE, tmp_path / "gone.png", video, None)
     assert view.backdrop_kind == "video"
 
 
 def test_wrong_length_frame_falls_to_tracks(view, video, monkeypatch) -> None:
-    monkeypatch.setattr(pp, "extract_frame", lambda p, i=0: bytes(10))
+    monkeypatch.setattr(vf, "extract_frame_rgb", lambda p, i=0: (bytes(10), 40, 20))
     view.set_source(SIZE, None, video, _tracks())
     assert view.backdrop_kind == "tracks"
 
 
 def test_none_frame_falls_to_tracks(view, video, monkeypatch) -> None:
-    monkeypatch.setattr(pp, "extract_frame", lambda p, i=0: None)
+    monkeypatch.setattr(vf, "extract_frame_rgb", lambda p, i=0: None)
     view.set_source(SIZE, None, video, _tracks())
     assert view.backdrop_kind == "tracks"
 
@@ -89,7 +89,7 @@ def test_raising_extract_falls_to_tracks(view, video, monkeypatch) -> None:
     def boom(p, i=0):
         raise RuntimeError("no codec")
 
-    monkeypatch.setattr(pp, "extract_frame", boom)
+    monkeypatch.setattr(vf, "extract_frame_rgb", boom)
     view.set_source(SIZE, None, video, _tracks())
     assert view.backdrop_kind == "tracks"
 
@@ -98,7 +98,7 @@ def test_missing_video_is_not_read(view, tmp_path, monkeypatch) -> None:
     def boom(p, i=0):
         raise AssertionError("must not be called")
 
-    monkeypatch.setattr(pp, "extract_frame", boom)
+    monkeypatch.setattr(vf, "extract_frame_rgb", boom)
     view.set_source(SIZE, None, tmp_path / "nope.mp4", _tracks())
     assert view.backdrop_kind == "tracks"
 

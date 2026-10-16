@@ -100,6 +100,16 @@ class SessionReader(ABC):
             )
         ]
 
+    @classmethod
+    def discover_lenient(cls, index: ScanIndex, peek: Peeker) -> list[Detection]:
+        """Sessions this reader would accept under loosened rules, for the "choose software" retry.
+
+        Called only when the user names this reader after a scan recognised nothing it would
+        take. Report only files :meth:`discover` refused, and only ones ``read`` can still parse;
+        the default reports none. Must not raise.
+        """
+        return []
+
     @abstractmethod
     def read(self, folder: Path, *, allow_pickle: bool = False) -> Session:
         """

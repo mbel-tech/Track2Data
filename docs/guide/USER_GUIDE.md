@@ -431,12 +431,13 @@ Further down the same screen, **Camera view** says how the camera looked at the 
 set** (the default), **Top-down**, or **Side view**. It is saved with the project, separately from
 the calibration, and a project that never sets it behaves exactly as before.
 
-Some metrics only make sense for one view. Today that is **Vertical Position (Depth)**, IL-15,
-which needs a side view: on a top-down recording the image's vertical axis is not depth. Until you
-declare a side view, that row is greyed on the Metrics screen and its tooltip says how to switch
-it on; if it is selected anyway, the run skips it and the run's README says so. Declaring a view
-does not switch off any existing metric. Thigmotaxis (IL-14) and distance from the centre (IL-3)
-still assume you are looking down on the arena, so read them accordingly on a side view.
+Some metrics only make sense for one view. **Vertical Position (Depth)**, IL-15, needs a side view:
+on a top-down recording the image's vertical axis is not depth. Until you declare a side view, that
+row is greyed on the Metrics screen and its tooltip says how to switch it on; if it is selected
+anyway, the run skips it and the run's README says so. The opposite holds for **Thigmotaxis**
+(IL-14) and **Distance from the Arena Centre** (IL-3): they describe the arena seen from above, so
+declaring a **Side view** greys them out and a run skips them. **Not set** and **Top-down** keep
+both, so a project that never declared a view is unchanged.
 
 For depth, draw a **main** zone from the waterline to the floor on the Zones screen. The top edge
 is the surface and the bottom edge the floor; Track2Data never substitutes the video frame, so with
@@ -523,7 +524,9 @@ Attach experimental information (treatment, date, tank, …) to every row of the
 <figcaption><b>Figure 11.</b> The Metadata screen: CSV preview, column mapping and the match summary.</figcaption>
 </figure>
 
-1. **Load metadata CSV…**. The first rows are previewed.
+1. **Load metadata file…** (a CSV or an Excel `.xlsx` workbook). The first rows are previewed. If a
+   workbook has several sheets, a **Sheet** menu appears: pick the one that holds your metadata (the
+   first sheet is used until you do). The older `.xls` format is not read; save it as `.xlsx`.
 2. Match columns to fields. Names like `date`, `condition` or `tank` are matched automatically to
    *Trial date*, *Treatment*, *Group ID*; change any you disagree with, or leave a field on
    `(skip)`.
@@ -535,7 +538,7 @@ row is matched per session (if several rows match, the first is used and the sum
 
 ### Per-animal information (sex, weight, genotype of individual animals)
 
-Give the CSV **one row per animal** and map its animal column (`fish_id`, `animal_id` or any name)
+Give the file **one row per animal** and map its animal column (`fish_id`, `animal_id` or any name)
 to *Individual ID*. Then:
 
 - **Match animals by** decides how each value is matched to an animal. *Validator label* uses the

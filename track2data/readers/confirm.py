@@ -12,6 +12,7 @@ It never reads a session. The options are validated against the reader's declare
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,9 +22,11 @@ from pydantic import ValidationError
 
 from track2data.core.errors import ImportError_
 from track2data.core.models import SessionRef
+from track2data.core.session_identity import same_session_part
 from track2data.readers.detection import Confidence, Detection
 from track2data.readers.params import ReaderParameter, ValueSource, resolve_options
-from track2data.readers.scan import FormatGroup, ScanResult
+from track2data.readers.scan import FormatGroup, ScanResult, lenient_scan
+from track2data.readers.video_meta import VideoProbe, probe_video
 
 ProblemCode = Literal[
     "NOTHING_SELECTED", "OPTION_MISSING", "OPTION_INVALID", "ID_DUPLICATE", "ID_UNSAFE"
@@ -64,11 +67,8 @@ class SessionRow:
     warnings: tuple[str, ...] = ()
 
 
-def _resolved(path: Path) -> Path:
-    try:
-        return Path(path).resolve()
-    except OSError:
-        return Path(path)
+#: The shared options a video file can answer.
+_VIDEO_OPTIONS = frozenset({"fps", "width_px", "height_px"})
 
 
 class ConfirmDraft:
@@ -82,9 +82,9 @@ class ConfirmDraft:
 
     def __init__(self, result: ScanResult, *, existing: Sequence[SessionRef] = ()) -> None:
         self._result = result
-        # (resolved folder, reader or None) of what the project already holds. A legacy entry
-        # (no saved reader) is the same session whichever reader reads it.
-        self._existing = [(_resolved(ref.folder), ref.reader) for ref in existing]
+        # What the project already holds. A legacy entry (no saved reader) is the same session
+        # whichever reader reads it; one with a panel is another part of the video.
+        self._existing = list(existing)
         self._existing_ids = {ref.session_id for ref in existing}
         self._group_index = 0
         self._detection: Detection | None = None
@@ -164,6 +164,21 @@ class ConfirmDraft:
         self._group_index = index
         self._enter(self._result.groups[index].best, "detected")
 
+    def offer_reader(self, name: str) -> bool:
+        """Try reader *name* with its loosened rules on the files the scan walked.
+
+        On success its sessions become a new, first group (LOW confidence) and are selected, so
+        :meth:`select_reader` can name it; returns False when it finds nothing to read. Only
+        readers that implement ``discover_lenient`` can be offered.
+        """
+        group = lenient_scan(self._result, name)
+        if group is None:
+            return False
+        self._result = dataclasses.replace(self._result, groups=(group, *self._result.groups))
+        self._group_index = 0
+        self._enter(group.best, "user")
+        return True
+
     def select_reader(self, name: str) -> None:
         """Amend the suggestion: read the selected group with another reader that recognised it."""
         if self.is_empty:
@@ -200,6 +215,30 @@ class ConfirmDraft:
             self._values[name] = value
             self._sources[name] = "user"
 
+    @property
+    def accepts_video_probe(self) -> bool:
+        """Whether the selected reader asks for something a video can answer (frame rate, size)."""
+        names = {p.name for p in self.parameters if p.scope == "group"}
+        return bool(names & _VIDEO_OPTIONS)
+
+    def prefill_from_video(self, path: Path) -> VideoProbe | None:
+        """Fill the frame rate and frame size from the video at *path*.
+
+        Only the options this reader has, and never one the user already typed (its source is
+        "user"). The filled values carry the source "video". Returns what the video said, or
+        None when it could not be read (nothing is changed then).
+        """
+        probe = probe_video(Path(path))
+        if probe is None:
+            return None
+        answers = {"fps": probe.fps, "width_px": probe.width_px, "height_px": probe.height_px}
+        group = {p.name for p in self.parameters if p.scope == "group"}
+        for name, value in answers.items():
+            if name in group and self._sources.get(name) != "user":
+                self._values[name] = value
+                self._sources[name] = "video"
+        return probe
+
     def set_session_option(self, session_id: str, name: str, value: Any) -> None:
         """Set an option that differs per session (which arena); ``None`` clears it."""
         self._row_key(session_id)
@@ -228,7 +267,7 @@ class ConfirmDraft:
                 session_id=self._ids[candidate.session_id],
                 source=candidate.source,
                 included=self._included[candidate.session_id],
-                already_added=self._already_added(candidate.source),
+                already_added=self._already_added(candidate.session_id, candidate.source),
                 warnings=candidate.warnings,
             )
             for candidate in self._detection.sessions
@@ -305,15 +344,22 @@ class ConfirmDraft:
         self._per_session = {}
         self._ids = {c.session_id: c.session_id for c in detection.sessions}
         self._included = {
-            c.session_id: not self._already_added(c.source) for c in detection.sessions
+            c.session_id: not self._already_added(c.session_id, c.source)
+            for c in detection.sessions
         }
 
-    def _already_added(self, source: Path) -> bool:
-        resolved = _resolved(source)
-        return any(
-            path == resolved and (reader is None or reader == self.reader)
-            for path, reader in self._existing
+    def _already_added(self, original_id: str, source: Path) -> bool:
+        """Whether the project holds this candidate as a whole-frame session of this reader."""
+        if not self._existing:
+            return False
+        candidate = SessionRef(
+            session_id=original_id,
+            folder=source,
+            sha256="",
+            reader=self.reader,
+            reader_options={**self._values, **self._per_session.get(original_id, {})},
         )
+        return any(same_session_part(candidate, ref) for ref in self._existing)
 
     def _row_key(self, session_id: str) -> None:
         if session_id not in self._ids:
