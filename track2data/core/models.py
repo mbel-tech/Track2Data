@@ -771,8 +771,10 @@ class ProjectManifest(BaseModel):
 
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""
+        # JSON mode writes a path with forward slashes on every platform, so the same project
+        # hashes the same on Windows and elsewhere.
         data: dict[str, Any] = self.model_dump(
-            exclude={"created_at", "updated_at", "run_log_path"}
+            mode="json", exclude={"created_at", "updated_at", "run_log_path"}
         )
         serialised = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(serialised.encode()).hexdigest()[:16]

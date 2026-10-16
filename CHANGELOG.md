@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A project hashes the same on Windows and elsewhere.** The project hash wrote folder paths with the platform's separators, so a project folder hashed differently on Windows (and two golden-hash tests failed there on every push to `main`). It now writes them with forward slashes. Hashes on Linux and macOS are unchanged; on Windows a project is re-hashed once, which refreshes its preprocessing cache.
 - **idtracker.ai v5 sessions with no recorded frame rate can be given one.** The legacy v5 reader now takes an `fps` option (`--option fps=25`, or the Frame rate field on import), used only after `video_object.npy` and the session json have been tried. Without any of the three it still stops with `VIDEO_FPS_MISSING` rather than assuming 1 fps; the message now says how to supply it.
 - **Rescanning a folder that was split into panels** offers the whole-frame session again instead of reporting it "already in the project". The import dialog and the project store now share one duplicate rule (decision D-046); a true duplicate is still left out.
 - **idtracker.ai pickle reader could run code.** The allowlist for `list_of_blobs.pickle` admitted every class in any module whose name starts with `numpy`, including helpers that execute code. It is now an exact list of the array-reconstruction functions numpy pickles use.
