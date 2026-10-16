@@ -162,9 +162,11 @@ def run(
             rows = np.flatnonzero(np.isin(expansion.frame_index, list(swap_boundaries)))
             swap_boundaries = {int(r) for r in rows}
     xy, step = correct_switches(
-        xy, config.identity_switch, swap_boundaries=swap_boundaries,
-        has_z=session.raw_z is not None,
+        xy, config.identity_switch, swap_boundaries=swap_boundaries
     )
+    if z_rows is not None and step.permutation is not None:
+        # the vertical coordinate travels with its animal's x and y
+        z_rows = np.take_along_axis(z_rows, step.permutation, axis=1)
     report.steps.append(step)
 
     # 4. Smoothing

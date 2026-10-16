@@ -105,7 +105,6 @@ def correct_switches(
     xy: np.ndarray,
     cfg: IdSwitchCfg,
     swap_boundaries: set[int] | None = None,
-    has_z: bool = False,
 ) -> tuple[np.ndarray, PPStepResult]:
     """Correct identity switches in multi-animal trajectory data.
 
@@ -142,17 +141,14 @@ def correct_switches(
         the permutation it licenses applies from *b* onward. When ``None``,
         every frame is a candidate -- correct, but far more
         false-positive-prone, so prefer supplying it.
-    has_z:
-        The session also carries a vertical coordinate (native 3-D). It is never
-        re-labelled here, so with several animals it can end up on the wrong
-        identity; that is logged once per call.
-
     Returns
     -------
     out:
         New array (input not mutated) with corrected identities.
     result:
-        ``PPStepResult`` describing corrected frames.
+        ``PPStepResult`` describing corrected frames. Its ``permutation`` says which input
+        column holds each identity at each frame, so an array that belongs to the positions (a
+        native 3-D session's z) can be relabelled the same way.
     """
     n_frames, n_animals, _ = xy.shape
 
@@ -171,14 +167,6 @@ def correct_switches(
         if swap_boundaries
         else "geometry alone, with no fragment boundaries to constrain it",
     )
-
-    if has_z:
-        logger.warning(
-            "Identity-switch correction re-labels x and y only; the 3-D z coordinate of this "
-            "session (%d animals) is left as read, so it can end up on the wrong identity. "
-            "Identity-switch correction is meant for a single animal's z, or sessions without z.",
-            n_animals,
-        )
 
     identity = np.arange(n_animals)
 
@@ -253,12 +241,14 @@ def correct_switches(
     # provenance).
     affected_frames = 0
     affected_per_individual = [0] * n_animals
+    columns = np.tile(identity, (n_frames, 1))
 
     for i, (start, perm) in enumerate(segments):
         end = segments[i + 1][0] if i + 1 < len(segments) else n_frames
         if np.array_equal(perm, identity):
             continue
         out[start:end] = xy[start:end][:, perm, :]
+        columns[start:end] = perm
         span = end - start
         affected_frames += span
         for k in range(n_animals):
@@ -269,4 +259,5 @@ def correct_switches(
         step_name="identity_switch",
         affected_frames=affected_frames,
         affected_per_individual=affected_per_individual,
+        permutation=columns,
     )

@@ -1256,3 +1256,11 @@ could not be re-added, while the store would have accepted it.
 
 **Why:** one frame rule and one body-length rule keep the three group metrics comparable, and the NND default keeps GL-19 the direct 3-D analogue of GL-6.
 
+### D-053 · Several animals in one Anipose file: a column prefix per animal, named by the user
+
+**Status:** accepted (the user chose option (a)); implemented. Synthetic files only, like the rest of the reader.
+
+**Decision:** the Anipose reader takes an `animals` option, a comma-separated list of column prefixes (`fishA,fishB`). A keypoint column belongs to the longest listed prefix it starts with (`<prefix>_<keypoint>_x|y|z`); the list order is the slot order and the labels are stored as `identities_labels`. Every animal must have the same keypoints and every keypoint column must belong to a listed animal, else `ANIPOSE_ANIMAL_COLUMNS`. The option left empty reads one animal, exactly as before. Group metrics are offered for a native project when every native session lists two or more animals (`manifest_native_several_animals`); for a run, the preprocessed session's animal count decides. Identity-switch correction reports the permutation it applied (`PPStepResult.permutation`) and the pipeline applies it to the native z, so z stays with its animal.
+
+**Why:** the prefixes are not guessed because a single-animal file with `left_ear` and `right_ear` has the same shape as two animals with one keypoint each; guessing would turn a one-animal file into two. A project with one single-animal native file keeps the group metrics off, since a group metric on a one-animal session has nothing to compare.
+

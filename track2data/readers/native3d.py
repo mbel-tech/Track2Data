@@ -54,6 +54,22 @@ def manifest_native_3d(manifest: Any) -> bool:
     return any(ref.reader in NATIVE_3D_READERS for ref in manifest.sessions)
 
 
+def ref_animal_count(ref: Any) -> int:
+    """How many animals a native entry's file holds, from its saved ``animals`` option (1 when
+    it is empty or the entry is of another reader): the number of comma-separated prefixes."""
+    if ref.reader not in NATIVE_3D_READERS:
+        return 1
+    names = [p.strip() for p in str(ref.reader_options.get("animals") or "").split(",")]
+    return max(1, len({n for n in names if n}))
+
+
+def manifest_native_several_animals(manifest: Any) -> bool:
+    """Whether every native session of *manifest* holds several animals, so group metrics have
+    animals to compare. One single-animal native file rules them out for the project."""
+    refs = [r for r in manifest.sessions if r.reader in NATIVE_3D_READERS]
+    return bool(refs) and all(ref_animal_count(r) >= 2 for r in refs)
+
+
 def ref_vertical_axis(ref: Any) -> str | None:
     """The vertical axis a native entry's file is read with, from its saved options (None for an
     entry of another reader). Confirmed entries save only the options that were given, so a

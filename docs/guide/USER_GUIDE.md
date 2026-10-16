@@ -788,14 +788,14 @@ no fusion): the positions are `(x, y, z)` in the project's unit, and IL-16 and I
 column. Example: a fish that moves (3, 4, 12) mm per frame in an Anipose file at 25 frames per second,
 read as cm, steps hypot(0.3, 0.4, 1.2) = 1.3 cm per frame, so 10 steps give an IL-16 of 13 cm and an
 IL-17 of 1.3 x 25 = 32.5 cm/s; its 2-D metrics measure the horizontal steps of 0.5 cm (IL-1 5 cm, IL-2
-12.5 cm/s). **GL-16 is not offered for native files** (it needs two animals in one session and a file holds one), and neither is any other group metric ("needs several animals in one session; a native 3-D file holds one animal"). **IL-3, IL-9, IL-10 and IL-14 are not offered either** ("uses a pixel-sized default and the project's native 3-D files have no pixel frame"): their default thresholds are in pixels and would silently change with the project unit. The Metrics screen greys them out, `validate` and the run `README.md` list the reason. IL-15 appears once the water column is set.
+12.5 cm/s). **GL-16 is not offered for native files that hold one animal** (it needs two animals in one session), and neither is any other group metric ("needs several animals in one session; a native 3-D file holds one animal"). An Anipose file that holds several animals, with columns named `<animal>_<keypoint>_x`, `_y`, `_z`, offers them when you list the prefixes in the **Animal column prefixes** option (`fishA,fishB`, in the order you want the animals); every native file in the project must then do the same. **IL-3, IL-9, IL-10 and IL-14 are not offered either** ("uses a pixel-sized default and the project's native 3-D files have no pixel frame"): their default thresholds are in pixels and would silently change with the project unit. The Metrics screen greys them out, `validate` and the run `README.md` list the reason. IL-15 appears once the water column is set.
 The per-frame table has a `z_cm` column, the file's own vertical coordinate after the same gap filling
 and smoothing as x and y (so IL-16 can be reproduced from `x_cm`, `y_cm` and `z_cm`); with a water
 column it also carries `depth_fraction` and `depth_cm` as for a fused unit. The run's `README.md` has a
 **Native 3-D source** section (reader, file unit, project unit, vertical axis, flip, water column or its
 absence) and, with a water column, a row **Samples outside the water column** with the count left out.
 
-Limits of native 3-D files: one animal per file; no mixing with pixel sessions; the unit you give
+Limits of native 3-D files: one animal per file (several only for an Anipose file whose animal prefixes you list); no mixing with pixel sessions; the unit you give
 must be the one of the calibration board (a wrong one scales everything); no refraction correction;
 the water column is entered, not estimated; no zones or background image; no group metrics and no IL-3, IL-9, IL-10 or IL-14; a multi-animal DeepLabCut
 3-D table (with an `individuals` header row) is named by the scan as one it cannot read yet.

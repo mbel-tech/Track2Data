@@ -281,3 +281,98 @@ def test_discover_warns_about_a_duplicate_column(tmp_path: Path) -> None:
     write_anipose_csv(other / "c.csv", KPS, 3)
     (group,) = scan([other]).groups
     assert group.detections[0].sessions[0].warnings == ()
+
+
+# ── several animals in one file: a column prefix per animal (D-053) ─────────────────────────
+
+
+def _two_fish(tmp_path: Path, **kwargs) -> Path:
+    return write_anipose_csv(
+        tmp_path / "pair.csv", KPS, 6, animals=["fishA", "fishB"], **kwargs
+    )
+
+
+def test_two_animals_in_one_file_become_two_slots_in_one_session(tmp_path: Path) -> None:
+    s = read(_two_fish(tmp_path), animals="fishA,fishB", keypoint="l-base", target_unit="mm")
+    assert s.n_animals == 2 and s.raw_xy.shape == (6, 2, 2) and s.raw_z.shape == (6, 2)
+    # default values: frame + 100 k + 10 axis + 1000 animal; the file's axes are x, y, z
+    for a in range(2):
+        np.testing.assert_allclose(s.raw_xy[:, a, 0], np.arange(6) + 1000.0 * a)
+        np.testing.assert_allclose(s.raw_xy[:, a, 1], np.arange(6) + 10.0 + 1000.0 * a)
+        np.testing.assert_allclose(s.raw_z[:, a], np.arange(6) + 20.0 + 1000.0 * a)
+    assert s.has_stable_identities is True
+    assert s.identities_labels == ["fishA", "fishB"]
+    assert s.keypoints is not None and s.keypoints.xy.shape == (6, 2, 3, 3)
+    assert s.keypoints.names == KPS  # the animal prefix is not part of the keypoint name
+
+
+def test_the_order_of_the_option_is_the_order_of_the_slots(tmp_path: Path) -> None:
+    s = read(_two_fish(tmp_path), animals="fishB, fishA", keypoint="l-base", target_unit="mm")
+    assert s.identities_labels == ["fishB", "fishA"]
+    np.testing.assert_allclose(s.raw_xy[:, 0, 0], np.arange(6) + 1000.0)
+
+
+def test_prefixes_may_contain_underscores_and_the_longest_wins(tmp_path: Path) -> None:
+    path = write_anipose_csv(
+        tmp_path / "u.csv", ["nose"], 4, animals=["fish", "fish_2"]
+    )
+    s = read(path, animals="fish,fish_2", keypoint="nose", target_unit="mm")
+    assert s.n_animals == 2
+    np.testing.assert_allclose(s.raw_xy[:, 1, 0], np.arange(4) + 1000.0)
+
+
+def test_a_missing_animal_is_refused_with_the_columns_it_lacks(tmp_path: Path) -> None:
+    with pytest.raises(Track2DataError) as err:
+        read(_two_fish(tmp_path), animals="fishA,fishC")
+    assert err.value.code == "ANIPOSE_ANIMAL_COLUMNS" and "fishC" in str(err.value)
+
+
+def test_animals_must_share_their_keypoints(tmp_path: Path) -> None:
+    path = _two_fish(tmp_path)
+    text = path.read_text().replace("fishB_tail_tip_", "fishB_tail_end_")
+    path.write_text(text)
+    with pytest.raises(Track2DataError) as err:
+        read(path, animals="fishA,fishB")
+    assert err.value.code == "ANIPOSE_ANIMAL_COLUMNS"
+
+
+def test_a_column_that_belongs_to_no_listed_animal_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(Track2DataError) as err:
+        read(_two_fish(tmp_path), animals="fishA")  # fishB's columns are left over
+    assert err.value.code == "ANIPOSE_ANIMAL_COLUMNS" and "fishB" in str(err.value)
+
+
+def test_duplicate_animal_names_are_refused(tmp_path: Path) -> None:
+    with pytest.raises(Track2DataError) as err:
+        read(_two_fish(tmp_path), animals="fishA,fishA")
+    assert err.value.code == "READER_OPTION_INVALID"
+
+
+def test_a_single_animal_file_still_reads_exactly_as_before(tmp_path: Path) -> None:
+    path = write_anipose_csv(tmp_path / "one.csv", KPS, 5)
+    plain = read(path, keypoint="l-base", target_unit="mm")
+    assert plain.n_animals == 1 and plain.identities_labels is None
+    # an animals list of one prefix-free name is not a thing: the option left out is the default
+    assert read(path, animals="", keypoint="l-base", target_unit="mm").raw_xy.shape == (5, 1, 2)
+
+
+def test_a_missing_keypoint_for_one_animal_is_nan_for_that_animal_only(tmp_path: Path) -> None:
+    xyz = np.zeros((6, 2, 3, 3)) + np.arange(6)[:, None, None, None]
+    xyz[2:4, 1, 0, :] = np.nan
+    path = write_anipose_csv(tmp_path / "gap.csv", KPS, 6, animals=["a", "b"], xyz=xyz)
+    s = read(path, animals="a,b", keypoint="l-base", target_unit="mm")
+    assert np.isnan(s.raw_xy[2:4, 1]).all() and np.isfinite(s.raw_xy[2:4, 0]).all()
+
+
+def test_a_score_cutoff_applies_per_animal(tmp_path: Path) -> None:
+    score = np.ones((6, 2, 3))
+    score[1, 1, :] = 0.1
+    path = write_anipose_csv(tmp_path / "s.csv", KPS, 6, animals=["a", "b"], score=score)
+    s = read(path, animals="a,b", keypoint="l-base", likelihood_cutoff=0.5, target_unit="mm")
+    assert np.isnan(s.raw_xy[1, 1]).all() and np.isfinite(s.raw_xy[1, 0]).all()
+
+
+def test_discover_lists_the_animals_option_beside_the_others(tmp_path: Path) -> None:
+    _two_fish(tmp_path)
+    (group,) = scan([tmp_path]).groups
+    assert "animals" in [p.name for p in group.best.parameters]

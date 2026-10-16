@@ -631,7 +631,7 @@ info-button modal (§6).
 
 ### 4.3 Social spacing
 
-**Availability (native 3-D projects).** Every group metric (`GL-*`) is unavailable in a native 3-D project (Anipose, DeepLabCut 3-D files): "needs several animals in one session; a native 3-D file holds one animal". The Metrics screen greys them out with that reason, and `validate` and the run `README.md` list it.
+**Availability (native 3-D projects).** Every group metric (`GL-*`) is unavailable in a native 3-D project (Anipose, DeepLabCut 3-D files) unless every file holds several animals (an Anipose file with its `animals` option set); otherwise: "needs several animals in one session; a native 3-D file holds one animal". The Metrics screen greys them out with that reason, and `validate` and the run `README.md` list it.
 
 #### GL-1 — Nearest-neighbour distance (NND)
 

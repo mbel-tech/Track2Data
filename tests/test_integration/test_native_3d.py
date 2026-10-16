@@ -350,3 +350,38 @@ def test_il15_names_the_water_column_as_its_source(project: Path) -> None:
     psess = engine.preprocess(engine.import_ref(manifest.sessions[0]))
     result = engine.compute_metrics(psess)["IL-15"]
     assert set(result["depth_extent_source"]) == {"water_column"}
+
+
+# ── one file, several animals (prefix per animal) ───────────────────────────────────────────
+
+
+def test_two_animals_in_one_file_run_the_group_metrics(tmp_path: Path) -> None:
+    """Two fish 10 cm apart in x (100 mm), moving together: GL-16 sees them, IL-16 sees each."""
+    data = tmp_path / "data"
+    data.mkdir()
+    xyz = np.stack([_track(), _track() + np.array([100.0, 0.0, 0.0])], axis=1)  # (F, 2, 1, 3)
+    write_anipose_csv(
+        data / "pair.csv", ["head"], N_FRAMES, animals=["f1", "f2"], xyz=xyz
+    )
+    now = datetime.now(tz=UTC)
+    project = tmp_path / "p.t2d.json"
+    write_manifest(ProjectManifest(project_name="pair", created_at=now, updated_at=now), project)
+    result = CliRunner().invoke(
+        cli,
+        ["add", str(project), str(data), "--option", "unit=mm", "--option", "fps=25",
+         "--option", "animals=f1,f2", "--yes"],
+    )
+    assert result.exit_code == 0, result.output
+    manifest = read_manifest(project)
+    manifest = manifest.model_copy(
+        update={
+            "metrics": SELECTION.model_copy(update={"individual": ["IL-16"], "group": ["GL-16"]})
+        }
+    )
+    out = tmp_path / "out"
+    Engine(manifest).run(out, exporters=["csv_long"])
+    long = pd.read_csv(out / "pair" / "metrics_long.csv")
+    path = long[(long["metric_id"] == "IL-16") & (long["column"] == "path_length_3d_cm")]
+    assert sorted(path["individual_id"].tolist()) == [0, 1]
+    assert path["value"].tolist() == pytest.approx([PATH_CM, PATH_CM], abs=1e-9)
+    assert _value(long, "GL-16", "mean_nnd_3d_cm") == pytest.approx(10.0, abs=1e-9)

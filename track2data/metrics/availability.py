@@ -125,6 +125,7 @@ def depth_scale_reason(
     px_per_cm: float | None,
     depth_height_cm: float | None,
     native_3d: bool = False,
+    native_several_animals: bool = False,
 ) -> str | None:
     """Why a ``requires_depth_scale`` metric cannot run, or None (also for any other metric).
 
@@ -132,7 +133,8 @@ def depth_scale_reason(
     cm scale (``bodylength``), then a unit without ``px_per_cm`` / ``depth_height_cm``.
 
     *native_3d* marks native 3-D data (its ``z`` is absolute, in the project unit), which needs
-    no ``depth_height_cm``.
+    no ``depth_height_cm``. *native_several_animals* is read by :func:`unavailable_reason` (group
+    metrics) and has no effect here.
     """
     if not getattr(metric_cls, "requires_depth_scale", False):
         return None
@@ -172,6 +174,10 @@ def manifest_depth_scale(manifest: Any) -> dict[str, Any]:
     }
     if native:
         scale["native_3d"] = True
+        from track2data.readers.native3d import manifest_native_several_animals
+
+        if manifest_native_several_animals(manifest):
+            scale["native_several_animals"] = True
     return scale
 
 
@@ -193,7 +199,9 @@ def unavailable_reason(
     if depth_scale is not None and depth_scale.get("native_3d", False):
         if getattr(metric_cls, "id", None) in PIXEL_FRAME_METRIC_IDS:
             return NEEDS_PIXEL_FRAME_REASON
-        if getattr(metric_cls, "level", None) == "group":
+        if getattr(metric_cls, "level", None) == "group" and not depth_scale.get(
+            "native_several_animals", False
+        ):
             return NEEDS_SEVERAL_ANIMALS_REASON
         if getattr(metric_cls, "uses_depth", False) and not has_depth:
             return NEEDS_WATER_COLUMN_REASON

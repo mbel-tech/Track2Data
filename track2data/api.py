@@ -1365,7 +1365,11 @@ class Engine:
             depth_height_cm=psess.depth_height_cm,
         )
         if psess.z is not None:
-            scale.update(dimension="3d", native_3d=True)
+            scale.update(
+                dimension="3d",
+                native_3d=True,
+                native_several_animals=psess.xy.shape[1] >= 2,
+            )
         return view_skipped_metrics(
             selected,
             self.camera_view_for_psess(psess),

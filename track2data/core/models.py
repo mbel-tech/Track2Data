@@ -771,8 +771,10 @@ class ProjectManifest(BaseModel):
 
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""
+        # JSON mode writes a path with forward slashes on every platform, so the same project
+        # hashes the same on Windows and elsewhere.
         data: dict[str, Any] = self.model_dump(
-            exclude={"created_at", "updated_at", "run_log_path"}
+            mode="json", exclude={"created_at", "updated_at", "run_log_path"}
         )
         serialised = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(serialised.encode()).hexdigest()[:16]
@@ -791,6 +793,10 @@ class PPStepResult:
     affected_frames: int
     affected_per_individual: list[int]
     notes: str = ""
+    #: Identity-switch correction only: ``(n_frames, n_animals)`` ints, the input column that holds
+    #: each identity at each frame, so arrays that follow the positions (a native 3-D z) can be
+    #: relabelled the same way. None for every other step.
+    permutation: Any = None
 
 
 @dataclass
@@ -946,8 +952,8 @@ class PreprocessedSession:
     # session's coordinate unit, laid out on the same rows as ``xy`` (NaN on inserted rows).
     # None for every other session. It is the file's coordinate cleaned like ``xy``: blanked
     # where a jump was replaced, then bridged, gap-filled and smoothed with the same settings
-    # (preprocess/z_axis.py). Identity-switch correction never touches it, so it is only valid
-    # for single-animal sources (native files are one animal).
+    # (preprocess/z_axis.py). Identity-switch correction relabels it with x and y (the pipeline
+    # applies the step's permutation), so it stays with its animal in a file with several.
     z: np.ndarray | None = None
     # (n_frames, n_animals) vertical speed in the project length unit per second, from
     # ``compute_kinematics`` on the WHOLE session's Z with the manifest's KinematicsCfg
