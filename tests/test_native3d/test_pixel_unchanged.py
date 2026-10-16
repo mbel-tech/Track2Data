@@ -46,12 +46,17 @@ def _manifest(water_column: WaterColumn | None = None) -> ProjectManifest:
     )
 
 
+def _posix(text: str) -> bytes:
+    return text.replace("\\\\", "/").encode()
+
+
 def test_a_pixel_manifest_hashes_and_serialises_as_before() -> None:
     manifest = _manifest()
     assert manifest.project_hash() == GOLDEN_HASH
-    indented = manifest.model_dump_json(indent=2).encode()
+    # A Windows path is written with escaped backslashes; fold them so the golden bytes hold there
+    indented = _posix(manifest.model_dump_json(indent=2))
     assert hashlib.sha256(indented).hexdigest() == GOLDEN_JSON_INDENT_SHA
-    assert hashlib.sha256(manifest.model_dump_json().encode()).hexdigest() == GOLDEN_JSON_SHA
+    assert hashlib.sha256(_posix(manifest.model_dump_json())).hexdigest() == GOLDEN_JSON_SHA
     assert "water_column" not in manifest.calibration.model_dump(mode="json")
 
 
