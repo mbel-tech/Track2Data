@@ -1,0 +1,1161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Track2Data project (.t2d.json)",
+  "$defs": {
+    "CalibrationConfig": {
+      "properties": {
+        "mode": {
+          "default": "bodylength",
+          "enum": [
+            "scalar",
+            "bodylength",
+            "session"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "px_per_cm": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Px Per Cm"
+        },
+        "bl_min_samples": {
+          "default": 30,
+          "title": "Bl Min Samples",
+          "type": "integer"
+        },
+        "length_unit_label": {
+          "default": "cm",
+          "title": "Length Unit Label",
+          "type": "string"
+        },
+        "length_unit_confirmed_by_user": {
+          "default": false,
+          "title": "Length Unit Confirmed By User",
+          "type": "boolean"
+        },
+        "session_calibration_stat": {
+          "default": "mean",
+          "enum": [
+            "mean",
+            "median"
+          ],
+          "title": "Session Calibration Stat",
+          "type": "string"
+        },
+        "body_length_source": {
+          "default": "session",
+          "enum": [
+            "session",
+            "blobs"
+          ],
+          "title": "Body Length Source",
+          "type": "string"
+        },
+        "water_column": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaterColumn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "CalibrationConfig",
+      "type": "object"
+    },
+    "ExportTarget": {
+      "properties": {
+        "exporter_name": {
+          "title": "Exporter Name",
+          "type": "string"
+        },
+        "out_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Out Dir"
+        }
+      },
+      "required": [
+        "exporter_name"
+      ],
+      "title": "ExportTarget",
+      "type": "object"
+    },
+    "FusionSettings": {
+      "description": "How the side view of a pair is lined up with its top view to give a depth.\n\n``frame_offset`` shifts the side clock against the top clock, in frames. The side view's\nhorizontal axis follows ``horizontal_axis`` of the top view (optionally ``flip``ped).\n``surface_row`` and ``floor_row`` are the water surface and tank floor, in side-view image\nrows, in either order (the surface is the larger row when the camera is upside down);\n``tank_height_cm`` is the water depth between them, which sets the side view's scale.",
+      "properties": {
+        "frame_offset": {
+          "default": 0,
+          "title": "Frame Offset",
+          "type": "integer"
+        },
+        "horizontal_axis": {
+          "default": "x",
+          "enum": [
+            "x",
+            "y"
+          ],
+          "title": "Horizontal Axis",
+          "type": "string"
+        },
+        "flip": {
+          "default": false,
+          "title": "Flip",
+          "type": "boolean"
+        },
+        "surface_row": {
+          "minimum": 0,
+          "title": "Surface Row",
+          "type": "number"
+        },
+        "floor_row": {
+          "title": "Floor Row",
+          "type": "number"
+        },
+        "tank_height_cm": {
+          "exclusiveMinimum": 0,
+          "title": "Tank Height Cm",
+          "type": "number"
+        }
+      },
+      "required": [
+        "surface_row",
+        "floor_row",
+        "tank_height_cm"
+      ],
+      "title": "FusionSettings",
+      "type": "object"
+    },
+    "GapFillCfg": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "max_gap_frames": {
+          "default": 30,
+          "title": "Max Gap Frames",
+          "type": "integer"
+        },
+        "across_tracking_intervals": {
+          "default": false,
+          "title": "Across Tracking Intervals",
+          "type": "boolean"
+        },
+        "max_cross_interval_gap_s": {
+          "default": 30.0,
+          "exclusiveMinimum": 0,
+          "title": "Max Cross Interval Gap S",
+          "type": "number"
+        }
+      },
+      "title": "GapFillCfg",
+      "type": "object"
+    },
+    "IdSwitchCfg": {
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "tier1_ratio": {
+          "default": 1.5,
+          "title": "Tier1 Ratio",
+          "type": "number"
+        },
+        "tier2_hungarian": {
+          "default": true,
+          "title": "Tier2 Hungarian",
+          "type": "boolean"
+        },
+        "consolidate_window": {
+          "default": 5,
+          "title": "Consolidate Window",
+          "type": "integer"
+        }
+      },
+      "title": "IdSwitchCfg",
+      "type": "object"
+    },
+    "JumpCfg": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "method": {
+          "default": "sd_multiple",
+          "enum": [
+            "sd_multiple",
+            "percentile",
+            "idtracker_velocity_threshold"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "sd_mult": {
+          "default": 10.0,
+          "title": "Sd Mult",
+          "type": "number"
+        },
+        "percentile": {
+          "default": 99.0,
+          "title": "Percentile",
+          "type": "number"
+        },
+        "pct_mult": {
+          "default": 2.0,
+          "title": "Pct Mult",
+          "type": "number"
+        },
+        "replacement": {
+          "default": "linear_interp",
+          "enum": [
+            "nan",
+            "linear_interp"
+          ],
+          "title": "Replacement",
+          "type": "string"
+        }
+      },
+      "title": "JumpCfg",
+      "type": "object"
+    },
+    "KinematicsCfg": {
+      "properties": {
+        "method": {
+          "default": "savgol",
+          "enum": [
+            "savgol",
+            "forward_difference"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "window": {
+          "default": 5,
+          "title": "Window",
+          "type": "integer"
+        },
+        "polyorder": {
+          "default": 2,
+          "title": "Polyorder",
+          "type": "integer"
+        }
+      },
+      "title": "KinematicsCfg",
+      "type": "object"
+    },
+    "MappingRule": {
+      "properties": {
+        "rules": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Rules",
+          "type": "object"
+        },
+        "join_keys": {
+          "default": [
+            "session_id"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Join Keys",
+          "type": "array"
+        },
+        "join_regex": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Join Regex"
+        },
+        "extra_columns": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Extra Columns",
+          "type": "array"
+        },
+        "individual_match": {
+          "default": "label",
+          "enum": [
+            "label",
+            "index"
+          ],
+          "title": "Individual Match",
+          "type": "string"
+        }
+      },
+      "title": "MappingRule",
+      "type": "object"
+    },
+    "MetadataSource": {
+      "properties": {
+        "path": {
+          "format": "path",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "sheet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sheet"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "title": "MetadataSource",
+      "type": "object"
+    },
+    "MetricSelection": {
+      "properties": {
+        "individual": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Individual",
+          "type": "array"
+        },
+        "group": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Group",
+          "type": "array"
+        },
+        "zone": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Zone",
+          "type": "array"
+        },
+        "diagnostic": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Diagnostic",
+          "type": "array"
+        },
+        "timepoint_minutes": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timepoint Minutes"
+        },
+        "quality_threshold": {
+          "default": 0.0,
+          "title": "Quality Threshold",
+          "type": "number"
+        },
+        "config": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "default": {},
+          "title": "Config",
+          "type": "object"
+        }
+      },
+      "title": "MetricSelection",
+      "type": "object"
+    },
+    "PairingPatterns": {
+      "description": "Regular expressions that recognise the top and side session of a pair by name.\n\nEmpty means no pattern. Stored in the mode, so they survive a re-scan of the sessions.",
+      "properties": {
+        "top_regex": {
+          "default": "",
+          "title": "Top Regex",
+          "type": "string"
+        },
+        "side_regex": {
+          "default": "",
+          "title": "Side Regex",
+          "type": "string"
+        }
+      },
+      "title": "PairingPatterns",
+      "type": "object"
+    },
+    "PanelRect": {
+      "description": "The part of a video frame one camera view occupies, in video pixels.\n\n``x`` and ``y`` are the top-left corner. Used by a session of a 'One video, two panels'\nproject to cut the shared video into its top and side views.",
+      "properties": {
+        "x": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "number"
+        },
+        "height": {
+          "exclusiveMinimum": 0,
+          "title": "Height",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "title": "PanelRect",
+      "type": "object"
+    },
+    "PreprocessConfig": {
+      "properties": {
+        "gap_fill": {
+          "$ref": "#/$defs/GapFillCfg",
+          "default": {
+            "enabled": true,
+            "max_gap_frames": 30,
+            "across_tracking_intervals": false,
+            "max_cross_interval_gap_s": 30.0
+          }
+        },
+        "jump": {
+          "$ref": "#/$defs/JumpCfg",
+          "default": {
+            "enabled": true,
+            "method": "sd_multiple",
+            "sd_mult": 10.0,
+            "percentile": 99.0,
+            "pct_mult": 2.0,
+            "replacement": "linear_interp"
+          }
+        },
+        "identity_switch": {
+          "$ref": "#/$defs/IdSwitchCfg",
+          "default": {
+            "enabled": false,
+            "tier1_ratio": 1.5,
+            "tier2_hungarian": true,
+            "consolidate_window": 5
+          }
+        },
+        "smoothing": {
+          "$ref": "#/$defs/SmoothCfg",
+          "default": {
+            "enabled": true,
+            "method": "savgol",
+            "window": 5,
+            "polyorder": 2
+          }
+        },
+        "kinematics": {
+          "$ref": "#/$defs/KinematicsCfg",
+          "default": {
+            "method": "savgol",
+            "window": 5,
+            "polyorder": 2
+          }
+        },
+        "coverage": {
+          "$ref": "#/$defs/ValidateCfg",
+          "default": {
+            "min_track_frames": 0,
+            "max_pct_na_per_individual": 0.1
+          }
+        }
+      },
+      "title": "PreprocessConfig",
+      "type": "object"
+    },
+    "ProjectMode": {
+      "description": "Whether the project is 2-D or 3-D, and for 3-D how the two views are supplied.\n\n``layout`` is set if and only if ``dimension == \"3d\"``. ``pairing`` holds the name\npatterns that match top and side sessions. A manifest written before ``pairing``\nexisted may still carry an ``id_map`` key; pydantic ignores it.",
+      "properties": {
+        "dimension": {
+          "default": "2d",
+          "enum": [
+            "2d",
+            "3d"
+          ],
+          "title": "Dimension",
+          "type": "string"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "enum": [
+                "single_video_two_panels",
+                "two_videos"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Layout"
+        },
+        "pairing": {
+          "$ref": "#/$defs/PairingPatterns",
+          "default": {
+            "top_regex": "",
+            "side_regex": ""
+          }
+        }
+      },
+      "title": "ProjectMode",
+      "type": "object"
+    },
+    "ROI": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "level": {
+          "default": "main",
+          "title": "Level",
+          "type": "string"
+        },
+        "vertices": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Vertices",
+          "type": "array"
+        },
+        "area_units": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Area Units"
+        },
+        "sign": {
+          "default": "+",
+          "enum": [
+            "+",
+            "-"
+          ],
+          "title": "Sign",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "vertices"
+      ],
+      "title": "ROI",
+      "type": "object"
+    },
+    "SceneConfig": {
+      "description": "What the recordings look at, declared once for the project.\n\nKept apart from ``ZoneSet`` (the Zones screen replaces that whole object on Clear/Load/Import)\nand from ``CalibrationConfig`` (hashed into the preprocessing cache key, which a camera view\nnever changes: it only decides which metrics are offered).",
+      "properties": {
+        "camera_view": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "top",
+            "side"
+          ],
+          "title": "Camera View",
+          "type": "string"
+        }
+      },
+      "title": "SceneConfig",
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "description": "Per-project consent for operations that can execute code from data.\n\n``npy`` is one of idtracker.ai's default trajectory output formats, and\nloading one means ``np.load(..., allow_pickle=True)`` -- which runs\narbitrary code from the file. That matters more for a desktop app that\ninvites the user to point a file dialog at a folder than it would for a\nlibrary: any shared, downloaded or collaborator-supplied session folder\nis otherwise an execution vector.\n\nDefaults to off. When off, the reader refuses the pickled formats and\nfalls through to h5/csv if the folder has them, so an ordinary session\nstill imports; only a pickle-only folder needs the user to opt in.",
+      "properties": {
+        "allow_pickle_trajectories": {
+          "default": false,
+          "title": "Allow Pickle Trajectories",
+          "type": "boolean"
+        }
+      },
+      "title": "SecurityConfig",
+      "type": "object"
+    },
+    "SessionRef": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "folder": {
+          "format": "path",
+          "title": "Folder",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "has_stable_identities": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Has Stable Identities"
+        },
+        "track_wo_identities": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Track Wo Identities"
+        },
+        "identity_free_override": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity Free Override"
+        },
+        "reader": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reader"
+        },
+        "reader_options": {
+          "additionalProperties": true,
+          "default": {},
+          "title": "Reader Options",
+          "type": "object"
+        },
+        "reader_chosen_by": {
+          "anyOf": [
+            {
+              "enum": [
+                "detected",
+                "user"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reader Chosen By"
+        },
+        "reader_confidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reader Confidence"
+        },
+        "view_role": {
+          "anyOf": [
+            {
+              "enum": [
+                "top",
+                "side"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "View Role"
+        },
+        "panel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelRect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "session_id",
+        "folder",
+        "sha256"
+      ],
+      "title": "SessionRef",
+      "type": "object"
+    },
+    "SmoothCfg": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "method": {
+          "default": "savgol",
+          "enum": [
+            "none",
+            "moving_avg",
+            "savgol"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "window": {
+          "default": 5,
+          "title": "Window",
+          "type": "integer"
+        },
+        "polyorder": {
+          "default": 2,
+          "title": "Polyorder",
+          "type": "integer"
+        }
+      },
+      "title": "SmoothCfg",
+      "type": "object"
+    },
+    "ValidateCfg": {
+      "properties": {
+        "min_track_frames": {
+          "default": 0,
+          "title": "Min Track Frames",
+          "type": "integer"
+        },
+        "max_pct_na_per_individual": {
+          "default": 0.1,
+          "title": "Max Pct Na Per Individual",
+          "type": "number"
+        }
+      },
+      "title": "ValidateCfg",
+      "type": "object"
+    },
+    "ViewPair": {
+      "description": "One top session matched with one side session.\n\n``fish_map`` maps a top fish label to the side fish label. ``same_ids`` says both views use\nthe same labels, so the map is implied. ``auto`` marks a pair found by the name patterns.\n``fusion`` holds the alignment settings once the pair has been set up for fusion.",
+      "properties": {
+        "top_session_id": {
+          "title": "Top Session Id",
+          "type": "string"
+        },
+        "side_session_id": {
+          "title": "Side Session Id",
+          "type": "string"
+        },
+        "same_ids": {
+          "default": false,
+          "title": "Same Ids",
+          "type": "boolean"
+        },
+        "fish_map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Fish Map",
+          "type": "object"
+        },
+        "auto": {
+          "default": false,
+          "title": "Auto",
+          "type": "boolean"
+        },
+        "fusion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FusionSettings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "top_session_id",
+        "side_session_id"
+      ],
+      "title": "ViewPair",
+      "type": "object"
+    },
+    "WaterColumn": {
+      "description": "Where the surface and the floor sit on a native 3-D file's z axis (either order).",
+      "properties": {
+        "surface_z": {
+          "title": "Surface Z",
+          "type": "number"
+        },
+        "floor_z": {
+          "title": "Floor Z",
+          "type": "number"
+        }
+      },
+      "required": [
+        "surface_z",
+        "floor_z"
+      ],
+      "title": "WaterColumn",
+      "type": "object"
+    },
+    "ZoneSet": {
+      "properties": {
+        "rois": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ROI"
+          },
+          "title": "Rois",
+          "type": "array"
+        },
+        "orientation_tag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Orientation Tag"
+        },
+        "zone_levels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Zone Levels",
+          "type": "object"
+        },
+        "source_width_px": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Width Px"
+        },
+        "source_height_px": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Height Px"
+        }
+      },
+      "title": "ZoneSet",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "app_version": {
+      "default": "0.3.0",
+      "title": "App Version",
+      "type": "string"
+    },
+    "project_name": {
+      "title": "Project Name",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "sessions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SessionRef"
+      },
+      "title": "Sessions",
+      "type": "array"
+    },
+    "calibration": {
+      "$ref": "#/$defs/CalibrationConfig",
+      "default": {
+        "mode": "bodylength",
+        "px_per_cm": null,
+        "bl_min_samples": 30,
+        "length_unit_label": "cm",
+        "length_unit_confirmed_by_user": false,
+        "session_calibration_stat": "mean",
+        "body_length_source": "session"
+      }
+    },
+    "zones": {
+      "$ref": "#/$defs/ZoneSet",
+      "default": {
+        "rois": [],
+        "orientation_tag": null,
+        "zone_levels": {},
+        "source_width_px": null,
+        "source_height_px": null
+      }
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneConfig",
+      "default": {
+        "camera_view": "unknown"
+      }
+    },
+    "mode": {
+      "$ref": "#/$defs/ProjectMode",
+      "default": {
+        "dimension": "2d",
+        "layout": null,
+        "pairing": {
+          "side_regex": "",
+          "top_regex": ""
+        }
+      }
+    },
+    "view_pairs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ViewPair"
+      },
+      "title": "View Pairs",
+      "type": "array"
+    },
+    "metadata_source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MetadataSource"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "mapping": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MappingRule"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "preprocess": {
+      "$ref": "#/$defs/PreprocessConfig",
+      "default": {
+        "gap_fill": {
+          "across_tracking_intervals": false,
+          "enabled": true,
+          "max_cross_interval_gap_s": 30.0,
+          "max_gap_frames": 30
+        },
+        "jump": {
+          "enabled": true,
+          "method": "sd_multiple",
+          "pct_mult": 2.0,
+          "percentile": 99.0,
+          "replacement": "linear_interp",
+          "sd_mult": 10.0
+        },
+        "identity_switch": {
+          "consolidate_window": 5,
+          "enabled": false,
+          "tier1_ratio": 1.5,
+          "tier2_hungarian": true
+        },
+        "smoothing": {
+          "enabled": true,
+          "method": "savgol",
+          "polyorder": 2,
+          "window": 5
+        },
+        "kinematics": {
+          "method": "savgol",
+          "polyorder": 2,
+          "window": 5
+        },
+        "coverage": {
+          "max_pct_na_per_individual": 0.1,
+          "min_track_frames": 0
+        }
+      }
+    },
+    "metrics": {
+      "$ref": "#/$defs/MetricSelection",
+      "default": {
+        "individual": [],
+        "group": [],
+        "zone": [],
+        "diagnostic": [],
+        "timepoint_minutes": null,
+        "quality_threshold": 0.0,
+        "config": {}
+      }
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfig",
+      "default": {
+        "allow_pickle_trajectories": false
+      }
+    },
+    "export_targets": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExportTarget"
+      },
+      "title": "Export Targets",
+      "type": "array"
+    },
+    "run_log_path": {
+      "anyOf": [
+        {
+          "format": "path",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Log Path"
+    },
+    "video_overrides": {
+      "additionalProperties": {
+        "format": "path",
+        "type": "string"
+      },
+      "default": {},
+      "title": "Video Overrides",
+      "type": "object"
+    },
+    "blob_diagnostics": {
+      "default": false,
+      "title": "Blob Diagnostics",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "project_name",
+    "created_at",
+    "updated_at"
+  ],
+  "type": "object"
+}

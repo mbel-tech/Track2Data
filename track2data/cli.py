@@ -12,6 +12,7 @@ scan         Look at a folder and say which tracking software wrote it.
 add          Scan a folder, confirm the software, and add its sessions to a project.
 cache        Wipe the cache directory.
 new          Scaffold an empty project manifest.
+schema       Print the JSON Schema for .t2d.json files (editor autocomplete).
 
 Example::
 
@@ -374,6 +375,27 @@ def cache(subcommand: str, cache_dir: str) -> None:
 
 
 @cli.command()
+@click.option("--out", "-o", default=None, type=click.Path(dir_okay=False),
+              help="Write the schema to this file instead of printing it.")
+def schema(out: str | None) -> None:
+    """Print the JSON Schema for .t2d.json project files.
+
+    Point your editor at it to get autocomplete and error checks while editing a
+    project file by hand (see the user guide for the VS Code setting).
+    """
+    import json
+
+    from track2data.core.manifest import json_schema
+
+    text = json.dumps(json_schema(), indent=2) + "\n"
+    if out is None:
+        click.echo(text, nl=False)
+        return
+    Path(out).write_text(text, encoding="utf-8", newline="\n")
+    click.echo(f"Wrote the project-file schema to {out}")
+
+
+@cli.command()
 @click.argument("name")
 @click.option("--out", "-o", default=None,
               help="Output path (default: <name>.t2d.json).")
@@ -413,6 +435,10 @@ def new(name: str, out: str | None) -> None:
             "metrics.zone"
         )
         click.echo(f"  3. Run:  track2data run {out_path}")
+        click.echo(
+            "Tip: `track2data schema --out t2d.schema.json` gives your editor "
+            "autocomplete for the manifest."
+        )
     except Exception as exc:
         click.echo(f"[error] Failed to write manifest: {exc}", err=True)
         sys.exit(1)

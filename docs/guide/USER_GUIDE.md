@@ -114,6 +114,19 @@ from the command line.
 - Closing the window, **New project** and **Open project** save first, and do nothing if saving
   fails. A reopened project saves back to the file it came from, and **New project** will not
   overwrite an existing project of the same name.
+- **Editing the file by hand.** The app is the easiest way to change a project, but `.t2d.json` is
+  plain JSON. To get autocomplete and error checks in your editor, save the schema once with
+  `track2data schema --out t2d.schema.json` (the same file is in the repository as
+  `schemas/project.t2d.schema.json`) and point your editor at it. In VS Code, add this to your
+  settings, with the path to where you saved it:
+
+  ```json
+  "json.schemas": [
+    { "fileMatch": ["*.t2d.json"], "url": "file:///C:/path/to/t2d.schema.json" }
+  ]
+  ```
+
+  The app does not write a `$schema` key into the file, so this setting is what links the two.
 - Reopening a project re-reads each session folder in the background, so frame counts and
   calibration readiness appear again after a moment.
 - Preprocessed sessions are cached in `.t2d_cache/` inside the project folder. It is safe to delete

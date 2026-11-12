@@ -9,6 +9,22 @@ from pathlib import Path
 
 from track2data.core.models import ProjectManifest
 
+JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+
+
+def json_schema() -> dict:
+    """The JSON Schema of a .t2d.json project file, for editor autocomplete and checks.
+
+    Generated from ProjectManifest, so it never drifts from what read() accepts. A copy
+    lives in schemas/project.t2d.schema.json; regenerate it with `track2data schema --out`.
+    """
+    schema = ProjectManifest.model_json_schema(mode="validation")
+    return {
+        "$schema": JSON_SCHEMA_DIALECT,
+        "title": "Track2Data project (.t2d.json)",
+        **{k: v for k, v in schema.items() if k != "title"},
+    }
+
 
 def read(path: Path) -> ProjectManifest:
     """Load a manifest from a JSON file."""
