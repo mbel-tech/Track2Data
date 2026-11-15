@@ -181,3 +181,11 @@ def test_the_docs_site_sources_all_exist() -> None:
 
     missing = [str(src) for src in builder.PAGES if not src.exists()]
     assert not missing, f"build_docs_site.py reads files that do not exist: {missing}"
+
+
+def test_readme_status_line_states_the_package_version() -> None:
+    """The README's status line is the first version a reader sees."""
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    match = re.search(r"\*\*Status:\*\*\s*v(\d+\.\d+\.\d+)", text)
+    assert match is not None, "README.md has no '**Status:** vX.Y.Z' line"
+    assert match.group(1) == __version__
