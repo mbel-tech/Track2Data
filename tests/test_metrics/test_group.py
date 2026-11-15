@@ -276,6 +276,27 @@ class TestCentroidSpeed:
         df = CentroidSpeed().compute(psess)
         assert df["mean_centroid_speed_px_s"].values[0] == pytest.approx(100.0, rel=1e-3)
 
+    def test_a_tracking_dropout_is_not_movement(self) -> None:
+        """Review finding C13: a static group in which one animal drops out for some frames
+        moved the centroid (average of whichever animals were valid), and that jump was
+        counted as speed. Only frames with the same animals on both sides are differenced."""
+        xy = np.zeros((50, 3, 2), dtype=np.float64)
+        xy[:, 0, 0] = 0.0
+        xy[:, 1, 0] = 10.0
+        xy[:, 2, 0] = 50.0
+        xy[20:30, 2, :] = np.nan
+        df = CentroidSpeed().compute(make_psess(xy=xy))
+        assert df["mean_centroid_speed_px_s"].values[0] == pytest.approx(0.0, abs=1e-9)
+
+    def test_a_dropout_does_not_hide_real_movement(self) -> None:
+        n_frames, n_animals = 60, 3
+        xy = np.zeros((n_frames, n_animals, 2), dtype=np.float64)
+        for k in range(n_animals):
+            xy[:, k, 0] = np.arange(n_frames, dtype=np.float64) * 4.0 + 10.0 * k
+        xy[10:20, 1, :] = np.nan
+        df = CentroidSpeed().compute(make_psess(xy=xy, fps=25.0))
+        assert df["mean_centroid_speed_px_s"].values[0] == pytest.approx(100.0, rel=1e-9)
+
     def test_centroid_speed_cm_s_when_calibrated(self) -> None:
         n_frames, n_animals = 50, 2
         xy = np.zeros((n_frames, n_animals, 2), dtype=np.float64)

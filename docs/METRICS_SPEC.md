@@ -712,7 +712,7 @@ Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availabil
 | **Formula** | `C[t] = (1/N) Σ_k xy[t, k]`; `centroid_speed[t] = ‖C[t+1] − C[t]‖ · fps` |
 | **Output columns** | `centroid_x`, `centroid_y` (frame-level); `mean_centroid_speed`, `median_centroid_speed` (summary) |
 | **Units** | px, cm, BL; speed in px/s, cm/s, BL/s |
-| **Assumptions** | Fewer-than-N animals → centroid is over the available `M(t)`, emit warning if `M(t) < N` ≥ 5% |
+| **Assumptions** | Fewer-than-N animals → centroid is over the available `M(t)`, emit warning if `M(t) < N` ≥ 5%. A speed step is taken only between consecutive frames with the same set of animals present; a step across a dropout or return is left out, since the centroid moves by the change of membership rather than by movement |
 | **Warnings** | Centroid speed is **NOT** the mean of individual speeds — it can be near zero even while every animal moves fast, whenever the group mills or the animals' velocities cancel. |
 | **Reference** | Standard kinematics applied to the group centroid; no single originating work |
 | **Supporting references** | Tunstrom et al. 2013, PLoS Comput. Biol. 9(2):e1002915 (collective states, multistability and transitional behavior in schooling fish) (DOI: 10.1371/journal.pcbi.1002915) |

@@ -702,7 +702,11 @@ class CentroidSpeed(Metric):
             "centroid_speed[t] = ||C[t+1] - C[t]|| * fps"
         ),
         inputs=["PreprocessedSession.xy"],
-        assumptions=["NaN animal positions are excluded from the centroid computation"],
+        assumptions=[
+            "NaN animal positions are excluded from the centroid computation",
+            "A speed step is taken only between consecutive frames with the same animals "
+            "present, so a tracking dropout or return is not counted as movement",
+        ],
         warnings=[
             "Highly variable valid-animal counts across frames may bias the metric",
             "Centroid speed is NOT the mean of individual speeds -- it can be "
@@ -732,17 +736,19 @@ class CentroidSpeed(Metric):
         fps = session.fps
         n_frames = session.n_frames
 
-        # Compute centroid per frame, ignoring NaN animals
+        # Centroid per frame over the animals present in that frame.
+        present = ~np.isnan(xy).any(axis=2)  # (n_frames, n_animals)
         centroid = np.full((n_frames, 2), np.nan)
         for t in range(n_frames):
-            positions = xy[t]  # (n_animals, 2)
-            valid = ~np.isnan(positions[:, 0])
-            if valid.sum() > 0:
-                centroid[t] = positions[valid].mean(axis=0)
+            if present[t].any():
+                centroid[t] = xy[t, present[t]].mean(axis=0)
 
-        # Frame-to-frame centroid speed
+        # Frame-to-frame centroid speed, only between frames with the same animals present:
+        # when an animal drops out or returns the centroid jumps by the change of membership,
+        # not by any movement, so that step is left out.
         d_centroid = centroid[1:] - centroid[:-1]  # (n_frames-1, 2)
-        valid_pairs = ~(np.isnan(d_centroid[:, 0]) | np.isnan(d_centroid[:, 1]))
+        same_set = (present[1:] == present[:-1]).all(axis=1) & present[1:].any(axis=1)
+        valid_pairs = same_set & ~(np.isnan(d_centroid[:, 0]) | np.isnan(d_centroid[:, 1]))
         speeds = np.sqrt((d_centroid[valid_pairs] ** 2).sum(axis=1)) * fps
 
         mean_speed_px_s = float(speeds.mean()) if len(speeds) > 0 else np.nan
