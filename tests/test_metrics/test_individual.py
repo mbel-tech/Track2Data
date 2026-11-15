@@ -368,14 +368,38 @@ class TestTortuosity:
         val = df["tortuosity"].values[0]
         assert np.isfinite(val)
 
-    def test_nan_gap_handled(self) -> None:
-        """Path with NaN frames must return a finite tortuosity."""
+    def test_an_interior_gap_gives_nan(self) -> None:
+        """Review finding C12: the path skipped the gap but the straight line spanned it, so a
+        straight track read below 1 (here 32/38). A gap between the first and last valid
+        positions now gives NaN."""
         xy = np.zeros((20, 1, 2), dtype=np.float64)
         xy[:, 0, 0] = np.arange(20, dtype=np.float64) * 2.0
         xy[5:8, 0, :] = np.nan
         psess = make_psess(xy=xy)
         df = Tortuosity().compute(psess)
-        assert np.isfinite(df["tortuosity"].values[0])
+        assert np.isnan(df["tortuosity"].values[0])
+
+    def test_missing_frames_before_the_first_or_after_the_last_position_are_fine(self) -> None:
+        xy = np.zeros((20, 1, 2), dtype=np.float64)
+        xy[:, 0, 0] = np.arange(20, dtype=np.float64) * 2.0
+        xy[:3, 0, :] = np.nan
+        xy[-2:, 0, :] = np.nan
+        df = Tortuosity().compute(make_psess(xy=xy))
+        assert df["tortuosity"].values[0] == pytest.approx(1.0)
+
+    def test_a_near_zero_displacement_is_capped(self) -> None:
+        """METRICS_SPEC IL-5: undefined when start == end; cap at 1e6."""
+        xy = np.zeros((50, 1, 2), dtype=np.float64)
+        xy[1::2, 0, 0] = 5.0  # back and forth, ending where it started
+        xy[-1, 0, 0] = 0.0
+        df = Tortuosity().compute(make_psess(xy=xy))
+        assert df["tortuosity"].values[0] == pytest.approx(1e6)
+
+    def test_tortuosity_is_never_below_one(self) -> None:
+        rng = np.random.default_rng(0)
+        xy = np.cumsum(rng.normal(size=(200, 3, 2)), axis=0)
+        df = Tortuosity().compute(make_psess(xy=xy))
+        assert (df["tortuosity"].dropna() >= 1.0 - 1e-12).all()
 
     def test_metric_id_column(self) -> None:
         df = Tortuosity().compute(make_psess())

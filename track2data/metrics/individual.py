@@ -566,6 +566,8 @@ class Activity(Metric):
 
 
 _EPSILON = 1e-6  # guard against zero displacement
+#: METRICS_SPEC IL-5: undefined when start == end, so capped rather than reported as ~1e9.
+_TORTUOSITY_CAP = 1e6
 
 
 class Tortuosity(Metric):
@@ -592,9 +594,13 @@ class Tortuosity(Metric):
             "citation supports the straightness-index form specifically, not "
             "tortuosity in general."
         ),
-        formula_plain="path_length / max(||end - start||, ε), ε=1e-6",
+        formula_plain="min(path_length / max(||end - start||, ε), 1e6), ε=1e-6",
         inputs=["PreprocessedSession.xy"],
-        assumptions=["NaN frames are excluded when computing path length and end-points"],
+        assumptions=[
+            "Missing frames before the first or after the last position are ignored; a "
+            "missing frame between them makes the value NaN, because the path would skip "
+            "the gap while the straight line spans it",
+        ],
         warnings=[
             "Very short paths or static animals give unreliable tortuosity",
             "Whole-track D/L is scale- and duration-dependent; comparing "
@@ -630,7 +636,12 @@ class Tortuosity(Metric):
             valid_mask = ~np.isnan(traj[:, 0])
             valid_traj = traj[valid_mask]  # only non-NaN rows
 
+            idx = np.flatnonzero(valid_mask)
             if len(valid_traj) < 2:
+                tortuosity = np.nan
+            elif len(idx) != idx[-1] - idx[0] + 1:
+                # A gap between the first and last positions: the path length would skip
+                # it while the straight line spans it, giving values below 1.
                 tortuosity = np.nan
             else:
                 # Path length over non-NaN consecutive frame pairs
@@ -642,7 +653,7 @@ class Tortuosity(Metric):
                 start = valid_traj[0]
                 end = valid_traj[-1]
                 straight = float(np.sqrt(((end - start) ** 2).sum()))
-                tortuosity = path_len / max(straight, _EPSILON)
+                tortuosity = min(path_len / max(straight, _EPSILON), _TORTUOSITY_CAP)
 
             records.append(
                 {

@@ -268,7 +268,7 @@ info-button modal (§6).
 | **Output columns** | `individual_id`, `tortuosity` |
 | **Units** | dimensionless |
 | **Assumptions** | Straight-line displacement is a meaningful baseline |
-| **Warnings** | Undefined when start == end; cap at 1e6 or report `inf`. Whole-track D/L is scale- and duration-dependent — comparing sessions of different length or sampling rate is not meaningful without accounting for this. |
+| **Warnings** | Undefined when start == end, so capped at 1e6. NaN when a frame between the first and last valid positions is missing (the path would skip the gap while the straight line spans it, giving values below 1); missing frames before the first or after the last position are ignored. Whole-track D/L is scale- and duration-dependent — comparing sessions of different length or sampling rate is not meaningful without accounting for this. |
 | **Reference** | Benhamou 2004, J. Theor. Biol. 229(2):209-220 (how to reliably estimate path tortuosity) — DOI [10.1016/j.jtbi.2004.03.016](https://doi.org/10.1016/j.jtbi.2004.03.016) |
 | **Supporting references** | Kareiva & Shigesada 1983, Oecologia 56(2-3):234-238 (analyzing insect movement as a correlated random walk) (DOI: 10.1007/BF00379695); Benhamou 2013, Ecol. Lett. 17(3):261-272 (of scales and stationarity in animal movements) (DOI: 10.1111/ele.12225) |
 
