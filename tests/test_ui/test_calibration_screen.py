@@ -512,3 +512,70 @@ def test_native_3d_sessions_are_described_as_converted_not_as_a_pixel_scale(
     assert rows == ["fish — in cm (converted when read)"]
     assert screen._session_info.text() == _NATIVE_INFO
     assert "pixels per cm" not in screen._session_info.text()
+
+
+# ── review findings A4/A5 (12 Nov 2026) ─────────────────────────────────────
+
+
+def test_choosing_custom_does_not_commit_a_placeholder_scale(qtbot, tmp_path: Path) -> None:
+    """Selecting Custom alone must leave px_per_cm unset so the gate blocks the run."""
+    from ui.calibration_screen import CalibrationScreen
+    from ui.store.stage_status import compute_stage_statuses
+
+    store = _make_store(tmp_path)
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._radio_scalar.setChecked(True)
+    screen.flush()
+
+    assert store.manifest.calibration.mode == "scalar"
+    assert store.manifest.calibration.px_per_cm is None
+    statuses = compute_stage_statuses(store.manifest, has_run_results=False)
+    assert any("positive pixels-per-cm" in info.message for info in statuses)
+
+
+def test_a_typed_scale_after_custom_is_committed(qtbot, tmp_path: Path) -> None:
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path)
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._radio_scalar.setChecked(True)
+    screen.flush()
+    screen._px_spin.setValue(1.0)  # a real 1 px per unit is still a valid entry
+    screen.flush()
+    assert store.manifest.calibration.px_per_cm == pytest.approx(1.0)
+
+
+def test_switching_project_resets_every_widget_from_the_new_config(
+    qtbot, tmp_path: Path
+) -> None:
+    """A previous project's px, unit and confirmation must not leak into the next."""
+    from ui.calibration_screen import CalibrationScreen
+
+    store = _make_store(tmp_path / "a")
+    screen = CalibrationScreen(store)
+    qtbot.addWidget(screen)
+
+    screen._radio_session.setChecked(True)
+    screen._unit_combo.setCurrentText("mm")
+    screen._confirm_check.setChecked(True)
+    screen.flush()
+    screen._radio_scalar.setChecked(True)
+    screen._px_spin.setValue(42.5)
+    screen.flush()
+
+    store.new_project("b", tmp_path / "b")  # fresh project: bodylength, nothing set
+
+    assert screen._px_spin.value() == screen._px_spin.minimum()  # shown as not set
+    assert not screen._confirm_check.isChecked()
+    assert screen._unit_combo.currentText() == store.manifest.calibration.length_unit_label
+
+    screen._radio_scalar.setChecked(True)
+    screen.flush()
+    assert store.manifest.calibration.px_per_cm is None
+    screen._radio_session.setChecked(True)
+    screen.flush()
+    assert store.manifest.calibration.length_unit_confirmed_by_user is False

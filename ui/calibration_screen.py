@@ -276,8 +276,12 @@ class CalibrationScreen(QWidget):
         scalar_form = QFormLayout(self._scalar_widget)
         scalar_form.setContentsMargins(0, 0, 0, 0)
         self._px_spin = QDoubleSpinBox()
-        self._px_spin.setRange(0.01, 10000.0)
-        self._px_spin.setValue(1.0)
+        # The minimum (0) means "not set" and is shown as text, so choosing Custom
+        # never commits a placeholder scale: px_per_cm stays None until a value is
+        # typed or measured, and the "enter a positive pixels-per-cm value" gate holds.
+        self._px_spin.setRange(0.0, 10000.0)
+        self._px_spin.setSpecialValueText("not set")
+        self._px_spin.setValue(0.0)
         self._px_spin.setDecimals(4)
         self._px_spin.setSuffix(" px per unit")
         self._px_spin.setMinimumWidth(180)
@@ -500,7 +504,7 @@ class CalibrationScreen(QWidget):
         current = self._store.manifest.calibration
         updates: dict[str, object] = {
             "mode": mode,
-            "px_per_cm": self._px_spin.value() if mode == "scalar" else None,
+            "px_per_cm": self._px_value() if mode == "scalar" else None,
         }
         if mode == "session":
             updates["session_calibration_stat"] = self._stat_combo.currentData()
@@ -513,6 +517,11 @@ class CalibrationScreen(QWidget):
             self._store.update_calibration(cfg)
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"Failed to apply calibration:\n{exc}")
+
+    def _px_value(self) -> float | None:
+        """The entered pixels per unit, None while the box still shows "not set"."""
+        value = self._px_spin.value()
+        return value if value > self._px_spin.minimum() else None
 
     def _update_view_help(self) -> None:
         value = self._view_combo.currentData()
@@ -540,20 +549,23 @@ class CalibrationScreen(QWidget):
     def _populate(self) -> None:
         if self._store is not None and self._store.manifest is not None:
             cfg = self._store.manifest.calibration
+            # Every widget is set from the config, whatever the mode, so values left
+            # over from a previous project can never be committed into this one.
+            self._px_spin.setValue(
+                cfg.px_per_cm if cfg.px_per_cm is not None else self._px_spin.minimum()
+            )
+            if self._unit_combo.findText(cfg.length_unit_label) < 0:
+                # A label set elsewhere must never be silently replaced by Apply.
+                self._unit_combo.addItem(cfg.length_unit_label)
+            self._unit_combo.setCurrentText(cfg.length_unit_label)
+            self._stat_combo.setCurrentIndex(
+                max(0, self._stat_combo.findData(cfg.session_calibration_stat))
+            )
+            self._confirm_check.setChecked(cfg.length_unit_confirmed_by_user)
             if cfg.mode == "scalar":
                 self._radio_scalar.setChecked(True)
-                if cfg.px_per_cm is not None:
-                    self._px_spin.setValue(cfg.px_per_cm)
             elif cfg.mode == "session":
                 self._radio_session.setChecked(True)
-                if self._unit_combo.findText(cfg.length_unit_label) < 0:
-                    # A label set elsewhere must never be silently replaced by Apply.
-                    self._unit_combo.addItem(cfg.length_unit_label)
-                self._unit_combo.setCurrentText(cfg.length_unit_label)
-                self._stat_combo.setCurrentIndex(
-                    max(0, self._stat_combo.findData(cfg.session_calibration_stat))
-                )
-                self._confirm_check.setChecked(cfg.length_unit_confirmed_by_user)
             else:
                 self._radio_bl.setChecked(True)
             self._view_combo.setCurrentIndex(
