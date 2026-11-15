@@ -2160,8 +2160,9 @@ class Engine:
             ),
         )
 
-        metric_results = self.compute_metrics(psess)
-        payload = self.build_payload(psess, metric_results)
+        failed_metrics: dict[str, str] = {}
+        metric_results = self.compute_metrics(psess, failures=failed_metrics)
+        payload = self.build_payload(psess, metric_results, failed_metrics=failed_metrics)
         emit(
             progress,
             ProgressEvent(

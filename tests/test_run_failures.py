@@ -200,3 +200,14 @@ def test_a_failed_metric_is_named_in_every_record(
 
     table = pd.read_csv(out / "sessions.csv").set_index("session_id")
     assert broken_metric in table.loc["sess_a", "issues"]
+
+
+def test_run_session_names_a_failed_metric_in_the_readme(
+    folder: Path, tmp_path: Path, broken_metric: str
+) -> None:
+    from track2data.api import Engine
+
+    engine = Engine(_manifest(folder, MetricSelection(individual=["IL-1", broken_metric])))
+    engine.run_session(engine.import_session(folder), tmp_path, exporters=["readme"])
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert broken_metric in readme and "division by fish" in readme

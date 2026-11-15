@@ -658,6 +658,10 @@ zone assignment, metrics, export.
 
 - The table shows each session's status and duration. A failed session is marked *Failed* and does
   not stop the others.
+- A session marked *Done, N metric(s) failed* was exported without the metrics that raised an
+  error. They are named in its README, in the `issues` column of `sessions.csv` and under
+  "Sessions with problems" in `PROJECT_SUMMARY.md`; so is a body-length calibration that could not
+  be applied. A session whose exporter failed is marked *Failed*.
 - **Workers** sets how many sessions run at the same time. `1` runs them one after another. More
   workers help when each session takes many seconds or more; for short sessions the start-up cost
   of each worker makes it slower.
