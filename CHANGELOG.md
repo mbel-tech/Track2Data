@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The packaged app ships every built-in exporter.** The CSV, Excel, Feather and README exporters were loaded by name in a loop that PyInstaller cannot follow, so a frozen build could start without them and export nothing. They are now imported statically, a test fails if a built-in exporter module is not, and the release smoke test runs the binary with `--self-check`, which exports a small payload through every built-in exporter.
 - **A project hashes the same on Windows and elsewhere.** The project hash wrote folder paths with the platform's separators, so a project folder hashed differently on Windows (and two golden-hash tests failed there on every push to `main`). It now writes them with forward slashes. Hashes on Linux and macOS are unchanged; on Windows a project is re-hashed once, which refreshes its preprocessing cache.
 - **idtracker.ai v5 sessions with no recorded frame rate can be given one.** The legacy v5 reader now takes an `fps` option (`--option fps=25`, or the Frame rate field on import), used only after `video_object.npy` and the session json have been tried. Without any of the three it still stops with `VIDEO_FPS_MISSING` rather than assuming 1 fps; the message now says how to supply it.
 - **Rescanning a folder that was split into panels** offers the whole-frame session again instead of reporting it "already in the project". The import dialog and the project store now share one duplicate rule (decision D-046); a true duplicate is still left out.

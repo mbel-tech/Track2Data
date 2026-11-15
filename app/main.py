@@ -13,6 +13,12 @@ import sys
 
 
 def main() -> None:
+    if "--self-check" in sys.argv[1:]:
+        # Headless: used by packaging/smoke_test.py on the frozen binary.
+        from app import selfcheck
+
+        sys.exit(selfcheck.run_self_check())
+
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 

@@ -31,6 +31,34 @@ def _executable_path() -> Path:
     return Path("dist/Track2Data")
 
 
+SELF_CHECK_TIMEOUT_S = 120
+
+
+def _self_check(exe: Path, env: dict[str, str]) -> int:
+    """Run ``exe --self-check``: a real export through every built-in exporter.
+
+    Staying alive proves the GUI imports resolved; it says nothing about the
+    exporters, which register quietly and are simply absent when PyInstaller
+    leaves a module out.
+    """
+    try:
+        result = subprocess.run(
+            [str(exe), "--self-check"], env=env, timeout=SELF_CHECK_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired:
+        print(f"FAILED: {exe} --self-check timed out", file=sys.stderr)
+        return 1
+    if result.returncode != 0:
+        print(
+            f"FAILED: {exe} --self-check returned {result.returncode} "
+            "-- a built-in exporter is missing from the build or failed to write.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"OK: {exe} --self-check exported through every built-in exporter.")
+    return 0
+
+
 def main() -> int:
     exe = _executable_path()
     if not exe.exists():
@@ -49,8 +77,8 @@ def main() -> int:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
-        print(f"OK: {exe} was still running after {STARTUP_WINDOW_S}s -- smoke test passed.")
-        return 0
+        print(f"OK: {exe} was still running after {STARTUP_WINDOW_S}s.")
+        return _self_check(exe, env)
 
     print(
         f"FAILED: {exe} exited on its own within {STARTUP_WINDOW_S}s "

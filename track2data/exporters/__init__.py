@@ -34,15 +34,19 @@ def list_exporters() -> list[str]:
 
 
 def _load_builtins() -> None:
-    for mod in (
-        "track2data.exporters.csv_long",
-        "track2data.exporters.csv_wide",
-        "track2data.exporters.excel",
-        "track2data.exporters.feather",
-        "track2data.exporters.readme",
-    ):
-        with contextlib.suppress(ImportError):
-            __import__(mod)
+    # Static imports, one per module, so PyInstaller's import analysis can
+    # follow them (a loop over ``__import__(name)`` is invisible to it and
+    # the frozen app would ship without these exporters).
+    with contextlib.suppress(ImportError):
+        import track2data.exporters.csv_long as _csv_long  # noqa: F401
+    with contextlib.suppress(ImportError):
+        import track2data.exporters.csv_wide as _csv_wide  # noqa: F401
+    with contextlib.suppress(ImportError):
+        import track2data.exporters.excel as _excel  # noqa: F401
+    with contextlib.suppress(ImportError):
+        import track2data.exporters.feather as _feather  # noqa: F401
+    with contextlib.suppress(ImportError):
+        import track2data.exporters.readme as _readme  # noqa: F401
     # External entry-point exporters.
     try:
         import importlib.metadata as _meta
