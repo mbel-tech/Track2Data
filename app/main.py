@@ -9,7 +9,51 @@ Run:
 
 from __future__ import annotations
 
+import logging
 import sys
+import traceback
+from types import TracebackType
+
+logger = logging.getLogger("track2data.app")
+
+
+def _show_error_dialog(text: str) -> None:
+    """Tell the user an unexpected error happened (no-op without a QApplication)."""
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    if QApplication.instance() is None:
+        return
+    box = QMessageBox()
+    box.setIcon(QMessageBox.Icon.Critical)
+    box.setWindowTitle("Unexpected error")
+    box.setText(
+        "Track2Data hit an unexpected error. The action you took may not have finished; "
+        "your saved project is unchanged. The details are in the log."
+    )
+    box.setDetailedText(text)
+    box.exec()
+
+
+def _excepthook(
+    exc_type: type[BaseException], exc: BaseException, tb: TracebackType | None
+) -> None:
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc, tb)
+        return
+    logger.error("Unhandled exception", exc_info=(exc_type, exc, tb))
+    try:
+        _show_error_dialog("".join(traceback.format_exception(exc_type, exc, tb)))
+    except Exception:  # the dialog itself must never raise out of the hook
+        logger.exception("Could not show the error dialog")
+
+
+def install_excepthook() -> None:
+    """Log and show exceptions that would otherwise vanish.
+
+    PySide6 hands an exception raised in a slot to ``sys.excepthook`` and carries on; in a
+    windowed build (no console) the default hook prints to nowhere, so the user saw nothing.
+    """
+    sys.excepthook = _excepthook
 
 
 def main() -> None:
@@ -34,6 +78,7 @@ def main() -> None:
     from track2data import __version__
 
     app = QApplication(sys.argv)
+    install_excepthook()
     app.setApplicationName("Track2Data")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("Track2Data")

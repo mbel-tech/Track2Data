@@ -155,6 +155,9 @@ class ProjectStore(QObject):
     # it: native 3-D and pixel sessions mixed, or another unit). It has been removed again;
     # carries (session_id, message).
     sessionRefused = Signal(str, str)
+    # A session's trajectory file no longer hashes to the SHA-256 the project recorded:
+    # (session_id, message). The stored hash is kept; the user decides what to do.
+    sessionInputChanged = Signal(str, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -1135,6 +1138,22 @@ class ProjectStore(QObject):
             self.append_log(f"_Could not hash `{source}` for `{session_id}`: {exc}_\n")
             return
 
+        ref = next((s for s in self._manifest.sessions if s.session_id == session_id), None)
+        if ref is None or ref.sha256 == digest:
+            return
+        if ref.sha256:
+            # The recorded hash is the project's claim of which input it was set up
+            # against; a re-probe (every project open) must not quietly move it to
+            # whatever is on disk now.
+            message = (
+                f"The trajectory file of session '{session_id}' has changed since it was "
+                f"added to the project ({Path(source).name}). Results from a new run will "
+                "not match earlier ones; remove and re-add the session if the change "
+                "is intended."
+            )
+            self.append_log(f"_Warning: {message}_\n")
+            self.sessionInputChanged.emit(session_id, message)
+            return
         sessions = [
             s.model_copy(update={"sha256": digest}) if s.session_id == session_id else s
             for s in self._manifest.sessions

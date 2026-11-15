@@ -221,6 +221,7 @@ class MainWindow(QMainWindow):
         self._store.runLogAppended.connect(self._run_log.append)
         self._store.runLogAppended.connect(weak_slot(self._update_log_toggle))
         self._store.pickleConsentRequired.connect(self._ask_pickle_consent)
+        self._store.sessionInputChanged.connect(self._warn_input_changed)
         # taskStarted/taskCancelled are deliberately NOT forwarded onto
         # ProjectStore's own signals (see ProjectStore's docstring) --
         # connect to store.tasks directly for the toolbar Cancel action.
@@ -323,6 +324,24 @@ class MainWindow(QMainWindow):
 
     def show_toast(self, text: str) -> None:
         self._toast.show_message(text)
+
+    def _warn_input_changed(self, session_id: str, message: str) -> None:
+        """A session's trajectory file no longer matches the hash the project recorded.
+
+        One non-modal box collects every such session (a project open re-probes them all),
+        so a changed folder of many sessions does not stack dialogs.
+        """
+        box = getattr(self, "_input_changed_box", None)
+        if box is None or not box.isVisible():
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Input file changed")
+            box.setModal(False)
+            box.setText(message)
+            self._input_changed_box = box
+        else:
+            box.setText(box.text() + "\n\n" + message)
+        box.show()
 
     def _toggle_log(self, visible: bool | None = None) -> None:
         visible = (not self._run_log.isVisible()) if visible is None else visible
