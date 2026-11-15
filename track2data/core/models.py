@@ -801,6 +801,11 @@ class PPStepResult:
     permutation: Any = None
 
 
+#: ``PPStepResult.step_name`` of the step recorded when a calibration could not be applied
+#: and the session is exported uncalibrated (``Engine.apply_calibration_and_zones``).
+CALIBRATION_FAILED_STEP = "calibration_failed"
+
+
 @dataclass
 class PreprocessReport:
     """Ordered log of all preprocessing steps applied to a session."""
@@ -845,11 +850,16 @@ class SessionRunResult:
     #: metric id -> exception text, for selected metrics that raised. The session is
     #: partially successful: every other metric was computed and exported.
     failed_metrics: dict[str, str] = field(default_factory=dict)
+    #: Other non-fatal problems, one sentence each (a calibration that could not be applied).
+    notes: list[str] = field(default_factory=list)
 
     @property
     def issues(self) -> list[str]:
         """Non-fatal problems a reader must know about, one line each."""
-        return [f"metric {mid} failed: {msg}" for mid, msg in self.failed_metrics.items()]
+        return [
+            *(f"metric {mid} failed: {msg}" for mid, msg in self.failed_metrics.items()),
+            *self.notes,
+        ]
 
 
 @dataclass

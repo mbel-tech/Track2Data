@@ -43,7 +43,9 @@ import numpy as np
 from track2data.core.errors import ImportError_
 from track2data.core.ids import default_session_id
 from track2data.core.models import (
+    CALIBRATION_FAILED_STEP,
     MODE_3D_BLOCK_REASON,
+    PPStepResult,
     PreprocessedSession,
     PreprocessReport,
     ProjectManifest,
@@ -1068,8 +1070,25 @@ class Engine:
                         apply_bodylength_calibration,
                     )
                     psess = apply_bodylength_calibration(psess, cfg)
-                except Exception:
-                    logger.warning("Body-length calibration failed; skipping.")
+                except Exception as exc:
+                    # Not fatal (the session is exported uncalibrated), but recorded on
+                    # the session's own step log so the README, sessions.csv and the run
+                    # result say so -- also when this session is later served from cache.
+                    logger.warning(
+                        "Body-length calibration failed for session %s; it is exported "
+                        "uncalibrated.", session.session_id, exc_info=True,
+                    )
+                    psess.report.steps.append(
+                        PPStepResult(
+                            step_name=CALIBRATION_FAILED_STEP,
+                            affected_frames=0,
+                            affected_per_individual=[],
+                            notes=(
+                                f"Body-length calibration failed ({type(exc).__name__}: "
+                                f"{exc}); this session is exported uncalibrated."
+                            ),
+                        )
+                    )
             elif cfg.mode == "session":
                 # Deliberately not caught-and-skipped like bodylength
                 # above: a missing length_unit here means Engine.validate()
@@ -1278,6 +1297,8 @@ class Engine:
         for sid in (pair.top_session_id, pair.side_session_id):
             try:
                 loaded.append(self.preprocess_ref(by_id[sid]))
+            except OperationCancelled:
+                raise
             except Track2DataError as exc:
                 raise FusionError(f"session {sid} could not be read: {exc}") from exc
         return loaded[0], loaded[1]
@@ -2819,7 +2840,9 @@ class Engine:
                 summary=SessionSummary.from_session(
                     session,
                     calibration_mode=self._manifest.calibration.mode,
-                    is_identity_free=ref.is_identity_free(),
+                    # The metric gate's own resolution (compute_metrics above), so the
+                    # table cannot say "identified" for a session whose metrics were gated.
+                    is_identity_free=self.identity_free_for(session, identity_free),
                     px_per_cm=psess.px_per_cm,
                     trajectory_sha256=self._hash_and_check_input(session, ref),
                 ),
@@ -2831,6 +2854,10 @@ class Engine:
                 ),
                 failed_exporters=failed_exporters,
                 failed_metrics=failed_metrics,
+                notes=[
+                    st.notes for st in psess.report.steps
+                    if st.step_name == CALIBRATION_FAILED_STEP
+                ],
             )
         except OperationCancelled:
             raise
@@ -3027,7 +3054,9 @@ class Engine:
                 SessionSummary.from_session(
                     session,
                     calibration_mode=mode,
-                    is_identity_free=ref.is_identity_free(),
+                    is_identity_free=self.identity_free_for(
+                        session, ref.identity_free_override
+                    ),
                     px_per_cm=self._resolve_px_per_cm(session),
                 )
             )
