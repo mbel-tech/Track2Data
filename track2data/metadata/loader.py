@@ -5,14 +5,15 @@ CSV / XLSX metadata loader with type coercion.
 Excel workbook; the first one by default). ``list_sheets`` names a workbook's sheets and
 ``preview`` gives the header and first rows exactly as stored, for the metadata screen:
   - Column names are stripped and lowercased.
-  - String columns are stripped of leading/trailing whitespace.
-  - Date-like columns are parsed to ``datetime64``.
+  - String cells are stripped of leading/trailing whitespace (other cells untouched).
+  - Date columns are parsed to ``datetime64`` only when every value is an ISO date
+    (YYYY-MM-DD); otherwise the text is kept as written.
 """
 
 from __future__ import annotations
 
-import contextlib
 import csv
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -83,6 +84,20 @@ def preview(
     return headers, [["" if pd.isna(v) else str(v) for v in row] for row in frame.to_numpy()]
 
 
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?")
+
+
+def _all_iso_dates(column: pd.Series) -> bool:
+    """True when the column is text and every non-blank value is an ISO date."""
+    if not (pd.api.types.is_object_dtype(column) or pd.api.types.is_string_dtype(column)):
+        return False
+    values = [v for v in column if not (v is None or (isinstance(v, float) and v != v))]
+    values = [v for v in values if not (isinstance(v, str) and v == "")]
+    return bool(values) and all(
+        isinstance(v, str) and _ISO_DATE_RE.fullmatch(v) is not None for v in values
+    )
+
+
 def load(path: Path, sheet: str | None = None) -> pd.DataFrame:
     """
     Load a metadata file (CSV or XLSX) and return a cleaned DataFrame.
@@ -120,15 +135,17 @@ def load(path: Path, sheet: str | None = None) -> pd.DataFrame:
     # Normalise column names: strip whitespace + lowercase.
     df.columns = [str(c).strip().lower() for c in df.columns]
 
-    # Strip whitespace from all string columns.
+    # Strip whitespace from string cells only: ``.str.strip()`` on an object column
+    # crashed on booleans and blanked numbers sitting in a mixed column.
     for col in df.select_dtypes(include=["object", "string"]).columns:
-        df[col] = df[col].str.strip()
+        df[col] = df[col].map(lambda v: v.strip() if isinstance(v, str) else v)
 
-    # Coerce obvious date columns to datetime.
+    # Parse date columns only when every value is an unambiguous ISO date
+    # (YYYY-MM-DD, optionally with a time). Anything else -- 15/03/2024, 5.3.2024 --
+    # is left as the text the user wrote rather than guessed month-first or blanked.
     date_hints = {"trial_date", "date", "exp_date"}
     for col in df.columns:
-        if col in date_hints:
-            with contextlib.suppress(Exception):
-                df[col] = pd.to_datetime(df[col], errors="coerce")
+        if col in date_hints and _all_iso_dates(df[col]):
+            df[col] = pd.to_datetime(df[col], format="ISO8601")
 
     return df

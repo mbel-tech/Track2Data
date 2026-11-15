@@ -364,3 +364,96 @@ def test_a_chosen_sheet_is_saved_and_changes_the_hash() -> None:
     assert again.project_hash() == chosen.project_hash()
     old = ProjectManifest.model_validate_json(plain.model_dump_json())
     assert old.metadata_source.sheet is None
+
+
+# ── review findings C17-C19 (12 Nov 2026) ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "regex",
+    [r"tank(?P<aquarium>\d+)", r"tank(\d+)", r"tank\d+"],
+    ids=["group-names-no-column", "unnamed-group", "no-group"],
+)
+def test_join_regex_without_a_usable_group_matches_nothing(regex: str) -> None:
+    """Every session used to take the first metadata row."""
+    from track2data.core.models import MappingRule
+    from track2data.metadata.join import match
+
+    df = pd.DataFrame({"tank": ["3", "4"], "treatment": ["ctrl", "exp"]})
+    result = match(["tank3", "tank4"], df, MappingRule(join_regex=regex))
+    assert result.matched == {}
+    assert set(result.unmatched_sessions) == {"tank3", "tank4"}
+
+
+def test_join_regex_ignores_a_group_that_did_not_take_part() -> None:
+    from track2data.core.models import MappingRule
+    from track2data.metadata.join import match
+
+    df = pd.DataFrame({"tank": ["3"], "trial_id": ["9"], "treatment": ["ctrl"]})
+    rule = MappingRule(join_regex=r"tank(?P<tank>\d+)(?:_t(?P<trial_id>\d+))?")
+    result = match(["tank3"], df, rule)
+    assert "tank3" in result.matched
+
+
+@pytest.mark.parametrize("text", ["15/03/2024", "03/15/2024", "5.3.2024", "March 2024"])
+def test_ambiguous_dates_are_left_as_text(tmp_path: Path, text: str) -> None:
+    from track2data.metadata.loader import load
+
+    csv = tmp_path / "meta.csv"
+    csv.write_text(f"session_id,trial_date\nS1,{text}\nS2,{text}\n")
+    df = load(csv)
+    assert df["trial_date"].tolist() == [text, text]
+
+
+def test_a_column_that_is_partly_iso_is_left_as_text(tmp_path: Path) -> None:
+    from track2data.metadata.loader import load
+
+    csv = tmp_path / "meta.csv"
+    csv.write_text("session_id,trial_date\nS1,2024-03-15\nS2,16/03/2024\n")
+    df = load(csv)
+    assert df["trial_date"].tolist() == ["2024-03-15", "16/03/2024"]
+
+
+def test_iso_dates_with_blanks_are_parsed(tmp_path: Path) -> None:
+    from track2data.metadata.loader import load
+
+    csv = tmp_path / "meta.csv"
+    csv.write_text("session_id,trial_date\nS1,2024-03-15\nS2,\n")
+    df = load(csv)
+    assert pd.api.types.is_datetime64_any_dtype(df["trial_date"])
+    assert df["trial_date"].iloc[0] == pd.Timestamp("2024-03-15")
+    assert pd.isna(df["trial_date"].iloc[1])
+
+
+def test_strip_keeps_booleans_and_numbers_in_mixed_columns(tmp_path: Path) -> None:
+    from track2data.metadata.loader import load
+
+    xlsx = tmp_path / "meta.xlsx"
+    pd.DataFrame(
+        {"session_id": [" S1 ", "S2"], "flag": [True, False], "mixed": [" a ", 7]}
+    ).to_excel(xlsx, index=False)
+    df = load(xlsx)
+    assert df["session_id"].tolist() == ["S1", "S2"]
+    assert df["flag"].tolist() == [True, False]
+    assert df["mixed"].tolist() == ["a", 7]
+
+
+def test_an_alias_is_not_renamed_onto_an_existing_canonical_column() -> None:
+    from track2data.core.models import MappingRule
+    from track2data.metadata.mapping import apply_mapping
+
+    df = pd.DataFrame(
+        {"session_id": ["S1"], "treatment": ["ctrl"], "condition": ["other"]}
+    )
+    out = apply_mapping(df, MappingRule(rules={}))
+    assert list(out.columns).count("treatment") == 1
+    assert out["treatment"].tolist() == ["ctrl"]
+
+
+def test_an_explicit_rule_onto_an_existing_column_does_not_duplicate_it() -> None:
+    from track2data.core.models import MappingRule
+    from track2data.metadata.mapping import apply_mapping
+
+    df = pd.DataFrame({"session_id": ["S1"], "treatment": ["ctrl"], "cond": ["other"]})
+    out = apply_mapping(df, MappingRule(rules={"treatment": "cond"}))
+    assert list(out.columns).count("treatment") == 1

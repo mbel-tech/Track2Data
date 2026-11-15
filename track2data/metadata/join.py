@@ -213,11 +213,18 @@ def _find_rows(
         pattern = re.compile(rule.join_regex)
         m = pattern.search(session_id)
         if m:
-            groups = m.groupdict()
+            # Only named groups that took part in the match and name a metadata
+            # column can select rows. With none, the mask would stay all-True and
+            # every session would take the first row, so that is no match.
+            usable = {
+                col: val for col, val in m.groupdict().items()
+                if val is not None and col in df.columns
+            }
+            if not usable:
+                return df.iloc[0:0]
             mask = pd.Series([True] * len(df), index=df.index)
-            for col, val in groups.items():
-                if col in df.columns:
-                    mask &= _as_text(df[col]) == str(val)
+            for col, val in usable.items():
+                mask &= _as_text(df[col]) == str(val)
             return df[mask]
         return df.iloc[0:0]  # empty
 

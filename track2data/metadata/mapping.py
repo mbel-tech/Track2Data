@@ -9,10 +9,14 @@ A ``MappingRule`` (defined in ``core/models.py``) stores a dict of
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 
 from track2data.core.models import MappingRule
 from track2data.metadata.schema import ALIASES, CANONICAL
+
+logger = logging.getLogger(__name__)
 
 #: Output columns written by the engine itself. A metadata column with one of
 #: these names would overwrite real data, so it is never carried.
@@ -46,18 +50,30 @@ def apply_mapping(df: pd.DataFrame, rule: MappingRule) -> pd.DataFrame:
     pd.DataFrame
         Subset and renamed to canonical columns (only mapped columns present).
     """
-    # Build rename map: source_col -> canonical_name.
+    # Build rename map: source_col -> canonical_name. A rename onto a name that a
+    # column which stays put already has would create two columns of one name, so
+    # it is skipped: the existing column is kept.
     rename: dict[str, str] = {}
+
+    def _target_taken(target: str) -> bool:
+        return target in rename.values() or (target in df.columns and target not in rename)
+
     for canonical, source in rule.rules.items():
         src = source.strip().lower()
-        if src in df.columns:
+        if src in df.columns and src != canonical:
+            if _target_taken(canonical):
+                logger.warning(
+                    "Metadata: not renaming column %r to %r, which already exists.",
+                    src, canonical,
+                )
+                continue
             rename[src] = canonical
 
     # Also apply built-in aliases for columns not explicitly mapped.
     for col in df.columns:
         if col not in rename and col not in rename.values():
             alias = ALIASES.get(col)
-            if alias and alias not in rename.values():
+            if alias and not _target_taken(alias):
                 rename[col] = alias
 
     df2 = df.rename(columns=rename)
