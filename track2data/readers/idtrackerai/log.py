@@ -43,10 +43,25 @@ from typing import Any
 
 # Optional "HH:MM:SS " timestamp, then WARNING/ERROR, then the message,
 # then a right-aligned "some/path/module.py:LINE" source reference.
-_LEVEL_LINE_RE = re.compile(
-    r"^\s*(?:\d{2}:\d{2}:\d{2}\s+)?(?P<level>WARNING|ERROR)\s+"
-    r"(?P<msg>.*?)\s+(?P<source>[\w./\-]+\.py:\d+)\s*$"
-)
+# Matched in two linear steps (prefix regex, then rsplit of the last token)
+# rather than one pattern: the old ``\s+(?P<msg>.*?)\s+source\s*$`` let three
+# whitespace quantifiers compete for the same run of spaces, so a WARNING
+# line of padding with no source backtracked cubically and hung the import.
+_LEVEL_PREFIX_RE = re.compile(r"\s*(?:\d{2}:\d{2}:\d{2}\s+)?(?:WARNING|ERROR)\s")
+_SOURCE_RE = re.compile(r"[\w./\-]+\.py:\d+")
+
+
+def _level_line_source(line: str) -> str | None:
+    """The ``module.py:N`` source of a WARNING/ERROR line, None if *line* is not one."""
+    m = _LEVEL_PREFIX_RE.match(line)
+    if m is None:
+        return None
+    parts = line[m.end():].rsplit(None, 1)
+    if len(parts) != 2 or _SOURCE_RE.fullmatch(parts[1]) is None:
+        return None
+    return parts[1]
+
+
 _SUCCESS_LINE_RE = re.compile(r"^\s*Success\s+[\w./\-]+\.py:\d+\s*$")
 _TRACEBACK_MARKER = "Traceback (most recent call last):"
 # The actual exception line inside a traceback, e.g. "OSError: [Errno 24]
@@ -92,8 +107,8 @@ def load_log_digest(folder: Path) -> dict[str, Any] | None:
         if _SUCCESS_LINE_RE.match(line):
             status = "Success"
 
-        m = _LEVEL_LINE_RE.match(line)
-        if m and not m.group("source").startswith(_NOISE_SOURCE_PREFIXES):
+        source = _level_line_source(line)
+        if source is not None and not source.startswith(_NOISE_SOURCE_PREFIXES):
             warnings.append(line.strip())
 
     if status != "Success" and _TRACEBACK_MARKER in text:
