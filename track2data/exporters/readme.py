@@ -105,6 +105,21 @@ class ReadmeExporter(Exporter):
             for mid, reason in sorted(skipped.items()):
                 readme_lines.append(f"- **{mid}**: {reason}")
 
+        # Selected, attempted, and raised: missing from the tables for a
+        # reason the analyst must see, not just the log.
+        failed = getattr(p, "failed_metrics", None) or {}
+        if failed:
+            readme_lines += [
+                "",
+                "## Metrics that failed",
+                "",
+                "These metrics were selected but raised an error while computing, "
+                "so they are absent from the tables:",
+                "",
+            ]
+            for mid, reason in sorted(failed.items()):
+                readme_lines.append(f"- **{mid}**: {reason}")
+
         preprocess_steps = p.preprocess_report.steps
         readme_lines += [
             "",

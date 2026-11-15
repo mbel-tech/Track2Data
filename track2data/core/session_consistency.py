@@ -322,6 +322,7 @@ def sessions_table(
     summaries: Sequence[SessionSummary],
     errors: dict[str, str] | None = None,
     fusion: Mapping[str, FusionRunInfo] | None = None,
+    issues: Mapping[str, Sequence[str]] | None = None,
 ) -> pd.DataFrame:
     """One row per session: the facts a downstream analyst needs to filter on.
 
@@ -344,10 +345,16 @@ def sessions_table(
         ``unit_id -> FusionRunInfo`` for the pair units of a 3-D run. When given and not empty,
         the provenance columns are appended (blank for a row that is not a pair unit); without
         it the table is exactly the 2-D one.
+    issues:
+        ``session_id -> problems`` that did not fail the session but leave its
+        export incomplete or qualified (a metric that raised, a calibration
+        that could not be applied). Written ``; ``-joined in the ``issues``
+        column, blank when there are none.
     """
     import pandas as pd
 
     errors = errors or {}
+    issues = issues or {}
     rows = [
         {
             "session_id": s.session_id,
@@ -368,6 +375,7 @@ def sessions_table(
             "error": errors.get(s.session_id),
             "length_calibration_n": s.length_calibration_n,
             "length_calibration_rel_sd": s.length_calibration_rel_sd,
+            "issues": "; ".join(issues.get(s.session_id, ())) or None,
         }
         for s in summaries
     ]
@@ -382,7 +390,7 @@ def sessions_table(
         "width_px", "height_px", "calibration_mode", "length_unit",
         "px_per_cm", "is_calibrated", "is_identity_free",
         "trajectory_source", "trajectory_sha256", "error",
-        "length_calibration_n", "length_calibration_rel_sd",
+        "length_calibration_n", "length_calibration_rel_sd", "issues",
     ]
     if fusion:
         fusion_columns = list(next(iter(fusion.values())).as_row())

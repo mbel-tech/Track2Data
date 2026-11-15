@@ -6,7 +6,7 @@ a contextual banner with a one-line remediation hint.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from track2data.core.models import PreprocessReport
@@ -108,3 +108,36 @@ class PreprocessStageError(ProcessingError):
 
 class ExportError(Track2DataError):
     """Error writing output files."""
+
+
+class UnknownExporterError(ConfigError):
+    """An exporter name that is not registered was requested."""
+
+    def __init__(self, names: list[str], known: list[str]) -> None:
+        super().__init__(
+            f"Unknown exporter(s): {', '.join(names)}",
+            code="EXPORTER_UNKNOWN",
+            subject=", ".join(names),
+            remediation=f"Use one of: {', '.join(known)}.",
+        )
+        self.names = list(names)
+
+
+class ExporterFailedError(ExportError):
+    """One or more exporters raised while writing a session.
+
+    Raised after every requested exporter has been tried, so ``written``
+    holds the files the others did write and ``failures`` maps each failed
+    exporter's name to its exception text.
+    """
+
+    def __init__(self, failures: dict[str, str], written: list[Any], subject: str = "") -> None:
+        detail = "; ".join(f"{name}: {msg}" for name, msg in failures.items())
+        super().__init__(
+            f"Export failed ({detail})",
+            code="EXPORTER_FAILED",
+            subject=subject,
+            remediation="The other exporters' files were written; fix the cause and re-run.",
+        )
+        self.failures = dict(failures)
+        self.written = list(written)

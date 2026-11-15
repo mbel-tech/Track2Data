@@ -839,6 +839,17 @@ class SessionRunResult:
     summary: SessionSummary | None = None
     #: How a 3-D pair unit was fused (settings and report); None for a 2-D session unit.
     fusion: FusionRunInfo | None = None
+    #: exporter name -> exception text, for exporters that raised (the session then has an
+    #: ``error`` too: its export is incomplete).
+    failed_exporters: dict[str, str] = field(default_factory=dict)
+    #: metric id -> exception text, for selected metrics that raised. The session is
+    #: partially successful: every other metric was computed and exported.
+    failed_metrics: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def issues(self) -> list[str]:
+        """Non-fatal problems a reader must know about, one line each."""
+        return [f"metric {mid} failed: {msg}" for mid, msg in self.failed_metrics.items()]
 
 
 @dataclass

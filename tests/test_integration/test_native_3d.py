@@ -321,7 +321,7 @@ def test_the_run_refuses_a_non_session_calibration(project: Path, tmp_path: Path
 OLD_SESSIONS_HEADER = (
     "session_id,reader,fps,n_frames,duration_s,n_animals,width_px,height_px,calibration_mode,"
     "length_unit,px_per_cm,is_calibrated,is_identity_free,trajectory_source,trajectory_sha256,"
-    "error,length_calibration_n,length_calibration_rel_sd"
+    "error,length_calibration_n,length_calibration_rel_sd,issues"
 )
 
 

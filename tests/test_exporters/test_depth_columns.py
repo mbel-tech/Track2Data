@@ -117,7 +117,7 @@ def test_2d_run_has_no_new_columns_rows_or_files(tmp_path: Path, tiny_real_sessi
         "session_id", "reader", "fps", "n_frames", "duration_s", "n_animals", "width_px",
         "height_px", "calibration_mode", "length_unit", "px_per_cm", "is_calibrated",
         "is_identity_free", "trajectory_source", "trajectory_sha256", "error",
-        "length_calibration_n", "length_calibration_rel_sd",
+        "length_calibration_n", "length_calibration_rel_sd", "issues",
     ]
     assert not list(out.rglob("skipped.csv"))
     for readme in (out / "PROJECT_SUMMARY.md", out / tiny_real_session.name / "README.md"):

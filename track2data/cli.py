@@ -168,6 +168,16 @@ def run(
         click.echo(f"[skipped] {skip.session_id}: {skip.reason}", err=True)
 
     exporter_list = list(exporters) if exporters else None
+    if exporter_list:
+        from track2data.exporters import list_exporters
+
+        unknown = [e for e in exporter_list if e not in list_exporters()]
+        if unknown:
+            raise click.BadParameter(
+                f"unknown exporter(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(list_exporters())}.",
+                param_hint="'--exporter' / '-e'",
+            )
 
     if manifest.mode.dimension == "3d":
         size = f"{len(plan.units)} fused pair(s), {len(plan.skipped)} session(s) skipped"

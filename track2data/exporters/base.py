@@ -141,6 +141,8 @@ class ExportPayload:
     # computed, or a Methods section written from it silently overstates
     # what the analysis covered.
     skipped_metrics: dict[str, str] = field(default_factory=dict)
+    # metric_id -> exception text, for metrics that were selected and raised while computing.
+    failed_metrics: dict[str, str] = field(default_factory=dict)
     # How a 3-D pair unit was fused; None for a 2-D session (the README then has no fusion section).
     fusion: FusionRunInfo | None = None
 

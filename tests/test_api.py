@@ -981,8 +981,10 @@ def test_run_session_uses_default_exporters_when_none_configured(tmp_path: Path)
     assert "README.md" in names  # from readme
 
 
-def test_run_session_skips_unregistered_exporter(tmp_path: Path) -> None:
+def test_run_session_rejects_unregistered_exporter(tmp_path: Path) -> None:
+    """An unknown exporter name fails up front (was: silently skipped)."""
     from track2data.api import Engine
+    from track2data.core.errors import UnknownExporterError
 
     session = _make_session(n_frames=10, n_animals=1)
     manifest = _make_manifest(
@@ -990,15 +992,17 @@ def test_run_session_skips_unregistered_exporter(tmp_path: Path) -> None:
         metrics=MetricSelection(),
     )
     engine = Engine(manifest)
-    written = engine.run_session(session, tmp_path, exporters=["not_a_real_exporter"])
-    assert written == []
+    with pytest.raises(UnknownExporterError):
+        engine.run_session(session, tmp_path, exporters=["not_a_real_exporter"])
 
 
-def test_run_session_catches_a_raising_exporter(
+def test_run_session_reports_a_raising_exporter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A raising exporter no longer passes silently: ExporterFailedError names it."""
     import track2data.exporters as exporters_module
     from track2data.api import Engine
+    from track2data.core.errors import ExporterFailedError
     from track2data.exporters.base import Exporter
 
     class BrokenExporter(Exporter):
@@ -1016,8 +1020,10 @@ def test_run_session_catches_a_raising_exporter(
         metrics=MetricSelection(),
     )
     engine = Engine(manifest)
-    written = engine.run_session(session, tmp_path, exporters=["broken_exporter"])  # must not raise
-    assert written == []
+    with pytest.raises(ExporterFailedError) as exc:
+        engine.run_session(session, tmp_path, exporters=["broken_exporter"])
+    assert exc.value.failures == {"broken_exporter": "RuntimeError: boom"}
+    assert exc.value.written == []
 
 
 # ── preview_frame ────────────────────────────────────────────────────────────

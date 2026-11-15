@@ -622,19 +622,32 @@ class ProcessingScreen(QWidget):
                 row = self._session_rows.get(session_result.session_id)
                 if row is None:
                     continue
-                status = "Failed" if session_result.error else "Done"
+                if session_result.error:
+                    status = "Failed"
+                elif session_result.failed_metrics:
+                    status = f"Done, {len(session_result.failed_metrics)} metric(s) failed"
+                else:
+                    status = "Done"
                 self._status_table.setItem(row, 1, QTableWidgetItem(status))
                 self._status_table.setItem(
                     row, 3, QTableWidgetItem(f"{session_result.duration_s:.1f}s")
                 )
             n_failed = sum(1 for s in result.sessions if s.error)
+            partial = [s for s in result.sessions if not s.error and s.issues]
             if n_failed:
                 self._status_label.setText(f"Finished with {n_failed} failed session(s).")
+            elif partial:
+                self._status_label.setText(
+                    f"Finished; {len(partial)} session(s) with problems (see log)."
+                )
             else:
                 self._status_label.setText("Finished.")
+            problems = "".join(
+                f"- {s.session_id}: {issue}\n" for s in partial for issue in s.issues
+            )
             self._store.append_log(
                 f"### Run finished\n{len(result.sessions)} session(s), "
-                f"{n_failed} failed.\n"
+                f"{n_failed} failed.\n" + problems
             )
         elif isinstance(result, Exception):
             self._status_label.setText("Failed — see log for details.")

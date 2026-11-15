@@ -1509,6 +1509,7 @@ class Engine:
         psess: PreprocessedSession,
         *,
         identity_free: bool | None = None,
+        failures: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Compute all selected metrics for *psess*.
@@ -1534,6 +1535,10 @@ class Engine:
         During ``run()`` the run's *cancel_check* is called before each
         selected metric, so a cancellation request is noticed between
         metrics; ``OperationCancelled`` propagates out of this method.
+
+        A selected metric that raises is logged and left out of the result;
+        when *failures* is given, its id is recorded there with the exception
+        text, so the export can say which metrics are missing and why.
 
         A 3-D project computes fused sessions only (``psess.depth`` is set); the plan itself is
         not rebuilt here, ``run()`` checks it once.
@@ -1622,8 +1627,10 @@ class Engine:
                         results[mid] = _with_bin_columns(results[mid], None)
                 except OperationCancelled:
                     raise
-                except Exception:
+                except Exception as exc:
                     logger.exception("Metric %s failed; skipping.", mid)
+                    if failures is not None:
+                        failures[mid] = f"{type(exc).__name__}: {exc}"
 
         _run(sel.individual)
 
@@ -1820,6 +1827,7 @@ class Engine:
         metric_results: dict[str, Any],
         *,
         identity_free: bool | None = None,
+        failed_metrics: dict[str, str] | None = None,
     ) -> Any:
         """
         Assemble an ``ExportPayload`` from a preprocessed session and its
@@ -1942,6 +1950,7 @@ class Engine:
             manifest_json=self._manifest.model_dump_json(indent=2),
             provenance=provenance,
             skipped_metrics=self.skipped_metrics(is_identity_free, psess.session, psess=psess),
+            failed_metrics=dict(failed_metrics or {}),
         )
 
     def export(
@@ -1953,6 +1962,11 @@ class Engine:
         """Write *payload* to *out_dir* via the requested (or configured
         default) exporters. Returns the list of written paths.
 
+        An unknown exporter name raises ``UnknownExporterError`` before anything is
+        written. An exporter that raises does not stop the others; once all have been
+        tried, ``ExporterFailedError`` is raised carrying the failures and the files
+        that were written.
+
         Called once per unit inside a run, so it uses the cheap :meth:`_require_not_blocked`
         rather than :meth:`require_computable` (which would fuse every pair again)."""
         self._require_not_blocked()
@@ -1961,22 +1975,41 @@ class Engine:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        exporter_names = exporters or [t.exporter_name for t in self._manifest.export_targets]
-        if not exporter_names:
-            exporter_names = ["csv_long", "readme"]
+        exporter_names = self._exporter_names(exporters)
 
         written: list[Path] = []
+        failures: dict[str, str] = {}
         for name in exporter_names:
             exp = get_exporter(name)
-            if exp is None:
-                logger.warning("Exporter %r not registered; skipping.", name)
-                continue
+            assert exp is not None  # checked by _exporter_names
             try:
                 written.extend(exp.write(payload, out_dir))
-            except Exception:
+            except Exception as exc:
                 logger.exception("Exporter %r failed.", name)
+                failures[name] = f"{type(exc).__name__}: {exc}"
+        if failures:
+            from track2data.core.errors import ExporterFailedError
 
+            raise ExporterFailedError(
+                failures, written, subject=str(getattr(payload, "session_id", ""))
+            )
         return written
+
+    def _exporter_names(self, exporters: list[str] | None) -> list[str]:
+        """The exporters a run writes with; raises ``UnknownExporterError`` for a name
+        that is not registered, before anything is written."""
+        from track2data.exporters import list_exporters
+
+        names = exporters or [t.exporter_name for t in self._manifest.export_targets]
+        if not names:
+            names = ["csv_long", "readme"]
+        known = list_exporters()
+        unknown = [n for n in names if n not in known]
+        if unknown:
+            from track2data.core.errors import UnknownExporterError
+
+            raise UnknownExporterError(unknown, known)
+        return list(names)
 
     def run_units(self) -> RunPlan:
         """What a run processes (see ``track2data.core.runplan``).
@@ -2197,6 +2230,7 @@ class Engine:
         n_workers: int,
         cancel_check: Callable[[], None] | None,
     ) -> RunResult:
+        exporters = self._exporter_names(exporters)  # fail before any unit runs
         units = plan.units
         n_configured = len(units)
         emit(
@@ -2354,7 +2388,8 @@ class Engine:
 
             table_path = out_dir / "sessions.csv"
             fusion = {r.session_id: r.fusion for r in results if r.fusion is not None}
-            sessions_table(summaries, errors=errors, fusion=fusion).to_csv(
+            issues = {r.session_id: r.issues for r in results if r.issues}
+            sessions_table(summaries, errors=errors, fusion=fusion, issues=issues).to_csv(
                 table_path, index=False, encoding="utf-8", lineterminator="\n"
             )
             written.append(table_path)
@@ -2506,9 +2541,23 @@ class Engine:
             lines += [f"- `{r.session_id}` — {r.error}" for r in failed]
             lines += [
                 "",
-                "These produced no metrics. They appear in `sessions.csv` with "
+                "These produced no metrics, or (when an exporter failed) an "
+                "incomplete export. They appear in `sessions.csv` with "
                 "their error, so an analysis that expected them can tell they "
                 "are missing rather than silently covering fewer animals.",
+                "",
+            ]
+
+        partial = [r for r in results if not r.error and r.issues]
+        if partial:
+            lines += ["## Sessions with problems", ""]
+            for r in partial:
+                lines += [f"- `{r.session_id}` — {issue}" for issue in r.issues]
+            lines += [
+                "",
+                "These sessions were exported, but the listed parts are missing or "
+                "qualified. The same notes are in the `issues` column of `sessions.csv` "
+                "and in each session's README.",
                 "",
             ]
 
@@ -2720,9 +2769,13 @@ class Engine:
                     else "Preprocessing complete",
                 ),
             )
-            metric_results = self.compute_metrics(psess, identity_free=identity_free)
+            failed_metrics: dict[str, str] = {}
+            metric_results = self.compute_metrics(
+                psess, identity_free=identity_free, failures=failed_metrics
+            )
             payload = self.build_payload(
-                psess, metric_results, identity_free=identity_free
+                psess, metric_results, identity_free=identity_free,
+                failed_metrics=failed_metrics,
             )
             payload.fusion = fusion
             emit(
@@ -2732,7 +2785,16 @@ class Engine:
                     session_id=unit_id, message="Metrics computed",
                 ),
             )
-            written = self.export(payload, session_out_dir, exporters)
+            from track2data.core.errors import ExporterFailedError
+
+            # Caught here rather than by the handler below, which would drop the summary
+            # and the files the other exporters did write.
+            failed_exporters: dict[str, str] = {}
+            try:
+                written = self.export(payload, session_out_dir, exporters)
+            except ExporterFailedError as exc:
+                written = list(exc.written)
+                failed_exporters = exc.failures
             emit(
                 progress,
                 ProgressEvent(
@@ -2762,6 +2824,13 @@ class Engine:
                     trajectory_sha256=self._hash_and_check_input(session, ref),
                 ),
                 fusion=fusion,
+                error=(
+                    "export failed: "
+                    + "; ".join(f"{n}: {m}" for n, m in failed_exporters.items())
+                    if failed_exporters else None
+                ),
+                failed_exporters=failed_exporters,
+                failed_metrics=failed_metrics,
             )
         except OperationCancelled:
             raise
@@ -2858,6 +2927,16 @@ class Engine:
             issues.append("Scalar calibration selected but px_per_cm is not set.")
         elif cfg.mode == "session":
             issues.extend(self._session_calibration_issues())
+        from track2data.exporters import list_exporters
+
+        known = list_exporters()
+        unknown = [t.exporter_name for t in self._manifest.export_targets
+                   if t.exporter_name not in known]
+        if unknown:
+            issues.append(
+                f"Unknown exporter(s) in the export settings: {', '.join(unknown)}. "
+                f"Available: {', '.join(known)}."
+            )
         sel = self._manifest.metrics
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
