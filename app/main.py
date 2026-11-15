@@ -16,6 +16,9 @@ from types import TracebackType
 
 logger = logging.getLogger("track2data.app")
 
+#: True while the error dialog is showing (see _excepthook).
+_dialog_open = False
+
 
 def _show_error_dialog(text: str) -> None:
     """Tell the user an unexpected error happened (no-op without a QApplication)."""
@@ -28,7 +31,7 @@ def _show_error_dialog(text: str) -> None:
     box.setWindowTitle("Unexpected error")
     box.setText(
         "Track2Data hit an unexpected error. The action you took may not have finished; "
-        "your saved project is unchanged. The details are in the log."
+        "your saved project is unchanged. Click Show Details for the error."
     )
     box.setDetailedText(text)
     box.exec()
@@ -41,10 +44,18 @@ def _excepthook(
         sys.__excepthook__(exc_type, exc, tb)
         return
     logger.error("Unhandled exception", exc_info=(exc_type, exc, tb))
+    global _dialog_open
+    if _dialog_open:
+        # Raised again while the dialog's own event loop runs (a timer or paint slot that
+        # keeps failing): log only, or dialogs would stack without end.
+        return
+    _dialog_open = True
     try:
         _show_error_dialog("".join(traceback.format_exception(exc_type, exc, tb)))
     except Exception:  # the dialog itself must never raise out of the hook
         logger.exception("Could not show the error dialog")
+    finally:
+        _dialog_open = False
 
 
 def install_excepthook() -> None:

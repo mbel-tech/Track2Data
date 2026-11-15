@@ -103,3 +103,32 @@ def test_the_excepthook_lets_keyboard_interrupt_through(monkeypatch) -> None:
     finally:
         sys.excepthook = previous
     assert called == ["default"]
+
+
+def test_an_error_raised_while_the_dialog_is_open_is_only_logged(monkeypatch, caplog) -> None:
+    """A repeating slot that raises must not stack dialogs inside the dialog's own loop."""
+    from app import main as app_main
+
+    shown: list[str] = []
+
+    def nested_dialog(text: str) -> None:
+        shown.append(text)
+        try:
+            raise ValueError("again")
+        except ValueError:
+            sys.excepthook(*sys.exc_info())
+
+    monkeypatch.setattr(app_main, "_show_error_dialog", nested_dialog)
+    previous = sys.excepthook
+    try:
+        app_main.install_excepthook()
+        try:
+            raise RuntimeError("first")
+        except RuntimeError:
+            exc_info = sys.exc_info()
+        with caplog.at_level(logging.ERROR):
+            sys.excepthook(*exc_info)
+    finally:
+        sys.excepthook = previous
+    assert len(shown) == 1
+    assert any("again" in (r.exc_text or "") for r in caplog.records)
