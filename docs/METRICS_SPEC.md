@@ -477,7 +477,7 @@ info-button modal (§6).
 | **Priority** | Primary |
 | **Inputs** | `Session.raw_xy`, `ZoneSet.rois` |
 | **Required preprocessing** | None |
-| **Formula** | For each zone Z: `time_s = (count of frames where xy[t, k] ∈ Z) / fps` |
+| **Formula** | For each zone Z: `time_s = (count of frames where xy[t, k] ∈ Z) / fps`; `time_pct = (count of frames where xy[t, k] ∈ Z) / (count of frames where animal k is tracked)` — untracked (NaN) frames and interval separator rows are in neither count. Z-2 and Z-8 use this same share. |
 | **Output columns** | `zone_name`, `individual_id` (NA if group), `time_s`, `time_pct` |
 | **Units** | s, % |
 | **Assumptions** | ROIs are non-overlapping (warning if they overlap) |

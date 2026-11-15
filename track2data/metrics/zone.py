@@ -16,6 +16,7 @@ See DECISIONS.md D-016 and docs/METRICS_SPEC.md section 4.5.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from itertools import pairwise
 from typing import ClassVar
 
@@ -54,6 +55,46 @@ def _frame_count(session: object) -> int:
     return int(session.n_frames)  # type: ignore[attr-defined]
 
 
+def _tracked_frames(session: object) -> np.ndarray:
+    """(n_animals,) frames in which each animal has a position (separator rows excluded).
+
+    The denominator of an occupancy share: METRICS_SPEC Z-1 drops untracked (NaN) frames from
+    numerator and denominator alike, so a share is of the time the animal was seen.
+    """
+    pooled = getattr(session, "tracked_frames", None)
+    if pooled is not None:
+        return np.asarray(pooled, dtype=np.int64)
+    n_animals: int = session.n_animals  # type: ignore[attr-defined]
+    xy = getattr(session, "xy", None)
+    if xy is None:
+        return np.full(n_animals, _frame_count(session), dtype=np.int64)
+    present = ~np.isnan(np.asarray(xy, dtype=np.float64)).any(axis=2)
+    counted = getattr(session, "counted_rows", None)
+    if callable(counted):
+        present &= np.asarray(counted(), dtype=bool)[:, None]
+    return present.sum(axis=0).astype(np.int64)
+
+
+def _zone_frame_counts(
+    zone_arrays: list[np.ndarray], n_animals: int, only: Collection[str] | None = None
+) -> dict[tuple[str, int], int]:
+    """``{(zone_name, animal): frames}`` over every zone array (Z-1, Z-2 and Z-8 share it)."""
+    counts: dict[tuple[str, int], int] = {}
+    for arr in zone_arrays:
+        for k in range(n_animals):
+            col = arr[:, k]
+            for zone_name in np.unique(col):
+                if zone_name == _EMPTY_ZONE_VALUE or (only is not None and zone_name not in only):
+                    continue
+                key = (str(zone_name), k)
+                counts[key] = counts.get(key, 0) + int(np.sum(col == zone_name))
+    return counts
+
+
+def _share(frames: int, tracked: int) -> float:
+    return frames / tracked if tracked > 0 else float("nan")
+
+
 class _PooledView:
     """Read-only stand-in for a PreprocessedSession with all slots stacked.
 
@@ -68,6 +109,7 @@ class _PooledView:
         n_animals: int = psess.n_animals  # type: ignore[attr-defined]
         self.n_animals = 1
         self.n_frames: int = _frame_count(psess) * n_animals
+        self.tracked_frames = np.array([_tracked_frames(psess).sum()], dtype=np.int64)
         for attr in ("main_zone", "sec_zone"):
             arr = getattr(psess, attr, None)
             setattr(self, attr, None if arr is None else arr.T.reshape(-1, 1))
@@ -285,7 +327,8 @@ class TimeInZone(Metric):
         ),
         formula_plain=(
             "time_s[k, z] = count(zone[t, k] == z) / fps; "
-            "time_pct[k, z] = time_s[k, z] / (n_frames / fps)"
+            "time_pct[k, z] = count(zone[t, k] == z) / count(frames where animal k is "
+            "tracked)"
         ),
         inputs=["PreprocessedSession.main_zone", "PreprocessedSession.sec_zone"],
         assumptions=["Zone arrays are pre-assigned object arrays of zone-name strings."],
@@ -317,30 +360,18 @@ class TimeInZone(Metric):
             return pd.DataFrame(columns=empty_cols)
 
         session_id: str = session.session_id  # type: ignore[attr-defined]
-        n_frames: int = _frame_count(session)
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
         fps: float = session.fps  # type: ignore[attr-defined]
-        total_duration_s = n_frames / fps
+        tracked = _tracked_frames(session)
 
-        # Accumulate frame counts: {(zone_name, animal_idx): frame_count}
-        counts: dict[tuple[str, int], int] = {}
-        for arr in zone_arrays:
-            for k in range(n_animals):
-                col = arr[:, k]
-                for zone_name in np.unique(col):
-                    if zone_name == _EMPTY_ZONE_VALUE:
-                        continue
-                    n = int(np.sum(col == zone_name))
-                    key = (zone_name, k)
-                    counts[key] = counts.get(key, 0) + n
-
+        counts = _zone_frame_counts(zone_arrays, n_animals)
         if not counts:
             return pd.DataFrame(columns=empty_cols)
 
         rows = []
         for (zone_name, animal_idx), frame_count in counts.items():
             time_s = frame_count / fps
-            time_pct = time_s / total_duration_s
+            time_pct = _share(frame_count, int(tracked[animal_idx]))
             rows.append(
                 {
                     "session_id": session_id,
@@ -631,23 +662,11 @@ class AreaCorrectedOccupancy(Metric):
             return empty_df
 
         session_id: str = session.session_id  # type: ignore[attr-defined]
-        n_frames: int = _frame_count(session)
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
-        fps: float = session.fps  # type: ignore[attr-defined]
-        total_duration_s = n_frames / fps
+        tracked = _tracked_frames(session)
 
-        # Compute time_pct per (zone, animal) — same logic as Z-1
-        counts: dict[tuple[str, int], int] = {}
-        for arr in zone_arrays:
-            for k in range(n_animals):
-                col = arr[:, k]
-                for zone_name in np.unique(col):
-                    if zone_name == _EMPTY_ZONE_VALUE:
-                        continue
-                    n = int(np.sum(col == zone_name))
-                    key = (zone_name, k)
-                    counts[key] = counts.get(key, 0) + n
-
+        # time_pct per (zone, animal), as Z-1 computes it
+        counts = _zone_frame_counts(zone_arrays, n_animals)
         if not counts:
             return empty_df
 
@@ -656,8 +675,7 @@ class AreaCorrectedOccupancy(Metric):
             roi_area = roi_areas.get(zone_name)
             if roi_area is None or roi_area == 0:
                 continue
-            time_s = frame_count / fps
-            time_pct = time_s / total_duration_s
+            time_pct = _share(frame_count, int(tracked[animal_idx]))
             area_fraction = roi_area / total_arena_area
             aco = time_pct / area_fraction
 
@@ -1443,27 +1461,16 @@ class ZonePreferenceIndex(Metric):
             return pd.DataFrame(columns=empty_cols)
 
         session_id: str = session.session_id  # type: ignore[attr-defined]
-        n_frames: int = _frame_count(session)
         n_animals: int = session.n_animals  # type: ignore[attr-defined]
-        total_duration_frames = n_frames
+        tracked = _tracked_frames(session)
 
-        counts: dict[tuple[str, int], int] = {}
-        for arr in zone_arrays:
-            for k in range(n_animals):
-                col = arr[:, k]
-                for zone_name in np.unique(col):
-                    if zone_name == _EMPTY_ZONE_VALUE or zone_name not in roi_areas:
-                        continue
-                    n = int(np.sum(col == zone_name))
-                    key = (str(zone_name), k)
-                    counts[key] = counts.get(key, 0) + n
-
+        counts = _zone_frame_counts(zone_arrays, n_animals, only=roi_areas)
         if not counts:
             return pd.DataFrame(columns=empty_cols)
 
         rows = []
         for (zone_name, animal_idx), frame_count in counts.items():
-            r = frame_count / total_duration_frames
+            r = _share(frame_count, int(tracked[animal_idx]))
             p = roi_areas[zone_name] / total_arena_area
             denom = r + p - 2 * r * p
             jacobs_d = 0.0 if denom == 0 else (r - p) / denom

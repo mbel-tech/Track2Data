@@ -319,3 +319,61 @@ class TestZoneVisitCount:
         psess = make_psess_with_zones()
         df = ZoneVisitCount().compute(psess)
         assert (df["session_id"] == "t").all()
+
+
+# ── review finding C14: NaN frames leave the denominator (METRICS_SPEC Z-1) ──
+
+
+def _psess_with_untracked_frames() -> PreprocessedSession:
+    """20 frames, 1 animal; zone_A for 5 frames, untracked (NaN) for 10."""
+    n_frames = 20
+    xy = np.zeros((n_frames, 1, 2))
+    xy[10:, 0, :] = np.nan
+    main_zone = np.full((n_frames, 1), "", dtype=object)
+    main_zone[:5, 0] = "zone_A"
+    sess = Session(
+        session_id="g",
+        folder=Path("/tmp"),
+        reader="test",
+        video=VideoInfo(fps=10.0, n_frames=n_frames, width_px=100, height_px=100),
+        n_animals=1,
+        trajectory_variant="wo_gaps",
+        has_stable_identities=True,
+        raw_xy=xy,
+    )
+    kine = KinematicsArrays(
+        speed_px_s=np.zeros((n_frames, 1)),
+        accel_px_s2=np.zeros((n_frames, 1)),
+        heading_rad=np.zeros((n_frames, 1)),
+    )
+    return PreprocessedSession(session=sess, xy=xy, kinematics=kine, main_zone=main_zone)
+
+
+def test_z1_time_pct_is_a_share_of_tracked_frames() -> None:
+    df = TimeInZone().compute(_psess_with_untracked_frames())
+    row = df[df["zone_name"] == "zone_A"].iloc[0]
+    assert row["time_s"] == pytest.approx(0.5)
+    assert row["time_pct"] == pytest.approx(0.5)  # 5 of 10 tracked frames, not 5 of 20
+
+
+def test_z2_uses_the_tracked_share() -> None:
+    from track2data.metrics.zone import AreaCorrectedOccupancy
+
+    cfg = {"roi_areas": {"zone_A": 2500.0}, "total_arena_area": 10000.0}
+    df = AreaCorrectedOccupancy().compute(_psess_with_untracked_frames(), cfg)
+    assert df.iloc[0]["area_corrected_occupancy"] == pytest.approx(0.5 / 0.25)
+
+
+def test_z8_uses_the_tracked_share() -> None:
+    from track2data.metrics.zone import ZonePreferenceIndex
+
+    cfg = {"roi_areas": {"zone_A": 5000.0}, "total_arena_area": 10000.0}
+    df = ZonePreferenceIndex().compute(_psess_with_untracked_frames(), cfg)
+    assert df.iloc[0]["jacobs_d"] == pytest.approx(0.0)  # r = p = 0.5
+
+
+def test_pooled_identity_free_share_counts_only_tracked_slots() -> None:
+    from track2data.metrics.zone import pooled_view
+
+    df = TimeInZone().compute(pooled_view(_psess_with_untracked_frames()))
+    assert df.iloc[0]["time_pct"] == pytest.approx(0.5)
