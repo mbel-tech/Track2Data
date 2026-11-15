@@ -47,13 +47,20 @@ from track2data.readers.base import SessionReader
 from track2data.readers.detection import Confidence, Detection, SessionCandidate
 from track2data.readers.index import ScanIndex
 from track2data.readers.params import ProposedValue, ReaderParameter, resolve_options
-from track2data.readers.peek import Peeker
+from track2data.readers.peek import (
+    Peeker,
+    header_too_long,
+    header_too_long_error,
+    read_header_lines,
+)
 
 #: DeepLabCut's name for the unique body parts in a multi-animal project: not an animal.
 _CATCH_ALL = "single"
 _PLACEHOLDER = re.compile(r"^ind\d+$")
 _NEEDED = ("x", "y", "likelihood")
-_HEAD_BYTES = 65_536
+#: The header is at most four rows (scorer, individuals, bodyparts, coords) plus one to
+#: tell where it ends.
+_HEADER_LINES = 5
 
 
 @dataclass(frozen=True)
@@ -120,13 +127,10 @@ def _parse_header(lines: list[str]) -> _Header | None:
 
 
 def _header_of(path: Path) -> _Header | None:
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read(_HEAD_BYTES)
-    except OSError:
-        return None
-    text = data.decode("utf-8-sig", errors="replace")
-    return _parse_header(text.splitlines()[:5])
+    # Whole lines, however many animals and body parts the header names (up to the
+    # shared header cap), never a fixed-size head that could cut the last columns off.
+    lines = read_header_lines(path, _HEADER_LINES)
+    return _parse_header(lines) if lines else None
 
 
 def _files_in(path: Path) -> list[Path]:
@@ -221,7 +225,7 @@ class DeepLabCutReader(SessionReader):
         for entry in index.walk():
             if entry.is_dir or entry.suffix != ".csv" or entry.cloud_only:
                 continue
-            lines = peek.text_lines(entry.path, 5)
+            lines = peek.header_lines(entry.path, _HEADER_LINES)
             header = _parse_header(lines) if lines else None
             if header is not None:
                 found.append((entry.path, header))
@@ -274,7 +278,7 @@ class DeepLabCutReader(SessionReader):
         for entry in index.walk():
             if entry.is_dir or entry.suffix not in _LENIENT_SUFFIXES or entry.cloud_only:
                 continue
-            lines = peek.text_lines(entry.path, 5)
+            lines = peek.header_lines(entry.path, _HEADER_LINES)
             header = _parse_header(lines) if lines else None
             if header is not None:
                 sessions.append(
@@ -360,7 +364,9 @@ def _resolved_parameters(headers: list[_Header]) -> tuple[ReaderParameter, ...]:
     return tuple(out)
 
 
-def _not_a_prediction_file(path: Path) -> ImportError_:
+def _not_a_prediction_file(path: Path) -> DataValidationError:
+    if path.is_file() and header_too_long(path, _HEADER_LINES):
+        return header_too_long_error(path, "a DeepLabCut prediction table")
     return _error(
         "DLC_NOT_A_PREDICTION_FILE",
         f"{path} is not a DeepLabCut prediction table.",

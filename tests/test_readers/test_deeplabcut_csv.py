@@ -472,3 +472,40 @@ class TestEdgesOfTheFormat:
         f = single(tmp_path / "a.csv")
         s = read(f, keypoint="")
         assert s.keypoints.selection.chosen_by == "coverage"
+
+
+class TestWideHeaders:
+    """Review finding C16: the header was read from the first 64 KB only, so a wide
+    multi-animal file silently lost the animals whose columns lay past it."""
+
+    def _wide(self, tmp_path: Path) -> tuple[Path, list[str]]:
+        animals = [f"individual-with-a-long-name-{i:04d}" for i in range(400)]
+        xy = random_pose(3, len(animals), 3)
+        f = write_dlc_csv(tmp_path / "wide.csv", xy, bodyparts=BPS, individuals=animals)
+        assert len(f.read_text().splitlines()[1]) > 65_536
+        return f, animals
+
+    def test_every_animal_of_a_wide_header_is_read(self, tmp_path: Path) -> None:
+        f, animals = self._wide(tmp_path)
+        s = read(f, keypoint="snout")
+        assert s.identities_labels == animals
+
+    def test_every_animal_of_a_wide_header_is_offered_by_the_scan(self, tmp_path: Path) -> None:
+        _f, animals = self._wide(tmp_path)
+        detection = detection_for(tmp_path)
+        assert detection.reader == "deeplabcut"
+        individuals = next(
+            p for p in detection.parameters if p.name in {"individuals", "animals"}
+        )
+        assert set(animals) <= set(individuals.choices)
+
+    def test_a_header_past_the_cap_raises_a_coded_error(self, tmp_path: Path) -> None:
+        from track2data.readers.peek import MAX_HEADER_BYTES
+
+        path = tmp_path / "huge.csv"
+        path.write_text("scorer," + "s," * (9 * 1024 * 1024 // 2) + "\nbodyparts,a\ncoords,x\n0,1\n")
+        assert path.stat().st_size > MAX_HEADER_BYTES
+        assert not DeepLabCutReader.detect(path)
+        with pytest.raises(Track2DataError) as err:
+            read(path)
+        assert err.value.code == "HEADER_TOO_LONG"

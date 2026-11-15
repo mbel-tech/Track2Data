@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **DeepLabCut files with a wide header are read whole.** The CSV reader (and the `.h5` reader's check for a CSV twin) looked only at the first 64 KB, so a multi-animal file whose header ran past that was not recognised (or, depending on where the cut fell, lost the last animals). It now reads whole header lines up to the shared 8 MB header cap, as the Anipose and DeepLabCut 3-D readers do, and a header past the cap stops with `HEADER_TOO_LONG` instead of "not a prediction table".
 - **`sessions.csv` reports identity-free sessions the way the metric gate treats them.** Its `is_identity_free` column read only the manifest's cached flag, which a CLI run never fills, so a session the tracker declared identity-free (and whose per-individual metrics were skipped) was listed as `False`. It now uses the same resolution as the gate: the user's override, else the session file's own declaration. The cross-session consistency check uses it too.
 - **A failed body-length calibration is recorded.** When body-length calibration cannot be applied the session is still exported uncalibrated, but the failure is now logged with its exception, added to the session's preprocessing steps in the README, and listed in the `issues` column of `sessions.csv`, the "Sessions with problems" section of `PROJECT_SUMMARY.md` and the Processing page.
 - **Cancelling a 3-D run while a pair is being read** stops the run instead of being reported as a fusion error for that pair.
