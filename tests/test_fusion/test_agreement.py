@@ -155,7 +155,14 @@ def test_fuse_never_fills_suggestion():
     assert fuse(top, side, pair, same_video=False).report.suggested_offset is None
 
 
+@pytest.mark.slow
 def test_timing_smoke_100k_frames():
+    """A coarse guard against an accidental quadratic scan, not a benchmark.
+
+    The lag scan takes about 2.2 s here standalone (3.2 s inside the full suite on the
+    maintainer's Windows machine, where the old 3 s bound failed every time), so the bound is
+    loose enough not to depend on machine load.
+    """
     import time
 
     n = 100_000
@@ -166,7 +173,7 @@ def test_timing_smoke_100k_frames():
     scan = time.perf_counter() - t0
     t0 = time.perf_counter()
     fuse(top, side, pair, same_video=False)
-    assert scan < 3.0 and time.perf_counter() - t0 < 1.0
+    assert scan < 8.0 and time.perf_counter() - t0 < 1.0
 
 
 def test_suggest_offset_frame_gaps_in_both_views():

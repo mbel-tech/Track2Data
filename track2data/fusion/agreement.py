@@ -40,10 +40,15 @@ def agreement(
     """
     top = np.asarray(top_axis_cm, dtype=float)
     side = np.asarray(side_h_cm, dtype=float)
+    return _agreement_of_diff(side - top)
+
+
+def _agreement_of_diff(diffs: np.ndarray) -> tuple[float | None, list[float | None]]:
+    """:func:`agreement` from the (n_rows, n_fish) differences ``side - top``."""
     per_fish: list[float | None] = []
     pooled: list[np.ndarray] = []
-    for k in range(top.shape[1]):
-        diff = side[:, k] - top[:, k]
+    for k in range(diffs.shape[1]):
+        diff = diffs[:, k]
         diff = diff[np.isfinite(diff)]
         if diff.size < MIN_FISH_SAMPLES:
             per_fish.append(None)
@@ -91,24 +96,30 @@ def suggest_offset(
         return bool(np.all(np.diff(f) == 1))
 
     fast = consecutive(top_frames) and consecutive(sorted_frames)
+    # Stored fish-major (each fish's samples contiguous) and handed out as (rows, fish) views:
+    # agreement() reads one fish column at a time, which on a row-major array is a strided
+    # walk over every row, once per fish and lag.
+    top_fm = np.ascontiguousarray(top_cm.T)
+    side_fm = np.ascontiguousarray(side_cm.T)
 
     def matched(lag: int) -> tuple[np.ndarray, np.ndarray]:
         if not fast:
             hit, pos = match_sorted(top_frames, sorted_frames, lag)
-            return top_cm[hit], side_cm[pos]
+            return top_fm[:, hit].T, side_fm[:, pos].T
         shift = int(top_frames[0]) + lag - int(sorted_frames[0])  # side index of top row 0
         lo = max(0, -shift)
         hi = max(lo, min(top_cm.shape[0], side_cm.shape[0] - shift))  # empty if no overlap
         lo = min(lo, hi)
-        return top_cm[lo:hi], side_cm[lo + shift : hi + shift]
+        return top_fm[:, lo:hi].T, side_fm[:, lo + shift : hi + shift].T
 
     def rms_at(lag: int) -> float | None:
         t_cm, s_cm = matched(lag)
         if t_cm.shape[0] == 0:
             return None
-        if int(np.isfinite(t_cm + s_cm).sum()) < MIN_LAG_SAMPLES:
+        diffs = s_cm - t_cm  # finite exactly where both views are
+        if int(np.isfinite(diffs).sum()) < MIN_LAG_SAMPLES:
             return None
-        return agreement(t_cm, s_cm)[0]
+        return _agreement_of_diff(diffs)[0]
 
     base = rms_at(0)
     if base is None:
