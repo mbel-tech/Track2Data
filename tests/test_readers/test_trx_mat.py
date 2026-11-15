@@ -124,3 +124,18 @@ def test_frame_numbers_that_disagree_with_the_positions_are_refused(tmp_path: Pa
 def test_the_frame_size_must_be_given(tmp_path: Path) -> None:
     with pytest.raises(Track2DataError):
         readers.read_session(write_trx(tmp_path / "trx.mat", TRACKS), reader="trx_mat", options={})
+
+
+def test_a_track_id_of_zero_is_kept(tmp_path: Path) -> None:
+    """Review finding C15: ``_scalar(e, "id") or i + 1`` turned id 0 into 1."""
+    path = write_trx(tmp_path / "trx.mat", TRACKS)
+    data = sio.loadmat(path)
+    trx = data["trx"]
+    new = np.empty(trx.shape, dtype=[*trx.dtype.descr, ("id", "O")])
+    for name in trx.dtype.names:
+        new[name] = trx[name]
+    new[0, 0]["id"] = np.array([[0]])
+    new[0, 1]["id"] = np.array([[7]])
+    sio.savemat(path, {"trx": new})
+    s = read(path)
+    assert s.identities_labels == ["0", "7"]

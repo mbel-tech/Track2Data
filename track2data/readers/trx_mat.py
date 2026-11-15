@@ -185,6 +185,12 @@ def _scalar(element: Any, field: str) -> float | None:
     return float(arr[0])
 
 
+def _track_label(element: Any, index: int) -> str:
+    """The track's own ``id`` (0 included), else its 1-based position in the file."""
+    value = _scalar(element, "id")
+    return str(value if value is not None else index + 1).removesuffix(".0")
+
+
 def _vector(element: Any, field: str) -> np.ndarray:
     return np.atleast_1d(np.asarray(getattr(element, field), dtype=np.float64)).ravel()
 
@@ -295,9 +301,7 @@ def _build_session(given: Path, path: Path, opts: dict[str, Any]) -> Session:
         raw_xy=xy,
         has_stable_identities=False,
         track_wo_identities=True,
-        identities_labels=[
-            str(_scalar(elements[i], "id") or i + 1).removesuffix(".0") for i in keep
-        ],
+        identities_labels=[_track_label(elements[i], i) for i in keep],
         trajectory_source=path,
         trajectory_format="trx_mat",
         length_unit=length_unit,
