@@ -503,7 +503,9 @@ class TestWideHeaders:
         from track2data.readers.peek import MAX_HEADER_BYTES
 
         path = tmp_path / "huge.csv"
-        path.write_text("scorer," + "s," * (9 * 1024 * 1024 // 2) + "\nbodyparts,a\ncoords,x\n0,1\n")
+        path.write_text(
+            "scorer," + "s," * (9 * 1024 * 1024 // 2) + "\nbodyparts,a\ncoords,x\n0,1\n"
+        )
         assert path.stat().st_size > MAX_HEADER_BYTES
         assert not DeepLabCutReader.detect(path)
         with pytest.raises(Track2DataError) as err:
