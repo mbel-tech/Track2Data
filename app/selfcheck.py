@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import TextIO
 
 BUILTIN_EXPORTERS = ("csv_long", "csv_wide", "excel", "feather", "readme")
 
@@ -46,7 +47,7 @@ def _payload() -> object:
     )
 
 
-def run_self_check(out: object = None) -> int:
+def run_self_check(out: TextIO | None = None) -> int:
     """Return 0 when every built-in exporter writes at least one file."""
     from track2data.exporters import get_exporter
 
@@ -70,7 +71,7 @@ def run_self_check(out: object = None) -> int:
                 failures.append(f"{name}: wrote no files")
     if stream is not None:
         if failures:
-            print("self-check FAILED:\n  " + "\n  ".join(failures), file=stream)  # type: ignore[arg-type]
+            print("self-check FAILED:\n  " + "\n  ".join(failures), file=stream)
         else:
-            print("self-check OK: " + ", ".join(BUILTIN_EXPORTERS), file=stream)  # type: ignore[arg-type]
+            print("self-check OK: " + ", ".join(BUILTIN_EXPORTERS), file=stream)
     return 1 if failures else 0
