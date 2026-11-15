@@ -24,6 +24,9 @@ class RunUnit:
     ref: SessionRef | None = None
     pair: ViewPair | None = None
     fused: FusedSession | None = None
+    #: A session unit's position in ``manifest.sessions``, so workers are handed that ref
+    #: rather than the first one with its id. None for a pair unit.
+    index: int | None = None
 
 
 @dataclass

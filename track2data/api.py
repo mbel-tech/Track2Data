@@ -270,7 +270,7 @@ def _parallel_run_one(
         unit = RunUnit(f"{pair.top_session_id}+{pair.side_session_id}", "pair", pair=pair)
     else:
         ref = manifest.sessions[index]
-        unit = RunUnit(ref.session_id, "session", ref=ref)
+        unit = RunUnit(ref.session_id, "session", ref=ref, index=index)
 
     def check() -> None:
         if _WORKER_CANCEL.is_set():
@@ -2049,7 +2049,12 @@ class Engine:
 
         if self._manifest.mode.dimension != "3d":
             refs = self._manifest.sessions
-            return RunPlan(units=[RunUnit(ref.session_id, "session", ref=ref) for ref in refs])
+            return RunPlan(
+                units=[
+                    RunUnit(ref.session_id, "session", ref=ref, index=i)
+                    for i, ref in enumerate(refs)
+                ]
+            )
 
         plan = RunPlan()
         in_unit: dict[str, str] = {}  # session id -> the unit id that runs it
@@ -2688,10 +2693,12 @@ class Engine:
                 i for i, p in enumerate(pairs) if (p.top_session_id, p.side_session_id) == key
             )
         assert unit.ref is not None
+        # The plan carries the ref's own position; re-finding it by id would take the
+        # first of two refs that share one.
+        if unit.index is not None:
+            return "session", unit.index
         refs = self._manifest.sessions
-        return "session", next(
-            i for i, r in enumerate(refs) if r.session_id == unit.ref.session_id
-        )
+        return "session", next(i for i, r in enumerate(refs) if r is unit.ref)
 
     @staticmethod
     def _collect_parallel_result(unit_id: str, fut: Any) -> SessionRunResult:
@@ -2943,6 +2950,10 @@ class Engine:
                 notes = list(dict.fromkeys(notes))
         if not self._manifest.sessions:
             issues.append("No sessions imported.")
+        from track2data.core.ids import session_id_problems
+
+        # The manifest validator checks this on load, but model_copy() does not validate.
+        issues.extend(session_id_problems([r.session_id for r in self._manifest.sessions]))
         cfg = self._manifest.calibration
         native = self._manifest.mode.dimension != "3d" and manifest_native_3d(self._manifest)
         mixing = native_mixing_issue(self._manifest)

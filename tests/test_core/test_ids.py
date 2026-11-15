@@ -135,3 +135,75 @@ class TestSessionRefGuard:
         from track2data.core.models import SessionRef
 
         assert SessionRef(session_id="fish 3 (v2)", folder=tmp_path, sha256="").session_id
+
+
+class TestProjectSessionIdsAreUnique:
+    """Review finding B6: two sessions whose ids collide on Windows (case, trailing dots or
+    spaces) would write one output folder; ``all_sessions`` is the pooled folder's name."""
+
+    @staticmethod
+    def _manifest(ids: list[str], tmp_path: Path):
+        from datetime import UTC, datetime
+
+        from track2data.core.models import ProjectManifest, SessionRef
+
+        now = datetime.now(tz=UTC)
+        return ProjectManifest(
+            project_name="p",
+            created_at=now,
+            updated_at=now,
+            sessions=[
+                SessionRef(session_id=sid, folder=tmp_path / f"f{i}", sha256="")
+                for i, sid in enumerate(ids)
+            ],
+        )
+
+    @pytest.mark.parametrize(
+        "ids",
+        [["a", "a"], ["Trial1", "trial1"], ["t1", "t1."], ["t1", "t1 "], ["t1", "T1 . "]],
+    )
+    def test_colliding_ids_are_rejected(self, ids: list[str], tmp_path: Path) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="collide"):
+            self._manifest(ids, tmp_path)
+
+    @pytest.mark.parametrize("sid", ["all_sessions", "ALL_SESSIONS", "all_sessions."])
+    def test_the_pooled_folder_name_is_reserved(self, sid: str, tmp_path: Path) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="all_sessions"):
+            self._manifest(["s1", sid], tmp_path)
+
+    def test_distinct_ids_load(self, tmp_path: Path) -> None:
+        assert len(self._manifest(["t1", "t2", "t1_b"], tmp_path).sessions) == 3
+
+    def test_uniquify_treats_windows_equal_names_as_taken(self) -> None:
+        assert uniquify(["Trial1", "trial1", "trial1."]) == ["Trial1", "trial1__2", "trial1.__3"]
+        assert uniquify(["all_sessions"]) == ["all_sessions__2"]
+
+    def test_the_engine_blocks_a_manifest_that_bypassed_validation(self, tmp_path: Path) -> None:
+        from track2data.api import Engine
+        from track2data.core.models import SessionRef
+
+        m = self._manifest(["a", "b"], tmp_path)
+        dup = m.model_copy(
+            update={"sessions": [*m.sessions, SessionRef(session_id="A", folder=tmp_path,
+                                                         sha256="")]}
+        )
+        assert any("collide" in issue for issue in Engine(dup).validate())
+
+    def test_the_store_gives_a_same_named_folder_a_unique_id(self, tmp_path: Path) -> None:
+        pytest.importorskip("PySide6")
+        from ui.store.project_store import ProjectStore
+
+        a = tmp_path / "x" / "trial1"
+        b = tmp_path / "y" / "Trial1"
+        a.mkdir(parents=True)
+        b.mkdir(parents=True)
+        store = ProjectStore()
+        store.new_project("p", tmp_path / "proj")
+        store.add_session(a)
+        store.add_session(b)
+        assert store.manifest is not None
+        assert [s.session_id for s in store.manifest.sessions] == ["trial1", "Trial1__2"]

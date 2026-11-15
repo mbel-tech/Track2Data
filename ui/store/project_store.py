@@ -832,6 +832,13 @@ class ProjectStore(QObject):
             self.append_log(f"_Skipped already-imported session folder `{folder}`_\n")
             return
         session_id = default_session_id(folder)
+        # Two folders of one name (or names Windows treats as one) must not share an id:
+        # the id is the output folder.
+        taken = [s.session_id for s in self._manifest.sessions]
+        unique_id = uniquify([session_id], taken)[0]
+        if unique_id != session_id:
+            self.append_log(f"_Session id `{session_id}` was taken; using `{unique_id}`_\n")
+            session_id = unique_id
         ref = SessionRef(session_id=session_id, folder=folder, sha256="")
         detected = self._detected_reader(folder)
         if self._refuse_bare_native(session_id, folder, detected):

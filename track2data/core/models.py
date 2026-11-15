@@ -773,6 +773,17 @@ class ProjectManifest(BaseModel):
     # security.allow_pickle_trajectories.
     blob_diagnostics: bool = False
 
+    @model_validator(mode="after")
+    def _session_ids_are_unique(self) -> ProjectManifest:
+        # Each id becomes an output folder; two that Windows sees as one folder (or the
+        # pooled all_sessions/ folder) would overwrite each other's results.
+        from track2data.core.ids import session_id_problems
+
+        problems = session_id_problems([ref.session_id for ref in self.sessions])
+        if problems:
+            raise ValueError(" ".join(problems))
+        return self
+
     def project_hash(self) -> str:
         """16-char hex hash of the manifest content (timestamps excluded)."""
         data: dict[str, Any] = self.model_dump(exclude={"created_at", "updated_at", "run_log_path"})

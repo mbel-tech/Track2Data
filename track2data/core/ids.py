@@ -49,28 +49,68 @@ def default_session_id(path: Path, *, is_file: bool | None = None) -> str:
     return sanitise_session_id(path.stem) if is_file else path.name
 
 
+#: The run-root folder that stacks every session's tables (``exporters/pooled.py``); a
+#: session of this name would write into it.
+RESERVED_SESSION_IDS = ("all_sessions",)
+
+
+def session_id_key(session_id: str) -> str:
+    """The form under which two ids name the same output folder on Windows.
+
+    Windows compares file names case-insensitively and drops trailing dots and spaces, so
+    ``Trial1``, ``trial1`` and ``trial1.`` are one folder there.
+    """
+    return unicodedata.normalize("NFC", session_id).rstrip(" .").casefold()
+
+
+def session_id_problems(ids: Sequence[str]) -> list[str]:
+    """One sentence per id that collides with an earlier one or takes a reserved name."""
+    problems: list[str] = []
+    seen: dict[str, str] = {}
+    reserved = {session_id_key(r): r for r in RESERVED_SESSION_IDS}
+    for sid in ids:
+        key = session_id_key(sid)
+        if key in reserved:
+            problems.append(
+                f"Session id {sid!r} is reserved: {reserved[key]!r} is the folder that "
+                "stacks every session's tables. Rename the session."
+            )
+        elif key in seen:
+            problems.append(
+                f"Session ids {seen[key]!r} and {sid!r} collide: they name the same output "
+                "folder on Windows (case, trailing dots and spaces are ignored there). Rename one."
+            )
+        else:
+            seen[key] = sid
+    return problems
+
+
 def uniquify(ids: Sequence[str], taken: Collection[str] = ()) -> list[str]:
     """Return *ids* with later duplicates suffixed ``__2``, ``__3``, ... in order.
 
-    The first holder of a name keeps it; names in *taken* are already used elsewhere.
-    A generated suffix never collides with a name that is present in *ids* or *taken*.
+    The first holder of a name keeps it; names in *taken* are already used elsewhere, and the
+    reserved names (:data:`RESERVED_SESSION_IDS`) are always taken. Names are compared the way
+    Windows compares folder names (:func:`session_id_key`). A generated suffix never collides
+    with a name that is present in *ids* or *taken*.
     """
-    used = set(taken)
-    reserved = set(ids)
+    used = {session_id_key(t) for t in (*taken, *RESERVED_SESSION_IDS)}
+    reserved = {session_id_key(i) for i in ids}
     out: list[str] = []
     counts: dict[str, int] = {}
     for item in ids:
-        if item not in used:
-            used.add(item)
+        key = session_id_key(item)
+        if key not in used:
+            used.add(key)
             out.append(item)
             continue
-        n = counts.get(item, 1)
+        n = counts.get(key, 1)
         while True:
             n += 1
             candidate = f"{item}__{n}"
-            if candidate not in used and candidate not in reserved:
+            ckey = session_id_key(candidate)
+            if ckey not in used and ckey not in reserved:
                 break
-        counts[item] = n
-        used.add(candidate)
+        counts[key] = n
+        used.add(ckey)
         out.append(candidate)
     return out
