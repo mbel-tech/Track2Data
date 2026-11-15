@@ -164,9 +164,20 @@ def run(
     xy, step = correct_switches(
         xy, config.identity_switch, swap_boundaries=swap_boundaries
     )
-    if z_rows is not None and step.permutation is not None:
-        # the vertical coordinate travels with its animal's x and y
-        z_rows = np.take_along_axis(z_rows, step.permutation, axis=1)
+    if step.permutation is not None and step.affected_frames > 0:
+        # Every per-animal array read next to xy travels with its animal: the vertical
+        # coordinate, the jump mask, the raw positions behind was_interpolated and the
+        # tracker's identity probabilities. Otherwise, from the switch on, they describe
+        # the other animal.
+        columns = step.permutation
+        if z_rows is not None:
+            z_rows = np.take_along_axis(z_rows, columns, axis=1)
+        jump_replaced = np.take_along_axis(jump_replaced, columns, axis=1)
+        raw_source = session.raw_xy if raw_rows is None else raw_rows
+        raw_rows = np.take_along_axis(raw_source, columns[:, :, None], axis=1)
+        prob_source = session.id_probabilities if id_prob_rows is None else id_prob_rows
+        if prob_source is not None:
+            id_prob_rows = np.take_along_axis(prob_source, columns, axis=1)
     report.steps.append(step)
 
     # 4. Smoothing
@@ -197,6 +208,9 @@ def run(
             "raw_xy_rows": raw_rows,
             "id_probabilities_rows": id_prob_rows,
         }
+    elif raw_rows is not None:
+        # no timeline expansion, but identity-switch correction relabelled the raw arrays
+        extra = {"raw_xy_rows": raw_rows, "id_probabilities_rows": id_prob_rows}
     return PreprocessedSession(
         session=session,
         xy=xy,
