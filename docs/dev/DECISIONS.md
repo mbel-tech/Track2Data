@@ -1264,3 +1264,16 @@ could not be re-added, while the store would have accepted it.
 
 **Why:** the prefixes are not guessed because a single-animal file with `left_ear` and `right_ear` has the same shape as two animals with one keypoint each; guessing would turn a one-animal file into two. A project with one single-animal native file keeps the group metrics off, since a group metric on a one-animal session has nothing to compare.
 
+
+### D-054 · Review fixes of 12 Nov 2026: what counts as a failed session, and a few rules behind the fixes
+
+**Status:** accepted; implemented on `fatina-del-codice/software-appraisal-review-1734de` by an automated run, awaiting the maintainer's review.
+
+**Decision:**
+- *Exporters.* An unknown exporter name stops the run before any session runs (`UnknownExporterError`, `EXPORTER_UNKNOWN`). An exporter that raises does not stop the others; the session is then **failed** (`SessionRunResult.error`, `failed_exporters`), because its export is incomplete, but it keeps its summary row in `sessions.csv` and the files that were written.
+- *Metrics and calibration.* A selected metric that raises, or a body-length calibration that cannot be applied, leaves the session **partially successful**: `error` stays empty, and the problem is listed in `SessionRunResult.issues`, a new last column `issues` of `sessions.csv`, a "Sessions with problems" section of `PROJECT_SUMMARY.md`, the session README and the Processing page. The calibration failure is stored as a `calibration_failed` step on the preprocessed session so it survives the preprocessing cache.
+- *Session ids.* Two ids that name one folder on Windows (equal after NFC, trailing dots/spaces stripped and casefold), or the pooled folder name `all_sessions`, are refused by the manifest validator; `Engine.validate` repeats the check for a manifest built with `model_copy`, and `uniquify` compares by the same key. An existing project with such ids no longer opens until renamed by hand.
+- *Zone shares.* Z-1 `time_pct`, Z-2 and Z-8 divide by the frames in which the animal is tracked, as METRICS_SPEC Z-1 says; no earlier decision recorded the all-frames denominator the code used.
+- *Metadata dates.* A date column is parsed only when every value is ISO (YYYY-MM-DD); anything else keeps its text. Day-first or month-first is never guessed.
+
+**Why:** the review found that each of these let a run look complete when it was not, or gave a number that disagreed with the spec. Failed versus partial follows whether the output on disk is incomplete (exporter) or complete except for named parts (metric, calibration).
