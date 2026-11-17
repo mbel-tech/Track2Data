@@ -102,7 +102,13 @@ Pick the threshold before you look at the outcome, not after.
 `heading_rad` and the IL-11 circular statistics are angles. Do not take arithmetic means,
 SDs or ordinary regressions of them: the mean of 350° and 10° is 0°, not 180°. Use circular
 statistics (`circular` in R, `scipy.stats.circmean`, `pingouin.circ_*`); IL-11 already
-reports `resultant_length` and `rayleigh_p` for exactly this reason.
+reports `resultant_length` and `rayleigh_p` for exactly this reason. It needs at least 10
+headings (`n_headings`); with fewer, or when the headings are not significantly
+directional (p above 0.05, or a resultant length under 0.1), `mean_heading_rad` is blank
+on purpose, since the mean direction of an undirected sample means nothing. Headings are
+`atan2(vy, vx)` in image coordinates (y down), so an increasing angle is a clockwise turn
+on the screen. Use the `min_speed_px_s` setting to leave out frames where the animal is
+barely moving and its heading is noise.
 
 ## Preprocessing choices are analysis choices
 
@@ -126,6 +132,21 @@ The long table makes it trivial to test 50 metrics against one treatment, and eq
 trivial to find a significant one by chance. Decide which metrics are primary before you
 run the analysis, state the rest as exploratory, and correct within families of related
 outcomes. `metric_id` is in every row, so pre-registering a list of ids is enough.
+
+**Some measures are not independent by construction.** Several metrics are built from the
+same raw quantity, so they rise and fall together in almost any data set, and a test on
+each is not a test on separate findings. The groups are: group size (GL-2, GL-4, GL-6,
+GL-10, and GL-18/GL-19 in 3-D), group shape and size (GL-4, GL-10, GL-15), neighbour
+distance (GL-1, GL-13, GL-16), group order (GL-3, GL-8, GL-11), group speed (GL-5, GL-7),
+movement amount (IL-1, IL-2, IL-4, IL-6, IL-7, and IL-16 to IL-18 in 3-D), turning (IL-5,
+IL-8, IL-11), position in the arena (IL-3, IL-14), time in a zone (Z-1, Z-2, Z-8) and zone
+entries (Z-3, Z-4, Z-5, Z-7). Pick one per group as the primary outcome and report the
+others as descriptive. Track2Data shows a note on the metrics screen and in
+`track2data validate` when you select two or more from one group.
+
+**Read `n_frames_used` and `note` before you test a value.** A group-level number from a
+handful of frames (or, for GL-15, from groups of fewer than 6 animals) is unreliable even
+when it is not blank.
 
 ## Reporting checklist
 

@@ -80,6 +80,9 @@ cleanup: see [[Statistics and Pseudoreplication]] and `track2data sensitivity`.
 | **Order state** | GL-11 | `swarm_time_pct`, `milling_time_pct`, `polarised_time_pct` |
 | **School area / shape** | GL-4, GL-10, GL-15 | convex hull area in `px^2`; group expansion; `mean_elongation_ratio` |
 | **Cohesion index** | GL-6 | `cohesion_index` |
+| **`n_frames_used`, `note`** | GL-4, GL-13, GL-15, IL-11 | how many frames (IL-11: headings) the value rests on, and a plain-language note when it is thin or degenerate. An empty `note` means nothing to flag |
+| **Axis consistency** | GL-15 | `axis_consistency`, in [0, 1]: how steadily the group's long axis points one way. Below 0.1 the orientation is left blank |
+| **Rayleigh test** | IL-11 | `rayleigh_p`: are the headings spread evenly round the circle? Needs at least 10 headings; the mean heading is left blank unless p ≤ 0.05 and the resultant length is at least 0.1 |
 
 A **group-level (GL-\*) metric is one value per session**, not per animal — which is what
 makes group metrics expensive in sample size. See [[Statistics and Pseudoreplication]].

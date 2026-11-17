@@ -187,6 +187,11 @@ make every per-bin ratio noisy: check `n_frames_used` per bin before reading a t
 
 ## Before you report any of these
 
+Read the `n_frames_used` and `note` columns of GL-4, GL-13, GL-15 and IL-11 first; a blank
+value with a note means the metric refused to guess. If you analyse several cohesion
+measures together, remember they are not independent (see *Multiplicity* in
+[[Statistics and Pseudoreplication]]).
+
 Confirm the sessions were poolable (`fps`, `n_animals`, segmentation settings — see
 `PROJECT_SUMMARY.md`), state your coverage threshold and the preprocessing settings from
 `manifest.json`, and record the `app_version` that produced the numbers. The full reporting

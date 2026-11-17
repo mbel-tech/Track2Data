@@ -47,6 +47,19 @@ top-view gaps (its denominator is now the side-view samples); IL-11 `mean_headin
 `left_right_turn_bias` for native files read with a vertical axis of `x` or `y` (the
 horizontal plane is now right-handed). GL-16 also gains `frac_frames_used_3d`, a new column.
 
+Edge-case handling of four metrics changed after that (D-054). GL-4, GL-13, GL-15 and
+IL-11 gain `n_frames_used` and `note`, and a value that rested on too few frames is now
+blank instead of a number: GL-4, GL-13 and GL-15 need 5 usable frames; IL-11 needs 10
+headings. GL-13 averages every k over the same frames (those with at least `k_max + 1`
+animals visible), so its k = 1 value can differ from before. GL-15 drops frames whose
+animals lie on a line, adds a median, and leaves the orientation blank when
+`axis_consistency` is below 0.1. IL-11 `mean_heading_rad` is blank when the headings are
+not significantly directional, `rayleigh_p` uses an exact formula (it could leave [0, 1] at
+very large n before), and `left_right_turn_bias` now compares each heading with the previous
+one within 0.5 s and ignores turns of exactly 0° or 180°. The turn-bias sign itself is
+unchanged and still waiting for a check against a real clip. GL-4 adds cm² columns, and GL-13 adds
+a cm column and a `radius_cm` setting.
+
 Metric-level detail lives in
 [`docs/METRICS_SPEC.md`](https://github.com/mbel-tech/Track2Data/blob/main/docs/METRICS_SPEC.md),
 and the reasoning behind a change in
