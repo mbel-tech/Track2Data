@@ -2862,7 +2862,43 @@ class Engine:
         if not sel.individual and not sel.group and not sel.zone:
             issues.append("No metrics selected.")
         issues.extend(self._gate_selection_issues())
+        issues.extend(self._metric_setting_issues())
+        from track2data.metrics.correlated import correlated_selection_notes
+
+        notes.extend(
+            correlated_selection_notes([*sel.individual, *sel.group, *sel.zone])
+        )
         return issues, notes
+
+    def _metric_setting_issues(self) -> list[str]:
+        """One blocking issue per metric setting that is below its declared minimum.
+
+        A setting such as GL-13's ``k_max`` has no meaning below its minimum (a k-th
+        neighbour needs k >= 1), so the project is refused rather than the metric failing
+        mid-run and being silently dropped from the export.
+        """
+        from track2data import metrics as metrics_registry
+
+        sel = self._manifest.metrics
+        issues: list[str] = []
+        for metric_id in [*sel.individual, *sel.group, *sel.zone]:
+            try:
+                cls = metrics_registry.get(metric_id)
+            except KeyError:
+                continue
+            overrides = sel.config.get(metric_id, {})
+            for param in cls.parameters:
+                value = overrides.get(param.name)
+                if param.derived or param.minimum is None or value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                if value < param.minimum:
+                    issues.append(
+                        f"{metric_id} setting '{param.name}' is {value:g}; "
+                        f"it must be at least {param.minimum:g}."
+                    )
+        return issues
 
     def session_read_issues(self) -> list[str]:
         """One issue per session that cannot be read as the project is set up.

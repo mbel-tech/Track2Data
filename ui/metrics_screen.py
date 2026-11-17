@@ -179,6 +179,14 @@ class MetricsScreen(QWidget):
         self._diag_note.setProperty("role", "faint")
         root.addWidget(self._diag_note)
 
+        # Metrics that share variance by construction (D-054): shown only while two or
+        # more metrics of one group are ticked.
+        self._correlation_note = QLabel("")
+        self._correlation_note.setWordWrap(True)
+        self._correlation_note.setProperty("role", "faint")
+        self._correlation_note.setVisible(False)
+        root.addWidget(self._correlation_note)
+
         qform = QHBoxLayout()
         qform.setSpacing(10)
         self._quality_spin = QDoubleSpinBox()
@@ -287,6 +295,22 @@ class MetricsScreen(QWidget):
             checked = len(self._checked_ids(table))
             self._tabs.setTabText(index, f"{name} {checked}/{table.rowCount()}")
         self._preset_combo.setItemText(0, f"Preset: {self.current_preset_name()}")
+        self._update_correlation_note()
+
+    def _update_correlation_note(self) -> None:
+        """Warn that some ticked metrics are intrinsically not independent."""
+        from track2data.metrics.correlated import correlated_selection_notes
+
+        selected = [mid for _n, table in self._tables() for mid in self._checked_ids(table)]
+        notes = correlated_selection_notes(selected)
+        if notes:
+            self._correlation_note.setText(
+                "Some selected metrics are not independent of each other:\n"
+                + "\n".join(f"• {n}" for n in notes)
+            )
+        else:
+            self._correlation_note.setText("")
+        self._correlation_note.setVisible(bool(notes))
 
     def current_preset_name(self) -> str:
         """The preset the ticked metrics exactly match, "None" when nothing is

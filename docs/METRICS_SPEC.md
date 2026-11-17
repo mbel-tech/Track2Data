@@ -1509,7 +1509,7 @@ exposed so future per-user opt-outs are non-breaking.
    flicker debounce. The GUI's ⚙ button now opens `MetricConfigDialog`
    (`ui/dialogs/metric_config_dialog.py`) for any metric that declares
    `parameters`, one widget per parameter keyed off `MetricParameter.kind`;
-   it is disabled with an explanatory tooltip for the 20 of the 41
+   it is disabled with an explanatory tooltip for the 18 of the 41
    metrics it lists that declare none (diagnostics always run and
    aren't selectable there, so they don't count towards either
    figure; both are pinned by
