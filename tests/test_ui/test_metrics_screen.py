@@ -1286,3 +1286,39 @@ def test_il3_and_il14_are_enabled_for_an_unset_or_top_view(qtbot) -> None:
         for metric_id in ("IL-3", "IL-14"):
             item = screen._ind_table.item(_row_for_id(screen._ind_table, metric_id), 0)
             assert _is_enabled(item)
+
+
+# ── correlated-metrics warning (D-054) ────────────────────────────────────────
+
+
+def _check(table, metric_id: str) -> None:
+    table.item(_row_for_id(table, metric_id), 0).setCheckState(Qt.CheckState.Checked)
+
+
+def test_correlation_note_hidden_until_two_metrics_of_a_group_are_selected(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+    assert screen._correlation_note.isHidden()
+
+    _check(screen._ind_table, "IL-1")
+    assert screen._correlation_note.isHidden()
+
+    _check(screen._ind_table, "IL-2")
+    assert not screen._correlation_note.isHidden()
+    text = screen._correlation_note.text()
+    assert "IL-1" in text and "IL-2" in text and "not independent" in text
+
+
+def test_correlation_note_clears_when_the_selection_is_unchecked(qtbot) -> None:
+    from ui.metrics_screen import MetricsScreen
+
+    screen = MetricsScreen()
+    qtbot.addWidget(screen)
+    _check(screen._ind_table, "IL-1")
+    _check(screen._ind_table, "IL-2")
+    screen._ind_table.item(_row_for_id(screen._ind_table, "IL-2"), 0).setCheckState(
+        Qt.CheckState.Unchecked
+    )
+    assert screen._correlation_note.isHidden()

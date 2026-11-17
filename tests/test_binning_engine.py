@@ -293,3 +293,18 @@ def test_binned_exports_do_not_multiply_rows(tmp_path: Path, tiny_real_session: 
     assert set(frames["bin_index"]) == {0, 1}
     group = pd.read_csv(d / "group_dynamics_summary.csv")
     assert list(group["bin_index"]) == [0, 1]
+
+
+def test_edge_case_columns_are_computed_per_window() -> None:
+    """D-054: n_frames_used and note come out of every window, not once per session."""
+    ids = ("IL-11",)
+    group = ("GL-4", "GL-13", "GL-15")
+    eng, psess = _engine(0.25, ids, group, session=_session(n_animals=4))  # 4 bins of 15 s
+    out = eng.compute_metrics(psess)
+    for mid in ("IL-11", "GL-4", "GL-13", "GL-15"):
+        df = out[mid]
+        assert {"n_frames_used", "note", "bin_index"} <= set(df.columns), mid
+        assert set(df["bin_index"]) == {0, 1, 2, 3}, mid
+        # Each window sees at most its own 15 s of frames.
+        assert (df["n_frames_used"] <= 15 * FPS).all(), mid
+    assert (out["GL-4"]["n_frames_used"] > 0).all()
