@@ -137,7 +137,8 @@ class TestTopologicalNeighbourCounts:
         assert (np.diff(distances) > 0).all()
 
     def test_two_close_pairs_have_two_neighbours_within_radius(self) -> None:
-        n_frames = 3
+        # 5 frames: GL-13 reports NaN below the minimum usable-frame count (D-054).
+        n_frames = 5
         xy = np.zeros((n_frames, 4, 2))
         for t in range(n_frames):
             xy[t] = [[0.0, 0.0], [1.0, 0.0], [100.0, 0.0], [101.0, 0.0]]

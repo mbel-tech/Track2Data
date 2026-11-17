@@ -21,6 +21,15 @@ from scipy.spatial.distance import pdist
 from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.geometry3d import positions_cm
+from track2data.metrics.notes import (
+    LINE_LIKE_SD_RATIO,
+    MIN_AXIS_CONSISTENCY,
+    MIN_USABLE_FRAMES,
+    NOTE_FRACTION,
+    RELIABLE_GROUP_SIZE,
+    join_notes,
+    usable_frames_note,
+)
 from track2data.metrics.references import (
     BALLERINI_2008,
     BERNARDIN_STIEFELHAGEN_2008,
@@ -1009,22 +1018,39 @@ class ConvexHullArea(Metric):
         "metric_id",
         "mean_hull_area_px2",
         "median_hull_area_px2",
+        "mean_hull_area_cm2",
+        "median_hull_area_cm2",
+        "n_frames_used",
+        "frac_collinear_frames",
+        "note",
     ]
     documentation = MetricDocumentation(
         definition=(
-            "Mean convex hull area of all animal positions per frame, averaged over "
-            "all valid frames.  Requires N≥3 animals."
+            "Mean convex hull area of the visible animals' positions per frame, "
+            "averaged over all usable frames.  A frame needs at least 3 visible "
+            "animals; a frame with fewer is skipped."
         ),
         formula_plain=(
-            "per-frame: hull_area[t] = ConvexHull(xy[t, :]).volume; "
-            "metric = mean/median over frames"
+            "per-frame: hull_area[t] = ConvexHull(xy[t, visible, :]).volume "
+            "(0 when the visible animals are collinear); "
+            "metric = mean/median over frames with >=3 visible animals; "
+            "cm2 = px2 / px_per_cm^2 when the arena is calibrated"
         ),
-        inputs=["PreprocessedSession.xy"],
+        inputs=["PreprocessedSession.xy", "PreprocessedSession.px_per_cm"],
         assumptions=[
-            "Frames where any animal has NaN position are skipped",
-            "Requires ≥3 animals for a valid convex hull",
+            "Animals with a NaN position in a frame are left out of that frame's hull "
+            "(the visible animals are used); a frame with fewer than 3 visible animals "
+            "is skipped",
+            "Collinear animals have a hull of area 0 and count as a usable frame",
         ],
-        warnings=["Returns NaN when fewer than 3 animals are present"],
+        warnings=[
+            "Returns NaN (and a note) when fewer than 3 animals are present, or when "
+            "fewer than min_frames frames are usable",
+            "The hull of a varying number of visible animals is not comparable across "
+            "frames: a missing animal shrinks the hull. n_frames_used counts the frames "
+            "that contributed",
+            "A note is added when 5% or more of the usable frames are collinear",
+        ],
         # An earlier draft of METRICS_SPEC.md attributed this to Buhl et
         # al. 2006 (marching locusts); that paper characterises order via
         # alignment and density, not convex-hull area, so the
@@ -1035,6 +1061,16 @@ class ConvexHullArea(Metric):
         primary_reference=MOHR_1947,
         supporting_references=[KRAUSE_RUXTON_2002],
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_frames",
+            label="Minimum usable frames",
+            kind="int",
+            default=MIN_USABLE_FRAMES,
+            minimum=1,
+            help="Report NaN (with a note) when fewer frames than this are usable.",
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         """Compute convex hull area statistics for *session*.
@@ -1044,48 +1080,54 @@ class ConvexHullArea(Metric):
         session:
             A fully preprocessed session.
         cfg:
-            Optional configuration dict (unused).
+            Optional configuration dict (``min_frames``).
 
         Returns
         -------
         pd.DataFrame
-            One row with mean and median hull area.
+            One row with mean and median hull area (px² and, when calibrated, cm²).
         """
         xy = session.xy  # (n_frames, n_animals, 2)
         n_frames, n_animals = xy.shape[0], xy.shape[1]
-
-        if n_animals < 3:
-            return pd.DataFrame(
-                [
-                    {
-                        "session_id": session.session_id,
-                        "metric_id": self.id,
-                        "mean_hull_area_px2": np.nan,
-                        "median_hull_area_px2": np.nan,
-                    }
-                ]
-            )
+        min_frames = int((cfg or {}).get("min_frames", MIN_USABLE_FRAMES))
 
         frame_areas: list[float] = []
-        for t in range(n_frames):
-            positions = xy[t]  # (n_animals, 2)
-            if np.isnan(positions).any():
+        n_collinear = 0
+        for t in range(n_frames if n_animals >= 3 else 0):
+            positions = xy[t]
+            positions = positions[~np.isnan(positions).any(axis=1)]
+            if positions.shape[0] < 3:
+                continue
+            if _is_collinear(positions):
+                frame_areas.append(0.0)
+                n_collinear += 1
                 continue
             try:
-                hull = ConvexHull(positions)
-                frame_areas.append(float(hull.volume))  # hull.volume is area in 2D
+                frame_areas.append(float(ConvexHull(positions).volume))  # area in 2-D
             except QhullError:
-                # Degenerate (all collinear)
-                continue
+                frame_areas.append(0.0)
+                n_collinear += 1
 
-        if len(frame_areas) == 0:
-            mean_area = np.nan
-            median_area = np.nan
-        else:
+        n_used = len(frame_areas)
+        notes: list[str] = []
+        if n_animals < 3:
+            notes.append("NaN: a hull needs at least 3 animals; this session has fewer.")
+        elif n_used < max(min_frames, 1):
+            notes.append(usable_frames_note(n_used, f"at least {min_frames} needed"))
+        frac_collinear = n_collinear / n_used if n_used else np.nan
+        if n_used >= max(min_frames, 1) and frac_collinear >= NOTE_FRACTION:
+            notes.append(
+                f"{n_collinear} of {n_used} usable frames ({frac_collinear:.0%}) were "
+                "collinear and count as area 0."
+            )
+
+        if n_animals >= 3 and n_used >= max(min_frames, 1):
             arr = np.array(frame_areas)
-            mean_area = float(arr.mean())
-            median_area = float(np.median(arr))
-
+            mean_area, median_area = float(arr.mean()), float(np.median(arr))
+        else:
+            mean_area = median_area = np.nan
+        scale = session.px_per_cm
+        cm2 = float(scale) ** 2 if scale else None
         return pd.DataFrame(
             [
                 {
@@ -1093,9 +1135,26 @@ class ConvexHullArea(Metric):
                     "metric_id": self.id,
                     "mean_hull_area_px2": mean_area,
                     "median_hull_area_px2": median_area,
+                    "mean_hull_area_cm2": mean_area / cm2 if cm2 else np.nan,
+                    "median_hull_area_cm2": median_area / cm2 if cm2 else np.nan,
+                    "n_frames_used": n_used,
+                    "frac_collinear_frames": frac_collinear,
+                    "note": join_notes(*notes),
                 }
-            ]
+            ],
+            columns=self.output_columns,
         )
+
+
+def _is_collinear(points: np.ndarray, rel_tol: float = 1e-9) -> bool:
+    """True when *points* (n, 2) lie on one line (or one point), to a relative tolerance.
+
+    Qhull only fails on an exact degeneracy; near-collinear points give a tiny, noise-sized
+    area, so the check is on the ratio of the second to the first singular value.
+    """
+    centred = points - points.mean(axis=0)
+    sv = np.linalg.svd(centred, compute_uv=False)
+    return bool(sv[0] <= 0.0 or sv[1] <= rel_tol * sv[0])
 
 
 # ── GL-6: GroupCohesion ───────────────────────────────────────────────────────
@@ -1752,26 +1811,44 @@ class TopologicalNeighbourCounts(Metric):
         "metric_id",
         "k",
         "mean_kth_nn_distance_px",
+        "mean_kth_nn_distance_cm",
         "mean_neighbours_within_radius",
+        "radius_px_used",
+        "n_frames_used",
+        "frac_zero_distance",
+        "note",
     ]
     documentation = MetricDocumentation(
         definition=(
             "For k = 1..k_max: the mean distance to each animal's k-th "
             "nearest neighbour, averaged over animals and frames. Also the "
             "mean count of neighbours within a fixed metric radius, for "
-            "comparison against the topological (rank-based) k-NN counts."
+            "comparison against the topological (rank-based) k-NN counts. "
+            "Only frames with at least k_max + 1 visible animals are used, "
+            "and the same frames serve every k and the radius count, so the "
+            "k rows are comparable with one another."
         ),
         formula_plain=(
-            "Per frame, per animal: query cKDTree for the k_max nearest "
-            "other animals; kth_nn_distance[k] = distance to the k-th; "
+            "Per frame with >= k_max+1 visible animals, per animal: query cKDTree for "
+            "the k_max nearest other animals; kth_nn_distance[k] = distance to the k-th; "
             "neighbours_within_radius = count of other animals within "
-            "radius_px; both averaged over all animals and valid frames"
+            "radius_px (or radius_cm * px_per_cm when calibrated); "
+            "both averaged over all animals and the frames used"
         ),
-        inputs=["PreprocessedSession.xy"],
-        assumptions=["Frames where any animal has NaN position are skipped"],
+        inputs=["PreprocessedSession.xy", "PreprocessedSession.px_per_cm"],
+        assumptions=[
+            "Animals with a NaN position in a frame are left out of that frame",
+            "A frame is used only if at least k_max + 1 animals are visible; the same "
+            "frame set is used for every k",
+        ],
         warnings=[
-            "Requires at least k_max + 1 animals with valid positions in a "
-            "frame for that frame to contribute to the k=k_max distance",
+            "NaN (with a note) when fewer than min_frames frames have k_max + 1 visible "
+            "animals, so with k_max >= the group size no frame qualifies",
+            "Two animals at exactly the same position give a distance of 0. The value is "
+            "kept; a note is added when 5% or more of a k's distances are 0 (a sign of "
+            "duplicated detections or a tracking merge)",
+            "radius_cm is used only for a calibrated arena; otherwise radius_px is used "
+            "and the note says so",
         ],
         primary_reference=BALLERINI_2008,
         supporting_references=[CLARK_EVANS_1954],
@@ -1783,7 +1860,7 @@ class TopologicalNeighbourCounts(Metric):
             kind="int",
             default=3,
             minimum=1,
-            help="Report distances for every rank 1..k_max.",
+            help="Report distances for every rank 1..k_max (at least 1).",
         ),
         MetricParameter(
             name="radius_px",
@@ -1794,58 +1871,108 @@ class TopologicalNeighbourCounts(Metric):
             unit="px",
             help="Radius for the topological-vs-metric neighbour-count comparison.",
         ),
+        MetricParameter(
+            name="radius_cm",
+            label="Metric radius (cm)",
+            kind="float",
+            default=None,
+            minimum=0.0,
+            unit="cm",
+            help=(
+                "Radius in cm; used instead of the pixel radius when the arena is "
+                "calibrated. Leave empty to use the pixel radius."
+            ),
+        ),
+        MetricParameter(
+            name="min_frames",
+            label="Minimum usable frames",
+            kind="int",
+            default=MIN_USABLE_FRAMES,
+            minimum=1,
+            help="Report NaN (with a note) when fewer frames than this are usable.",
+        ),
     ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         xy = session.xy
         n_frames = xy.shape[0]
+        cfg = cfg or {}
 
-        k_max = 3
-        radius_px = 50.0
-        if cfg is not None:
-            k_max = int(cfg.get("k_max", k_max))
-            radius_px = float(cfg.get("radius_px", radius_px))
+        k_max = int(cfg.get("k_max", 3))
+        if k_max < 1:
+            raise ValueError(f"GL-13 k_max must be at least 1 (got {k_max}).")
+        min_frames = int(cfg.get("min_frames", MIN_USABLE_FRAMES))
+        radius_px = float(cfg.get("radius_px", 50.0))
+        scale = session.px_per_cm
+        notes: list[str] = []
+        radius_cm = cfg.get("radius_cm")
+        if radius_cm is not None:
+            if scale:
+                radius_px = float(radius_cm) * float(scale)
+            else:
+                notes.append(
+                    "radius_cm was ignored because the arena is not calibrated; "
+                    f"radius_px ({radius_px:g}) was used."
+                )
 
-        kth_distances: dict[int, list[float]] = {k: [] for k in range(1, k_max + 1)}
+        kth_distances: dict[int, list[np.ndarray]] = {k: [] for k in range(1, k_max + 1)}
         radius_counts: list[float] = []
+        n_used = 0
 
         for t in range(n_frames):
             positions = xy[t]
             valid = ~np.isnan(positions[:, 0]) & ~np.isnan(positions[:, 1])
             pts = positions[valid]
-            if pts.shape[0] < 2:
+            if pts.shape[0] < k_max + 1:
                 continue
-
+            n_used += 1
             tree = cKDTree(pts)
-            n_query = min(k_max, pts.shape[0] - 1)
-            # k=0 is each point itself (distance 0); ranks 1..n_query are
-            # the actual neighbours.
-            dists, _idx = tree.query(pts, k=n_query + 1)
-            if n_query == 0:
-                continue
-            for k in range(1, n_query + 1):
-                kth_distances[k].extend(dists[:, k].tolist())
+            # k=0 is each point itself (distance 0); ranks 1..k_max are the neighbours.
+            dists, _idx = tree.query(pts, k=k_max + 1)
+            for k in range(1, k_max + 1):
+                kth_distances[k].append(dists[:, k])
 
             pair_counts = tree.query_ball_point(pts, r=radius_px)
             # Exclude the point itself from its own neighbour count.
             radius_counts.extend(len(neighbours) - 1 for neighbours in pair_counts)
 
+        enough = n_used >= max(min_frames, 1)
+        if not enough:
+            notes.append(
+                usable_frames_note(
+                    n_used, f"at least {min_frames} needed, each with {k_max + 1} visible animals"
+                )
+            )
+        mean_radius_count = float(np.mean(radius_counts)) if enough and radius_counts else np.nan
+        zero_ks: list[str] = []
         rows = []
-        mean_radius_count = float(np.mean(radius_counts)) if radius_counts else np.nan
         for k in range(1, k_max + 1):
-            values = kth_distances[k]
-            mean_kth = float(np.mean(values)) if values else np.nan
+            values = np.concatenate(kth_distances[k]) if kth_distances[k] else np.empty(0)
+            mean_kth = float(values.mean()) if enough and values.size else np.nan
+            frac_zero = float(np.mean(values == 0.0)) if values.size else np.nan
+            if enough and frac_zero >= NOTE_FRACTION:
+                zero_ks.append(f"k={k} ({frac_zero:.0%})")
             rows.append(
                 {
                     "session_id": session.session_id,
                     "metric_id": self.id,
                     "k": k,
                     "mean_kth_nn_distance_px": mean_kth,
+                    "mean_kth_nn_distance_cm": mean_kth / float(scale) if scale else np.nan,
                     "mean_neighbours_within_radius": mean_radius_count,
+                    "radius_px_used": radius_px,
+                    "n_frames_used": n_used,
+                    "frac_zero_distance": frac_zero,
                 }
             )
-
-        return pd.DataFrame(rows)
+        if zero_ks:
+            notes.append(
+                "Many zero distances (animals at the same position): " + ", ".join(zero_ks) + "."
+            )
+        note = join_notes(*notes)
+        for row in rows:
+            row["note"] = note
+        return pd.DataFrame(rows, columns=self.output_columns)
 
 
 # ── GL-15: Group elongation / shape anisotropy ────────────────────────────────
@@ -1871,29 +1998,48 @@ class GroupElongation(Metric):
         "session_id",
         "metric_id",
         "mean_elongation_ratio",
+        "median_elongation_ratio",
         "mean_major_axis_orientation_rad",
+        "axis_consistency",
+        "n_frames_used",
+        "note",
     ]
     documentation = MetricDocumentation(
         definition=(
             "Per-frame shape anisotropy of the group: the ratio of the major "
-            "to minor eigenvalue of the position covariance matrix (1.0 = "
-            "circular, higher = more elongated), and the orientation of the "
-            "major axis, averaged over frames."
+            "to minor standard deviation (square root of the eigenvalue ratio) of the "
+            "position covariance matrix (1.0 = circular, higher = more elongated), "
+            "reported as a mean and as a median over frames, plus the orientation of "
+            "the major axis and how consistent that axis is across frames."
         ),
         formula_plain=(
             "Per frame: Σ = cov(xy[t, valid, :]) (2x2); "
             "λ1 >= λ2 = eigenvalues(Σ); "
-            "elongation_ratio[t] = sqrt(λ1 / λ2) (NaN if λ2 <= 0); "
-            "major_axis_orientation[t] = angle of the eigenvector for λ1; "
-            "metric = mean over frames with >=3 valid animals"
+            "elongation_ratio[t] = sqrt(λ1 / λ2); "
+            "a frame with sqrt(λ2 / λ1) below 0.01 (the group is a line) is dropped and "
+            "counted in the note; "
+            "major_axis_orientation[t] = angle of the eigenvector for λ1, averaged as a "
+            "doubled-angle circular mean; "
+            "axis_consistency = |mean over frames of exp(2i·orientation[t])| (0 to 1); "
+            "metric = over frames with >=3 valid animals"
         ),
         inputs=["PreprocessedSession.xy"],
         assumptions=[
-            "Requires >=3 valid animal positions in a frame to define a covariance matrix"
+            "Requires >=3 valid animal positions in a frame to define a covariance matrix",
+            "Angle convention: image coordinates (x to the right, y DOWN), so a positive "
+            "angle is clockwise on screen; reported in (-π/2, π/2] because an axis has no "
+            "head or tail",
         ],
         warnings=[
             "Orientation is averaged as a circular quantity mod π (an axis "
             "has no head/tail), not as a plain arithmetic mean of angles",
+            "Orientation is NaN when axis_consistency is below 0.1: the group has no "
+            "stable axis, so a mean angle would be meaningless",
+            "The median is the safer summary for line-like groups; the mean is kept for "
+            "continuity but is pulled up by near-line frames",
+            "The ratio is comparable across group sizes only roughly, and is unreliable "
+            "for groups of fewer than 6 animals (a note is added); the minimum group "
+            "size stays at 3",
         ],
         primary_reference=TUNSTROM_2013,
         supporting_references=[MOHR_1947],
@@ -1902,9 +2048,11 @@ class GroupElongation(Metric):
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         xy = session.xy
         n_frames = xy.shape[0]
+        n_animals = xy.shape[1]
 
         ratios: list[float] = []
         orientations: list[complex] = []
+        n_line_like = 0
 
         for t in range(n_frames):
             positions = xy[t]
@@ -1917,7 +2065,8 @@ class GroupElongation(Metric):
             eigvals, eigvecs = np.linalg.eigh(cov)
             # eigh returns ascending order; take the larger as major axis.
             lam_minor, lam_major = eigvals[0], eigvals[1]
-            if lam_minor <= 0 or lam_major <= 0:
+            if lam_major <= 0 or lam_minor <= 0 or np.sqrt(lam_minor / lam_major) < LINE_LIKE_SD_RATIO:
+                n_line_like += 1
                 continue
 
             ratios.append(float(np.sqrt(lam_major / lam_minor)))
@@ -1928,13 +2077,35 @@ class GroupElongation(Metric):
             # no head/tail) via doubled-angle unit vectors.
             orientations.append(np.exp(1j * 2 * angle))
 
-        mean_ratio = np.nan if not ratios else float(np.mean(ratios))
+        n_used = len(ratios)
+        notes: list[str] = []
+        if n_line_like:
+            notes.append(
+                f"{n_line_like} line-like frame(s) dropped (minor/major spread below "
+                f"{LINE_LIKE_SD_RATIO:g})."
+            )
+        if n_animals < RELIABLE_GROUP_SIZE:
+            notes.append(
+                f"Group of {n_animals} animals is below {RELIABLE_GROUP_SIZE}: "
+                "elongation values are unreliable."
+            )
 
-        if not orientations:
-            mean_orientation = np.nan
+        if n_used == 0:
+            mean_ratio = median_ratio = mean_orientation = axis_consistency = np.nan
+            notes.append(usable_frames_note(n_used))
         else:
+            mean_ratio = float(np.mean(ratios))
+            median_ratio = float(np.median(ratios))
             mean_doubled = np.mean(orientations)
-            mean_orientation = float(np.angle(mean_doubled) / 2.0)
+            axis_consistency = float(np.abs(mean_doubled))
+            if axis_consistency < MIN_AXIS_CONSISTENCY:
+                mean_orientation = np.nan
+                notes.append(
+                    f"Orientation is NaN: axis consistency {axis_consistency:.2f} is below "
+                    f"{MIN_AXIS_CONSISTENCY:g} (no stable major axis)."
+                )
+            else:
+                mean_orientation = float(np.angle(mean_doubled) / 2.0)
 
         return pd.DataFrame(
             [
@@ -1942,9 +2113,14 @@ class GroupElongation(Metric):
                     "session_id": session.session_id,
                     "metric_id": self.id,
                     "mean_elongation_ratio": mean_ratio,
+                    "median_elongation_ratio": median_ratio,
                     "mean_major_axis_orientation_rad": mean_orientation,
+                    "axis_consistency": axis_consistency,
+                    "n_frames_used": n_used,
+                    "note": join_notes(*notes),
                 }
-            ]
+            ],
+            columns=self.output_columns,
         )
 
 
