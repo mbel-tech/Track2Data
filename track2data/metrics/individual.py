@@ -18,6 +18,13 @@ from track2data.core.models import PreprocessedSession
 from track2data.metrics.base import Metric, MetricDocumentation, MetricParameter
 from track2data.metrics.bouts import compute_bout_criterion_interval
 from track2data.metrics.geometry3d import body_length_cm, positions_cm, vertical_speed
+from track2data.metrics.notes import (
+    MEAN_HEADING_ALPHA,
+    MIN_HEADINGS,
+    MIN_RESULTANT_LENGTH,
+    TURN_WINDOW_S,
+    join_notes,
+)
 from track2data.metrics.references import (
     BENHAMOU_2004,
     BENHAMOU_2013,
@@ -1369,6 +1376,27 @@ class RoamingEntropy(Metric):
 # ── IL-11: Circular statistics of heading ────────────────────────────────────
 
 
+def rayleigh_p_value(n: int, r: float) -> float:
+    """Rayleigh-test p-value for ``n`` headings with mean resultant length ``r``.
+
+    Zar (1999) closed form as implemented in CircStat's ``circ_rtest``
+    (Berens 2009): with R = n·r,
+    ``p = exp(sqrt(1 + 4n + 4(n² − R²)) − (1 + 2n))``. It stays inside [0, 1] for
+    every n, unlike the older series expansion, whose correction terms grow with
+    Z = n·r² and leave [0, 1] for large samples. The exponent is evaluated as
+    ``−4R² / ((1 + 2n) + sqrt((1 + 2n)² − 4R²))`` (algebraically the same) so that
+    nothing cancels catastrophically when n is large.
+    """
+    if n < 1 or not np.isfinite(r):
+        return float("nan")
+    r = min(max(float(r), 0.0), 1.0)
+    big_r2 = (n * r) ** 2
+    a = 1.0 + 2.0 * n
+    root = np.sqrt(max(a * a - 4.0 * big_r2, 0.0))
+    p = float(np.exp(-4.0 * big_r2 / (a + root)))
+    return min(max(p, 0.0), 1.0)
+
+
 class CircularHeadingStats(Metric):
     """IL-11 — Mean heading direction, concentration, Rayleigh test, and
     left/right turn bias per individual."""
@@ -1387,6 +1415,10 @@ class CircularHeadingStats(Metric):
         "resultant_length",
         "rayleigh_p",
         "left_right_turn_bias",
+        "n_headings",
+        "n_frames_used",
+        "n_turns",
+        "note",
     ]
     documentation = MetricDocumentation(
         definition=(
@@ -1394,8 +1426,11 @@ class CircularHeadingStats(Metric):
             "mean direction, the concentration r (resultant length, 0 = "
             "uniformly distributed headings, 1 = all headings identical), a "
             "Rayleigh test p-value for non-uniformity, and a signed turn-bias "
-            "score (mean sign of frame-to-frame heading change: positive = "
-            "net left/counter-clockwise bias, negative = net right bias). "
+            "score (mean sign of frame-to-frame heading change). The sign "
+            "convention is documented in docs/dev/IL11_SIGN_CHECK.md: positive "
+            "means the heading angle increases from frame to frame (clockwise "
+            "on screen in image coordinates), and is awaiting a check against "
+            "a real clip. "
             "IL-8 reports only turn RATE (magnitude), discarding direction; "
             "wall-following and rotational arena artefacts are only visible "
             "here. Also the correct statistical framework for any angular "
@@ -1403,64 +1438,115 @@ class CircularHeadingStats(Metric):
             "359° and 1° is 0°, not 180°)."
         ),
         formula_plain=(
-            "C = mean(cos(heading)), S = mean(sin(heading)) over non-NaN "
-            "headings; mean_heading_rad = atan2(S, C); "
+            "Frames used = frames with a valid heading and speed >= min_speed_px_s. "
+            "C = mean(cos(heading)), S = mean(sin(heading)) over the frames used; "
             "resultant_length r = sqrt(C^2 + S^2); "
-            "rayleigh_p via Zar's approximation: Z = n*r^2, "
-            "p = exp(-Z) * (1 + (2Z - Z^2)/(4n) - "
-            "(24Z - 132Z^2 + 76Z^3 - 9Z^4)/(288n^2)); "
-            "left_right_turn_bias = mean(sign(wrap(theta[t+1] - theta[t])))"
+            "rayleigh_p = exp(sqrt(1 + 4n + 4(n^2 - R^2)) - (1 + 2n)) with R = n*r "
+            "(Zar 1999, as in CircStat circ_rtest; valid for any n); "
+            "mean_heading_rad = atan2(S, C), reported only if rayleigh_p <= 0.05 and "
+            "r >= 0.1; "
+            "turns: each frame's heading is compared with the previous valid heading "
+            "no more than 0.5 s earlier; changes of exactly 0° and 180° are ignored; "
+            "left_right_turn_bias = mean(sign(wrapped change)) over the turns, "
+            "n_turns = their number"
         ),
-        inputs=["PreprocessedSession.kinematics.heading_rad"],
+        inputs=[
+            "PreprocessedSession.kinematics.heading_rad",
+            "PreprocessedSession.kinematics.speed_px_s",
+        ],
         assumptions=[
-            "Heading is well-defined (i.e. speed > small ε); undefined frames are excluded"
+            "Heading is well-defined only while the animal moves; frames slower than "
+            "min_speed_px_s (the rest threshold, default 0 = no filter) are excluded",
+            "Heading = atan2(vy, vx) in image coordinates (x right, y down); an "
+            "increasing heading is a clockwise turn on screen",
         ],
         warnings=[
-            "Undefined (NaN) resultant_length/rayleigh_p when fewer than 2 "
-            "valid headings",
+            "NaN mean heading, r and p (with a note) when fewer than 10 headings "
+            "remain: the Rayleigh test is meaningless on so few angles",
+            "mean_heading_rad is NaN when rayleigh_p > 0.05 or r < 0.1: a mean "
+            "direction of a nearly uniform sample is noise",
             "rayleigh_p tests only for non-uniformity, not for any specific "
             "mean direction -- a small p-value says headings are not random, "
-            "not that they point any particular way",
+            "not that they point any particular way. With very many frames a "
+            "tiny bias becomes significant; read r alongside p",
+            "Successive frames are strongly autocorrelated, so n_headings is not "
+            "the number of independent observations and p is optimistic",
+            "left_right_turn_bias sign convention is unverified against a real clip "
+            "(see docs/dev/IL11_SIGN_CHECK.md); do not interpret it as left/right yet",
         ],
         primary_reference=BERENS_2009,
         supporting_references=[KAREIVA_SHIGESADA_1983],
     )
+    parameters: ClassVar[list[MetricParameter]] = [
+        MetricParameter(
+            name="min_speed_px_s",
+            label="Minimum speed (rest threshold)",
+            kind="float",
+            default=0.0,
+            minimum=0.0,
+            unit="px/s",
+            help=(
+                "Frames where the animal moves slower than this are left out: its "
+                "heading is noise when it is resting. 0 keeps every frame."
+            ),
+        ),
+    ]
 
     def compute(self, session: PreprocessedSession, cfg: dict | None = None) -> pd.DataFrame:
         heading = session.kinematics.heading_rad
+        speed = session.kinematics.speed_px_s
         n_animals = session.n_animals
+        cfg = cfg or {}
+        min_speed = float(cfg.get("min_speed_px_s", 0.0) or 0.0)
+        max_gap = max(int(round(TURN_WINDOW_S * float(session.fps))), 1)
         records: list[dict] = []
 
         for k in range(n_animals):
-            theta = heading[:, k]
+            theta = np.array(heading[:, k], dtype=float)
+            if min_speed > 0:
+                moving = speed[:, k] >= min_speed  # NaN speed compares False: excluded
+                theta[~moving] = np.nan
             valid = ~np.isnan(theta)
             theta_valid = theta[valid]
-            n = theta_valid.size
+            n = int(theta_valid.size)
+            notes: list[str] = []
 
-            if n < 2:
-                mean_heading = np.nan
-                r = np.nan
-                rayleigh_p = np.nan
+            mean_heading = r = rayleigh_p = np.nan
+            if n < MIN_HEADINGS:
+                notes.append(
+                    f"NaN: need at least {MIN_HEADINGS} headings for the Rayleigh test "
+                    f"(got {n})."
+                )
             else:
                 c_bar = float(np.mean(np.cos(theta_valid)))
                 s_bar = float(np.mean(np.sin(theta_valid)))
-                mean_heading = float(np.arctan2(s_bar, c_bar))
                 r = float(np.sqrt(c_bar**2 + s_bar**2))
-
-                z = n * r**2
-                rayleigh_p = float(
-                    np.exp(-z)
-                    * (
-                        1
-                        + (2 * z - z**2) / (4 * n)
-                        - (24 * z - 132 * z**2 + 76 * z**3 - 9 * z**4) / (288 * n**2)
+                rayleigh_p = rayleigh_p_value(n, r)
+                if rayleigh_p > MEAN_HEADING_ALPHA or r < MIN_RESULTANT_LENGTH:
+                    notes.append(
+                        f"Mean heading is NaN: headings are not clearly directed "
+                        f"(Rayleigh p = {rayleigh_p:.3g}, r = {r:.3f}; needs "
+                        f"p <= {MEAN_HEADING_ALPHA:g} and r >= {MIN_RESULTANT_LENGTH:g})."
                     )
-                )
+                else:
+                    mean_heading = float(np.arctan2(s_bar, c_bar))
 
-            diffs = theta[1:] - theta[:-1]
-            wrapped = np.arctan2(np.sin(diffs), np.cos(diffs))
-            wrapped_valid = wrapped[~np.isnan(wrapped)]
-            turn_bias = float(np.mean(np.sign(wrapped_valid))) if wrapped_valid.size else np.nan
+            # Turns: each valid heading against the previous valid heading, if that
+            # one is at most 0.5 s earlier; 0 and 180 degree changes carry no sign.
+            idx = np.flatnonzero(valid)
+            signs: list[float] = []
+            if idx.size >= 2:
+                gaps = np.diff(idx)
+                diffs = theta[idx[1:]] - theta[idx[:-1]]
+                wrapped = np.arctan2(np.sin(diffs), np.cos(diffs))
+                keep = (
+                    (gaps <= max_gap)
+                    & (np.abs(wrapped) > 1e-9)
+                    & (np.abs(np.abs(wrapped) - np.pi) > 1e-9)
+                )
+                signs = np.sign(wrapped[keep]).tolist()
+            n_turns = len(signs)
+            turn_bias = float(np.mean(signs)) if n_turns else np.nan
 
             records.append(
                 {
@@ -1471,10 +1557,14 @@ class CircularHeadingStats(Metric):
                     "resultant_length": r,
                     "rayleigh_p": rayleigh_p,
                     "left_right_turn_bias": turn_bias,
+                    "n_headings": n,
+                    "n_frames_used": n,
+                    "n_turns": n_turns,
+                    "note": join_notes(*notes),
                 }
             )
 
-        return pd.DataFrame(records)
+        return pd.DataFrame(records, columns=self.output_columns)
 
 
 # ── IL-14: Wall-distance thigmotaxis ──────────────────────────────────────────
