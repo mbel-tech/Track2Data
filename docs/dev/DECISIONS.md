@@ -1264,3 +1264,19 @@ could not be re-added, while the store would have accepted it.
 
 **Why:** the prefixes are not guessed because a single-animal file with `left_ear` and `right_ear` has the same shape as two animals with one keypoint each; guessing would turn a one-animal file into two. A project with one single-animal native file keeps the group metrics off, since a group metric on a one-animal session has nothing to compare.
 
+
+### D-054 · Edge cases of GL-4, GL-13, GL-15 and IL-11: notes in a `note` column, shared thresholds, sign left unchanged
+
+**Status:** accepted; implemented. One open item: the IL-11 turn-bias sign has not been checked against a real clip (`docs/dev/IL11_SIGN_CHECK.md`).
+
+**Decision:**
+- **Channel.** There is no separate issues output for metrics, so a metric's notes go in a `note` column (already an identifier column, and the one the D-* diagnostics use). Every affected metric also reports `n_frames_used`. A note is empty when nothing needs saying.
+- **Constants** live in `track2data/metrics/notes.py`: at least 5 usable frames, a note at 5% of frames, a line-like frame when `sqrt(λ2/λ1) < 0.01`, a reliable group size of 6, at least 10 headings, a mean heading only when Rayleigh p ≤ 0.05 and `r` ≥ 0.1, a 0.5 s turn window, an axis consistency of at least 0.1. The 5% note threshold for zero distances in GL-13 is our own choice, copied from the collinear-frame rule in GL-4.
+- **GL-4:** visible animals only; fewer than 3 skip the frame; collinear counts as area 0; cm² columns when calibrated. **GL-13:** one frame set (≥ `k_max + 1` visible) for every k; `radius_cm`; `k_max` < 1 refused in project validation (`Engine._metric_setting_issues`, which checks every numeric override against the parameter's minimum). **GL-15:** median added, line-like frames dropped, group of at least 3, `axis_consistency`, orientation NaN below 0.1. **IL-11:** `min_speed_px_s` setting, NaN below 10 headings, turns against the previous valid heading within 0.5 s (0° and 180° ignored), `n_turns`, `n_headings`.
+- **Rayleigh p** uses the closed form `exp(-4R²/((1+2n)+sqrt((1+2n)²-4R²)))` with `R = n·r`, clamped to [0, 1]. The earlier series from Zar left [0, 1] at large n.
+- **IL-11 sign:** unchanged. The heading is `atan2(vy, vx)` in image coordinates (y down), so an increasing heading is clockwise on screen. The older docs said positive means left; that is only true with y up. No real clip was available, so a test pins the present behaviour and the docs state the convention.
+- **Correlated metrics:** `track2data/metrics/correlated.py` lists the groups (size, shape, neighbour distance, order, speed, movement amount, turning, arena position, time in a zone, zone entries). `validation_issues` adds a note, and the metrics screen shows one, when two or more of a group are selected. It never blocks.
+
+**Why:** these measures returned a number from too few frames or from degenerate geometry with no sign of it. A note next to the number, with the count of frames behind it, lets a user judge it. Changing a sign without a real clip would risk making a correct result wrong.
+
+**Alternative considered:** a new issues file per run. Rejected for now because the `note` column reaches every export without a second schema.

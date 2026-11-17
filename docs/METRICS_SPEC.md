@@ -370,11 +370,12 @@ info-button modal (§6).
 | **Priority** | Advanced |
 | **Inputs** | `PreprocessedSession.kinematics.heading_rad` |
 | **Required preprocessing** | None beyond the heading computation IL-8 already relies on |
-| **Formula** | `C = mean(cos(heading))`, `S = mean(sin(heading))` over non-NaN headings; `mean_heading_rad = atan2(S, C)`; resultant length `r = sqrt(C² + S²)`; Rayleigh test via Zar's approximation: `Z = n·r²`, `p = exp(-Z) · (1 + (2Z − Z²)/(4n) − (24Z − 132Z² + 76Z³ − 9Z⁴)/(288n²))`; `left_right_turn_bias = mean(sign(wrap(θ[t+1] − θ[t])))` |
-| **Output columns** | `individual_id`, `mean_heading_rad`, `resultant_length`, `rayleigh_p`, `left_right_turn_bias` |
+| **Formula** | `C = mean(cos(heading))`, `S = mean(sin(heading))` over headings from frames moving faster than `min_speed_px_s`; `mean_heading_rad = atan2(S, C)`; resultant length `r = sqrt(C² + S²)`; Rayleigh test, exact closed form (Zar 1999): with `R = n·r`, `p = exp(-4R² / ((1+2n) + sqrt((1+2n)² − 4R²)))`, clamped to [0, 1] and stable at large n; `left_right_turn_bias = mean(sign(wrap(θ[t] − θ[prev])))`, where `prev` is the previous valid heading no more than 0.5 s earlier, and turns of exactly 0° or 180° are ignored |
+| **Output columns** | `individual_id`, `mean_heading_rad`, `resultant_length`, `rayleigh_p`, `left_right_turn_bias`, `n_headings`, `n_frames_used`, `n_turns`, `note` |
 | **Units** | radians; dimensionless ∈ [0, 1]; probability ∈ [0, 1]; dimensionless ∈ [-1, 1] |
-| **Assumptions** | Heading is well-defined (i.e. speed > small ε); undefined frames are excluded |
-| **Warnings** | Undefined (NaN) `resultant_length`/`rayleigh_p` when fewer than 2 valid headings. `rayleigh_p` tests only for non-uniformity, not for any specific mean direction — a small p-value says headings are not random, not that they point any particular way. |
+| **Assumptions** | Heading is well-defined (speed above `min_speed_px_s`); undefined frames are excluded. The Rayleigh test needs a unimodal alternative; it cannot detect two opposite preferred directions |
+| **Warnings** | All circular results are NaN with fewer than 10 headings (`n_headings` says how many were used). `mean_heading_rad` is NaN when the Rayleigh p is above 0.05 or `r` is below 0.1, because the direction of a non-directional sample is not meaningful. `rayleigh_p` tests only for non-uniformity, not for any specific mean direction. **Angle convention:** the heading is `atan2(vy, vx)` in image coordinates (y points down), so an *increasing* heading turns clockwise on the screen. The sign of `left_right_turn_bias` follows from that and has not been checked against a real clip; see `docs/dev/IL11_SIGN_CHECK.md`. |
+| **Parameters** | `min_speed_px_s` (float, px/s, default 0 = every frame with a heading) |
 | **Reference** | Berens 2009, J. Stat. Softw. 31(10):1-21 (CircStat: a MATLAB toolbox for circular statistics) — DOI [10.18637/jss.v031.i10](https://doi.org/10.18637/jss.v031.i10) |
 | **Supporting references** | Kareiva & Shigesada 1983, Oecologia 56(2-3):234-238 (analyzing insect movement as a correlated random walk) (DOI: 10.1007/BF00379695) |
 
@@ -693,11 +694,11 @@ Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availabil
 | **Level** | Group (per frame); trial summary |
 | **Priority** | Primary |
 | **Inputs** | `Session.raw_xy[t, :, :]` |
-| **Formula** | `area[t] = scipy.spatial.ConvexHull(xy[t, :, :]).volume` (in 2-D, `.volume` returns area) |
-| **Output columns** | `mean_hull_area_px2`, `mean_hull_area_cm2` |
+| **Formula** | `area[t] = scipy.spatial.ConvexHull(xy[t, visible, :]).volume` (in 2-D, `.volume` returns area) over the visible animals; a frame with fewer than 3 visible animals is skipped; collinear animals count as area 0 |
+| **Output columns** | `mean_hull_area_px2`, `median_hull_area_px2`, `mean_hull_area_cm2`, `median_hull_area_cm2` (cm² only when calibrated), `frac_collinear_frames`, `n_frames_used`, `note` |
 | **Units** | px², cm² |
-| **Assumptions** | N ≥ 3 (hull undefined for fewer points) |
-| **Warnings** | Hull collapses to a line / point when fish are colinear; emit warning if degenerate ≥ 5% of frames |
+| **Assumptions** | At least 3 visible animals in a frame; the metric is NaN with a note when fewer than `min_frames` frames (default 5) are usable |
+| **Warnings** | The hull collapses to a line when the animals are collinear; a note is added when 5% or more of the frames are collinear |
 | **Reference** | Mohr 1947, Am. Midl. Nat. 37(1):223-249 (table of equivalent populations of North American small mammals -- origin of the minimum convex polygon) — DOI [10.2307/2421652](https://doi.org/10.2307/2421652) |
 | **Supporting references** | Krause & Ruxton 2002, Living in Groups (Oxford University Press) (DOI: 10.1093/oso/9780198508175.001.0001) |
 
@@ -825,12 +826,12 @@ Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availabil
 | **Level** | Group (per frame); trial summary |
 | **Priority** | Optional |
 | **Inputs** | `Session.raw_xy`, all IDs |
-| **Formula** | Per frame, per animal: query `cKDTree` (same tree GL-1 already builds) for the `k_max` nearest other animals; `kth_nn_distance[k]` = distance to the k-th; `neighbours_within_radius` = count of other animals within `radius_px`; both averaged over all animals and valid frames |
-| **Output columns** | `k`, `mean_kth_nn_distance_px`, `mean_neighbours_within_radius` |
+| **Formula** | Per frame, per animal: query `cKDTree` for the `k_max` nearest other animals; `kth_nn_distance[k]` = distance to the k-th; `neighbours_within_radius` = count of other animals within the radius; both averaged over animals and over the frames that have at least `k_max + 1` visible animals (the same frame set for every k) |
+| **Output columns** | `k`, `mean_kth_nn_distance_px`, `mean_kth_nn_distance_cm`, `mean_neighbours_within_radius`, `radius_px_used`, `n_frames_used`, `frac_zero_distance`, `note` |
 | **Units** | px; count |
-| **Assumptions** | Frames where any animal has NaN position are skipped |
-| **Warnings** | Requires at least `k_max + 1` animals with valid positions in a frame for that frame to contribute to the `k=k_max` distance |
-| **Parameters** | `k_max` (int, default 3), `radius_px` (float, px, default 50.0) |
+| **Assumptions** | Only frames with at least `k_max + 1` visible animals contribute; NaN with a note when fewer than `min_frames` such frames exist |
+| **Warnings** | Zero distances (two animals at one position, usually a tracking duplicate) are kept in the value; a note is added when 5% or more of the distances are zero. `k_max` below 1 is refused when the project is validated |
+| **Parameters** | `k_max` (int, default 3, at least 1), `radius_px` (float, px, default 50.0), `radius_cm` (float, cm, default none: when set and the session is calibrated it replaces `radius_px`), `min_frames` (int, default 5) |
 | **Reference** | Ballerini et al. 2008, Proc. Natl. Acad. Sci. 105(4):1232-1237 (interaction ruling animal collective behavior depends on topological rather than metric distance) — DOI [10.1073/pnas.0711437105](https://doi.org/10.1073/pnas.0711437105) |
 | **Supporting references** | Clark & Evans 1954, Ecology 35(4):445-453 (distance to nearest neighbor as a measure of spatial relationships in populations) (DOI: 10.2307/1931034) |
 
@@ -842,11 +843,11 @@ Group metrics (`GL-*`) are unavailable in native 3-D projects: see the Availabil
 | **Level** | Group (per frame); trial summary |
 | **Priority** | Optional |
 | **Inputs** | `Session.raw_xy`, all IDs |
-| **Formula** | Per frame: `Σ = cov(xy[t, valid, :])` (2×2); `λ1 >= λ2 = eigenvalues(Σ)`; `elongation_ratio[t] = sqrt(λ1 / λ2)` (NaN if `λ2 <= 0`); `major_axis_orientation[t]` = angle of the eigenvector for `λ1`; metric = mean over frames with ≥3 valid animals |
-| **Output columns** | `mean_elongation_ratio`, `mean_major_axis_orientation_rad` |
-| **Units** | dimensionless ratio ≥ 1; radians |
-| **Assumptions** | Requires ≥3 valid animal positions in a frame to define a covariance matrix |
-| **Warnings** | Orientation is averaged as a circular quantity mod π (an axis has no head/tail), not as a plain arithmetic mean of angles |
+| **Formula** | Per frame: `Σ = cov(xy[t, visible, :])` (2×2); `λ1 >= λ2 = eigenvalues(Σ)`; `elongation_ratio[t] = sqrt(λ1 / λ2)`; `major_axis_orientation[t]` = angle of the eigenvector for `λ1`. Frames whose animals lie on a line (`sqrt(λ2/λ1) < 0.01`) are dropped and counted in the note. The reported value is the mean and the median over the remaining frames; the groups need at least 3 animals |
+| **Output columns** | `mean_elongation_ratio`, `median_elongation_ratio`, `mean_major_axis_orientation_rad`, `axis_consistency`, `n_frames_used`, `note` |
+| **Units** | dimensionless ratio ≥ 1 (the median is the more robust summary); radians in [0, π); `axis_consistency` dimensionless in [0, 1] |
+| **Assumptions** | At least 3 visible animals per frame (values are unreliable below 6: a covariance from 3 to 5 points is very noisy, and a note says so) |
+| **Warnings** | The orientation is an axis (mod π) and is averaged by doubling the angle. `axis_consistency` is the length of that doubled-angle average: near 1 the axis points one way all the time, near 0 it is random. The orientation is NaN when `axis_consistency` is below 0.1, because the mean of a random axis means nothing. Angle convention: `atan2(dy, dx)` in image coordinates (y down), in [0, π). NaN results come with a note giving the number of usable frames |
 | **Reference** | Tunstrom et al. 2013, PLoS Comput. Biol. 9(2):e1002915 (collective states, multistability and transitional behavior in schooling fish) — DOI [10.1371/journal.pcbi.1002915](https://doi.org/10.1371/journal.pcbi.1002915) |
 | **Supporting references** | Mohr 1947, Am. Midl. Nat. 37(1):223-249 (table of equivalent populations of North American small mammals -- origin of the minimum convex polygon) (DOI: 10.2307/2421652) |
 
@@ -1246,6 +1247,25 @@ data behind it.
 
 ---
 
+## 4a. Metrics that are not independent of each other
+
+Some measures are built from the same raw quantity and will move together in almost any data set. Selecting several of them is allowed, but they are not independent findings: do not count them as separate pieces of evidence, and do not correct for multiple testing as if they were unrelated. Choose one per group as the primary outcome and report the others as descriptive. The metrics screen and `track2data validate` show a note when two or more members of one group are selected (`track2data/metrics/correlated.py`).
+
+| Group | Metrics | Why |
+|---|---|---|
+| Group size | GL-2, GL-4, GL-6, GL-10 | all measure how spread out the group is |
+| Group size (3-D) | GL-18, GL-19 | cohesion is the inverse of the mean distance |
+| Group shape and size | GL-4, GL-10, GL-15 | all come from the covariance of the positions |
+| Neighbour distance | GL-1, GL-13, GL-16 | GL-1 is the k = 1 row of GL-13 |
+| Group order | GL-3, GL-8, GL-11 | the same headings |
+| Group speed | GL-5, GL-7 | both average the animals' speeds |
+| Movement amount | IL-1, IL-2, IL-4, IL-6, IL-7 | all from one speed trace |
+| Movement amount (3-D) | IL-16, IL-17, IL-18 | one 3-D trace |
+| Turning | IL-5, IL-8, IL-11 | all from heading changes |
+| Position in the arena | IL-3, IL-14 | two views of the same position |
+| Time in a zone | Z-1, Z-2, Z-8 | derived from the time in the zone |
+| Zone entries | Z-3, Z-4, Z-5, Z-7 | count the same border crossings |
+
 ## 5. Engine implementation map
 
 Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
@@ -1273,7 +1293,7 @@ Every metric ID maps to a concrete class in `track2data/metrics/*.py`.
 | D-1..D-9 | `metrics/diagnostic.py` | `TrackingCoverage`, `TrackingAccuracy`, `IdProbabilityStats`, `InconsistentFrameCount`, `IdentityStability`, `SegmentationErrorFrames`, `FragmentLengthDistribution`, `CrossingRate`, `SwapOpportunityCount` | Always-on |
 | D-10 | `metrics/diagnostic.py` | `PhysicalPlausibilityViolations` | Runs on `Session.raw_xy`, independent of preprocessing |
 | IL-9, IL-10 | `metrics/individual.py` | `HomeBaseOccupancy`, `RoamingEntropy` | Share `_occupancy_grid_counts` |
-| IL-11 | `metrics/individual.py` | `CircularHeadingStats` | np-only; Zar's Rayleigh-test approximation |
+| IL-11 | `metrics/individual.py` | `CircularHeadingStats` | np-only; Zar's closed-form Rayleigh p, numerically stable (D-054) |
 | IL-14 | `metrics/individual.py` | `WallDistanceThigmotaxis` | `shapely` -- the only IL-* metric with that dependency |
 | IL-15 | `metrics/individual.py` | `VerticalPosition` | np-only; the water column comes from `zones/extent.py`, derived in `metrics/derived.py`; gated by `Metric.valid_camera_views` (`metrics/availability.py`) |
 | IL-16 | `metrics/individual.py` | `PathLength3D` | np-only; positions from `metrics/geometry3d.py`; gated by `Metric.requires_depth_scale` (`metrics/availability.py`) |
